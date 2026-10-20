@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jelly Playground</title>
+<style>
+  :root { --ink: #3a2a48; --card: rgba(255, 255, 255, 0.78); --accent: #ff6fa8; --line: rgba(60, 40, 80, 0.1); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #ffe9f2; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(12px); border: 1px solid var(--line); border-radius: 18px; user-select: none; box-shadow: 0 8px 30px rgba(120, 60, 120, 0.12); }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 270px; }
+  #intro h1 { margin: 0 0 4px; font-size: 17px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.78; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 8px 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: rgba(60, 40, 80, 0.06); border: 0; padding: 7px 11px; border-radius: 11px; cursor: pointer; }
+  #bar button:hover { background: rgba(60, 40, 80, 0.12); }
+  #bar button.on { background: var(--accent); color: #fff; }
+  #bar label { font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  #bar input { width: 90px; accent-color: var(--accent); }
+  .sep { width: 1px; align-self: stretch; background: rgba(60, 40, 80, 0.15); margin: 3px 2px; }
+  @media (max-width: 640px) { #intro { display: none; } }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Jelly Playground</h1><p>Squishy pressure soft bodies. Grab a jelly and fling it down the stairs, through the pegs, into the others. Click empty space to drop a new one. Right-drag orbits.</p></div>
+<div id="bar" class="card">
+  <span style="font-size:12px;opacity:.7">Drop:</span>
+  <button data-shape="ball" class="on">🟣 Ball</button><button data-shape="cube">🟧 Cube</button><button data-shape="pudding">🍮 Pudding</button>
+  <div class="sep"></div>
+  <button id="rain">🌧 Rain</button><button id="shake">🫨 Shake</button><button id="moon">🌙 Low-g</button><button id="clear">Clear</button>
+  <div class="sep"></div>
+  <label>Wobble <input id="wobble" type="range" min="0" max="100" value="55" /></label>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/jelly-playground/index.html
+ * PURPOSE: verlet soft-body jellies (edge + radial springs, volume pressure) with eyes, OBB/peg world collisions, inter-body hash collisions, drag + spawn
+ * UI: Jelly Playground page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// Scene > Renderer, camera, pastel lighting
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffe9f2);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 7.5, 24);
+
+// Interaction > Pointer: registered before OrbitControls; left = grab/spawn, right = orbit
+renderer.domElement.addEventListener('pointerdown', (e) => onDown(e));
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 3.6, 0);
+controls.enableDamping = true;
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
+controls.minDistance = 10;
+controls.maxDistance = 40;
+controls.maxPolarAngle = Math.PI * 0.5;
+scene.add(new THREE.HemisphereLight(0xfff4fa, 0xd8b8e8, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(-6, 16, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 14, bottom: -6, near: 1, far: 50 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+// World > Colliders: oriented boxes + pegs (cylinders along z), tray bounds
+const R = 0.16; // particle radius
+const boxes = [], pegs = [];
+const BOUND = { x: 11.6, z: 2.6 };
+const toyMat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.55 });
+function addBox(cx, cy, w, h, rot, color) {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, BOUND.z * 2 + 0.4, 3, 0.12), toyMat(color));
+  m.position.set(cx, cy, 0);
+  m.rotation.z = rot;
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  boxes.push({ c: new THREE.Vector2(cx, cy), hw: w / 2, hh: h / 2, cos: Math.cos(rot), sin: Math.sin(rot) });
+}
+function addPeg(x, y, r, color) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, BOUND.z * 2 + 0.4, 24).rotateX(Math.PI / 2), toyMat(color));
+  m.position.set(x, y, 0);
+  m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  pegs.push({ x, y, r });
+}
+{
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(60, 1, 30), toyMat(0xf6d6e6));
+  floor.position.y = -0.5;
+  floor.receiveShadow = true;
+  scene.add(floor);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(60, 30), toyMat(0xffe0ec));
+  back.position.set(0, 10, -BOUND.z - 0.6);
+  back.receiveShadow = true;
+  scene.add(back);
+  for (const s of [-1, 1]) {
+    const wall = new THREE.Mesh(new RoundedBoxGeometry(0.5, 2.2, BOUND.z * 2 + 1, 2, 0.15), toyMat(0xc9a6f0));
+    wall.position.set(s * (BOUND.x + 0.25), 1.1, 0);
+    wall.castShadow = wall.receiveShadow = true;
+    scene.add(wall);
+  }
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(BOUND.x * 2 + 1, 2.2), new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, roughness: 0 }));
+  glass.position.set(0, 1.1, BOUND.z + 0.25);
+  scene.add(glass);
+  // stairs on the left
+  [[-10.2, 6.6], [-8.7, 5.2], [-7.2, 3.8], [-5.7, 2.4]].forEach(([x, h], i) => addBox(x, h / 2, 1.5, h, 0, [0xffb3c7, 0xffc9a8, 0xfff0a0, 0xbdf0b0][i]));
+  // peg field in the middle
+  [[-2.6, 7.4], [-0.6, 7.6], [1.4, 7.4], [-1.6, 5.6], [0.4, 5.7], [2.4, 5.4], [-0.6, 3.8], [1.4, 3.6]].forEach(([x, y], i) => addPeg(x, y, 0.32, [0x8fd3ff, 0xc9a6f0][i % 2]));
+  // ramp + bumper on the right
+  addBox(7.4, 4.4, 6.2, 0.45, 0.42, 0x8fe3c8);
+  addBox(10.6, 1.0, 1.4, 2.0, 0, 0xffb3c7);
+  addPeg(5.2, 1.0, 0.9, 0xfff0a0);
+}
+function collideWorld(p, prev) {
+  let hit = false;
+  // floor
+  if (p.y < R) { p.y = R; hit = 'y'; }
+  if (p.x < -BOUND.x + R) { p.x = -BOUND.x + R; hit = true; }
+  if (p.x > BOUND.x - R) { p.x = BOUND.x - R; hit = true; }
+  if (p.z < -BOUND.z + R) { p.z = -BOUND.z + R; hit = true; }
+  if (p.z > BOUND.z - R) { p.z = BOUND.z - R; hit = true; }
+  for (const b of boxes) {
+    const dx = p.x - b.c.x, dy = p.y - b.c.y;
+    const lx = dx * b.cos + dy * b.sin, ly = -dx * b.sin + dy * b.cos;
+    const ex = b.hw + R - Math.abs(lx), ey = b.hh + R - Math.abs(ly);
+    if (ex <= 0 || ey <= 0) continue;
+    let nx = 0, ny = 0;
+    if (ex < ey) nx = Math.sign(lx) * ex; else ny = Math.sign(ly) * ey;
+    p.x += nx * b.cos - ny * b.sin;
+    p.y += nx * b.sin + ny * b.cos;
+    hit = true;
+  }
+  for (const g of pegs) {
+    const dx = p.x - g.x, dy = p.y - g.y, d = Math.hypot(dx, dy), m = g.r + R;
+    if (d < m && d > 1e-6) { p.x = g.x + (dx / d) * m; p.y = g.y + (dy / d) * m; hit = true; }
+  }
+  if (hit) {
+    // friction: kill some tangential velocity on contact
+    prev.x += (p.x - prev.x) * 0.12;
+    prev.z += (p.z - prev.z) * 0.12;
+    if (hit === 'y') prev.x += (p.x - prev.x) * 0.2;
+  }
+  return hit;
+}
+
+// Jelly > Templates: surface mesh (merged verts), edges, rest volume
+function template(shape) {
+  let g;
+  if (shape === 'cube') g = new THREE.BoxGeometry(1.7, 1.7, 1.7, 4, 4, 4);
+  else if (shape === 'pudding') g = new THREE.CylinderGeometry(0.75, 1.05, 1.5, 16, 3);
+  else g = new THREE.IcosahedronGeometry(1.0, 3);
+  g.deleteAttribute('normal'); g.deleteAttribute('uv');
+  g = mergeVertices(g);
+  const pos = g.attributes.position, idx = g.index.array;
+  const edges = new Set();
+  for (let i = 0; i < idx.length; i += 3) for (let k = 0; k < 3; k++) {
+    const a = idx[i + k], b = idx[i + (k + 1) % 3];
+    edges.add(a < b ? a * 100000 + b : b * 100000 + a);
+  }
+  const E = [...edges].map((k) => [Math.floor(k / 100000), k % 100000]);
+  return { rest: Float32Array.from(pos.array), index: idx, edges: E, n: pos.count };
+}
+const TEMPL = { ball: template('ball'), cube: template('cube'), pudding: template('pudding') };
+
+// Jelly > Bodies
+const COLORS = [0xff6fa8, 0x8f7bff, 0x4fd1c5, 0xffb23f, 0x7bd96a, 0xff7a6b, 0x64b6ff];
+const bodies = [];
+const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1a1020, roughness: 0.2 });
+const eyeGeo = new THREE.SphereGeometry(0.21, 16, 12), pupilGeo = new THREE.SphereGeometry(0.11, 12, 10);
+function volumeOf(pos, index) {
+  let v = 0;
+  for (let i = 0; i < index.length; i += 3) {
+    const a = index[i] * 3, b = index[i + 1] * 3, c = index[i + 2] * 3;
+    v += pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1]) - pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c]) + pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+  }
+  return v / 6;
+}
+function spawn(shape, x, y, scale = 0.8 + Math.random() * 0.45) {
+  if (bodies.length >= 12) removeBody(bodies[0]);
+  const T = TEMPL[shape], n = T.n;
+  const pos = new Float32Array(n * 3), prev = new Float32Array(n * 3);
+  const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * 0.3));
+  const v = new THREE.Vector3(), rest = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    v.fromArray(T.rest, i * 3).multiplyScalar(scale);
+    rest.set([v.x, v.y, v.z], i * 3);
+    v.applyQuaternion(rot);
+    pos.set([v.x + x, v.y + y, v.z], i * 3);
+  }
+  prev.set(pos);
+  const center = new THREE.Vector3(x, y, 0);
+  const radial = new Float32Array(n);
+  for (let i = 0; i < n; i++) radial[i] = Math.hypot(rest[i * 3], rest[i * 3 + 1], rest[i * 3 + 2]);
+  const restLen = new Float32Array(T.edges.length);
+  T.edges.forEach(([a, b], k) => (restLen[k] = Math.hypot(rest[a * 3] - rest[b * 3], rest[a * 3 + 1] - rest[b * 3 + 1], rest[a * 3 + 2] - rest[b * 3 + 2])));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(T.index, 1));
+  geo.computeVertexNormals();
+  const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+  const mesh = new THREE.Mesh(geo, new THREE.MeshPhysicalMaterial({ color, roughness: 0.12, transmission: 0.55, thickness: 1.6, ior: 1.3, clearcoat: 1, clearcoatRoughness: 0.08, attenuationColor: new THREE.Color(color).multiplyScalar(0.7), attenuationDistance: 1.2, sheen: 0.4, sheenColor: 0xffffff }));
+  mesh.castShadow = true;
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  // eyes sit on the two surface verts nearest the "face" direction
+  const face = (s) => { let best = 0, bs = -Infinity; for (let i = 0; i < n; i++) { const sc = rest[i * 3 + 2] * 1.0 + rest[i * 3 + 1] * 0.35 + rest[i * 3] * s * 0.3; if (sc > bs) { bs = sc; best = i; } } return best; };
+  const eyes = [-1, 1].map((s) => {
+    const g = new THREE.Group();
+    const w = new THREE.Mesh(eyeGeo, eyeWhite), p = new THREE.Mesh(pupilGeo, pupilMat);
+    p.position.z = 0.14;
+    g.add(w, p);
+    g.scale.setScalar(scale);
+    scene.add(g);
+    return { g, v: face(s), pupil: p };
+  });
+  const body = { T, n, pos, prev, rest, radial, restLen, center, prevCenter: center.clone(), mesh, geo, eyes, scale, V0: Math.abs(volumeOf(rest, T.index)), blink: Math.random() * 4, lastVy: 0 };
+  bodies.push(body);
+  return body;
+}
+function removeBody(b) {
+  scene.remove(b.mesh); b.geo.dispose(); b.mesh.material.dispose();
+  b.eyes.forEach((e) => scene.remove(e.g));
+  bodies.splice(bodies.indexOf(b), 1);
+}
+
+// Jelly > Physics step: verlet, springs, radial pull to centroid, volume inflate, collisions
+let gravity = -14, stiff = 0.5;
+const grab = { body: null, i: -1, target: new THREE.Vector3() };
+const _p = new THREE.Vector3(), _q = new THREE.Vector3();
+function stepBody(b, h) {
+  const { pos, prev, n } = b;
+  const damp = 0.998;
+  for (let i = 0; i < n * 3; i += 3) {
+    const vx = (pos[i] - prev[i]) * damp, vy = (pos[i + 1] - prev[i + 1]) * damp, vz = (pos[i + 2] - prev[i + 2]) * damp;
+    prev[i] = pos[i]; prev[i + 1] = pos[i + 1]; prev[i + 2] = pos[i + 2];
+    pos[i] += vx; pos[i + 1] += vy + gravity * h * h; pos[i + 2] += vz;
+  }
+  const edgeK = 0.25 + stiff * 0.6, radialK = 0.012 + stiff * 0.05, volK = 0.6 + stiff * 0.3;
+  for (let it = 0; it < 3; it++) {
+    // edge springs
+    const E = b.T.edges;
+    for (let k = 0; k < E.length; k++) {
+      const a = E[k][0] * 3, c = E[k][1] * 3;
+      const dx = pos[c] - pos[a], dy = pos[c + 1] - pos[a + 1], dz = pos[c + 2] - pos[a + 2];
+      const d = Math.hypot(dx, dy, dz) + 1e-9, s = ((d - b.restLen[k]) / d) * 0.5 * edgeK;
+      pos[a] += dx * s; pos[a + 1] += dy * s; pos[a + 2] += dz * s;
+      pos[c] -= dx * s; pos[c + 1] -= dy * s; pos[c + 2] -= dz * s;
+    }
+    // centroid + radial springs keep the body from folding inside out
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n * 3; i += 3) { cx += pos[i]; cy += pos[i + 1]; cz += pos[i + 2]; }
+    cx /= n; cy /= n; cz /= n;
+    for (let i = 0, j = 0; j < n; i += 3, j++) {
+      const dx = pos[i] - cx, dy = pos[i + 1] - cy, dz = pos[i + 2] - cz, d = Math.hypot(dx, dy, dz) + 1e-9;
+      const s = ((b.radial[j] - d) / d) * radialK;
+      pos[i] += dx * s; pos[i + 1] += dy * s; pos[i + 2] += dz * s;
+    }
+    // volume: inflate/deflate along vertex directions from centroid
+    const V = Math.abs(volumeOf(pos, b.T.index));
+    const dV = (b.V0 - V) / b.V0;
+    const push = THREE.MathUtils.clamp(dV, -0.3, 0.3) * volK * Math.cbrt(b.V0) * 0.33;
+    for (let i = 0; i < n * 3; i += 3) {
+      const dx = pos[i] - cx, dy = pos[i + 1] - cy, dz = pos[i + 2] - cz, d = Math.hypot(dx, dy, dz) + 1e-9;
+      pos[i] += (dx / d) * push; pos[i + 1] += (dy / d) * push; pos[i + 2] += (dz / d) * push;
+    }
+    if (grab.body === b) {
+      const i = grab.i * 3;
+      pos[i] += (grab.target.x - pos[i]) * 0.5; pos[i + 1] += (grab.target.y - pos[i + 1]) * 0.5; pos[i + 2] += (grab.target.z - pos[i + 2]) * 0.5;
+      // drag neighbours too so the jelly stretches instead of one vertex spiking out
+      for (const j of grab.near) { const q = j * 3; pos[q] += (grab.target.x + grab.off[j].x - pos[q]) * 0.12; pos[q + 1] += (grab.target.y + grab.off[j].y - pos[q + 1]) * 0.12; pos[q + 2] += (grab.target.z + grab.off[j].z - pos[q + 2]) * 0.12; }
+    }
+    for (let i = 0; i < n * 3; i += 3) {
+      _p.set(pos[i], pos[i + 1], pos[i + 2]); _q.set(prev[i], prev[i + 1], prev[i + 2]);
+      if (collideWorld(_p, _q)) { pos[i] = _p.x; pos[i + 1] = _p.y; pos[i + 2] = _p.z; prev[i] = _q.x; prev[i + 1] = _q.y; prev[i + 2] = _q.z; }
+    }
+  }
+}
+// Jelly > Body-body: spatial hash over all particles, push apart particles from different bodies
+const CELL = 0.4, hashMap = new Map();
+function collideBodies() {
+  hashMap.clear();
+  bodies.forEach((b, bi) => {
+    for (let i = 0; i < b.n; i++) {
+      const k = ((Math.floor(b.pos[i * 3] / CELL) * 73856093) ^ (Math.floor(b.pos[i * 3 + 1] / CELL) * 19349663) ^ (Math.floor(b.pos[i * 3 + 2] / CELL) * 83492791)) | 0;
+      let arr = hashMap.get(k);
+      if (!arr) hashMap.set(k, (arr = []));
+      arr.push(bi, i);
+    }
+  });
+  const D = R * 2.2, D2 = D * D;
+  bodies.forEach((b, bi) => {
+    for (let i = 0; i < b.n; i++) {
+      const x = b.pos[i * 3], y = b.pos[i * 3 + 1], z = b.pos[i * 3 + 2];
+      const gx = Math.floor(x / CELL), gy = Math.floor(y / CELL), gz = Math.floor(z / CELL);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        const arr = hashMap.get((((gx + ox) * 73856093) ^ ((gy + oy) * 19349663) ^ ((gz + oz) * 83492791)) | 0);
+        if (!arr) continue;
+        for (let k = 0; k < arr.length; k += 2) {
+          const bj = arr[k];
+          if (bj <= bi) continue;
+          const o = bodies[bj], j = arr[k + 1] * 3;
+          const dx = o.pos[j] - x, dy = o.pos[j + 1] - y, dz = o.pos[j + 2] - z, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= D2 || d2 < 1e-10) continue;
+          const d = Math.sqrt(d2), s = ((D - d) / d) * 0.5;
+          b.pos[i * 3] -= dx * s; b.pos[i * 3 + 1] -= dy * s; b.pos[i * 3 + 2] -= dz * s;
+          o.pos[j] += dx * s; o.pos[j + 1] += dy * s; o.pos[j + 2] += dz * s;
+        }
+      }
+    }
+  });
+}
+
+// Interaction > Grab + spawn
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), dragPlane = new THREE.Plane();
+let shape = 'ball';
+function setRay(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); }
+function onDown(e) {
+  if (e.button !== 0) return;
+  startAudio();
+  setRay(e);
+  const hits = ray.intersectObjects(bodies.map((b) => b.mesh));
+  if (hits.length) {
+    const h = hits[0], b = bodies.find((x) => x.mesh === h.object);
+    let best = h.face.a, bd = Infinity;
+    for (const k of [h.face.a, h.face.b, h.face.c]) { const d = h.point.distanceToSquared(_p.fromArray(b.pos, k * 3)); if (d < bd) { bd = d; best = k; } }
+    grab.body = b; grab.i = best;
+    grab.target.fromArray(b.pos, best * 3);
+    grab.near = []; grab.off = {};
+    const gp = grab.target.clone();
+    for (let i = 0; i < b.n; i++) { _p.fromArray(b.pos, i * 3); if (i !== best && _p.distanceTo(gp) < 0.55 * b.scale) { grab.near.push(i); grab.off[i] = _p.clone().sub(gp); } }
+    dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), gp);
+    renderer.domElement.setPointerCapture(e.pointerId);
+    squish(b.scale, 0.6);
+  } else {
+    dragPlane.set(new THREE.Vector3(0, 0, 1), 0);
+    const p = new THREE.Vector3();
+    if (ray.ray.intersectPlane(dragPlane, p)) spawn(shape, THREE.MathUtils.clamp(p.x, -10, 10), 10.5);
+  }
+}
+renderer.domElement.addEventListener('pointermove', (e) => {
+  setRay(e);
+  if (grab.body) { ray.ray.intersectPlane(dragPlane, grab.target); grab.target.x = THREE.MathUtils.clamp(grab.target.x, -BOUND.x, BOUND.x); grab.target.y = Math.max(grab.target.y, 0.2); renderer.domElement.style.cursor = 'grabbing'; }
+  else renderer.domElement.style.cursor = ray.intersectObjects(bodies.map((b) => b.mesh)).length ? 'grab' : 'copy';
+});
+addEventListener('pointerup', () => (grab.body = null));
+
+// Audio > Boing + squish
+let actx;
+function startAudio() { actx ??= new AudioContext(); }
+function squish(size, vol) {
+  if (!actx) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  const f = 260 / size;
+  o.type = 'sine';
+  o.frequency.setValueAtTime(f * 0.6, t);
+  o.frequency.exponentialRampToValueAtTime(f * 1.4, t + 0.08);
+  o.frequency.exponentialRampToValueAtTime(f * 0.8, t + 0.3);
+  const lfo = actx.createOscillator(), lg = actx.createGain();
+  lfo.frequency.value = 22; lg.gain.value = f * 0.12;
+  lfo.connect(lg).connect(o.frequency);
+  g.gain.setValueAtTime(Math.min(vol, 1) * 0.16, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+  o.connect(g).connect(actx.destination);
+  o.start(t); lfo.start(t); o.stop(t + 0.4); lfo.stop(t + 0.4);
+}
+
+// HUD > Bar wiring
+document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => { shape = b.dataset.shape; document.querySelectorAll('[data-shape]').forEach((x) => x.classList.toggle('on', x === b)); }));
+document.getElementById('rain').onclick = () => { startAudio(); const sh = ['ball', 'cube', 'pudding']; for (let i = 0; i < 5; i++) setTimeout(() => spawn(sh[i % 3], -9 + Math.random() * 18, 11 + i * 0.5), i * 220); };
+document.getElementById('shake').onclick = () => { for (const b of bodies) { const kx = (Math.random() - 0.5) * 0.12, ky = 0.08 + Math.random() * 0.08; for (let i = 0; i < b.n * 3; i += 3) { b.prev[i] -= kx; b.prev[i + 1] -= ky; } } startAudio(); squish(1, 0.8); };
+document.getElementById('moon').onclick = (e) => { gravity = gravity < -10 ? -3.2 : -14; e.currentTarget.classList.toggle('on', gravity > -10); };
+document.getElementById('clear').onclick = () => { while (bodies.length) removeBody(bodies[0]); };
+document.getElementById('wobble').oninput = (e) => (stiff = 1 - e.target.value / 100);
+stiff = 1 - 0.55;
+
+// Run engine: substeps, body-body contacts, mesh + eye update, landing boings
+const clock = new THREE.Clock();
+const _n = new THREE.Vector3(), _look = new THREE.Vector3(), _m4 = new THREE.Matrix4();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 1 / 30), t = clock.elapsedTime;
+  const SUB = 4, h = dt / SUB;
+  for (let s = 0; s < SUB; s++) { for (const b of bodies) stepBody(b, h); if (bodies.length > 1) collideBodies(); }
+  for (const b of bodies) {
+    b.geo.attributes.position.needsUpdate = true;
+    b.geo.computeVertexNormals();
+    b.geo.computeBoundingSphere();
+    // landing: centroid vertical velocity flips from fast-down to slow
+    let cy = 0, py = 0;
+    for (let i = 1; i < b.n * 3; i += 3) { cy += b.pos[i]; py += b.prev[i]; }
+    const vy = (cy - py) / b.n / h;
+    if (b.lastVy < -6 && vy > -1.5) squish(b.scale, Math.min(-b.lastVy / 14, 1));
+    b.lastVy = vy;
+    // eyes ride their surface vertex, looking out along its normal, with a blink now and then
+    const nrm = b.geo.attributes.normal;
+    b.blink -= dt;
+    const blinkY = b.blink < 0.12 ? 0.15 : 1;
+    if (b.blink < 0) b.blink = 2 + Math.random() * 4;
+    for (const e of b.eyes) {
+      _p.fromArray(b.pos, e.v * 3);
+      _n.fromBufferAttribute(nrm, e.v).normalize();
+      e.g.position.copy(_p).addScaledVector(_n, 0.06 * b.scale);
+      _look.copy(e.g.position).add(_n);
+      _m4.lookAt(_look, e.g.position, new THREE.Vector3(0, 1, 0));
+      e.g.quaternion.setFromRotationMatrix(_m4);
+      e.g.scale.set(b.scale, b.scale * blinkY, b.scale);
+      e.pupil.position.x = Math.sin(t * 0.7 + b.scale * 10) * 0.03;
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+spawn('ball', -9.5, 9.5, 1.0);
+spawn('cube', 0.5, 10, 0.85);
+spawn('pudding', 7.5, 8.5, 1.0);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

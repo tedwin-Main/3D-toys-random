@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Marble Machine</title>
+<style>
+  :root { --ink: #2b2a35; --card: rgba(255, 255, 255, 0.8); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9e4f2; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 16px; box-shadow: 0 8px 26px rgba(40, 30, 80, 0.14); user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 270px; }
+  #intro h1 { margin: 0 0 4px; font-size: 18px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.8; }
+  #stats { top: 16px; right: 16px; padding: 10px 14px; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
+  #stats b { display: block; font-size: 22px; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: transparent; border: 0; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  #bar button:hover { background: rgba(0, 0, 0, 0.06); }
+  #bar button.on { background: var(--ink); color: #fff; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; font-size: 14px; opacity: 0.6; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="loading">warming up physics…</div>
+<div id="intro" class="card"><h1>Marble Machine</h1><p>A perpetual marble run: screw lift, banked helix, gravity-well funnel and a xylophone staircase. Click a marble to ride along, click empty space to drop a new one.</p></div>
+<div id="stats" class="card"><b id="count">0</b>marbles · <span id="laps">0</span> laps</div>
+<div id="bar" class="card"><button id="add">➕ 5 marbles</button><button id="follow">🎥 Ride along</button><button id="slow">🐢 Slow-mo</button><button id="sound" class="on">🔊 Sound</button><button id="clear">🧹 Reset</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/", "rapier": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.12.0/+esm" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/marble-run/index.html
+ * PURPOSE: perpetual marble machine on Rapier physics: swept acrylic channels, screw lift, vortex funnel, xylophone steps with notes
+ * UI: Marble Machine page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import RAPIER from 'rapier';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+await RAPIER.init();
+document.getElementById('loading').remove();
+
+// Scene > Renderer: soft studio env for glassy marbles
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9e4f2);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(19, 15, 21);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0.5, 7, -0.5);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.minDistance = 3;
+controls.maxDistance = 45;
+scene.add(new THREE.HemisphereLight(0xffffff, 0xb8a8d8, 0.8));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(8, 20, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 16, bottom: -6, near: 1, far: 50 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+
+// Physics > World: stronger-than-real gravity so the run feels lively
+const world = new RAPIER.World({ x: 0, y: -15, z: 0 });
+world.timestep = 1 / 120;
+const events = new RAPIER.EventQueue(true);
+const MARBLE_R = 0.2;
+
+// Machine > Base board
+{
+  const board = new THREE.Mesh(new THREE.BoxGeometry(18, 0.5, 14), new THREE.MeshStandardMaterial({ color: 0xc9a27a, roughness: 0.6 }));
+  board.position.set(0.5, -0.25, -0.5);
+  board.receiveShadow = true;
+  scene.add(board);
+  world.createCollider(RAPIER.ColliderDesc.cuboid(9, 0.25, 7).setTranslation(0.5, -0.25, -0.5));
+}
+
+// Machine > Materials: tinted acrylic channels, colored rims
+const acrylic = new THREE.MeshPhysicalMaterial({ color: 0xd6ecff, transparent: true, opacity: 0.42, roughness: 0.08, metalness: 0, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false });
+const rimMat = (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.35 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0xa47a55, roughness: 0.7 });
+
+// Machine > Channel builder: sweep U profile along a curve, auto-bank in turns, trimesh collider from same verts
+function channel(points, { radius = 0.42, half = 1.85, rim = 0xff7a59, bankK = 1.3, tension = 0.5 } = {}) {
+  const curve = new THREE.CatmullRomCurve3(points, false, 'catmullrom', tension);
+  const n = Math.ceil(curve.getLength() / 0.1), m = 14;
+  const verts = [], idx = [], edgeA = [], edgeB = [];
+  const T = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), B = new THREE.Vector3(), N = new THREE.Vector3(), c = new THREE.Vector3();
+  const tPrev = new THREE.Vector3(), tNext = new THREE.Vector3();
+  for (let i = 0; i <= n; i++) {
+    const u = i / n, p = curve.getPointAt(u);
+    curve.getTangentAt(u, T);
+    // horizontal curvature gives bank direction + amount
+    curve.getTangentAt(Math.max(0, u - 0.01), tPrev);
+    curve.getTangentAt(Math.min(1, u + 0.01), tNext);
+    c.subVectors(tNext, tPrev).setY(0);
+    const ds = curve.getLength() * (Math.min(1, u + 0.01) - Math.max(0, u - 0.01)) || 1;
+    const kappa = c.length() / ds;
+    const bank = Math.min(0.5, kappa * bankK);
+    if (c.lengthSq() > 1e-8) c.normalize();
+    N.copy(up).multiplyScalar(Math.cos(bank)).addScaledVector(c, Math.sin(bank));
+    B.crossVectors(T, N).normalize();
+    N.crossVectors(B, T).normalize();
+    for (let j = 0; j <= m; j++) {
+      const a = -half + (2 * half * j) / m;
+      const v = p.clone().addScaledVector(N, -Math.cos(a) * radius).addScaledVector(B, Math.sin(a) * radius);
+      verts.push(v.x, v.y, v.z);
+      if (j === 0) edgeA.push(v);
+      if (j === m) edgeB.push(v);
+    }
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) {
+    const a = i * (m + 1) + j, b = a + m + 1;
+    idx.push(a, b, a + 1, a + 1, b, b + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const mesh = new THREE.Mesh(g, acrylic);
+  mesh.renderOrder = 1;
+  scene.add(mesh);
+  for (const e of [edgeA, edgeB]) {
+    const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(e), e.length, 0.035, 6), rimMat(rim));
+    tube.castShadow = true;
+    scene.add(tube);
+  }
+  world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx)).setFriction(0.25).setRestitution(0.2));
+  return curve;
+}
+
+// Machine > Posts: wooden supports from board to a point
+function post(x, y, z) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, y, 8), woodMat);
+  m.position.set(x, y / 2, z);
+  m.castShadow = true;
+  scene.add(m);
+}
+
+// Machine > Lift: clear tube with rotating screw; marbles ride it kinematically
+const LIFT = new THREE.Vector3(6, 0, 0), LIFT_BOTTOM = 0.9, LIFT_TOP = 14.4;
+const liftTube = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, LIFT_TOP - 0.2, 32, 1, true), acrylic);
+liftTube.position.set(LIFT.x, (LIFT_TOP + 0.2) / 2, LIFT.z);
+scene.add(liftTube);
+const screw = new THREE.Group();
+{
+  const pts = [];
+  for (let i = 0; i <= 600; i++) { const s = i / 600, a = s * Math.PI * 24; pts.push(new THREE.Vector3(Math.cos(a) * 0.36, LIFT_BOTTOM - 0.25 + s * (LIFT_TOP - LIFT_BOTTOM), Math.sin(a) * 0.36)); }
+  const helix = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 1200, 0.045, 5), rimMat(0x6c63ff));
+  screw.add(helix);
+  const core = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, LIFT_TOP, 8), rimMat(0xdddddd));
+  core.position.y = LIFT_TOP / 2;
+  screw.add(core);
+}
+screw.position.set(LIFT.x, 0, LIFT.z);
+scene.add(screw);
+const motor = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 1.4), rimMat(0x6c63ff));
+motor.position.set(LIFT.x, LIFT_TOP + 0.6, LIFT.z);
+motor.castShadow = true;
+scene.add(motor);
+const gear = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.12, 6, 12), rimMat(0xffc94d));
+gear.position.set(LIFT.x + 0.75, LIFT_TOP + 0.6, LIFT.z);
+gear.rotation.y = Math.PI / 2;
+scene.add(gear);
+post(LIFT.x - 0.75, LIFT_TOP, LIFT.z - 0.75);
+post(LIFT.x + 0.75, LIFT_TOP, LIFT.z + 0.75);
+// intake hopper (visual + collider) catches the final chute
+{
+  const pts = [new THREE.Vector2(0.5, 0.35), new THREE.Vector2(0.55, 0.5), new THREE.Vector2(1.15, 1.35), new THREE.Vector2(1.2, 1.55)];
+  const g = new THREE.LatheGeometry(pts, 32);
+  const hop = new THREE.Mesh(g, acrylic);
+  hop.position.copy(LIFT);
+  scene.add(hop);
+  const v = g.attributes.position.array.slice();
+  for (let i = 0; i < v.length; i += 3) { v[i] += LIFT.x; v[i + 2] += LIFT.z; }
+  world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(v), new Uint32Array(g.index.array)).setFriction(0.2));
+}
+
+// Machine > Track 1: chute off the lift into a banked double helix, then around to the funnel
+const helixPts = [new THREE.Vector3(5.9, 14.3, 0), new THREE.Vector3(4.8, 14.15, 0)];
+for (let i = 0; i <= 64; i++) { const a = -(i / 64) * Math.PI * 4, y = 14.0 - (i / 64) * 4.6; helixPts.push(new THREE.Vector3(Math.cos(a) * 3.3, y, Math.sin(a) * 3.3)); }
+helixPts.push(new THREE.Vector3(3.25, 9.15, -1.6), new THREE.Vector3(2.4, 8.85, -3.4), new THREE.Vector3(0.6, 8.55, -4.2), new THREE.Vector3(-1.6, 8.25, -4.35), new THREE.Vector3(-3.5, 8.0, -4.05));
+channel(helixPts, { rim: 0xff7a59 });
+{
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 14.6, 16), woodMat);
+  pole.position.set(0, 7.3, 0);
+  pole.castShadow = true;
+  scene.add(pole);
+  for (let i = 0; i < 8; i++) {
+    const a = -(i / 8) * Math.PI * 4 - 0.3, y = 14.0 - (i / 8) * 4.6 - 0.55;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.08, 0.08), woodMat);
+    arm.position.set(Math.cos(a) * 1.6, y, Math.sin(a) * 1.6);
+    arm.rotation.y = -a;
+    scene.add(arm);
+  }
+  post(0.6, 8.1, -4.2);
+  post(-3.4, 7.55, -4.1);
+}
+
+// Machine > Funnel: gravity-well bowl with lip, marbles orbit then drop through the hole
+const FUNNEL = new THREE.Vector3(-4.5, 6.2, -2.2);
+{
+  const prof = [];
+  for (let i = 0; i <= 30; i++) { const r = 0.42 + (i / 30) * (2.3 - 0.42); prof.push(new THREE.Vector2(r, 0.95 - 0.8 / r)); }
+  prof.push(new THREE.Vector2(2.32, 1.15));
+  const g = new THREE.LatheGeometry(prof, 64);
+  const bowl = new THREE.Mesh(g, new THREE.MeshPhysicalMaterial({ color: 0xffd9a8, transparent: true, opacity: 0.55, roughness: 0.1, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false }));
+  bowl.position.copy(FUNNEL);
+  bowl.renderOrder = 1;
+  scene.add(bowl);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(2.32, 0.05, 6, 64), rimMat(0xffa94d));
+  rim.rotation.x = Math.PI / 2;
+  rim.position.set(FUNNEL.x, FUNNEL.y + 1.15, FUNNEL.z);
+  scene.add(rim);
+  const v = g.attributes.position.array.slice();
+  for (let i = 0; i < v.length; i += 3) { v[i] += FUNNEL.x; v[i + 1] += FUNNEL.y; v[i + 2] += FUNNEL.z; }
+  world.createCollider(RAPIER.ColliderDesc.trimesh(new Float32Array(v), new Uint32Array(g.index.array)).setFriction(0.05).setRestitution(0.1));
+  for (const [dx, dz] of [[1.6, 1.6], [-1.6, 1.6], [1.6, -1.6], [-1.6, -1.6]]) post(FUNNEL.x + dx, FUNNEL.y + 0.4, FUNNEL.z + dz);
+}
+
+// Machine > Xylophone: tuned bar staircase with side rails; each bar maps to a note
+const NOTES = [72, 74, 76, 79, 81, 84, 86, 88, 91];
+const barByHandle = new Map();
+const XY = { x0: FUNNEL.x + 0.05, y0: 4.85, dx: 0.5, dy: 0.25, z: FUNNEL.z };
+for (let i = 0; i < NOTES.length; i++) {
+  const x = XY.x0 + i * XY.dx, y = XY.y0 - i * XY.dy;
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.09, 0.9), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(i / NOTES.length, 0.75, 0.6), metalness: 0.5, roughness: 0.25, emissive: 0x000000 }));
+  bar.position.set(x, y, XY.z);
+  bar.rotation.z = -0.16;
+  bar.castShadow = true;
+  scene.add(bar);
+  const q = new THREE.Quaternion().setFromEuler(bar.rotation);
+  const col = world.createCollider(RAPIER.ColliderDesc.cuboid(0.23, 0.045, 0.45).setTranslation(x, y, XY.z).setRotation(q).setRestitution(0.35).setFriction(0.2));
+  barByHandle.set(col.handle, { i, bar, last: 0 });
+}
+{
+  const len = Math.hypot(NOTES.length * XY.dx, NOTES.length * XY.dy) + 0.4, ang = Math.atan2(XY.dy, XY.dx);
+  const cx = XY.x0 + ((NOTES.length - 1) * XY.dx) / 2, cy = XY.y0 - ((NOTES.length - 1) * XY.dy) / 2 + 0.3;
+  for (const s of [-1, 1]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(len, 0.75, 0.05), acrylic);
+    rail.position.set(cx, cy, XY.z + s * 0.48);
+    rail.rotation.z = -ang;
+    rail.renderOrder = 1;
+    scene.add(rail);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(len / 2, 0.375, 0.025).setTranslation(cx, cy, XY.z + s * 0.48).setRotation(new THREE.Quaternion().setFromEuler(rail.rotation)));
+  }
+  // back stop under the funnel hole so marbles start down the stairs
+  world.createCollider(RAPIER.ColliderDesc.cuboid(0.05, 0.5, 0.5).setTranslation(XY.x0 - 0.3, XY.y0 + 0.35, XY.z));
+  post(cx - 1.2, cy - 0.9, XY.z + 0.6);
+  post(cx + 1.2, cy - 1.6, XY.z - 0.6);
+}
+
+// Machine > Track 2: from the bottom of the stairs, a lazy S back to the lift hopper
+const endX = XY.x0 + NOTES.length * XY.dx, endY = XY.y0 - NOTES.length * XY.dy;
+channel([
+  new THREE.Vector3(endX - 0.2, endY - 0.35, XY.z), new THREE.Vector3(endX + 1.8, endY - 0.55, XY.z), new THREE.Vector3(3.6, 1.92, -1.9),
+  new THREE.Vector3(4.9, 1.78, -1.0), new THREE.Vector3(5.6, 1.68, -0.35), new THREE.Vector3(5.95, 1.62, -0.05),
+], { rim: 0x3ec7a6, half: 2.0, bankK: 2.2 });
+post(endX + 1.8, endY - 1.0, XY.z);
+post(4.9, 1.35, -1.0);
+
+// Marbles > Spawn: glassy swirl spheres, body + mesh pairs
+const marbles = [];
+const marbleGeo = new THREE.SphereGeometry(MARBLE_R, 24, 16);
+const lift = [];
+let laps = 0;
+function marbleMaterial(hue) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 64;
+  const g = c.getContext('2d');
+  const base = new THREE.Color().setHSL(hue, 0.75, 0.55);
+  g.fillStyle = `#${base.getHexString()}`;
+  g.fillRect(0, 0, 128, 64);
+  g.strokeStyle = `#${new THREE.Color().setHSL((hue + 0.5) % 1, 0.8, 0.85).getHexString()}`;
+  g.lineWidth = 7;
+  for (let k = 0; k < 3; k++) { g.beginPath(); for (let x = 0; x <= 128; x += 4) g.lineTo(x, 32 + Math.sin(x * 0.1 + k * 2) * 18); g.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshPhysicalMaterial({ map: t, roughness: 0.05, clearcoat: 1, clearcoatRoughness: 0.03, metalness: 0.05 });
+}
+function addMarble(pos, vel) {
+  if (marbles.length >= 80) return null;
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setCcdEnabled(true).setLinearDamping(0.05).setAngularDamping(0.2));
+  if (vel) body.setLinvel(vel, true);
+  const col = world.createCollider(RAPIER.ColliderDesc.ball(MARBLE_R).setDensity(2.5).setFriction(0.3).setRestitution(0.3).setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(14), body);
+  const mesh = new THREE.Mesh(marbleGeo, marbleMaterial(Math.random()));
+  mesh.castShadow = true;
+  scene.add(mesh);
+  const m = { body, col, mesh, idle: 0, inLift: false, s: 0 };
+  mesh.userData.marble = m;
+  marbles.push(m);
+  updateCount();
+  return m;
+}
+function enterLift(m) {
+  m.inLift = true;
+  m.s = 0;
+  m.body.setEnabled(false);
+  lift.push(m);
+}
+function releaseFromLift(m) {
+  m.inLift = false;
+  m.body.setEnabled(true);
+  m.body.setTranslation({ x: 5.85, y: 14.45, z: 0 }, true);
+  m.body.setLinvel({ x: -1.2, y: 0, z: 0 }, true);
+  m.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  laps++;
+  document.getElementById('laps').textContent = laps;
+}
+function updateCount() { document.getElementById('count').textContent = marbles.length; }
+function removeAll() {
+  for (const m of marbles) { world.removeRigidBody(m.body); scene.remove(m.mesh); m.mesh.material.map.dispose(); m.mesh.material.dispose(); }
+  marbles.length = 0;
+  lift.length = 0;
+  laps = 0;
+  document.getElementById('laps').textContent = 0;
+  updateCount();
+}
+function seed(n) {
+  for (let i = 0; i < n; i++) {
+    const m = addMarble(new THREE.Vector3(LIFT.x, 1, LIFT.z));
+    if (!m) break;
+    enterLift(m);
+    m.s = -i * 0.075;
+  }
+}
+
+// Audio > Sounds: glassy clicks by impact force, xylophone notes per bar
+let actx, soundOn = true, lastClick = 0;
+function audio() { actx ??= new AudioContext(); }
+addEventListener('pointerdown', audio, { once: true });
+function tone(freq, gain, dur, type = 'sine') {
+  if (!actx || !soundOn) return;
+  const t = actx.currentTime, o = actx.createOscillator(), o2 = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o2.type = 'sine'; o2.frequency.value = freq * 4.0;
+  const g2 = actx.createGain();
+  g2.gain.value = 0.25;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); o2.connect(g2).connect(g); g.connect(actx.destination);
+  o.start(t); o2.start(t); o.stop(t + dur + 0.02); o2.stop(t + dur + 0.02);
+}
+function handleEvents() {
+  events.drainContactForceEvents((e) => {
+    const f = e.maxForceMagnitude();
+    const bar = barByHandle.get(e.collider1()) ?? barByHandle.get(e.collider2());
+    const now = performance.now();
+    if (bar) {
+      if (now - bar.last < 90) return;
+      bar.last = now;
+      bar.flash = 1;
+      tone(440 * 2 ** ((NOTES[bar.i] - 69) / 12), Math.min(0.08 + f * 0.002, 0.3), 0.9);
+      return;
+    }
+    if (now - lastClick < 25) return;
+    lastClick = now;
+    tone(2200 + Math.random() * 1600, Math.min(f * 0.0012, 0.08), 0.06, 'triangle');
+  });
+}
+
+// HUD > Buttons + pointer: add marbles, follow, slow, sound, reset; click marble to ride it
+let follow = null, slow = false;
+document.getElementById('add').onclick = () => { audio(); for (let i = 0; i < 5; i++) setTimeout(() => { const m = addMarble(new THREE.Vector3(5.6 - i * 0.05, 14.6 + i * 0.5, 0), { x: -1, y: 0, z: 0 }); }, i * 350); };
+document.getElementById('follow').onclick = (e) => { follow = follow ? null : marbles.find((m) => !m.inLift) || marbles[0] || null; e.currentTarget.classList.toggle('on', !!follow); };
+document.getElementById('slow').onclick = (e) => { slow = !slow; e.currentTarget.classList.toggle('on', slow); };
+document.getElementById('sound').onclick = (e) => { soundOn = !soundOn; e.currentTarget.classList.toggle('on', soundOn); };
+document.getElementById('clear').onclick = () => { removeAll(); follow = null; document.getElementById('follow').classList.remove('on'); seed(12); };
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const h = ray.intersectObjects(marbles.map((m) => m.mesh), false)[0];
+  if (h) { follow = h.object.userData.marble; document.getElementById('follow').classList.add('on'); return; }
+  addMarble(new THREE.Vector3(5.6, 14.7, 0), { x: -1, y: 0, z: 0 });
+});
+
+// Run engine: fixed physics steps, lift conveyor, stray rescue, mesh sync, follow cam
+const clock = new THREE.Clock();
+let acc = 0;
+const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _camGoal = new THREE.Vector3(), _vel = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const simDt = dt * (slow ? 0.25 : 1);
+  acc += simDt;
+  let steps = 0;
+  while (acc >= world.timestep && steps < 6) { world.step(events); handleEvents(); acc -= world.timestep; steps++; }
+  const spin = simDt * 0.075 * Math.PI * 24;
+  screw.rotation.y -= spin;
+  gear.rotation.x += spin * 0.5;
+
+  // lift: advance riders along the screw path, keep spacing, pop out at top
+  for (let i = lift.length - 1; i >= 0; i--) {
+    const m = lift[i];
+    m.s += simDt * 0.075;
+    const s = Math.max(m.s, 0), a = -s * Math.PI * 24 + screw.rotation.y * 0;
+    m.mesh.position.set(LIFT.x + Math.cos(a) * 0.32, LIFT_BOTTOM + s * (LIFT_TOP - LIFT_BOTTOM), LIFT.z + Math.sin(a) * 0.32);
+    m.mesh.rotation.y = a;
+    if (m.s >= 1) { lift.splice(i, 1); releaseFromLift(m); }
+  }
+
+  for (const m of marbles) {
+    if (m.inLift) continue;
+    const t = m.body.translation(), r = m.body.rotation();
+    m.mesh.position.set(t.x, t.y, t.z);
+    m.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    // hopper capture: near lift foot and low
+    if (Math.hypot(t.x - LIFT.x, t.z - LIFT.z) < 1.0 && t.y < 1.5) {
+      const last = lift[lift.length - 1];
+      if (!last || last.s > 0.06) enterLift(m);
+      continue;
+    }
+    const v = m.body.linvel();
+    const speed = Math.hypot(v.x, v.y, v.z);
+    // gravity well: no rolling resistance in Rapier, so bleed speed by hand to make orbits spiral in
+    if (Math.hypot(t.x - FUNNEL.x, t.z - FUNNEL.z) < 2.35 && Math.abs(t.y - FUNNEL.y) < 1.4) {
+      const k = 1 - 0.26 * simDt;
+      m.body.setLinvel({ x: v.x * k, y: v.y, z: v.z * k }, true);
+    }
+    m.idle = speed < 0.15 || t.y < 0.5 ? m.idle + dt : 0;
+    // fallen or stuck marbles get scooped back into the lift queue
+    if (t.y < -3 || m.idle > 2.5) { m.idle = 0; const last = lift[lift.length - 1]; enterLift(m); m.s = last ? Math.min(last.s - 0.075, 0) : 0; }
+  }
+  for (const [, b] of barByHandle) {
+    if (b.flash > 0) { b.flash = Math.max(0, b.flash - dt * 4); b.bar.material.emissive.copy(b.bar.material.color).multiplyScalar(b.flash * 0.8); }
+  }
+
+  if (follow) {
+    _p.copy(follow.mesh.position);
+    if (!follow.inLift) { const v = follow.body.linvel(); _vel.set(v.x, 0, v.z); }
+    if (_vel.lengthSq() < 0.01) _vel.set(1, 0, 0);
+    _vel.normalize();
+    _camGoal.copy(_p).addScaledVector(_vel, -2.4).add(new THREE.Vector3(0, 1.3, 0));
+    camera.position.lerp(_camGoal, 1 - Math.exp(-dt * 3));
+    controls.target.lerp(_p, 1 - Math.exp(-dt * 6));
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+seed(14);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

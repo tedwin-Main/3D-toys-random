@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Meadow Downs</title>
+<style>
+  :root { --ink: #1b2230; --card: rgba(255, 255, 255, 0.86); --gold: #ffbf2f; --green: #1f7a4d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d8f5; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; }
+  button { font: inherit; cursor: pointer; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(10px); border-radius: 16px; box-shadow: 0 8px 30px rgba(20, 40, 70, 0.18); user-select: none; }
+  #panel { top: 16px; left: 16px; width: 290px; padding: 14px; max-height: calc(100% - 100px); overflow: auto; }
+  #panel h1 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+  #panel .sub { font-size: 12px; opacity: 0.65; margin: 2px 0 10px; }
+  #coins { font-weight: 800; color: #b07d00; }
+  .horse { display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; margin-bottom: 4px; border: 2px solid transparent; transition: background 0.2s, transform 0.25s; }
+  .horse.pick { border-color: var(--gold); background: #fff7df; }
+  .horse.clickable:hover { background: #fff; }
+  .swatch { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 13px; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+  .hname { font-size: 13.5px; font-weight: 700; }
+  .hmeta { font-size: 11px; opacity: 0.6; }
+  .odds { font-weight: 800; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
+  .chip { flex: 1; padding: 7px 0; border-radius: 999px; border: 2px solid #d9dde5; background: #fff; font-weight: 700; }
+  .chip.on { border-color: var(--gold); background: #fff3cc; }
+  #go { width: 100%; margin-top: 10px; padding: 11px; border: 0; border-radius: 12px; background: var(--green); color: #fff; font-weight: 800; font-size: 15px; }
+  #go:disabled { opacity: 0.45; cursor: default; }
+  #cams { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; }
+  #cams button { border: 0; background: transparent; padding: 7px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+  #cams button.on { background: var(--ink); color: #fff; }
+  #banner { position: fixed; top: 18%; left: 50%; transform: translate(-50%, -50%); font-size: 96px; font-weight: 900; color: #fff; text-shadow: 0 6px 30px rgba(0,0,0,0.35); pointer-events: none; transition: opacity 0.3s; }
+  #cheer { right: 16px; bottom: 16px; width: 104px; height: 104px; border-radius: 50%; border: 0; font-weight: 900; font-size: 15px; display: none; overflow: hidden; }
+  #cheer .fill { position: absolute; inset: auto 0 0 0; background: #ffe39a; height: 100%; z-index: -1; transition: height 0.1s linear; }
+  #result { top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 22px 26px; width: min(360px, calc(100% - 32px)); text-align: center; display: none; }
+  #result h2 { margin: 0 0 6px; font-size: 24px; }
+  #result ol { text-align: left; padding-left: 22px; margin: 12px 0; font-size: 14px; line-height: 1.7; }
+  #result button { padding: 10px 18px; border: 0; border-radius: 12px; background: var(--green); color: #fff; font-weight: 800; }
+  @media (max-width: 640px) { #panel { width: calc(100% - 32px); max-height: 42%; } #banner { font-size: 64px; } #cams button { padding: 7px 8px; font-size: 12px; } }
+</style>
+</head>
+<body>
+<div id="panel" class="card">
+  <h1>Meadow Downs</h1>
+  <div class="sub">2-lap derby · pick a horse, place a bet, cheer them home · <span id="coins">100</span> coins</div>
+  <div id="list"></div>
+  <div id="betting">
+    <div class="row"><button class="chip on" data-bet="10">10</button><button class="chip" data-bet="25">25</button><button class="chip" data-bet="50">50</button></div>
+    <button id="go" disabled>Pick a horse</button>
+  </div>
+</div>
+<div id="cams" class="card"></div>
+<div id="banner"></div>
+<button id="cheer" class="card"><div class="fill"></div>CHEER!<br><small>space</small></button>
+<div id="result" class="card"><h2 id="rtitle"></h2><div id="rsub"></div><ol id="rlist"></ol><button id="again">Race again</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/horse-race-track/index.html
+ * PURPOSE: oval racetrack, procedural galloping horses with jockeys, betting, live standings, multi-cam
+ * UI: Meadow Downs page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Scene > Renderer: canvas, shadows, fog
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa9d8f5);
+scene.fog = new THREE.Fog(0xa9d8f5, 120, 320);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 800);
+camera.position.set(10, 12, -70);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enabled = false;
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.47;
+
+// Scene > Lights: sky fill + sun with wide shadow box over whole track
+scene.add(new THREE.HemisphereLight(0xffffff, 0x6d8f4e, 1.05));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
+sun.position.set(-40, 80, -50);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 70, bottom: -70, near: 10, far: 220 });
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+// Track > Geometry: stadium-shaped centerline, s = meters along it, o = lateral offset (outward +)
+const SL = 34, RT = 26, W = 13, LAPS = 2;
+const L = 4 * SL + 2 * Math.PI * RT;
+const START_S = SL - 1.2;
+function trackPos(s, o = 0, out = {}) {
+  s = ((s % L) + L) % L;
+  const r = RT + o;
+  if (s < 2 * SL) { out.x = -SL + s; out.z = -r; out.h = Math.PI / 2; return out; }
+  s -= 2 * SL;
+  if (s < Math.PI * RT) { const a = -Math.PI / 2 + s / RT; out.x = SL + r * Math.cos(a); out.z = r * Math.sin(a); out.h = Math.atan2(-Math.sin(a), Math.cos(a)); return out; }
+  s -= Math.PI * RT;
+  if (s < 2 * SL) { out.x = SL - s; out.z = r; out.h = -Math.PI / 2; return out; }
+  s -= 2 * SL;
+  const a = Math.PI / 2 + s / RT;
+  out.x = -SL + r * Math.cos(a); out.z = r * Math.sin(a); out.h = Math.atan2(-Math.sin(a), Math.cos(a));
+  return out;
+}
+const rand = (a, b) => a + Math.random() * (b - a);
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const mat = (color, o = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, ...o });
+
+// Track > Ground: grass field with mowing stripes
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 16; i++) { g.fillStyle = i % 2 ? '#6fb552' : '#79bf5b'; g.fillRect(0, i * 16, 256, 16); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(30, 30);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(700, 700).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex, roughness: 1 }));
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// Track > Dirt ribbon: sampled along centerline with speckled vertex colors
+{
+  const N = 480, pos = [], col = [], idx = [], p = {}, c = new THREE.Color();
+  for (let i = 0; i <= N; i++) {
+    for (let k = 0; k <= 6; k++) {
+      trackPos((i / N) * L, -W / 2 - 0.8 + (k / 6) * (W + 1.6), p);
+      pos.push(p.x, 0.03, p.z);
+      c.setHSL(0.075, 0.42, rand(0.42, 0.5) - (k === 0 || k === 6 ? 0.06 : 0));
+      col.push(c.r, c.g, c.b);
+    }
+  }
+  for (let i = 0; i < N; i++) for (let k = 0; k < 6; k++) {
+    const a = i * 7 + k, b = a + 7;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  if (geo.attributes.normal.getY(0) < 0) geo.index.array.reverse();
+  geo.computeVertexNormals();
+  const dirt = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide }));
+  dirt.receiveShadow = true;
+  scene.add(dirt);
+}
+
+// Track > Rails: white posts + closed tube rails on both sides
+{
+  const railMat = mat(0xffffff, { roughness: 0.4 });
+  const post = new THREE.CylinderGeometry(0.07, 0.07, 1.1, 6);
+  const per = Math.floor(L / 2.5), p = {}, dummy = new THREE.Object3D();
+  for (const o of [-W / 2 - 0.4, W / 2 + 0.4]) {
+    const posts = new THREE.InstancedMesh(post, railMat, per);
+    const pts = [];
+    for (let i = 0; i < per; i++) {
+      trackPos((i / per) * L, o, p);
+      dummy.position.set(p.x, 0.55, p.z); dummy.updateMatrix();
+      posts.setMatrixAt(i, dummy.matrix);
+    }
+    for (let i = 0; i < 240; i++) { trackPos((i / 240) * L, o, p); pts.push(V(p.x, 1.08, p.z)); }
+    const rail = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 480, 0.08, 6, true), railMat);
+    posts.castShadow = rail.castShadow = true;
+    scene.add(posts, rail);
+  }
+}
+
+// Track > Finish line: checkered strip + finish post
+{
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 256;
+  const g = c.getContext('2d');
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 4; x++) { g.fillStyle = (x + y) % 2 ? '#111' : '#fff'; g.fillRect(x * 8, y * 8, 8, 8); }
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = THREE.NearestFilter;
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(1, W + 1.6).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: tex }));
+  line.position.set(0, 0.05, -RT);
+  line.receiveShadow = true;
+  scene.add(line);
+  const postMat = mat(0xffffff);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 5, 8), postMat);
+  pole.position.set(0, 2.5, -RT + W / 2 + 0.9);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.12, 24), mat(0xe63946));
+  disc.rotation.z = Math.PI / 2; disc.position.set(0, 5.2, -RT + W / 2 + 0.9);
+  pole.castShadow = disc.castShadow = true;
+  scene.add(pole, disc);
+}
+
+// Track > Grandstand: stepped seats, roof, pillars, crowd, flags
+const crowd = { mesh: null, base: [], n: 0 };
+const flags = [];
+{
+  const z0 = -RT - W / 2 - 3.5, rows = 9, width = 64;
+  const stepMat = mat(0xd9d4c7), roofMat = mat(0x1f7a4d, { roughness: 0.5 });
+  for (let r = 0; r < rows; r++) {
+    const step = new THREE.Mesh(new THREE.BoxGeometry(width, 0.6 + r * 0.6, 1.4), stepMat);
+    step.position.set(0, (0.6 + r * 0.6) / 2, z0 - r * 1.4);
+    step.castShadow = step.receiveShadow = true;
+    scene.add(step);
+  }
+  const back = new THREE.Mesh(new THREE.BoxGeometry(width, 9, 0.5), stepMat);
+  back.position.set(0, 4.5, z0 - rows * 1.4);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(width + 2, 0.4, rows * 1.4 + 3), roofMat);
+  roof.position.set(0, 9.6, z0 - (rows * 1.4) / 2 + 0.6);
+  roof.rotation.x = -0.08;
+  back.castShadow = roof.castShadow = true;
+  scene.add(back, roof);
+  for (let x = -width / 2 + 2; x <= width / 2 - 2; x += 10) {
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 9.5, 8), mat(0xffffff));
+    pillar.position.set(x, 4.75, z0 + 0.6);
+    pillar.castShadow = true;
+    scene.add(pillar);
+  }
+  const perRow = 52, N = perRow * (rows - 1);
+  const fan = new THREE.InstancedMesh(new THREE.CapsuleGeometry(0.22, 0.38, 3, 6), mat(0xffffff), N);
+  const palette = [0xe63946, 0x2a9df4, 0xffd23f, 0xffffff, 0x2ecc71, 0xff8c42, 0x7b2cbf, 0x1d2433, 0xff6bb5];
+  const dummy = new THREE.Object3D(), c = new THREE.Color();
+  let i = 0;
+  for (let r = 1; r < rows; r++) for (let k = 0; k < perRow; k++) {
+    if (Math.random() < 0.12) continue;
+    const x = -width / 2 + 1 + (k / perRow) * (width - 2) + rand(-0.2, 0.2);
+    const y = 0.6 + r * 0.6 + 0.4, z = z0 - r * 1.4 + 0.1;
+    dummy.position.set(x, y, z); dummy.updateMatrix();
+    fan.setMatrixAt(i, dummy.matrix);
+    fan.setColorAt(i, c.set(palette[(Math.random() * palette.length) | 0]));
+    crowd.base.push(x, y, z, rand(0, 6));
+    i++;
+  }
+  fan.count = crowd.n = i;
+  fan.castShadow = true;
+  crowd.mesh = fan;
+  scene.add(fan);
+  const flagGeo = () => new THREE.PlaneGeometry(1.8, 1.1, 12, 1);
+  for (let k = 0; k < 7; k++) {
+    const x = -width / 2 + 4 + k * ((width - 8) / 6);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3, 6), mat(0xffffff));
+    pole.position.set(x, 11.3, z0 - 4);
+    const flag = new THREE.Mesh(flagGeo(), mat(palette[k], { side: THREE.DoubleSide }));
+    flag.geometry.translate(0.9, 0, 0);
+    flag.position.set(x, 12.2, z0 - 4);
+    flag.castShadow = true;
+    flag.userData.orig = flag.geometry.attributes.position.array.slice();
+    flags.push(flag);
+    scene.add(pole, flag);
+  }
+}
+
+// Track > Infield: pond, flower beds, trees, scoreboard
+const scoreboard = {};
+{
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2), mat(0x4fa3d9, { roughness: 0.1, metalness: 0.2 }));
+  pond.scale.set(11, 1, 4.5); pond.position.set(-12, 0.04, 10);
+  scene.add(pond);
+  const bedCols = [0xff6bb5, 0xffd23f, 0xffffff, 0xff8c42];
+  const flowers = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.22, 0), mat(0xffffff), 500);
+  const dummy = new THREE.Object3D(), c = new THREE.Color();
+  for (let i = 0; i < 500; i++) {
+    const a = rand(0, Math.PI * 2), r = Math.sqrt(Math.random());
+    dummy.position.set(18 + Math.cos(a) * r * 6, 0.18, 6 + Math.sin(a) * r * 3.5); dummy.updateMatrix();
+    flowers.setMatrixAt(i, dummy.matrix);
+    flowers.setColorAt(i, c.set(bedCols[i % 4]));
+  }
+  scene.add(flowers);
+  const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 2, 6), leafGeo = new THREE.IcosahedronGeometry(2, 0);
+  const trunkMat = mat(0x7a5236), leafMat = mat(0x3f8f3a, { flatShading: true });
+  const tree = (x, z, s) => {
+    const t = new THREE.Mesh(trunkGeo, trunkMat); t.position.set(x, s, z); t.scale.setScalar(s);
+    const l = new THREE.Mesh(leafGeo, leafMat); l.position.set(x, s * 3, z); l.scale.setScalar(s);
+    t.castShadow = l.castShadow = true;
+    scene.add(t, l);
+  };
+  // infield trees hug centerline so they sit behind TV camera path
+  for (const [x, z] of [[-20, 0], [14, 1], [21, -1], [-26, 1]]) tree(x, z, rand(0.9, 1.3));
+  for (let i = 0; i < 90; i++) {
+    const a = rand(0, Math.PI * 2), r = rand(RT + W + 12, 150);
+    const x = Math.cos(a) * r * 1.4, z = Math.sin(a) * r;
+    if (z < -RT - 20 && Math.abs(x) < 50) continue;
+    tree(x, z, rand(0.9, 2));
+  }
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    const hill = new THREE.Mesh(new THREE.ConeGeometry(rand(40, 70), rand(25, 45), 7), mat(0x7fae63, { flatShading: true }));
+    hill.position.set(Math.cos(a) * 280, 8, Math.sin(a) * 240);
+    scene.add(hill);
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = 512; canvas.height = 288;
+  scoreboard.ctx = canvas.getContext('2d');
+  scoreboard.tex = new THREE.CanvasTexture(canvas);
+  scoreboard.tex.colorSpace = THREE.SRGBColorSpace;
+  const board = new THREE.Mesh(new THREE.PlaneGeometry(14, 7.9), new THREE.MeshBasicMaterial({ map: scoreboard.tex, toneMapped: false }));
+  board.position.set(0, 8, -0.5);
+  board.rotation.y = Math.PI;
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(14.6, 8.5, 0.4), mat(0x1f7a4d));
+  frame.position.set(0, 8, -0.25);
+  const legs = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4.5, 0.5), mat(0x1f7a4d));
+  legs.position.set(0, 2.2, -0.25);
+  frame.castShadow = true;
+  scene.add(board, frame, legs);
+}
+
+// Horses > Builder: procedural low-poly horse + jockey + saddle cloth number
+const HORSES = [
+  { name: 'Thunder Biscuit', coat: 0x8b4a2b, mane: 0x2a1a12, silk: 0xe63946, cap: 0xffffff },
+  { name: 'Sir Gallops-a-Lot', coat: 0x2a2220, mane: 0x0d0b0a, silk: 0x2a9df4, cap: 0xffd23f },
+  { name: 'Neigh Sayer', coat: 0xa6a6a6, mane: 0x4d4d4d, silk: 0x2ecc71, cap: 0x1d2433 },
+  { name: 'Hay Girl', coat: 0xd9b36c, mane: 0xf4ead2, silk: 0xff6bb5, cap: 0xffffff },
+  { name: 'Mane Event', coat: 0x6b3a22, mane: 0x1a0f08, silk: 0xffd23f, cap: 0x7b2cbf },
+  { name: 'Oat Malone', coat: 0xefebe3, mane: 0xcfc8bb, silk: 0x7b2cbf, cap: 0x2ecc71 },
+];
+const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+const hoofMat = mat(0x222222), skinMat = mat(0xf1c7a1), bootMat = mat(0x111111, { roughness: 0.4 }), whiteMat = mat(0xffffff);
+const pickables = [];
+
+function numberTexture(n, color) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = color; g.fillRect(0, 0, 128, 96);
+  g.fillStyle = '#fff'; g.font = 'bold 72px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(String(n), 64, 52);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function makeHorse(def, index) {
+  const coat = mat(def.coat, { roughness: 0.55 }), maneMat = mat(def.mane), silk = mat(def.silk, { roughness: 0.4 }), cap = mat(def.cap, { roughness: 0.4 });
+  const root = new THREE.Group(), body = new THREE.Group();
+  root.add(body);
+  const add = (parent, geo, material, x, y, z, sx = 1, sy = 1, sz = 1) => {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.castShadow = true;
+    m.userData.horse = index;
+    pickables.push(m);
+    parent.add(m);
+    return m;
+  };
+  const ball = new THREE.SphereGeometry(1, 16, 12);
+  add(body, ball, coat, 0, 1.5, 0, 0.42, 0.46, 1.0);
+  add(body, ball, coat, 0, 1.52, 0.62, 0.45, 0.5, 0.5);
+  add(body, ball, coat, 0, 1.55, -0.62, 0.46, 0.5, 0.52);
+
+  // Horses > Neck + head: neck tilts up-forward, head angles down
+  const neck = new THREE.Group();
+  neck.position.set(0, 1.7, 0.85);
+  neck.rotation.x = 0.62;
+  body.add(neck);
+  add(neck, new THREE.CylinderGeometry(0.17, 0.3, 1.0, 10), coat, 0, 0.45, 0);
+  for (let k = 0; k < 7; k++) add(neck, new THREE.BoxGeometry(0.08, 0.16, 0.14), maneMat, 0, 0.12 + k * 0.13, -0.2 + k * 0.012);
+  const headG = new THREE.Group();
+  headG.position.set(0, 0.95, 0);
+  headG.rotation.x = 1.35;
+  neck.add(headG);
+  add(headG, new THREE.CylinderGeometry(0.1, 0.17, 0.62, 10), coat, 0, 0.26, 0);
+  add(headG, new THREE.SphereGeometry(0.11, 8, 6), coat, 0, 0.56, 0.02, 1, 0.8, 1);
+  for (const s of [-1, 1]) {
+    const ear = add(headG, new THREE.ConeGeometry(0.05, 0.18, 4), coat, s * 0.08, -0.04, -0.12);
+    ear.rotation.x = -1.7;
+    add(headG, new THREE.SphereGeometry(0.03, 6, 6), hoofMat, s * 0.14, 0.08, 0.06);
+  }
+  add(headG, new THREE.BoxGeometry(0.08, 0.16, 0.08), maneMat, 0, -0.04, -0.15);
+
+  // Horses > Tail: hangs, streams back with speed
+  const tail = new THREE.Group();
+  tail.position.set(0, 1.72, -1.1);
+  body.add(tail);
+  add(tail, new THREE.CylinderGeometry(0.1, 0.03, 0.85, 6), maneMat, 0, -0.42, 0);
+
+  // Horses > Legs: hip > upper > knee > lower + hoof
+  const legs = [];
+  for (const [x, z, front, off] of [[-0.24, 0.72, true, 0.45], [0.24, 0.72, true, 0.57], [-0.24, -0.72, false, 0], [0.24, -0.72, false, 0.12]]) {
+    const hip = new THREE.Group();
+    hip.position.set(x, 1.3, z);
+    body.add(hip);
+    add(hip, new THREE.CylinderGeometry(front ? 0.12 : 0.16, 0.08, 0.6, 7), coat, 0, -0.3, 0);
+    const knee = new THREE.Group();
+    knee.position.y = -0.6;
+    hip.add(knee);
+    add(knee, new THREE.CylinderGeometry(0.06, 0.05, 0.56, 6), index % 2 ? whiteMat : coat, 0, -0.28, 0);
+    add(knee, new THREE.CylinderGeometry(0.07, 0.085, 0.12, 7), hoofMat, 0, -0.6, 0);
+    legs.push({ hip, knee, front, off: off * Math.PI * 2 });
+  }
+
+  // Horses > Tack: saddle, numbered cloth
+  add(body, new THREE.BoxGeometry(0.5, 0.1, 0.55), mat(0x3a2414), 0, 1.97, 0.1);
+  const numTex = numberTexture(index + 1, hex(def.silk));
+  for (const s of [-1, 1]) {
+    const cloth = add(body, new THREE.PlaneGeometry(0.62, 0.42), new THREE.MeshStandardMaterial({ map: numTex, side: THREE.DoubleSide }), s * 0.425, 1.72, 0.1);
+    cloth.rotation.y = s * Math.PI / 2;
+  }
+
+  // Horses > Jockey: crouched rider in silks
+  const jockey = new THREE.Group();
+  jockey.position.set(0, 2.0, 0.15);
+  body.add(jockey);
+  const torso = add(jockey, new THREE.BoxGeometry(0.34, 0.44, 0.24), silk, 0, 0.3, 0.08);
+  torso.rotation.x = 1.05;
+  const headJ = add(jockey, new THREE.SphereGeometry(0.13, 12, 10), skinMat, 0, 0.5, 0.36);
+  add(jockey, new THREE.SphereGeometry(0.145, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), cap, 0, 0.53, 0.36);
+  add(jockey, new THREE.BoxGeometry(0.12, 0.04, 0.12), cap, 0, 0.53, 0.5);
+  for (const s of [-1, 1]) {
+    const thigh = add(jockey, new THREE.BoxGeometry(0.12, 0.12, 0.4), whiteMat, s * 0.2, 0.1, 0.08);
+    thigh.rotation.x = -0.5;
+    const boot = add(jockey, new THREE.BoxGeometry(0.1, 0.42, 0.12), bootMat, s * 0.36, -0.12, 0.18);
+    boot.rotation.z = s * 0.25;
+    const arm = add(jockey, new THREE.BoxGeometry(0.08, 0.08, 0.46), silk, s * 0.16, 0.38, 0.52);
+    arm.rotation.x = 0.55;
+  }
+  return { root, body, neck, headG, tail, legs, jockey, headJ };
+}
+
+// Horses > Instances: build six runners in starting stalls
+const laneStart = (i) => -W / 2 + 1.5 + i * 2.0;
+const runners = HORSES.map((def, i) => {
+  const parts = makeHorse(def, i);
+  scene.add(parts.root);
+  return { ...def, ...parts, i, p: 0, v: 0, phase: rand(0, 6), o: laneStart(i), finished: false, place: 0, time: 0, cheer: 0 };
+});
+const marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.32), mat(0xffbf2f, { emissive: 0x6b4a00, metalness: 0.4, roughness: 0.3 }));
+marker.scale.y = 1.6;
+scene.add(marker);
+
+// Track > Starting gate: stalls, doors swing open at go, then gate rolls into infield
+const gate = new THREE.Group();
+const doors = [];
+{
+  const gm = mat(0x2d6a4f, { roughness: 0.5 }), dm = mat(0xf2f2f2);
+  const frame = (w, h, d, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), gm); m.position.set(x, y, z); m.castShadow = true; gate.add(m); };
+  frame(W + 1.2, 0.5, 3, 0, 3.4, 0);
+  // open-frame dividers so runners stay visible from side cams
+  for (let i = 0; i <= 6; i++) {
+    const x = -W / 2 + 0.5 + i * 2.0;
+    for (const z of [-1.35, 1.35]) frame(0.14, 3.4, 0.14, x, 1.7, z);
+    for (const y of [1.0, 1.9]) frame(0.1, 0.1, 2.8, x, y, 0);
+  }
+  for (let i = 0; i < 6; i++) {
+    const x = laneStart(i);
+    for (const s of [-1, 1]) {
+      const hinge = new THREE.Group();
+      hinge.position.set(x + s * 0.94, 0, 1.4);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.2, 0.06), dm);
+      door.position.set(-s * 0.45, 1.3, 0);
+      door.castShadow = true;
+      hinge.add(door);
+      hinge.userData.s = s;
+      gate.add(hinge);
+      doors.push(hinge);
+    }
+  }
+  const p = trackPos(START_S + 0.2, 0);
+  gate.position.set(p.x, 0, p.z);
+  gate.rotation.y = p.h;
+  scene.add(gate);
+}
+
+// Effects > Dust: recycled soft point pool kicked up by hooves
+const DUST = 900;
+const dust = { pos: new Float32Array(DUST * 3).fill(-50), vel: new Float32Array(DUST * 3), life: new Float32Array(DUST), i: 0 };
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(dust.pos, 3));
+  dust.points = new THREE.Points(geo, new THREE.PointsMaterial({ size: 1.1, map: new THREE.CanvasTexture(c), color: 0xcaa47c, transparent: true, opacity: 0.45, depthWrite: false }));
+  dust.points.frustumCulled = false;
+  scene.add(dust.points);
+}
+function kickDust(x, z, fx, fz) {
+  const k = dust.i++ % DUST;
+  dust.pos.set([x + rand(-0.3, 0.3), 0.15, z + rand(-0.3, 0.3)], k * 3);
+  dust.vel.set([-fx * rand(1, 3) + rand(-0.6, 0.6), rand(0.6, 1.8), -fz * rand(1, 3) + rand(-0.6, 0.6)], k * 3);
+  dust.life[k] = 1;
+}
+function updateDust(dt) {
+  for (let k = 0; k < DUST; k++) {
+    if (dust.life[k] <= 0) continue;
+    dust.life[k] -= dt * 0.9;
+    if (dust.life[k] <= 0) { dust.pos[k * 3 + 1] = -50; continue; }
+    for (let a = 0; a < 3; a++) { dust.pos[k * 3 + a] += dust.vel[k * 3 + a] * dt; dust.vel[k * 3 + a] *= 0.97; }
+  }
+  dust.points.geometry.attributes.position.needsUpdate = true;
+}
+
+// Effects > Audio: crowd noise bed, hoof thumps, bugle, beeps
+let actx, crowdGain;
+function initAudio() {
+  if (actx) return;
+  actx = new AudioContext();
+  const buf = actx.createBuffer(1, actx.sampleRate * 2, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = actx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const bp = actx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.5;
+  crowdGain = actx.createGain();
+  crowdGain.gain.value = 0.015;
+  src.connect(bp).connect(crowdGain).connect(actx.destination);
+  src.start();
+}
+function tone(freq, dur, type = 'sine', vol = 0.15, delay = 0, slide) {
+  if (!actx) return;
+  const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + delay;
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.05);
+}
+function bugle() {
+  const notes = [[392, 0.16], [523, 0.16], [659, 0.16], [784, 0.34], [659, 0.16], [784, 0.6]];
+  let t = 0;
+  for (const [f, d] of notes) { tone(f, d * 0.95, 'square', 0.05, t); tone(f, d * 0.95, 'triangle', 0.12, t); t += d; }
+  return t;
+}
+
+// HUD > Panel: horse cards, odds, bet chips, start button
+const ui = {
+  list: document.getElementById('list'), go: document.getElementById('go'), banner: document.getElementById('banner'),
+  coins: document.getElementById('coins'), cheer: document.getElementById('cheer'), cheerFill: document.querySelector('#cheer .fill'),
+  betting: document.getElementById('betting'), result: document.getElementById('result'), cams: document.getElementById('cams'),
+};
+let coins = 100;
+try { coins = Number(localStorage.getItem('meadow-downs-coins')) || 100; } catch {}
+const saveCoins = () => { ui.coins.textContent = coins; try { localStorage.setItem('meadow-downs-coins', coins); } catch {} };
+saveCoins();
+const race = { phase: 'betting', pick: -1, bet: 10, t: 0, finishers: [], countdown: 0, cheerCd: 0, excitement: 0 };
+
+function rollForm() {
+  for (const r of runners) {
+    r.base = rand(15.2, 16.3); r.stamina = rand(0.55, 1); r.kickAt = rand(0.55, 0.85); r.kick = rand(0.8, 2.3);
+    r.wobF = rand(0.3, 0.7); r.wobP = rand(0, 6);
+    r.rating = r.base + r.kick * r.stamina * 0.45 - (1 - r.stamina) * 0.6 + rand(-0.25, 0.25);
+  }
+  const ex = runners.map((r) => Math.exp(r.rating * 2.2)), sum = ex.reduce((a, b) => a + b, 0);
+  runners.forEach((r, i) => (r.mult = Math.max(1.3, Math.round((0.88 / (ex[i] / sum)) * 2) / 2)));
+}
+function renderList() {
+  const order = race.phase === 'betting' ? runners : [...runners].sort((a, b) => (a.finished && b.finished ? a.place - b.place : b.p - a.p));
+  const lead = order[0].p;
+  ui.list.innerHTML = order.map((r, k) => {
+    const meta = race.phase === 'betting' ? `pays ${r.mult}×` : r.finished ? `finished ${ordinal(r.place)} · ${r.time.toFixed(2)}s` : k === 0 ? 'leading' : `+${(lead - r.p).toFixed(1)} m`;
+    return `<div class="horse ${r.i === race.pick ? 'pick' : ''} ${race.phase === 'betting' ? 'clickable' : ''}" data-i="${r.i}" style="cursor:${race.phase === 'betting' ? 'pointer' : 'default'}">
+      <div class="swatch" style="background:${hex(r.silk)}">${r.i + 1}</div>
+      <div><div class="hname">${r.name}</div><div class="hmeta">${meta}</div></div>
+      <div class="odds">${race.phase === 'betting' ? r.mult + '×' : k + 1}</div></div>`;
+  }).join('');
+}
+const ordinal = (n) => n + (['th', 'st', 'nd', 'rd'][n % 10 > 3 || Math.floor(n / 10) === 1 ? 0 : n % 10] || 'th');
+function pickHorse(i) {
+  if (race.phase !== 'betting') return;
+  race.pick = i;
+  ui.go.disabled = coins < race.bet;
+  ui.go.textContent = coins < race.bet ? 'Not enough coins' : `Bet ${race.bet} on #${i + 1} · Start race`;
+  renderList();
+}
+ui.list.addEventListener('click', (e) => { const el = e.target.closest('.horse'); if (el) pickHorse(Number(el.dataset.i)); });
+for (const chip of document.querySelectorAll('.chip')) {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', c === chip));
+    race.bet = Number(chip.dataset.bet);
+    if (race.pick >= 0) pickHorse(race.pick);
+  });
+}
+
+// HUD > Camera bar: switch views
+const CAMS = [['tv', 'TV'], ['chase', 'Chase'], ['jockey', 'Jockey'], ['blimp', 'Blimp'], ['free', 'Free']];
+let camMode = 'tv';
+ui.cams.innerHTML = CAMS.map(([k, label]) => `<button data-cam="${k}" class="${k === camMode ? 'on' : ''}">${label}</button>`).join('');
+function setCam(k) {
+  camMode = k;
+  controls.enabled = k === 'free';
+  if (controls.enabled) controls.target.copy(packCenter());
+  ui.cams.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.cam === k));
+}
+ui.cams.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setCam(b.dataset.cam); });
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); cheer(); }
+  if (e.key.toLowerCase() === 'c') { const i = CAMS.findIndex(([k]) => k === camMode); setCam(CAMS[(i + 1) % CAMS.length][0]); }
+});
+
+// HUD > Start button: bugle, countdown, gates open
+ui.go.addEventListener('click', () => {
+  if (race.pick < 0 || coins < race.bet || race.phase !== 'betting') return;
+  initAudio();
+  coins -= race.bet;
+  saveCoins();
+  race.phase = 'countdown';
+  ui.betting.style.display = 'none';
+  renderList();
+  const wait = bugle();
+  ui.banner.textContent = '🎺';
+  race.countdown = wait + 0.4 + 3;
+});
+
+// HUD > Cheer button: short boost for picked horse, crowd roar
+function cheer() {
+  if (race.phase !== 'racing' || race.cheerCd > 0 || race.pick < 0) return;
+  const r = runners[race.pick];
+  if (r.finished) return;
+  r.cheer = 1.4;
+  race.cheerCd = 2.2;
+  race.excitement = Math.min(race.excitement + 0.4, 1);
+  tone(300, 0.5, 'sawtooth', 0.04, 0, 600);
+}
+ui.cheer.addEventListener('click', cheer);
+
+// HUD > Results card: payout + reset
+function showResults() {
+  const order = [...runners].sort((a, b) => a.place - b.place);
+  const mine = runners[race.pick];
+  const won = mine.place === 1;
+  const payout = won ? Math.round(race.bet * mine.mult) : 0;
+  coins += payout;
+  if (coins < 10) coins += 50;
+  saveCoins();
+  document.getElementById('rtitle').textContent = won ? `🏆 ${mine.name} wins!` : `${order[0].name} wins`;
+  document.getElementById('rsub').textContent = won ? `You collect ${payout} coins.` : `Your pick #${mine.i + 1} ${mine.name} came ${ordinal(mine.place)}.`;
+  document.getElementById('rlist').innerHTML = order.map((r) => `<li><b style="color:${hex(r.silk)}">#${r.i + 1}</b> ${r.name} — ${r.time.toFixed(2)}s</li>`).join('');
+  ui.result.style.display = 'block';
+  ui.cheer.style.display = 'none';
+}
+document.getElementById('again').addEventListener('click', resetRace);
+function resetRace() {
+  race.phase = 'betting'; race.finishers = []; race.t = 0; race.excitement = 0;
+  for (const r of runners) Object.assign(r, { p: 0, v: 0, o: laneStart(r.i), finished: false, place: 0, time: 0, cheer: 0 });
+  const p = trackPos(START_S + 0.2, 0);
+  gate.position.set(p.x, 0, p.z);
+  for (const d of doors) d.rotation.y = 0;
+  ui.result.style.display = 'none';
+  ui.betting.style.display = 'block';
+  rollForm();
+  pickHorse(race.pick >= 0 ? race.pick : 0);
+}
+rollForm();
+renderList();
+
+// 3D > Click horse: select it while betting
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (race.phase !== 'betting') return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(pickables, false)[0];
+  if (hit) pickHorse(hit.object.userData.horse);
+});
+
+// Run engine: race logic per frame
+const tp = {};
+function updateRace(dt) {
+  if (race.phase === 'countdown') {
+    race.countdown -= dt;
+    const n = Math.ceil(race.countdown);
+    if (n <= 3 && n >= 1 && ui.banner.textContent !== String(n)) { ui.banner.textContent = n; tone(660, 0.18, 'square', 0.08); }
+    if (race.countdown <= 0) {
+      race.phase = 'racing';
+      ui.banner.textContent = 'GO!';
+      tone(990, 0.5, 'square', 0.1);
+      ui.cheer.style.display = 'block';
+      race.excitement = 0.6;
+      setTimeout(() => { if (ui.banner.textContent === 'GO!') ui.banner.textContent = ''; }, 900);
+    }
+  }
+  if (race.phase === 'racing' || race.phase === 'finished') {
+    race.t += dt;
+    for (const d of doors) d.rotation.y = THREE.MathUtils.damp(d.rotation.y, d.userData.s * 1.9, 6, dt);
+    if (race.t > 2.5) {
+      const p = trackPos(START_S + 0.2, -22);
+      gate.position.x = THREE.MathUtils.damp(gate.position.x, p.x, 0.6, dt);
+      gate.position.z = THREE.MathUtils.damp(gate.position.z, p.z, 0.6, dt);
+    }
+    const total = LAPS * L;
+    for (const r of runners) {
+      let target;
+      if (r.finished) target = Math.max(3.5, 16 - (race.t - r.time) * 2.2);
+      else {
+        const frac = r.p / total;
+        target = r.base + Math.sin(race.t * r.wobF + r.wobP) * 0.5;
+        if (frac > r.kickAt) target += r.kick * r.stamina;
+        if (frac > 0.88) target -= (1 - r.stamina) * 2.6;
+        target += r.cheer;
+      }
+      r.cheer = Math.max(r.cheer - dt * 1.2, 0);
+      r.v = THREE.MathUtils.damp(r.v, target, r.p < 20 ? 0.9 : 2, dt);
+      r.p += r.v * dt;
+      // drift toward rail after break, keep lanes separated so horses never overlap
+      const settle = Math.min(r.p / 60, 1);
+      r.o = THREE.MathUtils.lerp(laneStart(r.i), -W / 2 + 1.2 + r.i * 1.25, settle * 0.85);
+      if (!r.finished && r.p >= total) {
+        r.finished = true;
+        r.time = race.t;
+        r.place = race.finishers.push(r);
+        race.excitement = 1;
+        if (r.place === 1) { ui.banner.textContent = `#${r.i + 1} ${r.name.split(' ')[0]}!`; tone(523, 0.3, 'triangle', 0.12); tone(784, 0.6, 'triangle', 0.12, 0.15); }
+        if (race.finishers.length === runners.length) {
+          race.phase = 'finished';
+          setTimeout(() => { ui.banner.textContent = ''; showResults(); }, 1600);
+        }
+      }
+    }
+    const leadFrac = Math.max(...runners.map((r) => r.p)) / total;
+    race.excitement = THREE.MathUtils.damp(race.excitement, leadFrac > 0.8 && race.phase === 'racing' ? 0.9 : 0.35, 0.5, dt);
+    race.cheerCd = Math.max(race.cheerCd - dt, 0);
+    ui.cheerFill.style.height = `${(1 - race.cheerCd / 2.2) * 100}%`;
+  }
+  if (crowdGain) crowdGain.gain.value = 0.01 + race.excitement * 0.09;
+}
+
+// Run engine: pose horses on track + gallop cycle
+let hoofClock = 0;
+function animateHorses(dt) {
+  hoofClock -= dt;
+  for (const r of runners) {
+    trackPos(START_S + r.p, r.o, tp);
+    r.root.position.set(tp.x, 0, tp.z);
+    // bank slightly into curves by comparing headings just ahead
+    const ahead = trackPos(START_S + r.p + 2, r.o, {});
+    let dh = ahead.h - tp.h;
+    if (dh > Math.PI) dh -= Math.PI * 2;
+    if (dh < -Math.PI) dh += Math.PI * 2;
+    r.root.rotation.set(0, tp.h, 0);
+    r.root.rotation.z = -dh * 0.6 * Math.min(r.v / 16, 1);
+    const speed = r.v, moving = speed > 0.3;
+    const gait = Math.min(speed / 14, 1);
+    r.phase += dt * (moving ? 2 + speed * 0.85 : 0.6);
+    const p = r.phase;
+    r.body.position.y = moving ? (Math.sin(p) * 0.5 + 0.5) * 0.14 * gait : Math.sin(p) * 0.01;
+    r.body.rotation.x = moving ? Math.cos(p) * 0.07 * gait : 0;
+    r.neck.rotation.x = 0.62 + (moving ? Math.sin(p + 0.6) * 0.14 * gait + gait * 0.3 : Math.sin(p * 0.7) * 0.05);
+    r.headG.rotation.x = 1.35 - gait * 0.15;
+    r.tail.rotation.x = 0.25 + gait * 0.95 + Math.sin(p * 2) * 0.08;
+    r.tail.rotation.z = Math.sin(p * 0.5) * 0.15;
+    for (const leg of r.legs) {
+      const ph = p + leg.off;
+      if (moving) {
+        leg.hip.rotation.x = -Math.sin(ph) * 0.55 * gait + (leg.front ? 0 : 0.08);
+        leg.knee.rotation.x = (leg.front ? 1.3 : -0.9) * Math.max(0, Math.cos(ph)) * gait + (leg.front ? 0 : 0.15);
+      } else {
+        leg.hip.rotation.x = THREE.MathUtils.damp(leg.hip.rotation.x, 0, 5, dt);
+        leg.knee.rotation.x = THREE.MathUtils.damp(leg.knee.rotation.x, leg.front ? 0 : 0.1, 5, dt);
+      }
+    }
+    r.jockey.position.y = 2.0 - (moving ? (Math.sin(p) * 0.5 + 0.5) * 0.1 * gait : 0);
+    if (moving && speed > 6 && Math.random() < dt * 30) {
+      const fx = Math.sin(tp.h), fz = Math.cos(tp.h);
+      kickDust(tp.x - fx * 0.8, tp.z - fz * 0.8, fx, fz);
+      if (hoofClock <= 0 && actx) { tone(rand(60, 90), 0.07, 'sine', 0.05); hoofClock = 0.045; }
+    }
+  }
+  if (race.pick >= 0) {
+    const r = runners[race.pick];
+    marker.visible = true;
+    marker.position.set(r.root.position.x, 3.5 + Math.sin(performance.now() / 300) * 0.15, r.root.position.z);
+    marker.rotation.y += dt * 2.5;
+  } else marker.visible = false;
+}
+
+// Run engine: crowd bob, flags wave, scoreboard redraw
+let boardTimer = 0;
+const crowdDummy = new THREE.Object3D();
+function animateVenue(dt, t) {
+  const ex = race.excitement;
+  for (let i = 0; i < crowd.n; i++) {
+    const [x, y, z, ph] = crowd.base.slice(i * 4, i * 4 + 4);
+    crowdDummy.position.set(x, y + Math.max(0, Math.sin(t * (4 + ex * 6) + ph)) * 0.35 * ex, z);
+    crowdDummy.updateMatrix();
+    crowd.mesh.setMatrixAt(i, crowdDummy.matrix);
+  }
+  crowd.mesh.instanceMatrix.needsUpdate = true;
+  for (const f of flags) {
+    const a = f.geometry.attributes.position.array, o = f.userData.orig;
+    for (let k = 0; k < a.length; k += 3) a[k + 2] = o[k + 2] + Math.sin(o[k] * 3 - t * 5 + f.position.x) * 0.12 * (o[k] / 1.8);
+    f.geometry.attributes.position.needsUpdate = true;
+  }
+  boardTimer -= dt;
+  if (boardTimer > 0) return;
+  boardTimer = 0.25;
+  const g = scoreboard.ctx;
+  g.fillStyle = '#0f3d27'; g.fillRect(0, 0, 512, 288);
+  g.fillStyle = '#ffbf2f'; g.font = 'bold 30px system-ui'; g.textAlign = 'left';
+  const lead = Math.max(...runners.map((r) => r.p));
+  const lap = Math.min(LAPS, Math.floor(lead / L) + 1);
+  g.fillText(race.phase === 'betting' ? 'MEADOW DOWNS' : race.phase === 'countdown' ? 'AT THE GATE' : race.phase === 'finished' ? 'OFFICIAL RESULT' : `LAP ${lap} / ${LAPS}`, 24, 44);
+  g.textAlign = 'right'; g.fillStyle = '#fff';
+  g.fillText(race.t.toFixed(1) + 's', 488, 44);
+  g.textAlign = 'left'; g.font = 'bold 34px system-ui';
+  const order = [...runners].sort((a, b) => (a.finished && b.finished ? a.place - b.place : b.p - a.p)).slice(0, 4);
+  order.forEach((r, k) => {
+    g.fillStyle = hex(r.silk); g.fillRect(24, 70 + k * 52, 40, 40);
+    g.fillStyle = '#fff'; g.fillText(`${k + 1}  #${r.i + 1}  ${r.name}`, 80, 102 + k * 52);
+  });
+  scoreboard.tex.needsUpdate = true;
+}
+
+// Run engine: camera modes
+const packCenter = () => {
+  const c = V(0, 0, 0);
+  runners.forEach((r) => c.add(r.root.position));
+  return c.multiplyScalar(1 / runners.length);
+};
+const camTarget = new THREE.Vector3(), lookTarget = new THREE.Vector3(0, 1, -RT), fwd = new THREE.Vector3();
+function updateCamera(dt, t) {
+  const pick = runners[Math.max(race.pick, 0)];
+  const center = packCenter();
+  const avgP = runners.reduce((a, r) => a + r.p, 0) / runners.length;
+  let k = 3;
+  if (camMode === 'free') {
+    controls.target.lerp(center.setY(1.2), 1 - Math.exp(-dt * 2));
+    controls.update();
+    return;
+  }
+  if (camMode === 'tv') {
+    // infield side: grandstand becomes backdrop instead of blocking view
+    const p = trackPos(START_S + avgP - 4, -W / 2 - 14, {});
+    camTarget.set(p.x, 6.5 + Math.sin(t * 0.2), p.z);
+    lookTarget.lerp(center.setY(1.2), 1 - Math.exp(-dt * 4));
+  } else if (camMode === 'chase') {
+    fwd.set(Math.sin(pick.root.rotation.y), 0, Math.cos(pick.root.rotation.y));
+    camTarget.copy(pick.root.position).addScaledVector(fwd, -7.5).setY(3.2);
+    lookTarget.copy(pick.root.position).addScaledVector(fwd, 5).setY(1.4);
+    k = 5;
+  } else if (camMode === 'jockey') {
+    fwd.set(Math.sin(pick.root.rotation.y), 0, Math.cos(pick.root.rotation.y));
+    pick.headJ.getWorldPosition(camTarget).addScaledVector(fwd, 0.25).y += 0.25;
+    lookTarget.copy(camTarget).addScaledVector(fwd, 12).setY(1.5);
+    camera.position.copy(camTarget);
+    camera.lookAt(lookTarget);
+    return;
+  } else {
+    camTarget.set(Math.sin(t * 0.05) * 80, 60, Math.cos(t * 0.05) * 60);
+    lookTarget.lerp(center, 1 - Math.exp(-dt * 2));
+    k = 1;
+  }
+  camera.position.lerp(camTarget, 1 - Math.exp(-dt * k));
+  camera.lookAt(lookTarget);
+}
+
+// Run engine: main loop
+const clock = new THREE.Clock();
+let listTimer = 0;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  updateRace(dt);
+  animateHorses(dt);
+  updateDust(dt);
+  animateVenue(dt, t);
+  updateCamera(dt, t);
+  if (race.phase !== 'betting' && (listTimer -= dt) <= 0) { listTimer = 0.2; renderList(); }
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+pickHorse(0);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

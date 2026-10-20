@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voxel Sandbox</title>
+<style>
+  :root { --card: rgba(20, 22, 30, 0.72); --ink: #f2f4f8; --accent: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd0ff; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 10px; user-select: none; }
+  #intro { top: 14px; left: 14px; padding: 10px 14px; font-size: 12px; line-height: 1.7; max-width: 300px; }
+  #intro b { color: var(--accent); font-size: 14px; }
+  #tools { top: 14px; right: 14px; padding: 6px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 50%; }
+  #tools button { font: inherit; font-size: 12px; color: var(--ink); background: rgba(255,255,255,0.08); border: 0; padding: 7px 10px; border-radius: 7px; cursor: pointer; }
+  #tools button:hover { background: rgba(255,255,255,0.18); }
+  #hotbar { bottom: 14px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; }
+  .slot { width: 46px; height: 46px; border-radius: 6px; border: 2px solid transparent; position: relative; cursor: pointer; image-rendering: pixelated; background-size: cover; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4); }
+  .slot.on { border-color: var(--accent); transform: translateY(-4px); }
+  .slot span { position: absolute; top: 1px; left: 3px; font-size: 10px; text-shadow: 0 1px 2px #000; }
+  #label { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); pointer-events: none; }
+  #toast { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); font-size: 13px; padding: 6px 12px; opacity: 0; transition: opacity 0.3s; }
+  @media (max-width: 700px) { .slot { width: 34px; height: 34px; } #intro { display: none; } }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><b>Voxel Sandbox</b><br>Click: place · Right-click / Shift+click: break<br>Drag: orbit · Scroll: zoom<br>1–9 / Q E: pick block · Ctrl+Z: undo<br>Break a <b>TNT</b> block to light the fuse 💥</div>
+<div id="tools" class="card"><button id="night">🌙 Night</button><button id="house">🏠 Drop house</button><button id="save">💾 Save</button><button id="load">📂 Load</button><button id="reset">♻️ New world</button></div>
+<div id="hotbar" class="card"></div>
+<div id="label"></div>
+<div id="toast" class="card"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/voxel-sandbox/index.html
+ * PURPOSE: Minecraft-style block builder: pixel textures, instanced voxels, TNT chain explosions, night bloom, save/load
+ * UI: Voxel Sandbox page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// Scene > Renderer: canvas, bloom composer, orbit camera
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const DAY = new THREE.Color(0x8fd0ff), NIGHT = new THREE.Color(0x070b1c);
+scene.background = DAY.clone();
+scene.fog = new THREE.Fog(DAY.clone(), 70, 140);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 400);
+const S = 40, HMAX = 30;
+camera.position.set(S + 12, 30, S + 14);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(S / 2, 4, S / 2);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: null };
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.25, 0.5, 0.92);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// Scene > Lights: hemisphere fill + sun shadows over whole map
+const hemi = new THREE.HemisphereLight(0xffffff, 0x6a7a5a, 1.0);
+const sun = new THREE.DirectionalLight(0xfff2dc, 2.4);
+sun.position.set(S / 2 + 30, 50, S / 2 + 10);
+sun.target.position.set(S / 2, 0, S / 2);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -34, right: 34, top: 34, bottom: -34, near: 10, far: 130 });
+sun.shadow.bias = -0.0008;
+scene.add(hemi, sun, sun.target);
+
+// Blocks > Textures: 16px procedural pixel art, nearest filtering
+const rand = (a, b) => a + Math.random() * (b - a);
+const _c = new THREE.Color();
+const shade = (hex, v) => _c.setHex(hex).offsetHSL(0, 0, v).getStyle();
+function makeTex(draw) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const g = c.getContext('2d');
+  draw(g);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.userData.url = c.toDataURL();
+  return t;
+}
+const px = (g, x, y, s) => { g.fillStyle = s; g.fillRect(x, y, 1, 1); };
+const noise = (base, v, holes = 0) => (g) => {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (Math.random() >= holes) px(g, x, y, shade(base, rand(-v, v)));
+};
+const TX = {
+  grassTop: makeTex(noise(0x5fb043, 0.06)),
+  grassSide: makeTex((g) => { noise(0x8a5a35, 0.05)(g); for (let x = 0; x < 16; x++) for (let y = 0; y < 3 + (Math.random() * 3 | 0); y++) px(g, x, y, shade(0x5fb043, rand(-0.06, 0.06))); }),
+  dirt: makeTex(noise(0x8a5a35, 0.06)),
+  stone: makeTex((g) => { noise(0x8e8e8e, 0.05)(g); for (let i = 0; i < 10; i++) px(g, rand(0, 16) | 0, rand(0, 16) | 0, shade(0x6e6e6e, 0)); }),
+  sand: makeTex(noise(0xe2d39b, 0.04)),
+  logSide: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, shade(0x6b4a2b, (x % 4 === 0 ? -0.08 : 0) + rand(-0.03, 0.03))); }),
+  logTop: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const r = Math.hypot(x - 7.5, y - 7.5); px(g, x, y, r > 7 ? shade(0x6b4a2b, -0.05) : shade(0xc49a5c, (Math.floor(r) % 2 ? -0.06 : 0))); } }),
+  planks: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, shade(0xb98b52, (y % 4 === 3 ? -0.12 : 0) + ((x + (y >> 2) * 5) % 16 === 0 ? -0.1 : 0) + rand(-0.03, 0.03))); }),
+  leaves: makeTex(noise(0x3d8a2f, 0.09, 0.18)),
+  glass: makeTex((g) => { g.fillStyle = 'rgba(200,235,255,0.15)'; g.fillRect(0, 0, 16, 16); g.fillStyle = '#e8f6ff'; g.fillRect(0, 0, 16, 1); g.fillRect(0, 15, 16, 1); g.fillRect(0, 0, 1, 16); g.fillRect(15, 0, 1, 16); for (let i = 3; i < 7; i++) px(g, i, 9 - i, 'rgba(255,255,255,0.7)'); }),
+  brick: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const mortar = y % 4 === 3 || (x + (Math.floor(y / 4) % 2) * 4) % 8 === 7; px(g, x, y, mortar ? shade(0xcfc6b8, 0) : shade(0xa8432f, rand(-0.05, 0.05))); } }),
+  gold: makeTex((g) => { noise(0xf2c230, 0.06)(g); for (let i = 0; i < 6; i++) px(g, rand(0, 16) | 0, rand(0, 16) | 0, '#fff6c2'); }),
+  snow: makeTex(noise(0xf4f8ff, 0.03)),
+  water: makeTex(noise(0x2f7fd8, 0.05)),
+  lamp: makeTex((g) => { noise(0xffcf5a, 0.08)(g); for (let i = 0; i < 18; i++) px(g, rand(0, 16) | 0, rand(0, 16) | 0, '#fff4c8'); }),
+  tntSide: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, y > 4 && y < 11 ? '#f1ece0' : shade(0xd2382c, (x % 4 === 0 ? -0.08 : 0))); g.fillStyle = '#111'; g.font = 'bold 6px monospace'; g.fillText('TNT', 3, 10); }),
+  tntTop: makeTex((g) => { noise(0xd2382c, 0.04)(g); g.fillStyle = '#333'; g.fillRect(6, 6, 4, 4); }),
+  bedrock: makeTex(noise(0x3a3a3a, 0.12)),
+  pumpkin: makeTex((g) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) px(g, x, y, shade(0xe07b1f, (x % 5 === 0 ? -0.1 : 0) + rand(-0.03, 0.03))); g.fillStyle = '#2a1404'; g.fillRect(3, 4, 3, 3); g.fillRect(10, 4, 3, 3); g.fillRect(3, 10, 10, 2); }),
+};
+
+// Blocks > Types: per-face texture sets (+x,-x,+y,-y,+z,-z) and material flags
+const stdMat = (map, o = {}) => new THREE.MeshStandardMaterial({ map, roughness: 0.92, ...o });
+const TYPES = {};
+function defType(id, name, faces, o = {}) {
+  const [side, top = side, bottom = top] = faces;
+  const mk = (t) => stdMat(t, o.mat || {});
+  const s = mk(side), tp = top === side ? s : mk(top), bt = bottom === top ? tp : bottom === side ? s : mk(bottom);
+  TYPES[id] = { id, name, mats: [s, s, tp, bt, s, s], icon: side.userData.url, transparent: !!o.transparent, breakable: o.breakable !== false };
+}
+defType('grass', 'Grass', [TX.grassSide, TX.grassTop, TX.dirt]);
+defType('dirt', 'Dirt', [TX.dirt]);
+defType('stone', 'Stone', [TX.stone]);
+defType('planks', 'Planks', [TX.planks]);
+defType('log', 'Log', [TX.logSide, TX.logTop]);
+defType('leaves', 'Leaves', [TX.leaves], { transparent: true, mat: { alphaTest: 0.5 } });
+defType('glass', 'Glass', [TX.glass], { transparent: true, mat: { transparent: true, depthWrite: false, roughness: 0.1 } });
+defType('brick', 'Brick', [TX.brick]);
+defType('sand', 'Sand', [TX.sand]);
+defType('water', 'Water', [TX.water], { transparent: true, mat: { transparent: true, opacity: 0.72, roughness: 0.1, depthWrite: false } });
+defType('lamp', 'Glowstone', [TX.lamp], { mat: { emissive: 0xffffff, emissiveMap: TX.lamp, emissiveIntensity: 0.6 } });
+defType('gold', 'Gold', [TX.gold], { mat: { metalness: 0.7, roughness: 0.35 } });
+defType('snow', 'Snow', [TX.snow]);
+defType('pumpkin', 'Pumpkin', [TX.pumpkin, TX.tntTop]);
+defType('tnt', 'TNT', [TX.tntSide, TX.tntTop]);
+defType('bedrock', 'Bedrock', [TX.bedrock], { breakable: false });
+TYPES.pumpkin.mats[2] = TYPES.pumpkin.mats[3] = stdMat(makeTex(noise(0xc9661a, 0.05)));
+const HOTBAR = ['grass', 'dirt', 'stone', 'planks', 'log', 'leaves', 'glass', 'brick', 'sand', 'water', 'lamp', 'gold', 'snow', 'pumpkin', 'tnt'];
+
+// Blocks > Storage: sparse map "x,y,z" -> type id, one InstancedMesh per type
+const blocks = new Map();
+const key = (x, y, z) => `${x},${y},${z}`;
+const parse = (k) => k.split(',').map(Number);
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const CAP = 24000;
+const meshes = {}, meshKeys = {};
+for (const t of Object.values(TYPES)) {
+  const m = new THREE.InstancedMesh(BOX, t.mats, CAP);
+  m.count = 0;
+  m.castShadow = !t.transparent || t.id === 'leaves';
+  m.receiveShadow = true;
+  m.userData.type = t.id;
+  // instanced bounds change constantly; skip culling instead of recomputing spheres
+  m.frustumCulled = false;
+  meshes[t.id] = m;
+  meshKeys[t.id] = [];
+  scene.add(m);
+}
+const dirty = new Set();
+const inBounds = (x, y, z) => x >= 0 && z >= 0 && x < S && z < S && y >= 0 && y < HMAX;
+function setBlock(x, y, z, type, record = true) {
+  const k = key(x, y, z), prev = blocks.get(k);
+  if (prev === type) return;
+  if (record) history.push([x, y, z, prev ?? null]);
+  if (prev) dirty.add(prev);
+  if (type) { blocks.set(k, type); dirty.add(type); } else blocks.delete(k);
+  // neighbors may become exposed or hidden
+  for (const [dx, dy, dz] of DIRS) { const n = blocks.get(key(x + dx, y + dy, z + dz)); if (n) dirty.add(n); }
+}
+const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+function exposed(x, y, z) {
+  for (const [dx, dy, dz] of DIRS) {
+    const n = blocks.get(key(x + dx, y + dy, z + dz));
+    if (!n || TYPES[n].transparent) return true;
+  }
+  return false;
+}
+const _m4 = new THREE.Matrix4();
+function rebuild() {
+  if (!dirty.size) return;
+  for (const id of dirty) { meshKeys[id].length = 0; }
+  for (const [k, id] of blocks) {
+    if (!dirty.has(id)) continue;
+    const [x, y, z] = parse(k);
+    if (!exposed(x, y, z)) continue;
+    const list = meshKeys[id];
+    if (list.length >= CAP) continue;
+    _m4.makeTranslation(x, y, z);
+    meshes[id].setMatrixAt(list.length, _m4);
+    list.push(k);
+  }
+  for (const id of dirty) {
+    meshes[id].count = meshKeys[id].length;
+    meshes[id].instanceMatrix.needsUpdate = true;
+    // raycast pre-checks cached bounds; force recompute after edits
+    meshes[id].boundingSphere = null;
+  }
+  dirty.clear();
+}
+
+// World > Generator: rolling hills, ponds, beaches, trees, snowy peaks
+const history = [];
+function generate() {
+  for (const k of [...blocks.keys()]) { const id = blocks.get(k); dirty.add(id); }
+  blocks.clear();
+  history.length = 0;
+  const ox = rand(0, 100), oz = rand(0, 100), WATER = 3;
+  const hAt = (x, z) => Math.round(4 + 2.4 * Math.sin((x + ox) * 0.19) * Math.cos((z + oz) * 0.16) + 1.8 * Math.sin((x + z + ox) * 0.09) + 1.4 * Math.cos((x - z + oz) * 0.21) + Math.max(0, Math.sin((x + oz) * 0.07) * Math.cos((z + ox) * 0.08)) * 6);
+  for (let x = 0; x < S; x++) for (let z = 0; z < S; z++) {
+    const h = Math.max(1, Math.min(HMAX - 8, hAt(x, z)));
+    blocks.set(key(x, 0, z), 'bedrock');
+    for (let y = 1; y <= h; y++) {
+      let t = y < h - 2 ? 'stone' : y < h ? 'dirt' : h <= WATER ? 'sand' : h >= 11 ? 'snow' : 'grass';
+      if (y === h && h === WATER + 1 && Math.random() < 0.5) t = 'sand';
+      blocks.set(key(x, y, z), t);
+    }
+    for (let y = h + 1; y <= WATER; y++) blocks.set(key(x, y, z), 'water');
+  }
+  for (let i = 0; i < 14; i++) {
+    const x = (rand(3, S - 3)) | 0, z = (rand(3, S - 3)) | 0;
+    let y = 0;
+    while (blocks.has(key(x, y + 1, z))) y++;
+    if (blocks.get(key(x, y, z)) !== 'grass') continue;
+    plantTree(x, y + 1, z, false);
+  }
+  // lamp posts so night mode has something to bloom
+  for (let i = 0; i < 9; i++) {
+    const x = (rand(2, S - 2)) | 0, z = (rand(2, S - 2)) | 0;
+    let y = 0;
+    while (blocks.has(key(x, y + 1, z))) y++;
+    if (blocks.get(key(x, y, z)) !== 'grass') continue;
+    blocks.set(key(x, y + 1, z), 'log');
+    blocks.set(key(x, y + 2, z), 'log');
+    blocks.set(key(x, y + 3, z), 'lamp');
+  }
+  for (const id of Object.keys(TYPES)) dirty.add(id);
+  rebuild();
+}
+function plantTree(x, y, z, record = true) {
+  const hgt = (rand(4, 6)) | 0;
+  for (let k = 0; k < hgt; k++) setBlock(x, y + k, z, 'log', record);
+  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 1; dy++) {
+    if (Math.abs(dx) + Math.abs(dz) + Math.abs(dy) > 3 || (dx === 0 && dz === 0 && dy < 1)) continue;
+    const X = x + dx, Y = y + hgt - 1 + dy, Z = z + dz;
+    if (inBounds(X, Y, Z) && !blocks.has(key(X, Y, Z))) setBlock(X, Y, Z, 'leaves', record);
+  }
+}
+
+// Tools > Drop house: stamps a little cottage at look-at point
+function dropHouse(cx, cy, cz) {
+  const batch = history.length;
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) for (let y = 0; y <= 4; y++) {
+    const X = cx + x, Y = cy + y, Z = cz + z;
+    if (!inBounds(X, Y, Z)) continue;
+    const wall = Math.abs(x) === 3 || Math.abs(z) === 3;
+    let t = null;
+    if (y === 0) t = 'planks';
+    else if (wall) {
+      const corner = Math.abs(x) === 3 && Math.abs(z) === 3;
+      t = corner ? 'log' : y === 2 && (x === 0 || z === 0) ? 'glass' : 'brick';
+      if (z === 3 && x === 0 && y <= 2) t = null;
+    }
+    if (y === 4) t = null;
+    setBlock(X, Y, Z, t);
+  }
+  for (let layer = 0; layer < 4; layer++) for (let x = -4 + layer; x <= 4 - layer; x++) for (let z = -4; z <= 4; z++) {
+    const X = cx + x, Y = cy + 4 + layer, Z = cz + z;
+    if (inBounds(X, Y, Z) && (Math.abs(x) === 4 - layer || layer === 3)) setBlock(X, Y, Z, 'planks');
+  }
+  setBlock(cx + 2, cy + 1, cz + 2, 'lamp');
+  history.push(['batch', batch]);
+  rebuild();
+}
+
+// HUD > Hotbar: pick block type
+let current = 0;
+const hotbar = document.getElementById('hotbar'), label = document.getElementById('label');
+hotbar.innerHTML = HOTBAR.map((id, i) => `<div class="slot" data-i="${i}" style="background-image:url(${TYPES[id].icon})"><span>${i < 9 ? i + 1 : ''}</span></div>`).join('');
+function pick(i) {
+  current = (i + HOTBAR.length) % HOTBAR.length;
+  hotbar.querySelectorAll('.slot').forEach((s, k) => s.classList.toggle('on', k === current));
+  label.textContent = TYPES[HOTBAR[current]].name;
+}
+hotbar.addEventListener('click', (e) => { const s = e.target.closest('.slot'); if (s) pick(Number(s.dataset.i)); });
+pick(0);
+const toastEl = document.getElementById('toast');
+let toastT;
+function toast(msg) { toastEl.textContent = msg; toastEl.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => (toastEl.style.opacity = 0), 1400); }
+
+// Interaction > Raycast: hover ghost, place on face, break block
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const ghost = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02, 1.02, 1.02)), new THREE.LineBasicMaterial({ color: 0xffffff }));
+scene.add(ghost);
+let hover = null, shift = false;
+function castAt(cx, cy) {
+  ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hits = ray.intersectObjects(Object.values(meshes), false).filter((h) => h.object.userData.type !== 'water' || shift);
+  const h = hits[0];
+  if (!h) return null;
+  const k = meshKeys[h.object.userData.type][h.instanceId];
+  const [x, y, z] = parse(k);
+  const n = h.face.normal;
+  return { x, y, z, type: h.object.userData.type, px: x + Math.round(n.x), py: y + Math.round(n.y), pz: z + Math.round(n.z) };
+}
+function updateGhost() {
+  if (!hover) { ghost.visible = false; return; }
+  ghost.visible = true;
+  const breaking = shift;
+  ghost.material.color.set(breaking ? 0xff5a4a : 0xffffff);
+  if (breaking) ghost.position.set(hover.x, hover.y, hover.z);
+  else ghost.position.set(hover.px, hover.py, hover.pz);
+}
+let pointer = { x: 0, y: 0 }, downPos = null;
+renderer.domElement.addEventListener('pointermove', (e) => { pointer = { x: e.clientX, y: e.clientY }; hover = castAt(e.clientX, e.clientY); updateGhost(); });
+renderer.domElement.addEventListener('pointerdown', (e) => (downPos = [e.clientX, e.clientY, e.button]));
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downPos || Math.hypot(e.clientX - downPos[0], e.clientY - downPos[1]) > 5) return;
+  const h = castAt(e.clientX, e.clientY);
+  if (!h) return;
+  if (downPos[2] === 2 || e.shiftKey) breakBlock(h.x, h.y, h.z);
+  else placeBlock(h.px, h.py, h.pz);
+  hover = castAt(e.clientX, e.clientY);
+  updateGhost();
+});
+function placeBlock(x, y, z) {
+  if (!inBounds(x, y, z) || (blocks.has(key(x, y, z)) && blocks.get(key(x, y, z)) !== 'water')) return;
+  setBlock(x, y, z, HOTBAR[current]);
+  rebuild();
+  sfx.place();
+}
+function breakBlock(x, y, z) {
+  const t = blocks.get(key(x, y, z));
+  if (!t || !TYPES[t].breakable) { if (t) toast('Bedrock is unbreakable'); return; }
+  if (t === 'tnt') { ignite(x, y, z, 1.6); return; }
+  setBlock(x, y, z, null);
+  rebuild();
+  spawnDebris(x, y, z, t, 6, 2);
+  sfx.crunch();
+}
+addEventListener('keydown', (e) => {
+  if (e.key === 'Shift') { shift = true; updateGhost(); }
+  if (/^[1-9]$/.test(e.key)) pick(Number(e.key) - 1);
+  if (e.key === 'q') pick(current - 1);
+  if (e.key === 'e') pick(current + 1);
+  if (e.key === 'n') toggleNight();
+  if ((e.metaKey || e.ctrlKey) && e.key === 'z') { e.preventDefault(); undo(); }
+});
+addEventListener('keyup', (e) => { if (e.key === 'Shift') { shift = false; hover = castAt(pointer.x, pointer.y); updateGhost(); } });
+function undo() {
+  let step = history.pop();
+  if (!step) return;
+  const apply = ([x, y, z, prev]) => setBlock(x, y, z, prev, false);
+  if (step[0] === 'batch') { const stop = step[1]; while (history.length > stop) apply(history.pop()); }
+  else apply(step);
+  rebuild();
+  toast('Undo');
+}
+
+// TNT > Fuse + explosion: flashing fuse, sphere carve, chain reactions, debris, camera shake
+const fuses = new Map();
+const flashMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.5 });
+const flashMesh = new THREE.InstancedMesh(BOX, flashMat, 200);
+flashMesh.count = 0;
+flashMesh.frustumCulled = false;
+scene.add(flashMesh);
+function ignite(x, y, z, fuse) {
+  const k = key(x, y, z);
+  if (fuses.has(k)) return;
+  fuses.set(k, { x, y, z, t: fuse });
+  sfx.hiss();
+}
+let shake = 0;
+const boomLight = new THREE.PointLight(0xffa040, 0, 30, 1.5);
+scene.add(boomLight);
+function explode(x, y, z) {
+  const R = 3.3, removed = [];
+  for (let dx = -4; dx <= 4; dx++) for (let dy = -4; dy <= 4; dy++) for (let dz = -4; dz <= 4; dz++) {
+    const d = Math.hypot(dx, dy, dz);
+    if (d > R + rand(-0.5, 0.3)) continue;
+    const X = x + dx, Y = y + dy, Z = z + dz, t = blocks.get(key(X, Y, Z));
+    if (!t || !TYPES[t].breakable) continue;
+    if (t === 'tnt' && (dx || dy || dz)) { ignite(X, Y, Z, rand(0.15, 0.45)); continue; }
+    removed.push([X, Y, Z, t]);
+  }
+  const batch = history.length;
+  for (const [X, Y, Z] of removed) setBlock(X, Y, Z, null);
+  history.push(['batch', batch]);
+  rebuild();
+  for (const [X, Y, Z, t] of removed.slice(0, 60)) spawnDebris(X, Y, Z, t, 1, 9, x, y, z);
+  spawnSmoke(x, y, z);
+  boomLight.position.set(x, y + 1, z);
+  boomLight.intensity = 80;
+  shake = 0.6;
+  sfx.boom();
+}
+
+// Effects > Debris: physics cubes using source block material
+const debris = [];
+const DEBRIS_GEO = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+function spawnDebris(x, y, z, type, n, power, cx = x, cy = y - 0.5, cz = z) {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(DEBRIS_GEO, TYPES[type].mats);
+    m.position.set(x + rand(-0.3, 0.3), y + rand(-0.3, 0.3), z + rand(-0.3, 0.3));
+    const dir = new THREE.Vector3(x - cx, y - cy, z - cz).normalize();
+    if (!isFinite(dir.x)) dir.set(0, 1, 0);
+    const v = dir.multiplyScalar(power * rand(0.5, 1.1)).add(new THREE.Vector3(rand(-1.5, 1.5), rand(2, 5), rand(-1.5, 1.5)));
+    m.castShadow = true;
+    scene.add(m);
+    debris.push({ m, v, spin: new THREE.Vector3(rand(-8, 8), rand(-8, 8), rand(-8, 8)), life: rand(2, 3.2) });
+  }
+}
+const smoke = [];
+const SMOKE_GEO = new THREE.IcosahedronGeometry(0.6, 1);
+function spawnSmoke(x, y, z) {
+  for (let i = 0; i < 18; i++) {
+    const m = new THREE.Mesh(SMOKE_GEO, new THREE.MeshStandardMaterial({ color: i < 6 ? 0xffb347 : 0x9a9a9a, emissive: i < 6 ? 0xff7a1a : 0x000000, transparent: true, opacity: 0.9, flatShading: true, depthWrite: false }));
+    m.position.set(x + rand(-1, 1), y + rand(-0.5, 1), z + rand(-1, 1));
+    m.scale.setScalar(rand(0.6, 1.6));
+    scene.add(m);
+    smoke.push({ m, v: new THREE.Vector3(rand(-2, 2), rand(1, 4), rand(-2, 2)), life: 1 });
+  }
+}
+function groundAt(x, z) {
+  const X = Math.round(x), Z = Math.round(z);
+  for (let y = HMAX; y >= 0; y--) { const t = blocks.get(key(X, y, Z)); if (t && t !== 'water') return y + 0.5; }
+  return -0.5;
+}
+function updateEffects(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i];
+    d.v.y -= 22 * dt;
+    d.m.position.addScaledVector(d.v, dt);
+    d.m.rotation.x += d.spin.x * dt; d.m.rotation.y += d.spin.y * dt;
+    const g = groundAt(d.m.position.x, d.m.position.z) + 0.17;
+    if (d.m.position.y < g) { d.m.position.y = g; d.v.y *= -0.35; d.v.x *= 0.6; d.v.z *= 0.6; d.spin.multiplyScalar(0.6); }
+    d.life -= dt;
+    if (d.life < 0.4) d.m.scale.setScalar(Math.max(d.life / 0.4, 0.01));
+    if (d.life <= 0) { scene.remove(d.m); debris.splice(i, 1); }
+  }
+  for (let i = smoke.length - 1; i >= 0; i--) {
+    const s = smoke[i];
+    s.life -= dt * 0.7;
+    s.m.position.addScaledVector(s.v, dt);
+    s.v.multiplyScalar(0.96);
+    s.m.scale.multiplyScalar(1 + dt * 0.9);
+    s.m.material.opacity = Math.max(s.life, 0) * 0.9;
+    if (s.life <= 0) { scene.remove(s.m); s.m.material.dispose(); smoke.splice(i, 1); }
+  }
+  let f = 0;
+  for (const [k, fu] of fuses) {
+    fu.t -= dt;
+    if (fu.t <= 0) { fuses.delete(k); explode(fu.x, fu.y, fu.z); continue; }
+    if (Math.sin(fu.t * 30) > 0 && f < 200) { _m4.makeTranslation(fu.x, fu.y, fu.z).scale(new THREE.Vector3(1.04, 1.04, 1.04)); flashMesh.setMatrixAt(f++, _m4); }
+  }
+  flashMesh.count = f;
+  flashMesh.instanceMatrix.needsUpdate = true;
+  boomLight.intensity *= Math.exp(-dt * 6);
+}
+
+// Effects > Audio: synthesized place, crunch, hiss, boom
+let actx;
+const ac = () => (actx ??= new AudioContext());
+function noiseBurst(dur, freq, vol, type = 'lowpass') {
+  const a = ac(), buf = a.createBuffer(1, a.sampleRate * dur, a.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+  const src = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+  src.buffer = buf; f.type = type; f.frequency.value = freq; g.gain.value = vol;
+  src.connect(f).connect(g).connect(a.destination); src.start();
+}
+const sfx = {
+  place: () => noiseBurst(0.08, 1800, 0.35),
+  crunch: () => noiseBurst(0.15, 900, 0.45),
+  hiss: () => noiseBurst(1.4, 5000, 0.12, 'highpass'),
+  boom: () => { noiseBurst(1.6, 220, 1.2); noiseBurst(0.4, 1200, 0.4); },
+};
+
+// Tools > Buttons: night toggle, house, save/load, regenerate
+let night = false, nightK = 0;
+function toggleNight() { night = !night; document.getElementById('night').textContent = night ? '☀️ Day' : '🌙 Night'; }
+document.getElementById('night').onclick = toggleNight;
+document.getElementById('house').onclick = () => {
+  const t = controls.target;
+  const x = Math.round(t.x), z = Math.round(t.z);
+  dropHouse(x, Math.round(groundAt(x, z) + 0.5), z);
+  sfx.place();
+  toast('House dropped at view center');
+};
+document.getElementById('save').onclick = () => {
+  try { localStorage.setItem('voxel-sandbox-world', JSON.stringify([...blocks])); toast(`Saved ${blocks.size} blocks`); } catch { toast('Save failed (storage blocked)'); }
+};
+document.getElementById('load').onclick = () => {
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem('voxel-sandbox-world')); } catch {}
+  if (!data) { toast('No save yet'); return; }
+  blocks.clear();
+  for (const [k, v] of data) blocks.set(k, v);
+  history.length = 0;
+  for (const id of Object.keys(TYPES)) dirty.add(id);
+  rebuild();
+  toast('Loaded');
+};
+document.getElementById('reset').onclick = () => { generate(); toast('Fresh world'); };
+
+// Run engine: day/night blend, camera shake, render
+generate();
+const clock = new THREE.Clock();
+const shakeOff = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  nightK = THREE.MathUtils.damp(nightK, night ? 1 : 0, 3, dt);
+  scene.background.copy(DAY).lerp(NIGHT, nightK);
+  scene.fog.color.copy(scene.background);
+  sun.intensity = 2.4 * (1 - nightK) + 0.15;
+  hemi.intensity = 1.0 - nightK * 0.82;
+  TYPES.lamp.mats[0].emissiveIntensity = 0.6 + nightK * 2.4;
+  bloom.strength = 0.2 + nightK * 1.1;
+  bloom.threshold = 0.92 - nightK * 0.35;
+  controls.update();
+  updateEffects(dt);
+  camera.position.sub(shakeOff);
+  shake = Math.max(shake - dt, 0);
+  shakeOff.set(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(shake * 0.6);
+  camera.position.add(shakeOff);
+  ghost.material.opacity = 0.6 + Math.sin(t * 6) * 0.3;
+  composer.render();
+  requestAnimationFrame(loop);
+}
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

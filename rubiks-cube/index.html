@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Twisty Cube</title>
+<style>
+  :root { --ink: #f3f4f8; --muted: #9aa0b4; --card: rgba(255, 255, 255, 0.07); --accent: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); background: radial-gradient(circle at 50% 40%, #2b3150, #0d0f1a 70%); }
+  canvas { display: block; touch-action: none; }
+  #top { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; }
+  #top h1 { margin: 0; font-size: 15px; letter-spacing: 0.2em; color: var(--muted); font-weight: 700; }
+  #timer { font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  #moves { font-size: 13px; color: var(--muted); }
+  #bar { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; border-radius: 14px; background: var(--card); backdrop-filter: blur(8px); flex-wrap: wrap; justify-content: center; }
+  #bar button, #bar select { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: rgba(255,255,255,0.08); border: 0; padding: 9px 13px; border-radius: 10px; cursor: pointer; }
+  #bar button:hover { background: rgba(255,255,255,0.16); }
+  #bar select option { color: #000; }
+  #help { position: fixed; left: 18px; bottom: 18px; font-size: 12px; line-height: 1.7; color: var(--muted); }
+  #help kbd { color: var(--ink); background: rgba(255,255,255,0.1); border-radius: 4px; padding: 0 5px; }
+  #win { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%) scale(0.8); font-size: 40px; font-weight: 900; color: var(--accent); opacity: 0; transition: all 0.4s; pointer-events: none; text-shadow: 0 4px 30px rgba(255, 210, 63, 0.5); }
+  #win.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  @media (max-width: 700px) { #help { display: none; } #timer { font-size: 32px; } }
+</style>
+</head>
+<body>
+<div id="top"><h1>TWISTY CUBE</h1><div id="timer">0.00</div><div id="moves">0 moves · scramble to start the clock</div></div>
+<div id="win">SOLVED!</div>
+<div id="help">Drag a face to twist · drag background to orbit<br><kbd>U</kbd><kbd>D</kbd><kbd>L</kbd><kbd>R</kbd><kbd>F</kbd><kbd>B</kbd> turns · <kbd>Shift</kbd> = prime<br><kbd>Space</kbd> scramble · <kbd>Ctrl Z</kbd> undo</div>
+<div id="bar">
+  <select id="size"><option value="2">2×2</option><option value="3" selected>3×3</option><option value="4">4×4</option><option value="5">5×5</option></select>
+  <button id="scramble">🔀 Scramble</button><button id="undo">↩️ Undo</button><button id="solve">✨ Auto-solve</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/rubiks-cube/index.html
+ * PURPOSE: playable N×N twisty puzzle: drag-to-turn layers, notation keys, scramble, timer, undo, rewind auto-solve, confetti
+ * UI: Twisty Cube page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// Scene > Renderer: transparent canvas over CSS gradient, glossy env lighting
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(6, 5, 7.5);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.minDistance = 6;
+controls.maxDistance = 22;
+const key = new THREE.DirectionalLight(0xffffff, 1.2);
+key.position.set(4, 10, 6);
+key.castShadow = true;
+scene.add(key, new THREE.AmbientLight(0xffffff, 0.3));
+const shadow = new THREE.Mesh(new THREE.PlaneGeometry(14, 14).rotateX(-Math.PI / 2), new THREE.ShadowMaterial({ opacity: 0.35 }));
+shadow.position.y = -3.2;
+shadow.receiveShadow = true;
+scene.add(shadow);
+
+// Cube > Materials: black plastic body, six sticker colors (+x,-x,+y,-y,+z,-z)
+const FACE_COLORS = [0xe8333a, 0xff8a1f, 0xffffff, 0xffd400, 0x1fbf5a, 0x2b6cf0];
+const FACE_NORMALS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]].map((a) => new THREE.Vector3(...a));
+const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111216, roughness: 0.35, metalness: 0.1 });
+const stickerMats = FACE_COLORS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.18, metalness: 0.0 }));
+function roundedRect(s, r) {
+  const h = s / 2, shape = new THREE.Shape();
+  shape.moveTo(-h + r, -h);
+  shape.lineTo(h - r, -h); shape.quadraticCurveTo(h, -h, h, -h + r);
+  shape.lineTo(h, h - r); shape.quadraticCurveTo(h, h, h - r, h);
+  shape.lineTo(-h + r, h); shape.quadraticCurveTo(-h, h, -h, h - r);
+  shape.lineTo(-h, -h + r); shape.quadraticCurveTo(-h, -h, -h + r, -h);
+  return new THREE.ShapeGeometry(shape, 6);
+}
+const BODY_GEO = new RoundedBoxGeometry(0.98, 0.98, 0.98, 4, 0.1);
+const STICKER_GEO = roundedRect(0.8, 0.14);
+
+// Cube > Build: N³ cubies (outer shell only), stickers on outward faces
+const root = new THREE.Group();
+scene.add(root);
+const pivot = new THREE.Group();
+root.add(pivot);
+let N = 3, cubies = [], pickables = [];
+function build(n) {
+  N = n;
+  for (const c of cubies) root.remove(c);
+  cubies = []; pickables = [];
+  const off = (N - 1) / 2;
+  for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) for (let z = 0; z < N; z++) {
+    const p = new THREE.Vector3(x - off, y - off, z - off);
+    if (Math.max(Math.abs(p.x), Math.abs(p.y), Math.abs(p.z)) < off - 0.01) continue;
+    const g = new THREE.Group();
+    g.position.copy(p);
+    const body = new THREE.Mesh(BODY_GEO, bodyMat);
+    body.castShadow = true;
+    body.userData.cubie = g;
+    g.add(body);
+    pickables.push(body);
+    FACE_NORMALS.forEach((nrm, i) => {
+      if (p.dot(nrm) < off - 0.01) return;
+      const s = new THREE.Mesh(STICKER_GEO, stickerMats[i]);
+      s.position.copy(nrm).multiplyScalar(0.495);
+      s.lookAt(s.position.clone().multiplyScalar(2));
+      s.userData = { cubie: g, color: i, normal: nrm.clone() };
+      g.add(s);
+      pickables.push(s);
+    });
+    root.add(g);
+    cubies.push(g);
+  }
+  const scale = 3 / N;
+  root.scale.setScalar(Math.min(1, scale * 1.15));
+  history.length = 0;
+  queue.length = 0;
+  active = null;
+  resetTimer();
+}
+
+// Cube > Moves: queue of {axis, layer, dir}; pivot animates, then cubies snap back to grid
+const queue = [], history = [];
+let active = null;
+const AX = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+function enqueue(move, opts = {}) { queue.push({ ...move, ...opts }); }
+function startNext() {
+  if (active || !queue.length) return;
+  const m = queue.shift();
+  pivot.rotation.set(0, 0, 0);
+  pivot.updateMatrixWorld();
+  const members = cubies.filter((c) => Math.abs(c.position[m.axis] - m.layer) < 0.1);
+  for (const c of members) pivot.attach(c);
+  active = { ...m, members, t: 0, dur: m.fast ? 0.07 : m.slow ? 0.16 : 0.2 };
+  if (!m.silent) click();
+}
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const _mat = new THREE.Matrix4();
+function stepMove(dt) {
+  if (!active) return;
+  active.t = Math.min(active.t + dt / active.dur, 1);
+  pivot.rotation[active.axis] = active.dir * (Math.PI / 2) * ease(active.t);
+  if (active.t < 1) return;
+  pivot.updateMatrixWorld();
+  for (const c of active.members) {
+    root.attach(c);
+    c.position.set(snap(c.position.x), snap(c.position.y), snap(c.position.z));
+    // kill float drift: round rotation matrix to exact 0/±1
+    _mat.makeRotationFromQuaternion(c.quaternion);
+    const e = _mat.elements;
+    for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) e[i] = Math.round(e[i]);
+    c.quaternion.setFromRotationMatrix(_mat);
+  }
+  pivot.rotation.set(0, 0, 0);
+  const done = active;
+  active = null;
+  if (!done.replay) history.push({ axis: done.axis, layer: done.layer, dir: done.dir });
+  if (done.user) onUserMove();
+  if (!queue.length) checkSolved();
+}
+const snap = (v) => Math.round(v * 2) / 2;
+
+// Cube > Solved check: every sticker facing each direction shares a color
+const _n = new THREE.Vector3();
+function isSolved() {
+  const seen = new Map();
+  for (const c of cubies) for (const s of c.children) {
+    if (s.userData.color === undefined) continue;
+    _n.copy(s.userData.normal).applyQuaternion(c.quaternion).round();
+    const k = `${_n.x},${_n.y},${_n.z}`;
+    if (!seen.has(k)) seen.set(k, s.userData.color);
+    else if (seen.get(k) !== s.userData.color) return false;
+  }
+  return true;
+}
+
+// HUD > Timer + move counter: starts on first twist after scramble
+const timerEl = document.getElementById('timer'), movesEl = document.getElementById('moves'), winEl = document.getElementById('win');
+const T = { scrambled: false, running: false, start: 0, moves: 0 };
+function resetTimer() { Object.assign(T, { scrambled: false, running: false, start: 0, moves: 0 }); timerEl.textContent = '0.00'; movesEl.textContent = '0 moves · scramble to start the clock'; }
+function onUserMove() {
+  if (!T.scrambled) return;
+  if (!T.running) { T.running = true; T.start = performance.now(); }
+  T.moves++;
+  movesEl.textContent = `${T.moves} moves`;
+}
+function checkSolved() {
+  if (T.rewinding) { T.rewinding = false; movesEl.textContent = 'rewound to solved · scramble again'; return; }
+  if (!T.scrambled || !isSolved()) return;
+  const secs = T.running ? (performance.now() - T.start) / 1000 : 0;
+  T.running = false; T.scrambled = false;
+  timerEl.textContent = secs.toFixed(2);
+  movesEl.textContent = `${T.moves} moves · solved!`;
+  winEl.classList.add('show');
+  setTimeout(() => winEl.classList.remove('show'), 2200);
+  confetti();
+  chime();
+}
+
+// HUD > Buttons: size, scramble, undo, rewind-solve
+document.getElementById('size').onchange = (e) => build(Number(e.target.value));
+function scramble() {
+  if (active || queue.length) return;
+  const layers = Array.from({ length: N }, (_, i) => i - (N - 1) / 2);
+  let last = '';
+  for (let i = 0; i < 18 + N * 5; i++) {
+    let axis;
+    do axis = 'xyz'[(Math.random() * 3) | 0]; while (axis === last);
+    last = axis;
+    enqueue({ axis, layer: layers[(Math.random() * N) | 0], dir: Math.random() < 0.5 ? 1 : -1 }, { fast: true, silent: i % 2 === 1 });
+  }
+  T.scrambled = true; T.running = false; T.moves = 0;
+  timerEl.textContent = '0.00';
+  movesEl.textContent = 'scrambled · first twist starts the clock';
+}
+function undo() {
+  if (active || queue.length || !history.length) return;
+  const m = history.pop();
+  enqueue({ ...m, dir: -m.dir }, { replay: true });
+}
+function autoSolve() {
+  if (active || queue.length || !history.length) return;
+  // rewind = replay full history backwards; no win credit
+  T.running = false; T.scrambled = false; T.rewinding = true;
+  const moves = history.splice(0).reverse();
+  for (const m of moves) enqueue({ ...m, dir: -m.dir }, { replay: true, fast: moves.length > 30, slow: moves.length <= 30, silent: false });
+  movesEl.textContent = 'rewinding…';
+}
+document.getElementById('scramble').onclick = scramble;
+document.getElementById('undo').onclick = undo;
+document.getElementById('solve').onclick = autoSolve;
+
+// Interaction > Keyboard: standard notation on outer layers
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  if (e.code === 'Space') { e.preventDefault(); scramble(); return; }
+  const o = (N - 1) / 2;
+  const map = { u: ['y', o, -1], d: ['y', -o, 1], r: ['x', o, -1], l: ['x', -o, 1], f: ['z', o, -1], b: ['z', -o, 1] };
+  const m = map[e.key.toLowerCase()];
+  if (!m) return;
+  const [axis, layer, dir] = m;
+  enqueue({ axis, layer, dir: e.shiftKey ? -dir : dir }, { user: true });
+});
+
+// Interaction > Drag twist: pick face, choose drag axis in screen space, axis = normal × drag
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let drag = null;
+function toNdc(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); }
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  toNdc(e);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(pickables, false)[0];
+  if (!hit) return;
+  controls.enabled = false;
+  const cubie = hit.object.userData.cubie;
+  // face normal in root space, snapped to nearest axis
+  const nrm = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+  const big = ['x', 'y', 'z'].reduce((a, b) => (Math.abs(nrm[a]) > Math.abs(nrm[b]) ? a : b));
+  const normal = new THREE.Vector3(); normal[big] = Math.sign(nrm[big]);
+  drag = { x: e.clientX, y: e.clientY, cubie, normal, point: hit.point.clone(), done: false };
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!drag || drag.done) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (Math.hypot(dx, dy) < 12) return;
+  drag.done = true;
+  let best = null, bestDot = 0;
+  for (const a of ['x', 'y', 'z']) {
+    if (Math.abs(drag.normal[a]) > 0.5) continue;
+    const axis = AX[a];
+    const p0 = drag.point.clone().project(camera), p1 = drag.point.clone().add(axis).project(camera);
+    const sx = (p1.x - p0.x) * innerWidth, sy = -(p1.y - p0.y) * innerHeight;
+    const len = Math.hypot(sx, sy) || 1;
+    const dot = (sx * dx + sy * dy) / len;
+    if (Math.abs(dot) > Math.abs(bestDot)) { bestDot = dot; best = axis.clone().multiplyScalar(Math.sign(dot)); }
+  }
+  if (!best) return;
+  const rot = new THREE.Vector3().crossVectors(drag.normal, best);
+  const axis = ['x', 'y', 'z'].find((a) => Math.abs(rot[a]) > 0.5);
+  enqueue({ axis, layer: snap(drag.cubie.position[axis]), dir: Math.sign(rot[axis]) }, { user: true });
+});
+addEventListener('pointerup', () => { drag = null; controls.enabled = true; });
+
+// Effects > Confetti: sticker-colored flakes on solve
+const CONF = 400;
+const conf = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.12, 0.2), new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.4 }), CONF);
+conf.count = 0;
+conf.frustumCulled = false;
+scene.add(conf);
+let flakes = [];
+function confetti() {
+  flakes = Array.from({ length: CONF }, () => ({
+    p: new THREE.Vector3(0, 0, 0), v: new THREE.Vector3((Math.random() - 0.5) * 10, Math.random() * 9 + 4, (Math.random() - 0.5) * 10),
+    r: new THREE.Euler(Math.random() * 6, Math.random() * 6, 0), s: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8),
+  }));
+  flakes.forEach((f, i) => conf.setColorAt(i, new THREE.Color(FACE_COLORS[i % 6])));
+  conf.instanceColor.needsUpdate = true;
+  conf.count = CONF;
+}
+const _o = new THREE.Object3D();
+function stepConfetti(dt) {
+  if (!flakes.length) return;
+  let alive = 0;
+  flakes.forEach((f, i) => {
+    f.v.y -= 9 * dt; f.v.multiplyScalar(0.985);
+    f.p.addScaledVector(f.v, dt);
+    f.r.x += f.s.x * dt; f.r.y += f.s.y * dt;
+    _o.position.copy(f.p); _o.rotation.copy(f.r); _o.updateMatrix();
+    conf.setMatrixAt(i, _o.matrix);
+    if (f.p.y > -6) alive++;
+  });
+  conf.instanceMatrix.needsUpdate = true;
+  if (!alive) { flakes = []; conf.count = 0; }
+}
+
+// Effects > Audio: plastic click per turn, chime on solve
+let actx;
+function click() {
+  actx ??= new AudioContext();
+  const len = actx.sampleRate * 0.05, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 6);
+  const src = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = buf; f.type = 'bandpass'; f.frequency.value = 2400 + Math.random() * 800; g.gain.value = 0.5;
+  src.connect(f).connect(g).connect(actx.destination); src.start();
+}
+function chime() {
+  actx ??= new AudioContext();
+  [523, 659, 784, 1047].forEach((fr, i) => {
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.09;
+    o.frequency.value = fr; o.type = 'triangle';
+    g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.6);
+  });
+}
+
+// Run engine: process queue, gentle idle float, timer tick
+build(3);
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  startNext();
+  stepMove(dt);
+  startNext();
+  stepConfetti(dt);
+  root.position.y = Math.sin(t * 1.2) * 0.08;
+  if (T.running) timerEl.textContent = ((performance.now() - T.start) / 1000).toFixed(2);
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

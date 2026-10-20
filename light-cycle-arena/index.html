@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Light Cycles</title>
+<style>
+  :root { --ink: #e8fbff; --card: rgba(4, 10, 22, 0.66); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02040a; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(120, 220, 255, 0.18); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .a { font-size: 30px; font-weight: 900; line-height: 1; color: #2de2e6; }
+  #info .a small { font-size: 15px; color: #fff; opacity: 0.75; }
+  #info .m { font-size: 13px; margin-top: 4px; opacity: 0.9; }
+  #energy { margin-top: 6px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+  #energy div { height: 100%; width: 100%; background: linear-gradient(90deg, #2de2e6, #ff6ec7); }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 170px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; box-shadow: 0 0 6px currentColor; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; opacity: 0.85; }
+  #board .row.out span { opacity: 0.4; text-decoration: line-through; }
+  #board .row.me span { color: #2de2e6; font-weight: 800; }
+  #big { position: fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(32px, 8vw, 80px); font-weight: 900; text-shadow: 0 0 24px rgba(45, 226, 230, 0.7); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.3em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #2de2e6; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  #map { position: fixed; right: 14px; bottom: 14px; border-radius: 12px; background: var(--card); border: 1px solid rgba(120, 220, 255, 0.18); }
+  #touch { position: fixed; inset: 0; display: none; pointer-events: none; }
+  #touch button { position: absolute; bottom: 24px; width: 84px; height: 84px; border-radius: 50%; border: 0; background: rgba(45, 226, 230, 0.22); color: #fff; font-size: 28px; font-weight: 900; pointer-events: auto; }
+  #touch .l { left: 20px; } #touch .r { left: 116px; } #touch .b { right: 22px; background: rgba(255, 110, 199, 0.35); font-size: 16px; }
+  @media (pointer: coarse) { #touch { display: block; } #hint { display: none; } #map { bottom: auto; top: 110px; width: 130px; height: 130px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="a" id="alive"></div><div class="m" id="round"></div><div id="energy"><div></div></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>A / D</b> or <b>← / →</b> turn 90° · <b>Space / W</b> boost · <b>C</b> camera · don't hit any light wall</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+<canvas id="map" width="160" height="160"></canvas>
+<div id="touch"><button class="l" data-k="left">↰</button><button class="r" data-k="right">↱</button><button class="b" data-k="boost">BOOST</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/light-cycle-arena/index.html
+ * PURPOSE: online light-cycle battle for up to 12: 90° turns, boost energy, glowing trail walls on a 100x100 grid, flood-fill bots, 5 rounds; host-authoritative grid sim
+ * UI: Light Cycles page (lobby overlay, alive counter, energy bar, standings, minimap, touch turn buttons)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createLobby } from '../components/room-lobby.js';
+import { startTicker } from '../components/room-client.js';
+
+// Scene > Renderer + bloom, neon grid floor, arena walls
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02040a);
+scene.fog = new THREE.Fog(0x02040a, 60, 170);
+const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 500);
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.45, 0.35);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+scene.add(new THREE.HemisphereLight(0x88ccff, 0x050510, 0.6));
+const A = 100, HALF = A / 2;
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 40, A + 40).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
+  fog: true, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]),
+  vertexShader: `varying vec3 vW; #include <fog_pars_vertex>
+    void main(){ vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition; #include <fog_vertex> }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
+  fragmentShader: `uniform float uTime; varying vec3 vW; #include <fog_pars_fragment>
+    float line(float v, float w){ float f = abs(fract(v) - 0.5); return smoothstep(0.5 - w, 0.5, f); }
+    void main(){
+      float g1 = max(line(vW.x / 5., 0.03), line(vW.z / 5., 0.03));
+      float g2 = max(line(vW.x, 0.02), line(vW.z, 0.02)) * 0.35;
+      float inside = step(abs(vW.x), ${HALF}.) * step(abs(vW.z), ${HALF}.);
+      vec3 base = vec3(0.01, 0.02, 0.05);
+      vec3 col = base + vec3(0.1, 0.55, 0.9) * (g1 * 0.55 + g2) * (0.35 + 0.65 * inside);
+      gl_FragColor = vec4(col, 1.);
+      #include <fog_fragment>
+    }`.replace(/#include <(\w+)>/g, '\n#include <$1>\n'),
+}));
+scene.add(floor);
+const rimMat = new THREE.MeshBasicMaterial({ color: 0x2de2e6 });
+for (const [x, z, w, d] of [[0, -HALF, A + 0.6, 0.3], [0, HALF, A + 0.6, 0.3], [-HALF, 0, 0.3, A + 0.6], [HALF, 0, 0.3, A + 0.6]]) {
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), rimMat);
+  wall.position.set(x, 0.8, z);
+  scene.add(wall);
+}
+
+// Grid > occupancy: owner id + 1 per 1x1 cell, crash on entering a lit cell
+const grid = new Int16Array(A * A);
+const cellOf = (x, z) => { const cx = Math.floor(x + HALF), cz = Math.floor(z + HALF); return cx < 0 || cz < 0 || cx >= A || cz >= A ? -1 : cz * A + cx; };
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+// Cycles > model: dark chassis, glowing wheels and stripe in player color, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(4,10,22,0.75)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true, toneMapped: false }));
+  s.scale.set(3, 0.75, 1); s.position.y = 2.6; s.renderOrder = 5;
+  return s;
+}
+const chassisMat = new THREE.MeshStandardMaterial({ color: 0x0c1220, roughness: 0.3, metalness: 0.7 });
+const MAXSEG = 700;
+const segGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+const cycles3d = new Map();
+function makeCycle(p) {
+  const g = new THREE.Group(), bike = new THREE.Group();
+  const glow = new THREE.MeshBasicMaterial({ color: p.color });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.5, 2.2), chassisMat); body.position.y = 0.6;
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x0a0f1a, metalness: 0.9, roughness: 0.1 })); canopy.position.set(0, 0.82, 0.2); canopy.scale.set(1, 0.8, 2);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 2.24), glow); stripe.position.y = 0.6;
+  bike.add(body, canopy, stripe);
+  for (const z of [-0.85, 0.85]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.07, 8, 24).rotateY(Math.PI / 2), glow); w.position.set(0, 0.42, z); bike.add(w); }
+  const trailMat = new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const trail = new THREE.InstancedMesh(segGeo, trailMat, MAXSEG);
+  trail.count = 0; trail.frustumCulled = false;
+  const tag = nameTag(p.nick, p.color);
+  g.add(bike, tag);
+  scene.add(g, trail);
+  return { g, bike, trail, trailMat, tag, derez: 0 };
+}
+
+// FX > crash sparks
+const SPARK = 600;
+const sparkGeo = new THREE.BufferGeometry();
+const spPos = new Float32Array(SPARK * 3), spCol = new Float32Array(SPARK * 3), spVel = new Float32Array(SPARK * 3), spLife = new Float32Array(SPARK);
+sparkGeo.setAttribute('position', new THREE.BufferAttribute(spPos, 3));
+sparkGeo.setAttribute('color', new THREE.BufferAttribute(spCol, 3));
+const sparks = new THREE.Points(sparkGeo, new THREE.PointsMaterial({ size: 0.35, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+sparks.frustumCulled = false;
+scene.add(sparks);
+for (let i = 0; i < SPARK; i++) spPos[i * 3 + 1] = -99;
+let spNext = 0;
+function explode(x, z, hex) {
+  const c = new THREE.Color(hex);
+  for (let k = 0; k < 90; k++) {
+    const i = spNext++ % SPARK, a = Math.random() * Math.PI * 2, s = 3 + Math.random() * 12;
+    spPos.set([x, 0.7, z], i * 3);
+    spVel.set([Math.cos(a) * s, 2 + Math.random() * 9, Math.sin(a) * s], i * 3);
+    spCol.set([c.r * 1.6, c.g * 1.6, c.b * 1.6], i * 3);
+    spLife[i] = 0.8 + Math.random() * 0.6;
+  }
+}
+
+// Audio > hum, turn chirp, crash, countdown, win
+let actx = null, hum = null, humGain = null;
+function audio() {
+  if (actx) return;
+  actx = new AudioContext();
+  hum = actx.createOscillator(); hum.type = 'sawtooth'; hum.frequency.value = 70;
+  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+  humGain = actx.createGain(); humGain.gain.value = 0;
+  hum.connect(lp).connect(humGain).connect(actx.destination); hum.start();
+}
+addEventListener('pointerdown', audio, { once: true });
+addEventListener('keydown', audio, { once: true });
+function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
+  if (!actx) return;
+  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
+}
+const sfx = {
+  turn() { tone(900, 1300, 0.05, 0.05, 'square'); },
+  crash(me) { tone(320, 40, 0.8, me ? 0.22 : 0.08, 'sawtooth'); tone(120, 30, 0.6, me ? 0.2 : 0.06, 'square'); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  win() { [523, 659, 784, 1046].forEach((f, i) => tone(f, f, 0.2, 0.1, 'square', i * 0.11)); },
+};
+
+// Game > World
+const BOT_NAMES = ['Flynn', 'Quorra', 'Rinzler', 'Byte', 'Pixel', 'Vector', 'Glitch', 'Neon', 'Raster', 'Sector', 'Kernel', 'Cache'];
+const BOT_COLORS = ['#ff9f43', '#c77dff', '#5ee07a', '#ff6ec7', '#ffd23f', '#a3e635', '#3fa7ff', '#ff5a5f', '#14b8a6', '#f8fafc', '#8b5cf6', '#2de2e6'];
+const ROUNDS = 5, SPEED = 17, BOOST = 28;
+// 12 spawns in a starburst: 3 abreast per direction, all heading outward so no early crossings
+const SLOTS = [];
+for (const k of [0, -6, 6]) for (let dir = 0; dir < 4; dir++) { const [dx, dz] = DIRS[dir]; SLOTS.push({ x: dx * 8 - dz * k + 0.5, z: dz * 8 + dx * k + 0.5, dir }); }
+const world = { mode: 'attract', phase: 'count', t: 3, round: 1, players: new Map(), outCount: 0, winner: null };
+let events = [];
+const rng = Math.random;
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, dir: 0, alive: true, boost: false, energy: 1, pts: 0, wins: 0, corners: [], cells: [], cell: -1, turns: [], turnSeq: 0, inBoost: false, think: 0, skill: 0.75 + rng() * 0.22, place: 0 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) {
+  const p = world.players.get(id);
+  if (p) for (const c of p.cells) if (grid[c] === slotOf(p)) grid[c] = 0;
+  world.players.delete(id);
+  const v = cycles3d.get(id);
+  if (v) { scene.remove(v.g, v.trail); cycles3d.delete(id); }
+}
+const slotOf = (p) => p.gid;
+let nextGid = 1;
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function startRound() {
+  grid.fill(0);
+  nextGid = 1;
+  const ps = [...world.players.values()];
+  const order = SLOTS.map((s, i) => i);
+  ps.forEach((p, k) => {
+    const s = SLOTS[order[k % SLOTS.length]];
+    Object.assign(p, { x: s.x, z: s.z, dir: s.dir, alive: true, boost: false, energy: 1, corners: [s.x, s.z], cells: [], turns: [], place: 0, gid: nextGid++ });
+    p.cell = cellOf(p.x, p.z);
+    grid[p.cell] = p.gid; p.cells.push(p.cell);
+  });
+  for (const v of cycles3d.values()) v.derez = 0;
+  world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3.5; world.outCount = 0; world.winner = null;
+  kfDirty = true;
+}
+
+// Run engine > turns snap to cell centers, cells lit as the head enters them
+function turn(p, d) {
+  if (!p.alive || world.phase !== 'play') return;
+  const cx = Math.floor(p.x + HALF) - HALF + 0.5, cz = Math.floor(p.z + HALF) - HALF + 0.5;
+  p.x = cx; p.z = cz;
+  p.dir = (p.dir + (d > 0 ? 1 : 3)) % 4;
+  p.corners.push(cx, cz);
+  events.push(['t', p.id, cx, cz, p.dir]);
+}
+function crash(p) {
+  p.alive = false;
+  p.pts += world.outCount;
+  world.outCount++;
+  p.place = world.players.size - world.outCount + 1;
+  for (const c of p.cells) if (grid[c] === p.gid) grid[c] = 0;
+  events.push(['x', p.id, +p.x.toFixed(1), +p.z.toFixed(1), p.place]);
+}
+function stepCycle(p, dt) {
+  if (!p.alive || world.phase !== 'play') return;
+  if (p.turns.length) turn(p, p.turns.shift());
+  p.boost = p.inBoost && p.energy > 0.02;
+  p.energy = clamp(p.energy + (p.boost ? -0.5 : 0.12) * dt, 0, 1);
+  const sp = p.boost ? BOOST : SPEED, [dx, dz] = DIRS[p.dir];
+  let remain = sp * dt;
+  // walk cell by cell so fast cycles can't skip through a wall
+  while (remain > 0) {
+    const stepLen = Math.min(remain, 0.45);
+    p.x += dx * stepLen; p.z += dz * stepLen; remain -= stepLen;
+    const c = cellOf(p.x, p.z);
+    if (c === p.cell) continue;
+    if (c < 0 || grid[c]) { crash(p); return; }
+    grid[c] = p.gid; p.cells.push(c); p.cell = c;
+  }
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Run engine > bots: compare straight / left / right by reachable area, steer away early
+function freeRay(x, z, dir, max) { const [dx, dz] = DIRS[dir]; let n = 0; for (let k = 1; k <= max; k++) { const c = cellOf(x + dx * k, z + dz * k); if (c < 0 || grid[c]) break; n++; } return n; }
+const seen = new Int32Array(A * A);
+let seenMark = 0;
+function area(x, z, dir, limit) {
+  const [dx, dz] = DIRS[dir], start = cellOf(x + dx, z + dz);
+  if (start < 0 || grid[start]) return 0;
+  seenMark++;
+  const q = [start]; seen[start] = seenMark;
+  let n = 0;
+  while (q.length && n < limit) {
+    const c = q.shift(); n++;
+    const cx = c % A, cz = (c - cx) / A;
+    for (const [ex, ez] of DIRS) {
+      const nx = cx + ex, nz = cz + ez;
+      if (nx < 0 || nz < 0 || nx >= A || nz >= A) continue;
+      const ni = nz * A + nx;
+      if (grid[ni] || seen[ni] === seenMark) continue;
+      seen[ni] = seenMark; q.push(ni);
+    }
+  }
+  return n;
+}
+function botThink(p, dt) {
+  if (!p.alive || world.phase !== 'play') return;
+  p.think -= dt;
+  const ahead = freeRay(p.x, p.z, p.dir, 30);
+  const danger = ahead < 3 + (p.boost ? 5 : 2.5) * p.skill;
+  if (!danger && p.think > 0) return;
+  p.think = 0.25 + rng() * 0.35;
+  const opts = [[0, p.dir], [1, (p.dir + 1) % 4], [-1, (p.dir + 3) % 4]].map(([d, dir]) => {
+    const ray = freeRay(p.x, p.z, dir, 30);
+    return { d, s: Math.min(area(p.x, p.z, dir, 400), 400) + ray * 2 + (d === 0 ? 6 : 0) + rng() * 10 * (1.1 - p.skill) };
+  });
+  // rare random wiggle keeps bots from drawing perfect squares
+  if (!danger && rng() < 0.08) opts[1 + Math.floor(rng() * 2)].s += 30;
+  const best = opts.sort((a, b) => b.s - a.s)[0];
+  if (best.d) p.turns.push(best.d);
+  p.inBoost = !danger && ahead > 20 && rng() < 0.4 * p.skill;
+}
+
+// Game > Phases: countdown, ride until one survives, round results, final
+let lastBeep = 0;
+function phases(dt) {
+  const ps = [...world.players.values()];
+  world.t -= dt;
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { world.phase = 'play'; events.push(['c', 0]); }
+  } else if (world.phase === 'play') {
+    const alive = ps.filter((p) => p.alive);
+    if (alive.length === 0 || (ps.length > 1 && alive.length <= 1)) {
+      const w = alive[0];
+      if (w) { w.pts += world.outCount + 2; w.wins++; w.place = 1; world.winner = w.id; events.push(['w', w.id]); }
+      world.phase = 'round'; world.t = world.mode === 'attract' ? 2.5 : 4;
+    }
+  } else if (world.phase === 'round' && world.t <= 0) {
+    if (world.mode === 'attract' || world.round < ROUNDS) { world.round = world.mode === 'attract' ? 1 : world.round + 1; startRound(); }
+    else { world.phase = 'final'; world.t = 10; }
+  } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract'; world.round = 1;
+  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  startRound();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'light-cycles', title: 'Light Cycles', emoji: '🏍️', accent: '#2de2e6',
+  blurb: 'Ride, turn at right angles, leave a wall of light. Box others in, never touch a wall. Last cycle running takes the round.',
+  maxBots: 11, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 12 riders per room (humans + bots). 5 rounds, points for outlasting others.',
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match'; world.round = 1;
+    ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    document.getElementById('top').style.display = 'flex';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startRound();
+  },
+  onLobby() {
+    ['info', 'board', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 12 seats: replace a bot (crashed ones first); late joiner rides from next round
+    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
+    const n = addPlayer(p.id, p.nick, p.color, false);
+    n.alive = false; n.gid = nextGid++; n.x = 0; n.z = 0;
+  }
+}
+
+// Multiplayer > Net: guest turns sent instantly (ordered), boost at 20 Hz; host snapshots + turn events + corner keyframes
+const remoteSeq = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  const room = lobby.room;
+  if (room.isHost && d.g === 'i') {
+    const p = world.players.get(from);
+    if (!p) return;
+    p.inBoost = !!d.b;
+    // turns carry a running count so late or dropped packets can't double-turn
+    // first packet seen (new match or inherited host): just sync the count
+    if (!remoteSeq.has(from)) { remoteSeq.set(from, d.n); return; }
+    const last = remoteSeq.get(from);
+    const fresh = (d.q ?? []).slice(Math.max(0, (d.q?.length ?? 0) - (d.n - last)));
+    remoteSeq.set(from, d.n);
+    for (const t of fresh) p.turns.push(t);
+  }
+  if (d.g === 's' && !room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+let kfDirty = true, kfT = 0;
+function snapshot(withKf) {
+  const s = {
+    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events,
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), p.dir, (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.boost ? 4 : 0), f2(p.energy), p.pts, p.wins, p.place, p.nick, p.color]),
+  };
+  if (withKf) s.K = [...world.players.values()].map((p) => [p.id, p.corners]);
+  return s;
+}
+let snapAt = 0;
+function applySnap(s) {
+  Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
+  const seenIds = new Set();
+  for (const [id, x, z, dir, fl, energy, pts, wins, place, nick, color] of s.P) {
+    seenIds.add(id);
+    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    Object.assign(p, { x, z, dir, alive: !!(fl & 2), boost: !!(fl & 4), energy, pts, wins, place });
+  }
+  for (const id of [...world.players.keys()]) if (!seenIds.has(id)) removePlayer(id);
+  for (const e of s.ev) if (e[0] === 't') { const p = world.players.get(e[1]); if (p) { const n = p.corners.length; if (p.corners[n - 2] !== e[2] || p.corners[n - 1] !== e[3]) p.corners.push(e[2], e[3]); } }
+  if (s.K) for (const [id, corners] of s.K) { const p = world.players.get(id); if (p) p.corners = corners; }
+  // a fresh round (count phase) brings derezzed trails back
+  if (s.ph === 'count') for (const v of cycles3d.values()) v.derez = 0;
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+function playEvents(evs) {
+  const me = lobby.room?.me;
+  for (const e of evs) {
+    const p = world.players.get(e[1]);
+    if (e[0] === 't' && e[1] === me) sfx.turn();
+    else if (e[0] === 'x' && p) {
+      explode(e[2], e[3], p.color);
+      const v = cycles3d.get(p.id); if (v) v.derez = 0.01;
+      if (Math.hypot(e[2] - camLook.x, e[3] - camLook.z) < 60 || e[1] === me) sfx.crash(e[1] === me);
+      if (e[1] === me && world.mode === 'match') flash(`<small>derezzed</small>${ord(e[4])} place`);
+    } else if (e[0] === 'c') { if (world.mode === 'match') { sfx.beep(e[1] === 0); if (e[1] === 0) flash('GO!', 0.8); } }
+    else if (e[0] === 'w' && p) { if (world.mode === 'match') sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last cycle running'}</small>🏆 ${esc(p.nick)}`, 3.5); }
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ord = (n) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || 'th');
+
+// Input > turns queue (edge-triggered), boost hold, camera toggle, touch buttons
+const local = { turnLog: [], n: 0, boost: false };
+const keys = {};
+let camMode = 0;
+function localTurn(d) {
+  if (world.mode !== 'match') return;
+  const room = lobby.room;
+  if (room.isHost) { const me = world.players.get(room.me); if (me) me.turns.push(d); }
+  else { local.turnLog.push(d); local.n++; if (local.turnLog.length > 8) local.turnLog.shift(); sendInput(); }
+}
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (!e.repeat) {
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') localTurn(-1);
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') localTurn(1);
+    if (e.code === 'KeyC') camMode = (camMode + 1) % 2;
+  }
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const touchHeld = {};
+document.querySelectorAll('#touch button').forEach((b) => {
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); const k = b.dataset.k; if (k === 'left') localTurn(-1); else if (k === 'right') localTurn(1); else touchHeld.boost = true; });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (touchHeld[b.dataset.k] = false));
+});
+function sendInput() { lobby.room?.send({ g: 'i', b: local.boost ? 1 : 0, n: local.n, q: local.turnLog }); }
+
+// HUD > alive counter, energy, standings, banner, minimap
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.8) { big(t); flashT = len; }
+let hudT = 0;
+function hud(dt) {
+  flashT -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  const me = world.players.get(lobby.room?.me);
+  if (world.phase === 'count') big(`<small>Round ${world.round} of ${ROUNDS}</small>${Math.max(1, Math.ceil(world.t))}`);
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big(world.phase === 'play' && me && !me.alive ? '<small>spectating</small>' : '');
+  document.querySelector('#energy div').style.width = `${Math.round((me?.energy ?? 0) * 100)}%`;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  const ps = [...world.players.values()], alive = ps.filter((p) => p.alive).length;
+  document.getElementById('alive').innerHTML = `${alive}<small> / ${ps.length} riding</small>`;
+  document.getElementById('round').textContent = `Round ${world.round} of ${ROUNDS}${me ? ` · you: ${me.pts} pts` : ''}`;
+  const r = ps.sort((a, b) => b.pts - a.pts || b.alive - a.alive);
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color};color:${p.color}"></i><span>${esc(p.nick)}</span><em>${'🏆'.repeat(Math.min(p.wins, 3))} ${p.pts}</em></div>`).join('');
+}
+const mapC = document.getElementById('map'), mg = mapC.getContext('2d');
+function drawMap() {
+  const W = mapC.width, sc = (W - 12) / A, o = 6;
+  mg.clearRect(0, 0, W, W);
+  mg.strokeStyle = 'rgba(45,226,230,0.5)'; mg.lineWidth = 1; mg.strokeRect(o, o, A * sc, A * sc);
+  for (const p of world.players.values()) {
+    const v = cycles3d.get(p.id);
+    if (v && v.derez >= 1 && !p.alive) continue;
+    mg.strokeStyle = p.color; mg.globalAlpha = p.alive ? 0.9 : 0.35; mg.lineWidth = 1.6;
+    mg.beginPath();
+    const c = p.corners;
+    for (let i = 0; i < c.length; i += 2) { const X = o + (c[i] + HALF) * sc, Z = o + (c[i + 1] + HALF) * sc; i ? mg.lineTo(X, Z) : mg.moveTo(X, Z); }
+    if (p.alive && c.length) mg.lineTo(o + (p.x + HALF) * sc, o + (p.z + HALF) * sc);
+    mg.stroke();
+    if (p.alive) { mg.globalAlpha = 1; mg.fillStyle = p.id === lobby.room?.me ? '#fff' : p.color; mg.beginPath(); mg.arc(o + (p.x + HALF) * sc, o + (p.z + HALF) * sc, p.id === lobby.room?.me ? 3.2 : 2.2, 0, 7); mg.fill(); }
+  }
+  mg.globalAlpha = 1;
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  local.boost = !!(keys.Space || keys.KeyW || keys.ArrowUp || touchHeld.boost);
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') me.inBoost = local.boost;
+    const ps = [...world.players.values()];
+    for (const p of ps) if (p.bot) botThink(p, dt);
+    for (const p of ps) stepCycle(p, dt);
+    const ph = world.phase;
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt; kfT -= dt;
+      if (sendT <= 0 || ph !== world.phase) {
+        sendT = 0.05;
+        const withKf = kfDirty || kfT <= 0;
+        if (withKf) { kfDirty = false; kfT = 1; }
+        room.send(snapshot(withKf));
+        playEvents(events); events = [];
+      }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; sendInput(); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop: cycles, trail walls, derez, sparks, chase camera
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 60, 70), camLook = new THREE.Vector3(), _v = new THREE.Vector3(), _m = new THREE.Matrix4();
+let camYaw = 0, specIdx = 0, specT = 0;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim();
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.1);
+  for (const p of world.players.values()) {
+    let v = cycles3d.get(p.id);
+    if (!v) { v = makeCycle(p); cycles3d.set(p.id, v); v.g.position.set(p.x, 0, p.z); }
+    const [dx, dz] = DIRS[p.dir], sp = p.alive && world.phase === 'play' ? (p.boost ? BOOST : SPEED) : 0;
+    const tx = p.x + dx * sp * age, tz = p.z + dz * sp * age;
+    // snap on turns (axis change) so the bike never cuts the corner
+    const a = hostSim ? 1 : 1 - Math.exp(-dt * 25);
+    if (Math.hypot(tx - v.g.position.x, tz - v.g.position.z) > 4) v.g.position.set(tx, 0, tz);
+    v.g.position.x += (tx - v.g.position.x) * a; v.g.position.z += (tz - v.g.position.z) * a;
+    const want = Math.atan2(dx, dz);
+    let dh = want - v.bike.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    v.bike.rotation.y += dh * Math.min(1, dt * 18);
+    v.bike.rotation.z = -dh * 0.4;
+    v.g.visible = p.alive || world.phase === 'count';
+    if (!p.alive && v.derez > 0) v.derez = Math.min(2, v.derez + dt * 1.2);
+    // trail: one stretched box per straight run between corners, last one ends at the bike
+    const c = p.corners, n = Math.min(c.length / 2, MAXSEG);
+    let k = 0;
+    const hx = p.alive ? v.g.position.x : p.x, hz = p.alive ? v.g.position.z : p.z;
+    for (let i = 0; i < n; i++) {
+      const x0 = c[i * 2], z0 = c[i * 2 + 1], last = i === n - 1, x1 = last ? hx : c[i * 2 + 2], z1 = last ? hz : c[i * 2 + 3];
+      const len = Math.hypot(x1 - x0, z1 - z0);
+      if (len < 0.01) continue;
+      _m.makeRotationY(Math.atan2(x1 - x0, z1 - z0));
+      _m.scale(_v.set(0.16, 1.15, len + 0.16)).setPosition((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      v.trail.setMatrixAt(k++, _m);
+    }
+    v.trail.count = k;
+    v.trail.instanceMatrix.needsUpdate = true;
+    const fade = p.alive ? 1 : Math.max(0, 1 - Math.max(0, v.derez - 0.3) / 0.8);
+    v.trailMat.opacity = 0.62 * fade;
+    v.trail.visible = fade > 0.01 && (p.alive || world.phase !== 'count' || c.length > 2);
+    v.trail.scale.y = 0.4 + 0.6 * fade;
+    v.tag.visible = p.alive && p.id !== lobby.room?.me;
+  }
+  for (let i = 0; i < SPARK; i++) {
+    if (spLife[i] <= 0) continue;
+    spLife[i] -= dt; spVel[i * 3 + 1] -= 18 * dt;
+    for (let k = 0; k < 3; k++) spPos[i * 3 + k] += spVel[i * 3 + k] * dt;
+    if (spPos[i * 3 + 1] < 0.05) { spPos[i * 3 + 1] = 0.05; spVel[i * 3 + 1] *= -0.4; }
+    if (spLife[i] <= 0) spPos[i * 3 + 1] = -99;
+  }
+  sparkGeo.attributes.position.needsUpdate = true; sparkGeo.attributes.color.needsUpdate = true;
+  hud(dt);
+  drawMap();
+  // camera: chase own cycle, or follow survivors; C toggles overhead
+  const me = world.players.get(lobby.room?.me);
+  let f = me && me.alive && world.mode === 'match' ? me : null;
+  if (!f) {
+    const alive = [...world.players.values()].filter((p) => p.alive);
+    specT -= dt; if (specT <= 0) { specT = 6; specIdx++; }
+    f = alive.length ? alive[specIdx % alive.length] : null;
+  }
+  const fv = f && cycles3d.get(f.id);
+  if (fv && camMode === 0 && (f !== me || world.mode === 'match')) {
+    const want = fv.bike.rotation.y;
+    let d = want - camYaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+    camYaw += d * Math.min(1, dt * 5);
+    const back = world.mode === 'attract' ? 16 : 9, up = world.mode === 'attract' ? 9 : 4.2;
+    camPos.lerp(_v.set(fv.g.position.x - Math.sin(camYaw) * back, up, fv.g.position.z - Math.cos(camYaw) * back), 1 - Math.exp(-dt * 6));
+    camLook.lerp(_v.set(fv.g.position.x + Math.sin(camYaw) * 8, 0.8, fv.g.position.z + Math.cos(camYaw) * 8), 1 - Math.exp(-dt * 8));
+  } else {
+    const cx = fv ? fv.g.position.x * 0.4 : 0, cz = fv ? fv.g.position.z * 0.4 : 0;
+    camPos.lerp(_v.set(cx, 85, cz + 45), 1 - Math.exp(-dt * 3));
+    camLook.lerp(_v.set(cx, 0, cz + 2), 1 - Math.exp(-dt * 3));
+  }
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  if (actx) {
+    const meAlive = me?.alive && world.phase === 'play';
+    humGain.gain.value = meAlive ? (me.boost ? 0.07 : 0.045) : 0;
+    hum.frequency.value = me?.boost ? 110 : 72;
+  }
+  composer.render();
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

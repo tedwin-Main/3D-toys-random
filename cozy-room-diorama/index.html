@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cozy Room</title>
+<style>
+  :root { --ink: #3a2c2a; --card: rgba(255, 248, 240, 0.86); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f2d9c4; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); transition: background 1.2s; }
+  body.night { background: #1b1a2e; }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 16px; box-shadow: 0 8px 26px rgba(60, 30, 20, 0.16); user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 270px; }
+  #intro h1 { margin: 0 0 4px; font-size: 18px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.8; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: transparent; border: 0; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  #bar button:hover { background: rgba(0, 0, 0, 0.06); }
+  #bar button.on { background: var(--ink); color: #fff; }
+  #tip { position: fixed; pointer-events: none; padding: 5px 10px; border-radius: 8px; background: rgba(40, 28, 26, 0.85); color: #fff; font-size: 12px; transform: translate(14px, 14px); opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
+  #tip.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Cozy Room</h1><p>Click things: the lamp, radio, plant, string lights, window, mug and especially the cat. Drag to peek around.</p></div>
+<div id="bar" class="card"><button id="b-night">🌙 Night</button><button id="b-rain">🌧 Rain</button><button id="b-music">🎵 Lo-fi</button><button id="b-lights">✨ Fairy lights</button><button id="b-lamp">💡 Lamp</button></div>
+<div id="tip"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/cozy-room-diorama/index.html
+ * PURPOSE: isometric cozy bedroom diorama with clickable lamp, lo-fi radio, plant, fairy lights, rain window, day/night and a wandering cat
+ * UI: Cozy Room page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// Scene > Renderer: soft shadows, narrow fov for the diorama look
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, stencil: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(28, innerWidth / innerHeight, 0.5, 200);
+camera.position.set(19, 15, 19);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.2, 0);
+controls.enableDamping = true;
+controls.enablePan = false;
+controls.minAzimuthAngle = 0.08;
+controls.maxAzimuthAngle = Math.PI / 2 - 0.08;
+controls.minPolarAngle = 0.55;
+controls.maxPolarAngle = 1.3;
+controls.minDistance = 14;
+controls.maxDistance = 38;
+
+// Scene > Lights: hemisphere fill, sun through the window, lamp + fairy glow
+const hemi = new THREE.HemisphereLight(0xfff1e0, 0x7a5a48, 1.0);
+scene.add(hemi);
+const sunLight = new THREE.DirectionalLight(0xfff0d8, 2.6);
+sunLight.position.set(4, 10, -14);
+sunLight.target.position.set(0, 0, 0);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+Object.assign(sunLight.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+sunLight.shadow.bias = -0.0006;
+scene.add(sunLight, sunLight.target);
+const fill = new THREE.DirectionalLight(0xffe4d0, 0.5);
+fill.position.set(12, 10, 10);
+scene.add(fill);
+
+// Helpers > Builders: rounded box with shadows, materials cache
+const mats = new Map();
+const mat = (color, extra = {}) => {
+  const key = color + JSON.stringify(extra);
+  if (!mats.has(key)) mats.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...extra }));
+  return mats.get(key);
+};
+function box(parent, w, h, d, color, x, y, z, r = 0.05, extra) {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(r, w / 2.1, h / 2.1, d / 2.1)), typeof color === 'object' ? color : mat(color, extra));
+  m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function cyl(parent, rt, rb, h, color, x, y, z, seg = 16, extra) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), typeof color === 'object' ? color : mat(color, extra));
+  m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+// Interaction > Registry: clickable things with hover labels
+const clickables = [];
+function clickable(obj, label, act) { obj.traverse((o) => (o.userData.click = { label, act, root: obj })); clickables.push(obj); }
+
+// Room > Floor + walls with a window hole in the back wall
+const room = new THREE.Group();
+scene.add(room);
+const floorTex = canvasTex(1024, 1024, (g, w, h) => {
+  for (let i = 0; i < 10; i++) {
+    const base = 160 + Math.random() * 25;
+    g.fillStyle = `rgb(${base + 20},${base - 30},${base - 85})`;
+    g.fillRect(0, (i * h) / 10, w, h / 10);
+    for (let k = 0; k < 40; k++) {
+      g.strokeStyle = `rgba(80,40,20,${Math.random() * 0.12})`;
+      const y = (i * h) / 10 + Math.random() * (h / 10);
+      g.beginPath(); g.moveTo(0, y); g.bezierCurveTo(w / 3, y + 4, (2 * w) / 3, y - 4, w, y); g.stroke();
+    }
+    g.fillStyle = 'rgba(70,35,15,0.5)';
+    g.fillRect(0, (i * h) / 10, w, 3);
+    g.fillRect(((i * 397) % 900) + 60, (i * h) / 10, 3, h / 10);
+  }
+});
+box(room, 10.6, 0.5, 10.6, new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.6 }), -0.3, -0.25, -0.3, 0.04);
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xe8c9b0, roughness: 0.95 });
+const trimMat = mat(0xf7efe6);
+const WH = 7.2;
+// back wall pieces around window x .6..3.6, y 2.4..5.6
+box(room, 6.2, WH, 0.35, wallMat, -2.5, WH / 2, -5.4, 0.02);
+box(room, 1.6, WH, 0.35, wallMat, 4.4, WH / 2, -5.4, 0.02);
+box(room, 3.0, 2.4, 0.35, wallMat, 2.1, 1.2, -5.4, 0.02);
+box(room, 3.0, WH - 5.6, 0.35, wallMat, 2.1, (WH + 5.6) / 2, -5.4, 0.02);
+box(room, 0.35, WH, 10.6, wallMat, -5.4, WH / 2, -0.3, 0.02);
+box(room, 10.6, 0.25, 0.12, trimMat, -0.3, 0.12, -5.18, 0.03);
+box(room, 0.12, 0.25, 10.6, trimMat, -5.18, 0.12, -0.3, 0.03);
+
+// Room > Window: frame, mullions, sill, glass, curtains
+const win = new THREE.Group();
+room.add(win);
+for (const [w, h, x, y] of [[3.3, 0.18, 2.1, 5.6], [3.3, 0.18, 2.1, 2.4], [0.18, 3.3, 0.55, 4.0], [0.18, 3.3, 3.65, 4.0], [0.08, 3.1, 2.1, 4.0], [3.1, 0.08, 2.1, 4.0]]) box(win, w, h, 0.22, trimMat, x, y, -5.3, 0.03);
+box(win, 3.8, 0.14, 0.6, trimMat, 2.1, 2.3, -5.05, 0.04);
+const glass = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 3.1), new THREE.MeshStandardMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.2 }));
+glass.position.set(2.1, 4.0, -5.32);
+win.add(glass);
+function curtain(x) {
+  const g = new THREE.PlaneGeometry(1.0, 4.3, 12, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setZ(i, Math.sin(p.getX(i) * 12) * 0.08);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, mat(0xd98f7a, { side: THREE.DoubleSide, roughness: 1 }));
+  m.position.set(x, 3.75, -5.05);
+  m.castShadow = true;
+  win.add(m);
+  return m;
+}
+curtain(0.15); curtain(4.05);
+cyl(win, 0.04, 0.04, 4.6, 0x8a6a50, 2.1, 5.95, -5.05, 8).rotation.z = Math.PI / 2;
+clickable(win, 'Window · toggle rain', () => setRain(!rain));
+// stencil portal: outside world only draws where the window opening is visible
+const portal = new THREE.Mesh(new THREE.PlaneGeometry(3.1, 3.1), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp }));
+portal.position.set(2.1, 4.0, -5.34);
+portal.renderOrder = 1;
+win.add(portal);
+const OUTSIDE = { stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc };
+function outside(o) { o.renderOrder = 2; Object.assign(o.material, OUTSIDE); return o; }
+
+// Outside > Sky + city: gradient shader with stars/moon, silhouettes with lit windows at night
+const skyU = { uNight: { value: 0 }, uRain: { value: 0 }, uTime: { value: 0 } };
+const outsideSky = new THREE.Mesh(new THREE.PlaneGeometry(26, 16), new THREE.ShaderMaterial({
+  uniforms: skyU,
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+  fragmentShader: `uniform float uNight; uniform float uRain; uniform float uTime; varying vec2 vUv;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
+    void main(){
+      vec3 day = mix(vec3(1.0,0.86,0.72), vec3(0.45,0.7,1.0), smoothstep(0.3, 0.9, vUv.y));
+      vec3 night = mix(vec3(0.16,0.17,0.36), vec3(0.03,0.04,0.12), smoothstep(0.3, 0.9, vUv.y));
+      vec3 c = mix(day, night, uNight);
+      vec2 g = floor(vUv * vec2(160., 100.));
+      float s = step(0.992, h(g)) * (0.6 + 0.4 * sin(uTime * 2. + h(g + 3.) * 30.));
+      c += s * uNight * (1. - uRain) * 0.9;
+      float md = length((vUv - vec2(0.62, 0.72)) * vec2(1.6, 1.));
+      c = mix(c, vec3(1., 0.97, 0.85), smoothstep(0.035, 0.03, md) * uNight * (1. - uRain * 0.8));
+      c += vec3(0.5, 0.5, 0.6) * smoothstep(0.2, 0.0, md) * 0.25 * uNight;
+      c = mix(c, vec3(0.5, 0.55, 0.62) * (1. - uNight * 0.7), uRain * 0.6);
+      gl_FragColor = vec4(c, 1.);
+      #include <colorspace_fragment>
+    }`,
+}));
+outsideSky.position.set(2, 3, -14);
+scene.add(outside(outsideSky));
+const cityWin = canvasTex(256, 256, (g, w, h) => {
+  g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
+  for (let y = 8; y < h; y += 22) for (let x = 6; x < w; x += 18) if (Math.random() < 0.45) { g.fillStyle = Math.random() < 0.7 ? '#ffcf7a' : '#bfe4ff'; g.fillRect(x, y, 9, 12); }
+});
+const cityMat = new THREE.MeshStandardMaterial({ color: 0x8c9bb8, emissive: 0xffffff, emissiveMap: cityWin, emissiveIntensity: 0, roughness: 1, ...OUTSIDE });
+for (let i = 0; i < 9; i++) {
+  const w = 1.4 + Math.random() * 1.6, h = 5 + Math.random() * 5;
+  const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, 1.5), cityMat);
+  b.position.set(-3 + i * 1.5 + Math.random() * 0.5, -4 + h / 2, -10 - Math.random() * 2);
+  b.renderOrder = 2;
+  scene.add(b);
+}
+
+// Outside > Rain: falling streaks between glass and city
+const RAIN = 500;
+const rainPos = new Float32Array(RAIN * 6);
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rainLines = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0xcfe2ff, transparent: true, opacity: 0.55 }));
+rainLines.frustumCulled = false;
+rainLines.visible = false;
+scene.add(outside(rainLines));
+const drops = Array.from({ length: RAIN }, () => ({ x: -1 + Math.random() * 6.2, y: Math.random() * 9, z: -5.8 - Math.random() * 3.5, v: 9 + Math.random() * 5 }));
+
+// Furniture > Bed: frame, mattress, blanket, pillows
+const bed = new THREE.Group();
+room.add(bed);
+box(bed, 3.4, 0.7, 5.2, 0x8a5a3c, -3.55, 0.45, -2.5, 0.08);
+box(bed, 3.4, 2.4, 0.3, 0x7a4e33, -3.55, 1.2, -5.0, 0.1);
+box(bed, 3.2, 0.5, 4.9, 0xfaf3ea, -3.55, 1.05, -2.45, 0.2);
+box(bed, 3.35, 0.32, 3.4, 0x7c9cc4, -3.55, 1.32, -1.65, 0.15);
+box(bed, 3.38, 0.12, 0.6, 0xf3e7d5, -3.55, 1.5, -3.25, 0.06);
+box(bed, 1.3, 0.38, 0.85, 0xffffff, -4.25, 1.45, -4.35, 0.18).rotation.x = -0.25;
+box(bed, 1.3, 0.38, 0.85, 0xfbe9e1, -2.85, 1.45, -4.35, 0.18).rotation.x = -0.25;
+box(bed, 0.9, 0.5, 0.4, 0xe3b04b, -3.6, 1.6, -3.9, 0.2).rotation.set(-0.3, 0.3, 0.1);
+
+// Furniture > Desk + chair + monitor with code + mug
+const desk = new THREE.Group();
+room.add(desk);
+box(desk, 3.6, 0.16, 1.6, 0xb98a5e, 2.1, 2.35, -4.3, 0.05);
+for (const [x, z] of [[0.45, -3.65], [3.75, -3.65], [0.45, -4.95], [3.75, -4.95]]) box(desk, 0.14, 2.3, 0.14, 0x8a6240, x, 1.15, z, 0.04);
+box(desk, 1.0, 0.7, 1.4, 0xa77a50, 3.1, 1.85, -4.3, 0.04);
+const codeTex = canvasTex(512, 300, (g, w, h) => {
+  g.fillStyle = '#1e2030'; g.fillRect(0, 0, w, h);
+  const cols = ['#ff7a90', '#9ece6a', '#7aa2f7', '#e0af68', '#bb9af7', '#c0caf5'];
+  for (let y = 18, i = 0; y < h - 10; y += 18, i++) {
+    let x = 16 + ((i * 7) % 4) * 18;
+    const n = 2 + ((i * 5) % 4);
+    for (let k = 0; k < n; k++) { const len = 30 + ((i * 13 + k * 29) % 90); g.fillStyle = cols[(i + k) % cols.length]; g.fillRect(x, y, len, 8); x += len + 10; }
+  }
+});
+const screenMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: codeTex, emissiveIntensity: 0.9 });
+box(desk, 1.9, 1.15, 0.1, 0x2a2a33, 1.7, 3.25, -4.75, 0.05);
+const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.75, 1.0), screenMat);
+screen.position.set(1.7, 3.25, -4.69);
+desk.add(screen);
+box(desk, 0.12, 0.5, 0.12, 0x2a2a33, 1.7, 2.6, -4.75, 0.04);
+box(desk, 0.6, 0.05, 0.4, 0x2a2a33, 1.7, 2.45, -4.75, 0.02);
+box(desk, 1.2, 0.06, 0.4, 0xe9e4dc, 1.7, 2.46, -4.05, 0.02);
+const mug = new THREE.Group();
+cyl(mug, 0.17, 0.15, 0.36, 0xe56b5d, 0, 0.18, 0, 16);
+const handle = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 6, 12), mat(0xe56b5d));
+handle.position.set(0.18, 0.2, 0);
+mug.add(handle);
+cyl(mug, 0.15, 0.15, 0.02, 0x4a2a18, 0, 0.33, 0, 16);
+mug.position.set(2.85, 2.43, -3.9);
+desk.add(mug);
+let sips = 0;
+clickable(mug, 'Mug · sip', () => { sips++; mug.rotation.z = -0.5; setTimeout(() => (mug.rotation.z = 0), 450); blip(520); });
+const chair = new THREE.Group();
+room.add(chair);
+box(chair, 1.3, 0.2, 1.3, 0x4f6d8f, 0, 1.45, 0, 0.1);
+box(chair, 1.3, 1.5, 0.18, 0x4f6d8f, 0, 2.3, 0.6, 0.1);
+cyl(chair, 0.07, 0.07, 1.1, 0x333333, 0, 0.85, 0, 8);
+for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; box(chair, 0.7, 0.08, 0.12, 0x333333, Math.cos(a) * 0.35, 0.25, Math.sin(a) * 0.35, 0.03).rotation.y = -a; }
+chair.position.set(1.9, 0, -2.75);
+chair.rotation.y = 0.35;
+
+// Furniture > Bookshelf with random books + radio on top
+const shelf = new THREE.Group();
+room.add(shelf);
+const SX = -4.75, SZ = 2.1;
+box(shelf, 0.9, 4.2, 0.12, 0x9b6b47, SX, 2.1, SZ - 1.25, 0.03);
+box(shelf, 0.9, 4.2, 0.12, 0x9b6b47, SX, 2.1, SZ + 1.25, 0.03);
+box(shelf, 0.1, 4.2, 2.6, 0x8a5e3e, SX - 0.42, 2.1, SZ, 0.02);
+const bookCols = [0xd9534f, 0x5b8fd6, 0xf0ad4e, 0x5cb85c, 0x8e6bbf, 0xe7d8c0, 0x2f4f6f, 0xc96f53];
+for (let s = 0; s < 4; s++) {
+  box(shelf, 0.9, 0.1, 2.5, 0x9b6b47, SX, 0.1 + s * 1.3, SZ, 0.02);
+  if (s === 3) continue;
+  let z = SZ - 1.12;
+  while (z < SZ + 1.05) {
+    const t = 0.12 + Math.random() * 0.12, hgt = 0.75 + Math.random() * 0.4;
+    if (Math.random() < 0.12) { z += 0.18; continue; }
+    const b = box(shelf, 0.62, hgt, t, bookCols[Math.floor(Math.random() * bookCols.length)], SX + 0.05, 0.15 + s * 1.3 + hgt / 2, z + t / 2, 0.02);
+    if (Math.random() < 0.08) b.rotation.x = 0.18;
+    z += t + 0.015;
+  }
+}
+const radio = new THREE.Group();
+box(radio, 0.7, 0.55, 1.1, 0xc4583a, 0, 0.28, 0, 0.1);
+const grill = canvasTex(128, 128, (g) => { g.fillStyle = '#e8d5b5'; g.fillRect(0, 0, 128, 128); g.fillStyle = '#8a6a4a'; for (let y = 8; y < 128; y += 12) for (let x = 8; x < 128; x += 12) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); } });
+const grillMesh = new THREE.Mesh(new THREE.CircleGeometry(0.2, 20), new THREE.MeshStandardMaterial({ map: grill }));
+grillMesh.position.set(0.36, 0.28, -0.2);
+grillMesh.rotation.y = Math.PI / 2;
+radio.add(grillMesh);
+const dialMat = new THREE.MeshStandardMaterial({ color: 0x332211, emissive: 0xffa040, emissiveIntensity: 0 });
+const dial = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.16), dialMat);
+dial.position.set(0.36, 0.33, 0.25);
+dial.rotation.y = Math.PI / 2;
+radio.add(dial);
+cyl(radio, 0.015, 0.015, 0.9, 0xbbbbbb, 0, 0.9, 0.4, 6).rotation.x = -0.4;
+radio.position.set(SX + 0.05, 4.0, SZ);
+shelf.add(radio);
+clickable(radio, 'Radio · lo-fi on/off', () => setMusic(!music));
+
+// Furniture > Rug, posters, clock on the left wall
+const rugTex = canvasTex(512, 512, (g) => {
+  const rings = ['#c96f53', '#f2d0a4', '#7a9cc4', '#f2d0a4', '#c96f53', '#e8b04b', '#f7ead8'];
+  rings.forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(256, 256, 256 - i * 34, 0, 7); g.fill(); });
+});
+const rug = new THREE.Mesh(new THREE.CircleGeometry(2.3, 48), new THREE.MeshStandardMaterial({ map: rugTex, roughness: 1 }));
+rug.rotation.x = -Math.PI / 2;
+rug.position.set(0.9, 0.02, 1.3);
+rug.receiveShadow = true;
+room.add(rug);
+function poster(draw, w, h, z, y) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: canvasTex(256, Math.round((256 * h) / w), draw), roughness: 0.9 }));
+  m.position.set(-5.19, y, z);
+  m.rotation.y = Math.PI / 2;
+  room.add(m);
+  box(room, 0.05, h + 0.12, w + 0.12, 0x3a2c2a, -5.23, y, z, 0.02);
+}
+poster((g, w, h) => { g.fillStyle = '#f6d6b8'; g.fillRect(0, 0, w, h); g.fillStyle = '#e8735a'; g.beginPath(); g.arc(w / 2, h * 0.42, w * 0.22, 0, 7); g.fill(); g.fillStyle = '#5a6f9a'; g.beginPath(); g.moveTo(0, h); g.lineTo(w * 0.35, h * 0.5); g.lineTo(w * 0.6, h * 0.75); g.lineTo(w * 0.8, h * 0.55); g.lineTo(w, h * 0.8); g.lineTo(w, h); g.fill(); }, 1.5, 2.0, -0.3, 4.6);
+poster((g, w, h) => { g.fillStyle = '#26324a'; g.fillRect(0, 0, w, h); g.fillStyle = '#f2c14e'; for (let i = 0; i < 30; i++) { g.globalAlpha = Math.random(); g.fillRect(Math.random() * w, Math.random() * h * 0.6, 3, 3); } g.globalAlpha = 1; g.fillStyle = '#9ec5e6'; g.beginPath(); g.arc(w * 0.7, h * 0.3, 28, 0, 7); g.fill(); g.fillStyle = '#1a2236'; g.fillRect(0, h * 0.75, w, h); }, 1.2, 1.5, 1.4, 4.9);
+const clock = new THREE.Group();
+cyl(clock, 0.55, 0.55, 0.1, 0xf7efe6, 0, 0, 0, 32).rotation.z = Math.PI / 2;
+const ring = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 8, 32), mat(0x3a2c2a));
+ring.rotation.y = Math.PI / 2;
+clock.add(ring);
+const hourHand = new THREE.Group(), minHand = new THREE.Group();
+box(hourHand, 0.03, 0.3, 0.06, 0x3a2c2a, 0, 0.15, 0, 0.01);
+box(minHand, 0.03, 0.45, 0.04, 0x3a2c2a, 0, 0.22, 0, 0.01);
+hourHand.position.x = minHand.position.x = 0.07;
+clock.add(hourHand, minHand);
+clock.position.set(-5.15, 5.4, -3.1);
+room.add(clock);
+
+// Furniture > Floor lamp with real point light
+const lamp = new THREE.Group();
+cyl(lamp, 0.45, 0.5, 0.1, 0x3a2c2a, 0, 0.05, 0, 24);
+cyl(lamp, 0.04, 0.04, 4.0, 0x3a2c2a, 0, 2.05, 0, 8);
+const shadeMat = new THREE.MeshStandardMaterial({ color: 0xf3dfbf, emissive: 0xffb45a, emissiveIntensity: 0, side: THREE.DoubleSide, roughness: 1 });
+const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.75, 0.8, 24, 1, true), shadeMat);
+shade.position.y = 4.2;
+lamp.add(shade);
+const lampLight = new THREE.PointLight(0xffb366, 0, 14, 1.4);
+lampLight.position.y = 3.9;
+lampLight.castShadow = true;
+lampLight.shadow.mapSize.set(512, 512);
+lampLight.shadow.bias = -0.002;
+lamp.add(lampLight);
+lamp.position.set(-4.1, 0, 4.3);
+room.add(lamp);
+clickable(lamp, 'Floor lamp · click', () => setLamp(!lampOn));
+
+// Furniture > Plant: pot + leaves that grow when watered
+const plant = new THREE.Group();
+cyl(plant, 0.48, 0.36, 0.8, 0xc8734a, 0, 0.4, 0, 18);
+cyl(plant, 0.44, 0.44, 0.05, 0x4a3020, 0, 0.78, 0, 18);
+const leaves = new THREE.Group();
+leaves.position.y = 0.8;
+plant.add(leaves);
+const leafGeo = new THREE.SphereGeometry(0.3, 8, 6).scale(0.55, 0.12, 1.4).translate(0, 0, 0.42);
+const leafMats = [mat(0x4f9a4a), mat(0x3f8a42), mat(0x5fae55)];
+const leafList = [];
+for (let i = 0; i < 26; i++) {
+  const pivot = new THREE.Group();
+  const a = i * 2.4, tilt = 0.4 + (i % 5) * 0.12;
+  pivot.rotation.set(0, a, 0);
+  const stem = new THREE.Group();
+  stem.rotation.x = -tilt;
+  stem.position.y = 0.05 + (i / 26) * 1.6;
+  const leaf = new THREE.Mesh(leafGeo, leafMats[i % 3]);
+  leaf.castShadow = true;
+  stem.add(leaf);
+  pivot.add(stem);
+  leaves.add(pivot);
+  leafList.push({ pivot, stem, leaf, at: i / 26 });
+}
+let growth = 0.35;
+function applyGrowth() {
+  for (const l of leafList) {
+    const s = THREE.MathUtils.clamp((growth - l.at * 0.85) * 3, 0, 1);
+    l.leaf.scale.setScalar(s * (0.8 + growth * 0.6));
+    l.stem.position.y = 0.05 + l.at * 1.6 * growth;
+  }
+}
+applyGrowth();
+plant.position.set(4.3, 0, -1.6);
+room.add(plant);
+clickable(plant, 'Plant · water it', () => { growth = Math.min(growth + 0.12, 1.25); applyGrowth(); for (let i = 0; i < 14; i++) spawnFx('drop', plant.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 3 + Math.random(), (Math.random() - 0.5) * 0.6))); blip(700); });
+
+// Furniture > Fairy lights draped along the walls
+const bulbs = [];
+const bulbCols = [0xffc36b, 0xff8fa3, 0x8fd3ff, 0xb6ff9a, 0xffe08a];
+function drape(a, b, n, sag) {
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, p = a.clone().lerp(b, t);
+    p.y -= Math.sin(t * Math.PI) * sag;
+    pts.push(p);
+  }
+  const wire = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.012, 4), mat(0x2a2a2a));
+  room.add(wire);
+  for (let i = 1; i < n; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshStandardMaterial({ color: bulbCols[i % 5], emissive: bulbCols[i % 5], emissiveIntensity: 0.1 }));
+    m.position.copy(pts[i]).y -= 0.07;
+    room.add(m);
+    bulbs.push(m);
+  }
+}
+drape(new THREE.Vector3(-5.15, 6.7, 4.8), new THREE.Vector3(-5.15, 6.7, -1.0), 14, 0.5);
+drape(new THREE.Vector3(-5.15, 6.7, -1.0), new THREE.Vector3(-5.15, 6.7, -5.15), 10, 0.35);
+drape(new THREE.Vector3(-5.15, 6.7, -5.15), new THREE.Vector3(5.0, 6.7, -5.15), 22, 0.55);
+const fairyLight = new THREE.PointLight(0xffb070, 0, 16, 1.5);
+fairyLight.position.set(-2, 6, -2);
+room.add(fairyLight);
+for (const b of bulbs) clickable(b, 'Fairy lights · toggle', () => setLights(!lightsOn));
+
+// Cat > Model: capsule body, head with ears, swinging legs, wavy tail
+const cat = new THREE.Group();
+const fur = mat(0xe8954a, { roughness: 1 }), belly = mat(0xfff1e0, { roughness: 1 }), dark = mat(0x2a1a14);
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.6, 6, 12).rotateX(Math.PI / 2), fur);
+body.position.y = 0.55;
+body.castShadow = true;
+cat.add(body);
+const chest = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), belly);
+chest.position.set(0, 0.5, 0.32);
+cat.add(chest);
+const head = new THREE.Group();
+head.position.set(0, 0.85, 0.5);
+cat.add(head);
+const skull = new THREE.Mesh(new THREE.SphereGeometry(0.26, 16, 12), fur);
+skull.scale.set(1.05, 0.92, 0.95);
+skull.castShadow = true;
+head.add(skull);
+for (const s of [-1, 1]) {
+  const ear = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.2, 4), fur);
+  ear.position.set(s * 0.14, 0.22, -0.02);
+  ear.rotation.z = -s * 0.25;
+  head.add(ear);
+}
+const eyes = [];
+for (const s of [-1, 1]) {
+  const e = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), dark);
+  e.position.set(s * 0.1, 0.04, 0.22);
+  head.add(e);
+  eyes.push(e);
+}
+const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), belly);
+muzzle.position.set(0, -0.07, 0.2);
+muzzle.scale.set(1.2, 0.8, 0.8);
+head.add(muzzle);
+const nose = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 5), mat(0xe87a8a));
+nose.position.set(0, -0.02, 0.29);
+head.add(nose);
+const legs = [];
+for (const [x, z] of [[-0.14, 0.3], [0.14, 0.3], [-0.14, -0.3], [0.14, -0.3]]) {
+  const hip = new THREE.Group();
+  hip.position.set(x, 0.45, z);
+  const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.06, 0.45, 8), fur);
+  leg.position.y = -0.22;
+  leg.castShadow = true;
+  hip.add(leg);
+  cat.add(hip);
+  legs.push(hip);
+}
+const tailSegs = [];
+for (let i = 0; i < 8; i++) {
+  const s = new THREE.Mesh(new THREE.SphereGeometry(0.065 - i * 0.003, 8, 6), fur);
+  s.castShadow = true;
+  cat.add(s);
+  tailSegs.push(s);
+}
+cat.position.set(1, 0, 2);
+room.add(cat);
+clickable(cat, 'Cat · pet', () => petCat());
+
+// Cat > Brain: wander, sit, nap on the rug, purr when petted
+const CAT_BOX = { x0: -1.0, x1: 3.6, z0: -1.6, z1: 4.4 };
+const catState = { mode: 'walk', target: new THREE.Vector3(2, 0, 3), timer: 0, heading: 0, sleepT: 0 };
+function pickTarget() {
+  if (Math.random() < 0.35) return new THREE.Vector3(rug.position.x + (Math.random() - 0.5), 0, rug.position.z + (Math.random() - 0.5));
+  return new THREE.Vector3(THREE.MathUtils.lerp(CAT_BOX.x0, CAT_BOX.x1, Math.random()), 0, THREE.MathUtils.lerp(CAT_BOX.z0, CAT_BOX.z1, Math.random()));
+}
+function petCat() {
+  catState.mode = 'pet';
+  catState.timer = 2.6;
+  for (let i = 0; i < 8; i++) setTimeout(() => spawnFx('heart', cat.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 1.3, (Math.random() - 0.5) * 0.6))), i * 120);
+  purr();
+}
+const _v = new THREE.Vector3(), _camFlat = new THREE.Vector3();
+function updateCat(dt, t) {
+  const st = catState;
+  let walking = false, lying = 0;
+  if (st.mode === 'walk') {
+    _v.subVectors(st.target, cat.position);
+    _v.y = 0;
+    const d = _v.length();
+    if (d < 0.08) {
+      const onRug = cat.position.distanceTo(rug.position) < 1.6;
+      const r = Math.random();
+      st.mode = onRug && r < 0.5 ? 'sleep' : r < 0.75 ? 'sit' : 'walk';
+      st.timer = st.mode === 'sleep' ? 14 + Math.random() * 10 : 3 + Math.random() * 4;
+      if (st.mode === 'walk') st.target = pickTarget();
+    } else {
+      const want = Math.atan2(_v.x, _v.z);
+      let dh = want - st.heading;
+      dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+      st.heading += dh * Math.min(1, dt * 5);
+      if (Math.abs(dh) < 0.8) cat.position.addScaledVector(_v.normalize(), Math.min(d, dt * 0.9));
+      walking = true;
+    }
+  } else if ((st.timer -= dt) <= 0) { st.mode = 'walk'; st.target = pickTarget(); }
+  if (st.mode === 'sleep') lying = 1;
+  st.sleepT += ((lying ? 1 : 0) - st.sleepT) * Math.min(1, dt * 2.5);
+  const k = st.sleepT;
+  cat.rotation.y = st.heading;
+  const step = walking ? t * 9 : 0;
+  legs.forEach((l, i) => { l.rotation.x = walking ? Math.sin(step + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.5 : 0; l.scale.y = 1 - k * 0.85; l.position.y = 0.45 - k * 0.3; });
+  body.position.y = 0.55 - k * 0.3 + (walking ? Math.abs(Math.sin(step)) * 0.02 : 0) + (st.mode === 'sleep' ? Math.sin(t * 1.6) * 0.012 : 0);
+  chest.position.y = 0.5 - k * 0.28;
+  head.position.set(k * 0.18, 0.85 - k * 0.48, 0.5 - k * 0.05);
+  // sit + pet: look at the viewer
+  if (st.mode === 'sit' || st.mode === 'pet') {
+    _camFlat.copy(camera.position).sub(cat.position);
+    const look = Math.atan2(_camFlat.x, _camFlat.z) - st.heading;
+    head.rotation.y += (THREE.MathUtils.clamp(Math.atan2(Math.sin(look), Math.cos(look)), -1, 1) - head.rotation.y) * Math.min(1, dt * 4);
+    head.rotation.z = st.mode === 'pet' ? Math.sin(t * 5) * 0.15 : 0;
+  } else { head.rotation.y *= 1 - Math.min(1, dt * 4); head.rotation.z = k * 0.5; }
+  const blink = st.mode === 'sleep' || st.mode === 'pet' ? 0.15 : Math.sin(t * 0.9) > 0.985 ? 0.15 : 1;
+  for (const e of eyes) e.scale.y = blink;
+  for (let i = 0; i < tailSegs.length; i++) {
+    const f = i / tailSegs.length;
+    const sway = Math.sin(t * (st.mode === 'pet' ? 6 : 2.2) - i * 0.5) * 0.25 * f;
+    tailSegs[i].position.set(sway + k * f * 0.5, 0.6 - k * 0.3 + Math.sin(f * 2.4) * 0.5 * (1 - k * 0.8), -0.5 - f * 0.55 * (1 - k * 0.4));
+  }
+  if (st.mode === 'sleep' && Math.random() < dt * 0.7) spawnFx('z', cat.position.clone().add(new THREE.Vector3(0, 0.8, 0)));
+}
+
+// Effects > Sprites: hearts, z's, music notes, steam, water drops
+const glyphTex = {};
+function glyph(ch, color) {
+  const key = ch + color;
+  if (!glyphTex[key]) glyphTex[key] = canvasTex(64, 64, (g) => { g.fillStyle = color; g.font = 'bold 48px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(ch, 32, 36); });
+  return glyphTex[key];
+}
+const puffTex = canvasTex(64, 64, (g) => { const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); });
+const fx = [];
+function spawnFx(kind, pos) {
+  const map = kind === 'heart' ? glyph('♥', '#ff5f7e') : kind === 'z' ? glyph('z', '#6a7bd0') : kind === 'note' ? glyph(Math.random() < 0.5 ? '♪' : '♫', ['#ff8a5c', '#5c9dff', '#5cc98a'][Math.floor(Math.random() * 3)]) : kind === 'drop' ? glyph('●', '#6ab8ff') : puffTex;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false }));
+  s.position.copy(pos);
+  const size = kind === 'steam' ? 0.25 : kind === 'drop' ? 0.12 : 0.38;
+  s.scale.setScalar(size);
+  scene.add(s);
+  fx.push({ s, kind, age: 0, life: kind === 'steam' ? 2.2 : kind === 'drop' ? 0.8 : 2.4, vx: (Math.random() - 0.5) * 0.3, size });
+}
+function updateFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.age += dt;
+    const k = f.age / f.life;
+    if (f.kind === 'drop') f.s.position.y -= dt * 4;
+    else { f.s.position.y += dt * (f.kind === 'steam' ? 0.35 : 0.6); f.s.position.x += Math.sin(f.age * 3) * dt * 0.2 + f.vx * dt; }
+    if (f.kind === 'steam') f.s.scale.setScalar(f.size * (1 + k * 2));
+    f.s.material.opacity = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
+    if (k >= 1) { scene.remove(f.s); f.s.material.dispose(); fx.splice(i, 1); }
+  }
+}
+
+// Audio > Engine: shared context, lo-fi loop scheduler, rain noise, purr, blips
+let actx, master, music = false, rainGain, nextBeat = 0, beat = 0, schedTimer = null;
+function ensureAudio() {
+  if (actx) return;
+  actx = new AudioContext();
+  master = actx.createGain();
+  master.gain.value = 0.7;
+  master.connect(actx.destination);
+  const len = actx.sampleRate * 2, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) { last = last * 0.97 + (Math.random() * 2 - 1) * 0.03; d[i] = last * 6; }
+  const src = actx.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const f = actx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 1400;
+  rainGain = actx.createGain();
+  rainGain.gain.value = 0;
+  src.connect(f).connect(rainGain).connect(master);
+  src.start();
+}
+function noiseBuf(sec) {
+  const len = Math.floor(actx.sampleRate * sec), buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+const midi = (n) => 440 * 2 ** ((n - 69) / 12);
+const CHORDS = [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]];
+const BPM = 74;
+function playNote(freq, t, dur, type, gain, cutoff = 1600) {
+  const o = actx.createOscillator(), g = actx.createGain(), f = actx.createBiquadFilter();
+  o.type = type; o.frequency.value = freq; o.detune.value = (Math.random() - 0.5) * 12;
+  f.type = 'lowpass'; f.frequency.value = cutoff;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(f).connect(g).connect(master);
+  o.start(t); o.stop(t + dur + 0.05);
+}
+function drum(kind, t) {
+  if (kind === 'kick') {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(40, t + 0.18);
+    g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.32);
+    return;
+  }
+  const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf(kind === 'snare' ? 0.25 : 0.06);
+  f.type = kind === 'snare' ? 'bandpass' : 'highpass';
+  f.frequency.value = kind === 'snare' ? 1800 : 7000;
+  g.gain.setValueAtTime(kind === 'snare' ? 0.18 : 0.05, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + (kind === 'snare' ? 0.22 : 0.05));
+  s.connect(f).connect(g).connect(master); s.start(t);
+}
+function schedule() {
+  const spb = 60 / BPM / 2;
+  while (nextBeat < actx.currentTime + 0.25) {
+    const t = nextBeat, eighth = beat % 8, bar = Math.floor(beat / 8) % 4, chord = CHORDS[bar];
+    // lazy swing on off-beats
+    const sw = eighth % 2 ? spb * 0.18 : 0;
+    if (eighth === 0) { for (const n of chord) playNote(midi(n), t, spb * 7.5, 'triangle', 0.045, 1100); playNote(midi(chord[0] - 12), t, spb * 3, 'sine', 0.16, 400); }
+    if (eighth === 4) playNote(midi(chord[0] - 12), t, spb * 3, 'sine', 0.13, 400);
+    if (eighth === 3 || eighth === 6 || (eighth === 7 && bar % 2)) playNote(midi(chord[(beat * 7) % 4] + 12), t + sw, spb * 1.5, 'sine', 0.05, 2400);
+    if (eighth === 0 || eighth === 5) drum('kick', t);
+    if (eighth === 2 || eighth === 6) drum('snare', t + sw);
+    drum('hat', t + sw);
+    nextBeat += spb;
+    beat++;
+  }
+}
+function setMusic(on) {
+  ensureAudio();
+  music = on;
+  if (on) { nextBeat = actx.currentTime + 0.1; beat = 0; schedTimer = setInterval(schedule, 60); schedule(); }
+  else clearInterval(schedTimer);
+  dialMat.emissiveIntensity = on ? 1.6 : 0;
+  document.getElementById('b-music').classList.toggle('on', on);
+}
+function purr() {
+  ensureAudio();
+  const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain(), lfo = actx.createOscillator(), lg = actx.createGain(), t = actx.currentTime;
+  s.buffer = noiseBuf(2.4);
+  f.type = 'lowpass'; f.frequency.value = 180;
+  g.gain.value = 0;
+  lfo.frequency.value = 24;
+  lg.gain.value = 0.35;
+  lfo.connect(lg).connect(g.gain);
+  const env = actx.createGain();
+  env.gain.setValueAtTime(0.0001, t); env.gain.exponentialRampToValueAtTime(1, t + 0.3); env.gain.exponentialRampToValueAtTime(0.0001, t + 2.3);
+  s.connect(f).connect(g).connect(env).connect(master);
+  s.start(t); lfo.start(t); lfo.stop(t + 2.4);
+}
+function blip(freq) {
+  ensureAudio();
+  const t = actx.currentTime;
+  playNote(freq, t, 0.25, 'sine', 0.12, 3000);
+  playNote(freq * 1.5, t + 0.07, 0.25, 'sine', 0.08, 3000);
+}
+
+// State > Toggles: night, rain, lamp, fairy lights (buttons + clicks share these)
+let night = false, rain = false, lampOn = false, lightsOn = false, nightK = 0;
+function setNight(on) { night = on; document.body.classList.toggle('night', on); document.getElementById('b-night').classList.toggle('on', on); if (on && !lampOn) setLamp(true); if (on && !lightsOn) setLights(true); }
+function setRain(on) { ensureAudio(); rain = on; rainLines.visible = on; document.getElementById('b-rain').classList.toggle('on', on); }
+function setLamp(on) { lampOn = on; document.getElementById('b-lamp').classList.toggle('on', on); blip(on ? 660 : 440); }
+function setLights(on) { lightsOn = on; document.getElementById('b-lights').classList.toggle('on', on); }
+document.getElementById('b-night').onclick = () => setNight(!night);
+document.getElementById('b-rain').onclick = () => setRain(!rain);
+document.getElementById('b-music').onclick = () => setMusic(!music);
+document.getElementById('b-lights').onclick = () => setLights(!lightsOn);
+document.getElementById('b-lamp').onclick = () => setLamp(!lampOn);
+
+// Interaction > Pointer: hover tooltip + glow, click fires action (ignores orbit drags)
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tip = document.getElementById('tip');
+let hovered = null, downAt = null;
+function hit(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const h = ray.intersectObjects(clickables, true)[0];
+  return h ? h.object.userData.click : null;
+}
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const c = hit(e);
+  hovered = c;
+  renderer.domElement.style.cursor = c ? 'pointer' : 'grab';
+  tip.classList.toggle('show', !!c);
+  if (c) { tip.textContent = c.label; tip.style.left = `${e.clientX}px`; tip.style.top = `${e.clientY}px`; }
+});
+renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  const c = hit(e);
+  if (c) c.act();
+});
+
+// Run engine: blend day/night, animate rain, steam, notes, clock, cat
+const clockT = new THREE.Clock();
+let steamT = 0, noteT = 0;
+const dayHemi = new THREE.Color(0xfff1e0), nightHemi = new THREE.Color(0x4a4f8a);
+function loop() {
+  const dt = Math.min(clockT.getDelta(), 0.05), t = clockT.elapsedTime;
+  nightK += ((night ? 1 : 0) - nightK) * Math.min(1, dt * 1.5);
+  skyU.uNight.value = nightK;
+  skyU.uRain.value += ((rain ? 1 : 0) - skyU.uRain.value) * Math.min(1, dt * 2);
+  skyU.uTime.value = t;
+  sunLight.intensity = THREE.MathUtils.lerp(2.6, 0.35, nightK) * (1 - skyU.uRain.value * 0.55);
+  sunLight.color.setHSL(THREE.MathUtils.lerp(0.09, 0.63, nightK), 0.6, THREE.MathUtils.lerp(0.9, 0.75, nightK));
+  hemi.color.copy(dayHemi).lerp(nightHemi, nightK);
+  hemi.intensity = THREE.MathUtils.lerp(1.0, 0.22, nightK);
+  fill.intensity = THREE.MathUtils.lerp(0.5, 0.05, nightK);
+  cityMat.emissiveIntensity = nightK * 1.2;
+  cityMat.color.setScalar(1 - nightK * 0.75);
+  const lampK = lampOn ? 1 : 0;
+  lampLight.intensity += (lampK * 9 - lampLight.intensity) * Math.min(1, dt * 8);
+  shadeMat.emissiveIntensity = lampLight.intensity / 9 * 1.4;
+  for (let i = 0; i < bulbs.length; i++) bulbs[i].material.emissiveIntensity = lightsOn ? 1.6 + Math.sin(t * 2 + i * 1.7) * 0.6 : 0.08;
+  fairyLight.intensity += ((lightsOn ? 3.5 : 0) - fairyLight.intensity) * Math.min(1, dt * 6);
+  screenMat.emissiveIntensity = 0.7 + Math.sin(t * 7) * 0.03;
+  if (actx) rainGain.gain.value += ((rain ? 0.25 : 0) - rainGain.gain.value) * Math.min(1, dt * 2);
+
+  if (rain) {
+    for (let i = 0; i < RAIN; i++) {
+      const d = drops[i];
+      d.y -= d.v * dt;
+      if (d.y < -2) { d.y = 8 + Math.random() * 2; d.x = -1 + Math.random() * 6.2; }
+      rainPos.set([d.x, d.y, d.z, d.x - 0.05, d.y + 0.35, d.z], i * 6);
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+  if ((steamT += dt) > 0.35 && sips < 12) { steamT = 0; spawnFx('steam', mug.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3((Math.random() - 0.5) * 0.1, 0.45, 0))); }
+  if (music && (noteT += dt) > 0.7) { noteT = 0; spawnFx('note', radio.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0.3, 0.8, (Math.random() - 0.5) * 0.6))); }
+  for (const l of leafList) l.pivot.rotation.z = Math.sin(t * 1.3 + l.at * 6) * 0.03;
+  const now = new Date();
+  minHand.rotation.x = -((now.getMinutes() + now.getSeconds() / 60) / 60) * Math.PI * 2;
+  hourHand.rotation.x = -(((now.getHours() % 12) + now.getMinutes() / 60) / 12) * Math.PI * 2;
+  updateCat(dt, t);
+  updateFx(dt);
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+// match real clock: after 19:00 or before 6:00 start in night mode
+{ const h = new Date().getHours(); if (h >= 19 || h < 6) setNight(true); }
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

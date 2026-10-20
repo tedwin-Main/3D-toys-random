@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Galaxy Generator</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: ui-rounded, system-ui, sans-serif; color: #e8ecff; }
+  canvas { display: block; }
+  #intro { position: fixed; left: 18px; bottom: 18px; font-size: 12.5px; line-height: 1.7; opacity: 0.75; pointer-events: none; }
+  #intro b { font-size: 22px; letter-spacing: 0.04em; display: block; opacity: 1; }
+  #bang { position: fixed; left: 18px; top: 18px; font: inherit; font-weight: 700; padding: 10px 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.3); background: rgba(255,255,255,0.08); color: #fff; cursor: pointer; backdrop-filter: blur(6px); }
+  #bang:hover { background: rgba(255,255,255,0.18); }
+  .lil-gui { --width: 260px; }
+</style>
+</head>
+<body>
+<button id="bang">💥 Big Bang</button>
+<div id="intro"><b>GALAXY GENERATOR</b>Hover to warp spacetime · drag to orbit · scroll to zoom<br>Tweak arms, spin, colors on the right · 💥 to rebuild from a singularity</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/", "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19.1/+esm" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/galaxy-generator/index.html
+ * PURPOSE: GPU spiral galaxy: shader-animated differential rotation, mouse gravity warp, big-bang rebuild, black hole disk
+ * UI: Galaxy Generator page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import GUI from 'lil-gui';
+
+// Scene > Renderer: camera, controls, bloom
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(0, 7, 11);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.25;
+controls.minDistance = 2;
+controls.maxDistance = 60;
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.5, 0.15);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// Galaxy > Params: tweakable via GUI, rebuild on change
+const P = {
+  count: 200000, size: 42, radius: 6, branches: 4, spin: 1.1, randomness: 0.32, power: 3,
+  inside: '#ff8a3d', outside: '#3d6bff', speed: 0.35, warp: 1.2, bloom: 0.7,
+};
+
+// Galaxy > Shader: per-particle orbit angle ∝ 1/r, big-bang ease, mouse repulsion
+const vertexShader = /* glsl */ `
+  uniform float uTime, uSize, uBang, uSpeed, uWarp;
+  uniform vec3 uMouse;
+  attribute float aScale;
+  attribute vec3 aRandom;
+  varying vec3 vColor;
+  varying float vGlow;
+  void main() {
+    vec3 p = position;
+    float r = length(p.xz);
+    float angle = atan(p.x, p.z) + uTime * uSpeed * (1.0 / (r + 0.35));
+    p.x = sin(angle) * r;
+    p.z = cos(angle) * r;
+    p += aRandom;
+    float t = clamp(uBang, 0.0, 1.0);
+    float e = 1.0 - pow(1.0 - t, 4.0);
+    p *= e;
+    p.y += (1.0 - e) * aRandom.y * 6.0;
+    vec3 toM = p - uMouse;
+    float d = length(toM);
+    float push = uWarp * exp(-d * d * 1.6);
+    p += normalize(toM + 1e-4) * push * 0.9;
+    p.y += push * 0.6;
+    vGlow = push;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = uSize * aScale * (1.0 + push * 1.5) * (1.0 / -mv.z);
+    vColor = color;
+  }`;
+const fragmentShader = /* glsl */ `
+  varying vec3 vColor;
+  varying float vGlow;
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    float s = pow(1.0 - clamp(d * 2.0, 0.0, 1.0), 3.5);
+    vec3 c = mix(vColor, vec3(1.0, 0.95, 0.9), clamp(vGlow * 0.8, 0.0, 1.0));
+    gl_FragColor = vec4(c * s * 0.55, 1.0);
+  }`;
+const uniforms = {
+  uTime: { value: 0 }, uSize: { value: P.size * renderer.getPixelRatio() }, uBang: { value: 0 }, uSpeed: { value: P.speed },
+  uMouse: { value: new THREE.Vector3(999, 0, 999) }, uWarp: { value: P.warp },
+};
+const material = new THREE.ShaderMaterial({ vertexShader, fragmentShader, uniforms, vertexColors: true, depthWrite: false, blending: THREE.AdditiveBlending });
+
+// Galaxy > Builder: log-ish radial spread, curved arms, power-law scatter
+let galaxy = null;
+function build() {
+  if (galaxy) { galaxy.geometry.dispose(); scene.remove(galaxy); }
+  const n = P.count, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), scale = new Float32Array(n), rnd = new Float32Array(n * 3);
+  const cin = new THREE.Color(P.inside), cout = new THREE.Color(P.outside), c = new THREE.Color();
+  const scatter = () => Math.pow(Math.random(), P.power) * (Math.random() < 0.5 ? 1 : -1);
+  for (let i = 0; i < n; i++) {
+    const r = Math.pow(Math.random(), 1.4) * P.radius;
+    const branch = ((i % P.branches) / P.branches) * Math.PI * 2;
+    const a = branch + r * P.spin;
+    pos[i * 3] = Math.sin(a) * r;
+    pos[i * 3 + 1] = 0;
+    pos[i * 3 + 2] = Math.cos(a) * r;
+    rnd[i * 3] = scatter() * P.randomness * r;
+    rnd[i * 3 + 1] = scatter() * P.randomness * r * 0.35;
+    rnd[i * 3 + 2] = scatter() * P.randomness * r;
+    c.copy(cin).lerp(cout, r / P.radius);
+    if (Math.random() < 0.02) c.setHSL(Math.random(), 0.6, 0.8);
+    col.set([c.r, c.g, c.b], i * 3);
+    scale[i] = Math.random() < 0.01 ? rand(2, 4) : Math.random();
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aScale', new THREE.BufferAttribute(scale, 1));
+  geo.setAttribute('aRandom', new THREE.BufferAttribute(rnd, 3));
+  galaxy = new THREE.Points(geo, material);
+  galaxy.frustumCulled = false;
+  scene.add(galaxy);
+}
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// Galaxy > Core: black hole sphere + swirling accretion disk shader
+const core = new THREE.Group();
+scene.add(core);
+core.add(new THREE.Mesh(new THREE.SphereGeometry(0.22, 32, 16), new THREE.MeshBasicMaterial({ color: 0x000000 })));
+const diskMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: uniforms.uTime },
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: /* glsl */ `
+    uniform float uTime; varying vec2 vUv;
+    void main(){
+      vec2 p = vUv - 0.5; float r = length(p) * 2.0; float a = atan(p.y, p.x);
+      float ring = smoothstep(0.22, 0.3, r) * (1.0 - smoothstep(0.5, 1.0, r));
+      float swirl = 0.6 + 0.4 * sin(a * 6.0 - uTime * 4.0 + r * 18.0);
+      vec3 c = mix(vec3(1.0, 0.85, 0.5), vec3(1.0, 0.35, 0.1), r);
+      gl_FragColor = vec4(c * ring * swirl * 1.6, 1.0);
+    }`,
+});
+const disk = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), diskMat);
+disk.rotation.x = -Math.PI / 2;
+core.add(disk);
+
+// Scene > Backdrop: distant static starfield
+{
+  const n = 4000, a = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const v = new THREE.Vector3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).normalize().multiplyScalar(rand(80, 160));
+    a.set([v.x, v.y, v.z], i * 3);
+  }
+  scene.add(new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(a, 3)), new THREE.PointsMaterial({ color: 0x9aa6ff, size: 0.22, transparent: true, opacity: 0.45 })));
+}
+
+// HUD > GUI: sliders rebuild galaxy, live uniforms update in place
+const gui = new GUI({ title: 'Galaxy' });
+const shape = gui.addFolder('Shape');
+shape.add(P, 'count', 10000, 400000, 1000).onFinishChange(build);
+shape.add(P, 'radius', 1, 12, 0.1).onFinishChange(build);
+shape.add(P, 'branches', 1, 12, 1).onFinishChange(build);
+shape.add(P, 'spin', -3, 3, 0.01).onFinishChange(build);
+shape.add(P, 'randomness', 0, 1, 0.01).onFinishChange(build);
+shape.add(P, 'power', 1, 8, 0.1).onFinishChange(build);
+const look = gui.addFolder('Look');
+look.addColor(P, 'inside').onFinishChange(build);
+look.addColor(P, 'outside').onFinishChange(build);
+look.add(P, 'size', 4, 120, 1).onChange((v) => (uniforms.uSize.value = v * renderer.getPixelRatio()));
+look.add(P, 'bloom', 0, 2.5, 0.01).onChange((v) => (bloom.strength = v));
+const motion = gui.addFolder('Motion');
+motion.add(P, 'speed', 0, 2, 0.01).onChange((v) => (uniforms.uSpeed.value = v));
+motion.add(P, 'warp', 0, 3, 0.01).name('mouse warp').onChange((v) => (uniforms.uWarp.value = v));
+motion.add(controls, 'autoRotate').name('camera drift');
+gui.add({ random: () => {
+  Object.assign(P, { branches: (rand(2, 7)) | 0, spin: rand(-2, 2), randomness: rand(0.15, 0.5), power: rand(2, 4.5), inside: `#${new THREE.Color().setHSL(Math.random(), 0.9, 0.6).getHexString()}`, outside: `#${new THREE.Color().setHSL(Math.random(), 0.9, 0.5).getHexString()}` });
+  gui.controllersRecursive().forEach((c) => c.updateDisplay());
+  bigBang();
+} }, 'random').name('🎲 Randomize');
+if (innerWidth < 640) gui.close();
+
+// HUD > Big Bang: rebuild + replay expansion from center
+let bangT = 0;
+function bigBang() { build(); bangT = 0; }
+document.getElementById('bang').onclick = bigBang;
+
+// Interaction > Mouse warp: project cursor onto galactic plane
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
+const mouseTarget = new THREE.Vector3(999, 0, 999);
+addEventListener('pointermove', (e) => {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (ray.ray.intersectPlane(plane, hit)) mouseTarget.copy(hit);
+});
+addEventListener('pointerleave', () => mouseTarget.set(999, 0, 999));
+
+// Run engine: animate uniforms, render with bloom
+build();
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  uniforms.uTime.value += dt;
+  bangT = Math.min(bangT + dt / 3.2, 1);
+  uniforms.uBang.value = bangT;
+  uniforms.uMouse.value.lerp(mouseTarget, 1 - Math.exp(-dt * 8));
+  disk.rotation.z += dt * 0.6;
+  controls.update();
+  composer.render();
+  requestAnimationFrame(loop);
+}
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

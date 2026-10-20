@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Domino Run</title>
+<style>
+  :root { --ink: #2a1f17; --card: rgba(255, 250, 242, 0.88); --accent: #e8573c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f3e6d4; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 16px; box-shadow: 0 8px 28px rgba(80, 50, 20, 0.16); user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 280px; }
+  #intro h1 { margin: 0 0 4px; font-size: 19px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.6; opacity: 0.8; }
+  #stats { top: 16px; right: 16px; padding: 12px 16px; text-align: right; font-variant-numeric: tabular-nums; }
+  #stats b { font-size: 26px; display: block; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: transparent; border: 0; padding: 8px 11px; border-radius: 10px; cursor: pointer; }
+  #bar button:hover { background: rgba(0,0,0,0.06); }
+  #bar button.on { background: var(--ink); color: #fff; }
+  #bar .sep { width: 1px; background: rgba(0,0,0,0.12); margin: 4px 2px; }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Domino Run</h1><p>Drag on the table to lay dominoes · click a domino to tip it · right-drag to orbit, scroll to zoom<br>Try a preset, then knock the first one over.</p></div>
+<div id="stats" class="card"><b id="fallen">0 / 0</b>dominoes down</div>
+<div id="bar" class="card">
+  <button data-preset="spiral">🌀 Spiral</button><button data-preset="heart">❤️ Heart</button><button data-preset="snake">🐍 Snake</button><button data-preset="grow">📈 Growing</button><button data-preset="split">🔱 Split</button>
+  <div class="sep"></div>
+  <button id="go">👉 Push first</button><button id="reset">↺ Stand up</button><button id="slow">🐢 Slow-mo</button><button id="follow">🎥 Follow</button><button id="clear">🗑 Clear</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/domino-chain/index.html
+ * PURPOSE: draw domino paths on a table, hinge-model topple chains with clack audio, presets incl. growing dominoes
+ * UI: Domino Run page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// Scene > Renderer: warm room, soft shadows, orbit on right button only
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf3e6d4);
+scene.fog = new THREE.Fog(0xf3e6d4, 30, 70);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 14, 15);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.46;
+controls.minDistance = 4;
+controls.maxDistance = 40;
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0x8a6a4a, 1.1));
+const sun = new THREE.DirectionalLight(0xfff0dc, 2.2);
+sun.position.set(-8, 18, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 16, bottom: -16, near: 1, far: 50 });
+sun.shadow.bias = -0.0005;
+sun.shadow.radius = 4;
+scene.add(sun);
+
+// Scene > Table: procedural plank texture
+const TABLE = 26;
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 8; i++) {
+    const base = 150 + Math.random() * 30;
+    g.fillStyle = `rgb(${base + 40},${base - 5},${base - 60})`;
+    g.fillRect(0, i * 128, 1024, 128);
+    for (let k = 0; k < 60; k++) {
+      g.strokeStyle = `rgba(90,50,20,${Math.random() * 0.12})`;
+      g.lineWidth = Math.random() * 2;
+      const y = i * 128 + Math.random() * 128;
+      g.beginPath(); g.moveTo(0, y);
+      for (let x = 0; x <= 1024; x += 64) g.lineTo(x, y + Math.sin(x * 0.01 + k) * 4);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(60,30,10,0.4)';
+    g.fillRect(0, i * 128, 1024, 3);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const table = new THREE.Mesh(new THREE.BoxGeometry(TABLE, 0.6, TABLE), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 }));
+  table.position.y = -0.3;
+  table.receiveShadow = true;
+  scene.add(table);
+}
+
+// Dominoes > Storage: hinge state per domino + one instanced mesh with per-domino color/scale
+// own hinge model, not a rigid-body engine: cannon-es box stacks stall mid-lean and never chain
+const DW = 0.5, DH = 1.0, DD = 0.12, SPACING = 0.5, MAX = 900, G = 38;
+const dominoes = [];
+let nbrVersion = 0;
+const dominoMesh = new THREE.InstancedMesh(new RoundedBoxGeometry(DW, DH, DD, 2, 0.025), new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.05 }), MAX);
+dominoMesh.count = 0;
+dominoMesh.castShadow = dominoMesh.receiveShadow = true;
+dominoMesh.frustumCulled = false;
+scene.add(dominoMesh);
+const _c = new THREE.Color();
+function addDomino(x, z, angle, scale = 1) {
+  if (dominoes.length >= MAX || Math.abs(x) > TABLE / 2 - 0.4 || Math.abs(z) > TABLE / 2 - 0.4) return null;
+  for (const d of dominoes) if (Math.hypot(d.x - x, d.z - z) < 0.22 * Math.min(scale, d.scale)) return null;
+  const i = dominoes.length;
+  const d = { x, z, angle, scale, i, fx: Math.sin(angle), fz: Math.cos(angle), h: DH * scale, w: DW * scale, t: DD * scale, m: scale ** 3, theta: 0, omega: 0, dir: 0, tau: 0, push: 0, pushAcc: 0, nbrs: null, nbrV: -1 };
+  d.I = (d.m * (d.h * d.h + d.t * d.t)) / 3;
+  dominoMesh.setColorAt(i, _c.setHSL((i * 0.013) % 1, 0.62, 0.55));
+  dominoMesh.instanceColor.needsUpdate = true;
+  dominoes.push(d);
+  dominoMesh.count = dominoes.length;
+  nbrVersion++;
+  return d;
+}
+function clearAll() {
+  dominoes.length = 0;
+  dominoMesh.count = 0;
+  nbrVersion++;
+}
+function standUp() {
+  for (const d of dominoes) Object.assign(d, { theta: 0, omega: 0, dir: 0, push: 0, pushAcc: 0, nbrV: -1 });
+  pushed = false;
+}
+
+// Physics > Neighbors: dominoes ahead within reach and overlapping laterally, cached until layout changes
+function neighbors(A) {
+  if (A.nbrV === nbrVersion) return A.nbrs;
+  const Fx = A.fx * A.dir, Fz = A.fz * A.dir;
+  const list = [];
+  for (const B of dominoes) {
+    if (B === A) continue;
+    const rx = B.x - A.x, rz = B.z - A.z;
+    const along = rx * Fx + rz * Fz;
+    if (along <= 0 || along > A.h + A.t + B.t) continue;
+    const lat = Math.abs(rx * Fz - rz * Fx);
+    const bf = Math.abs(B.fx * Fz - B.fz * Fx);
+    const half = (B.w / 2) * Math.sqrt(1 - bf * bf) + (B.t / 2) * bf;
+    if (lat < (A.w / 2) * 0.9 + half) list.push(B);
+  }
+  A.nbrs = list;
+  A.nbrV = nbrVersion;
+  return list;
+}
+
+// Physics > Contact: max tilt of A before touching B (corner vs B's back face, or A's face vs B's top edge)
+function contactAngle(A, B) {
+  const Fx = A.fx * A.dir, Fz = A.fz * A.dir;
+  const fb = B.fx * Fx + B.fz * Fz;
+  const dB = B.dir || (fb >= 0 ? 1 : -1);
+  const tb = Math.max(0, B.theta * dB * fb);
+  const g = (B.x - A.x) * Fx + (B.z - A.z) * Fz - A.t / 2 + B.t / 2;
+  const c = Math.cos(tb), s = Math.sin(tb);
+  let best = Infinity, hc = 0;
+  const k = (g * c - B.t) / A.h;
+  if (k >= -1 && k <= 1) {
+    const th = tb + Math.asin(k);
+    const tt = (A.h * Math.sin(th) - g + B.t * c) * s + (A.h * Math.cos(th) - B.t * s) * c;
+    if (tt >= 0 && tt <= B.h) { best = th; hc = tt; }
+  }
+  const Ex = g - B.t * c + B.h * s, Ey = B.t * s + B.h * c;
+  if (Ex * Ex + Ey * Ey <= A.h * A.h) {
+    const th = Math.atan2(Ex, Ey);
+    if (th < best) { best = th; hc = B.h; }
+  }
+  return best === Infinity ? null : { th: best, hc, dB, opposed: B.dir !== 0 && B.dir * fb < -0.2 };
+}
+
+// Physics > Step: gravity about pivot edge, floor stop, then impacts + lean pushes
+function physicsStep(h) {
+  for (const d of dominoes) {
+    if (!d.dir) continue;
+    d.push = d.pushAcc;
+    d.pushAcc = 0;
+    d.tau = d.m * G * ((d.h / 2) * Math.sin(d.theta) - (d.t / 2) * Math.cos(d.theta));
+    d.omega += (d.tau / d.I + d.push) * h;
+    d.omega = Math.min(d.omega * (1 - 0.3 * h), 14 / Math.sqrt(d.scale));
+    d.theta += d.omega * h;
+    if (d.theta < 0) { d.theta = 0; if (d.omega < 0) d.omega = 0; }
+    if (d.theta >= Math.PI / 2) {
+      if (d.omega > 1.5) clack(d.omega * 0.12, d.scale);
+      d.theta = Math.PI / 2;
+      d.omega *= -0.15;
+    }
+  }
+  for (const A of dominoes) {
+    if (!A.dir || A.theta <= 0) continue;
+    for (const B of neighbors(A)) {
+      const ct = contactAngle(A, B);
+      if (!ct || A.theta < ct.th) continue;
+      A.theta = ct.th;
+      // B already flat: just a floor to rest on
+      if (B.theta > 1.45) { if (A.omega > 0) A.omega *= -0.1; continue; }
+      // head-on pair (sharp hairpin): they prop each other up, no push feedback
+      if (ct.opposed) { A.omega = Math.min(A.omega, 0); continue; }
+      if (!B.dir) { B.dir = ct.dB; followIdx = B.i; }
+      const hc = Math.max(ct.hc, 0.1 * B.h);
+      const vA = A.omega * A.h, vB = B.omega * hc;
+      if (vA > vB) {
+        // inelastic-ish swap of contact-point speeds, wood restitution
+        const mA = A.I / (A.h * A.h), mB = B.I / (hc * hc), dv = vA - vB, e = 0.25;
+        const v = (mA * vA + mB * vB) / (mA + mB);
+        A.omega = (v - (e * mB * dv) / (mA + mB)) / A.h;
+        B.omega = (v + (e * mA * dv) / (mA + mB)) / hc;
+        if (dv > 0.4) clack(dv, B.scale);
+      }
+      const tq = A.tau + A.push * A.I;
+      if (tq > 0) B.pushAcc += ((tq / A.h) * hc) / B.I;
+    }
+  }
+}
+
+// Dominoes > Path laying: resample polyline at fixed spacing, face along tangent
+let pathLast = null, pathPrev = null;
+function layAlong(x, z, scaleFn = () => 1) {
+  if (!pathLast) { pathLast = { x, z }; return; }
+  let dx = x - pathLast.x, dz = z - pathLast.z, dist = Math.hypot(dx, dz);
+  const s = scaleFn(dominoes.length);
+  while (dist >= SPACING * s) {
+    const t = (SPACING * s) / dist;
+    const nx = pathLast.x + dx * t, nz = pathLast.z + dz * t;
+    addDomino(nx, nz, Math.atan2(dx, dz), s);
+    pathPrev = pathLast;
+    pathLast = { x: nx, z: nz };
+    dx = x - nx; dz = z - nz; dist = Math.hypot(dx, dz);
+  }
+}
+function layPolyline(points, scaleFn) {
+  pathLast = null;
+  for (const [x, z] of points) layAlong(x, z, scaleFn);
+  pathLast = null;
+}
+
+// Dominoes > Presets: spiral, heart, snake, growing, split fork
+const PRESETS = {
+  spiral: () => { const pts = []; for (let a = 0; a < Math.PI * 9; a += 0.02) { const r = 1.2 + a * 0.36; pts.push([Math.cos(a) * r, Math.sin(a) * r]); } return [pts.reverse()]; },
+  // heart: short stem into the bottom tip, then both halves race up to meet at the dip
+  heart: () => {
+    const f = (t) => [16 * Math.sin(t) ** 3 * 0.55, -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * 0.55];
+    const a = [], b = [];
+    for (let t = 0; t <= Math.PI; t += 0.01) { a.push(f(Math.PI - t)); b.push(f(Math.PI + t)); }
+    return [[[0, 12.2], [0, 9.35]], a, b];
+  },
+  snake: () => { const pts = []; for (let x = -11; x <= 11; x += 0.05) pts.push([x, Math.sin(x * 0.7) * 4]); return [pts]; },
+  grow: () => { const pts = []; for (let x = -11; x <= 12; x += 0.05) pts.push([x, 0]); return [pts]; },
+  split: () => {
+    const trunk = [], a = [], b = [];
+    for (let z = 8; z >= 0; z -= 0.05) trunk.push([0, z]);
+    for (let t = 0; t <= 1; t += 0.01) { a.push([-Math.sin(t * Math.PI / 2) * 7, -t * 8]); b.push([Math.sin(t * Math.PI / 2) * 7, -t * 8]); }
+    return [trunk, [[0, 0.3], ...a.slice(1)], [[0, 0.3], ...b.slice(1)]];
+  },
+};
+function loadPreset(name) {
+  clearAll();
+  pushed = false;
+  const lines = PRESETS[name]();
+  const scaleFn = name === 'grow' ? (i) => Math.min(1.09 ** i * 0.35, 3.2) : undefined;
+  for (const line of lines) layPolyline(line, scaleFn);
+  updateStats();
+}
+
+// Interaction > Pointer: click domino tips it; drag on table lays a path
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tablePlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3();
+let drawing = false, downAt = null;
+const _look = new THREE.Vector3();
+function pointerToTable(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  return ray.ray.intersectPlane(tablePlane, hit) ? hit : null;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const h = ray.intersectObject(dominoMesh, false)[0];
+  if (h) {
+    const d = dominoes[h.instanceId];
+    camera.getWorldDirection(_look);
+    tip(d, d.fx * _look.x + d.fz * _look.z >= 0 ? 1 : -1);
+    return;
+  }
+  const p = pointerToTable(e);
+  if (!p) return;
+  drawing = true;
+  downAt = [e.clientX, e.clientY];
+  pathLast = null;
+  layAlong(p.x, p.z);
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!drawing) return;
+  const p = pointerToTable(e);
+  if (p) { layAlong(p.x, p.z); updateStats(); }
+});
+addEventListener('pointerup', () => { drawing = false; pathLast = null; });
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function tip(d, dir = 1) {
+  if (!d || (d.dir && d.dir !== dir)) return;
+  d.dir = dir;
+  d.omega = Math.max(d.omega, 2.6 / Math.sqrt(d.scale));
+  pushed = true;
+  followIdx = d.i;
+}
+
+// Effects > Audio: wooden clack per impact, pitch by domino size, throttled
+let actx, lastClack = 0;
+function clack(v, size) {
+  if (!actx || v < 0.3) return;
+  const now = actx.currentTime;
+  if (now - lastClack < 0.012) return;
+  lastClack = now;
+  const len = Math.floor(actx.sampleRate * 0.04), buf = actx.createBuffer(1, len, actx.sampleRate), data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 8);
+  const src = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = buf; f.type = 'bandpass'; f.frequency.value = (2600 + Math.random() * 900) / Math.sqrt(size); f.Q.value = 3;
+  g.gain.value = Math.min(v * 0.3, 0.9);
+  src.connect(f).connect(g).connect(actx.destination); src.start();
+}
+addEventListener('pointerdown', () => (actx ??= new AudioContext()), { once: true });
+
+// HUD > Buttons + stats
+let slow = false, follow = false, pushed = false, followIdx = 0;
+document.querySelectorAll('[data-preset]').forEach((b) => (b.onclick = () => { actx ??= new AudioContext(); loadPreset(b.dataset.preset); }));
+document.getElementById('go').onclick = () => { actx ??= new AudioContext(); tip(dominoes[0]); };
+document.getElementById('reset').onclick = standUp;
+document.getElementById('clear').onclick = () => { clearAll(); updateStats(); };
+document.getElementById('slow').onclick = (e) => { slow = !slow; e.target.classList.toggle('on', slow); };
+document.getElementById('follow').onclick = (e) => { follow = !follow; e.target.classList.toggle('on', follow); };
+const fallenEl = document.getElementById('fallen');
+function countFallen() {
+  let n = 0, newest = -1;
+  for (const d of dominoes) if (d.theta > 0.72) { n++; newest = Math.max(newest, d.i); }
+  return [n, newest];
+}
+function updateStats() { const [n] = countFallen(); fallenEl.textContent = `${n} / ${dominoes.length}`; }
+
+// Run engine: fixed substeps, hinge pose to instance matrix, follow cam
+const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _qx = new THREE.Quaternion(), _s = new THREE.Vector3(), _off = new THREE.Vector3();
+const AXIS_X = new THREE.Vector3(1, 0, 0), AXIS_Y = new THREE.Vector3(0, 1, 0);
+const clock = new THREE.Clock();
+let statT = 0, acc = 0;
+const followTarget = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  acc += dt * (slow ? 0.25 : 1);
+  for (let n = 0; acc >= 1 / 240 && n < 16; n++) { physicsStep(1 / 240); acc -= 1 / 240; }
+  for (const d of dominoes) {
+    const sd = d.dir || 1;
+    _q.setFromAxisAngle(AXIS_Y, d.angle).multiply(_qx.setFromAxisAngle(AXIS_X, sd * d.theta));
+    _off.set(0, d.h / 2, (-sd * d.t) / 2).applyQuaternion(_q);
+    _p.set(d.x + (d.fx * sd * d.t) / 2, 0, d.z + (d.fz * sd * d.t) / 2).add(_off);
+    _s.setScalar(d.scale);
+    dominoMesh.setMatrixAt(d.i, _m.compose(_p, _q, _s));
+  }
+  dominoMesh.instanceMatrix.needsUpdate = true;
+  dominoMesh.boundingSphere = null;
+  statT += dt;
+  if (statT > 0.15) {
+    statT = 0;
+    const [n, newest] = countFallen();
+    fallenEl.textContent = `${n} / ${dominoes.length}`;
+    if (newest >= 0) followIdx = newest;
+  }
+  if (follow && pushed && dominoes[followIdx]) {
+    const fd = dominoes[followIdx];
+    followTarget.set(fd.x, fd.h / 2, fd.z);
+    const delta = followTarget.clone().sub(controls.target).multiplyScalar(1 - Math.exp(-dt * 2.5));
+    controls.target.add(delta);
+    camera.position.add(delta);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+loadPreset('spiral');
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

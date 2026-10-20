@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Bumper Sumo</title>
+<style>
+  :root { --ink: #fff7ec; --card: rgba(20, 16, 30, 0.6); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f7b27a; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 14px; user-select: none; }
+  #board { top: 14px; left: 14px; padding: 10px 12px; min-width: 170px; font-size: 14px; display: none; }
+  #board .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  #board .row i { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  #board .row .n { flex: 1; font-weight: 700; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row.out .n { opacity: 0.4; text-decoration: line-through; }
+  #board .row .w { letter-spacing: 2px; color: #ffd23f; font-size: 12px; }
+  #board .hd { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.6; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  #big { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(36px, 8vw, 84px); font-weight: 900; color: #fff; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.25), 0 0 30px rgba(255, 120, 60, 0.6); pointer-events: none; text-align: center; white-space: nowrap; transition: transform 0.15s; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; opacity: 0.9; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffd23f; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  #stick { position: fixed; left: 24px; bottom: 24px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(255, 255, 255, 0.35); display: none; }
+  #stick div { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); }
+  #dashBtn { position: fixed; right: 28px; bottom: 34px; width: 96px; height: 96px; border-radius: 50%; border: 0; background: #ff5a5f; color: #fff; font: inherit; font-weight: 900; font-size: 18px; box-shadow: 0 6px 0 #b8383c; display: none; }
+  @media (pointer: coarse) { #stick, #dashBtn { display: block; } #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>WASD / arrows</b> drive · <b>Space</b> dash · knock everyone off the shrinking ring · first to 3 rounds</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn" title="End match, back to lobby">Lobby</button></div>
+<div id="stick"><div></div></div>
+<button id="dashBtn">DASH</button>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/bumper-sumo-arena/index.html
+ * PURPOSE: online party sumo: bumper cars on a shrinking floating ring, dash to shove, last car standing wins the round, first to 3; host-authoritative sim, bots fill seats
+ * UI: Bumper Sumo page (lobby overlay, scoreboard, countdown, touch stick)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../components/room-lobby.js';
+import { startTicker } from '../components/room-client.js';
+
+// Scene > Renderer, camera, lights
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xf6b48a, 60, 160);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 500);
+scene.add(new THREE.HemisphereLight(0xfff0e0, 0x4a6aa0, 1.4));
+const sun = new THREE.DirectionalLight(0xffe2c0, 2.4);
+sun.position.set(-14, 30, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 1, far: 80 });
+scene.add(sun);
+
+// Scene > Sky dome: sunset gradient
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(300, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: `varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
+  fragmentShader: `varying vec3 vD; void main(){ float y = vD.y; vec3 c = mix(vec3(1.0,0.72,0.5), vec3(0.45,0.55,0.95), smoothstep(0.0, 0.6, y)); c = mix(c, vec3(1.0,0.55,0.45), smoothstep(0.05, -0.2, y)); gl_FragColor = vec4(c, 1.); }`,
+})));
+
+// Scene > Sea: vertex-wave plane, foam near platform
+const seaU = { uTime: { value: 0 }, uRing: { value: 13 } };
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(320, 320, 160, 160).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
+  uniforms: { ...seaU, ...THREE.UniformsLib.fog }, fog: true,
+  vertexShader: `uniform float uTime; varying float vH; varying vec2 vP;
+    #include <fog_pars_vertex>
+    void main(){ vec3 p = position; float h = sin(p.x*0.25 + uTime*1.3)*0.35 + sin(p.z*0.31 - uTime*1.1)*0.3 + sin((p.x+p.z)*0.6 + uTime*2.)*0.12; p.y = h - 3.; vH = h; vP = p.xz;
+      vec4 mvPosition = modelViewMatrix * vec4(p,1.); gl_Position = projectionMatrix * mvPosition;
+      #include <fog_vertex>
+    }`,
+  fragmentShader: `uniform float uTime, uRing; varying float vH; varying vec2 vP;
+    #include <fog_pars_fragment>
+    void main(){ vec3 deep = vec3(0.12,0.38,0.62), lite = vec3(0.35,0.75,0.85);
+      vec3 c = mix(deep, lite, smoothstep(-0.5, 0.6, vH));
+      float d = length(vP); float foam = smoothstep(2.2, 0., abs(d - uRing*0.55 - 1.5)) * (0.5 + 0.5*sin(d*4. - uTime*3.));
+      c += vec3(0.9) * foam * 0.5 + vec3(1.,0.8,0.6) * pow(max(vH,0.),3.) * 0.6;
+      gl_FragColor = vec4(c, 1.);
+      #include <fog_fragment>
+    }`,
+}));
+scene.add(sea);
+
+// Arena > Platform: scaled disc (radius 1 geometry), target rings texture, pillar into sea
+const R0 = 13, R_MIN = 5.2;
+const topTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const cols = ['#ffe8c2', '#ffb35c'];
+  for (let i = 8; i > 0; i--) { g.fillStyle = cols[i % 2]; g.beginPath(); g.arc(256, 256, i * 32, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#e8574f'; g.beginPath(); g.arc(256, 256, 34, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = 'rgba(120,60,20,0.25)'; g.lineWidth = 3;
+  for (let a = 0; a < 16; a++) { g.beginPath(); g.moveTo(256, 256); g.lineTo(256 + Math.cos(a / 16 * Math.PI * 2) * 256, 256 + Math.sin(a / 16 * Math.PI * 2) * 256); g.stroke(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+})();
+const platform = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1.2, 72), [
+  new THREE.MeshStandardMaterial({ color: 0xd9733b, roughness: 0.8 }),
+  new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.75 }),
+  new THREE.MeshStandardMaterial({ color: 0x9a4a24 }),
+]);
+platform.position.y = -0.6;
+platform.receiveShadow = true;
+scene.add(platform);
+const pillar = new THREE.Mesh(new THREE.CylinderGeometry(3, 1.5, 6, 24), new THREE.MeshStandardMaterial({ color: 0x8a5a3a, roughness: 0.9 }));
+pillar.position.y = -4;
+scene.add(pillar);
+// Arena > Edge bollards: instanced striped posts, re-placed as ring shrinks
+const BOL = 40;
+const bolTex = (() => { const c = document.createElement('canvas'); c.width = 16; c.height = 64; const g = c.getContext('2d'); for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? '#ffffff' : '#e8413c'; g.fillRect(0, i * 16, 16, 16); } const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+const bollards = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.2, 0.7, 10), new THREE.MeshStandardMaterial({ map: bolTex, roughness: 0.5 }), BOL);
+bollards.castShadow = true;
+scene.add(bollards);
+const _m = new THREE.Matrix4();
+function placeRing(r) {
+  platform.scale.set(r, 1, r);
+  for (let i = 0; i < BOL; i++) { const a = (i / BOL) * Math.PI * 2; _m.makeTranslation(Math.cos(a) * (r - 0.15), 0.35, Math.sin(a) * (r - 0.15)); bollards.setMatrixAt(i, _m); }
+  bollards.instanceMatrix.needsUpdate = true;
+  seaU.uRing.value = r;
+}
+placeRing(R0);
+
+// Arena > Floating buoys + gulls for life
+const buoys = [];
+for (let i = 0; i < 9; i++) {
+  const b = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), new THREE.MeshStandardMaterial({ color: i % 2 ? 0xffffff : 0xe8413c }));
+  const a = i / 9 * Math.PI * 2 + 0.3, r = 24 + (i % 3) * 6;
+  b.userData = { a, r, ph: Math.random() * 6 };
+  scene.add(b); buoys.push(b);
+}
+
+// Cars > Model: lathe puck body, rubber bumper ring, helmeted driver with eyes, name tag sprite
+const CAR_R = 1.1;
+const bodyGeo = new THREE.LatheGeometry([[0, 0.15], [0.95, 0.15], [1.05, 0.35], [1.0, 0.75], [0.7, 0.95], [0, 0.98]].map(([x, y]) => new THREE.Vector2(x, y)), 36);
+const bumperGeo = new THREE.TorusGeometry(1.05, 0.2, 10, 40).rotateX(Math.PI / 2).translate(0, 0.42, 0);
+const headGeo = new THREE.SphereGeometry(0.38, 20, 14);
+const eyeGeo = new THREE.SphereGeometry(0.07, 8, 6);
+const rubber = new THREE.MeshStandardMaterial({ color: 0x222228, roughness: 0.85 });
+const skin = new THREE.MeshStandardMaterial({ color: 0xffd6b0, roughness: 0.7 });
+const black = new THREE.MeshBasicMaterial({ color: 0x111111 });
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 30px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(20,16,30,0.7)'; g.beginPath(); g.roundRect(128 - w / 2, 8, w, 46, 23); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 20, 31, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 128 + 8, 32, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(3.4, 0.85, 1); s.position.y = 2.5; s.renderOrder = 5;
+  return s;
+}
+function makeCar(p) {
+  const g = new THREE.Group();
+  const paint = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.35, metalness: 0.15 });
+  const body = new THREE.Mesh(bodyGeo, paint); body.castShadow = true;
+  const bump = new THREE.Mesh(bumperGeo, rubber); bump.castShadow = true;
+  const head = new THREE.Mesh(headGeo, skin); head.position.set(0, 1.25, 0.05); head.castShadow = true;
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.42, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), paint); helmet.position.copy(head.position);
+  const e1 = new THREE.Mesh(eyeGeo, black), e2 = new THREE.Mesh(eyeGeo, black);
+  e1.position.set(-0.13, 1.3, 0.38); e2.position.set(0.13, 1.3, 0.38);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.2), rubber); pole.position.set(0, 1.4, -0.6);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.3), new THREE.MeshStandardMaterial({ color: p.color, side: THREE.DoubleSide }));
+  flag.position.set(0.22, 1.85, -0.6);
+  const tilt = new THREE.Group();
+  tilt.add(body, bump, head, helmet, e1, e2, pole, flag);
+  g.add(tilt);
+  const tag = nameTag(p.nick, p.color);
+  g.add(tag);
+  g.userData = { tilt, flag, tag };
+  scene.add(g);
+  return g;
+}
+
+// FX > Puffs (dash) and splash droplets: pooled sprites
+const fxGeo = new THREE.SphereGeometry(0.25, 8, 6);
+const fx = [];
+function puff(x, y, z, vx, vy, vz, color, life = 0.6, s = 1) {
+  let f = fx.find((q) => q.life <= 0);
+  if (!f) { if (fx.length > 260) return; f = { mesh: new THREE.Mesh(fxGeo, new THREE.MeshBasicMaterial({ transparent: true })) }; scene.add(f.mesh); fx.push(f); }
+  f.mesh.position.set(x, y, z); f.v = new THREE.Vector3(vx, vy, vz); f.life = f.max = life; f.s = s;
+  f.mesh.material.color.set(color); f.mesh.visible = true;
+}
+function splash(x, z) {
+  for (let i = 0; i < 26; i++) { const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 4; puff(x, -2.6, z, Math.cos(a) * s, 6 + Math.random() * 6, Math.sin(a) * s, i % 3 ? 0xdff6ff : 0x8fd3ff, 1.1, 1.3); }
+}
+function updateFx(dt) {
+  for (const f of fx) {
+    if (f.life <= 0) continue;
+    f.life -= dt;
+    f.v.y -= (f.max > 0.9 ? 18 : 0) * dt;
+    f.mesh.position.addScaledVector(f.v, dt);
+    const k = f.life / f.max;
+    f.mesh.scale.setScalar(f.s * (f.max > 0.9 ? 1 : 1.6 - k));
+    f.mesh.material.opacity = k;
+    if (f.life <= 0) f.mesh.visible = false;
+  }
+}
+
+// Audio > bump thud, splash, dash whoosh, countdown beeps
+let actx = null, noiseBuf = null;
+function audio() {
+  if (actx) return actx;
+  actx = new AudioContext();
+  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return actx;
+}
+addEventListener('pointerdown', audio, { once: true });
+addEventListener('keydown', audio, { once: true });
+function tone(f0, f1, len, vol, type = 'sine') {
+  if (!actx) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
+}
+function noise(len, vol, type, f0, f1) {
+  if (!actx) return;
+  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf; fl.type = type; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
+}
+const sfx = {
+  bump(k) { tone(200 + k * 20, 55, 0.25, Math.min(0.5, 0.12 + k * 0.04)); tone(520, 300, 0.08, 0.08, 'triangle'); },
+  splash() { noise(0.9, 0.5, 'lowpass', 2400, 200); },
+  dash() { noise(0.3, 0.25, 'bandpass', 600, 2400); },
+  beep(hi) { tone(hi ? 880 : 520, hi ? 880 : 520, hi ? 0.4 : 0.15, 0.2, 'square'); },
+};
+
+// Game > World: same shape on host and guests; host simulates, guests mirror snapshots
+const BOT_NAMES = ['Bonk', 'Wobbles', 'Turbo', 'Pip', 'Mochi', 'Zippy', 'Rumble', 'Noodle', 'Biscuit', 'Ziggy', 'Pogo', 'Waffles'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const world = { mode: 'attract', phase: 'fight', t: 0, ring: R0, round: 0, winner: null, players: new Map() };
+const cars = new Map();
+let events = [];
+const rng = Math.random;
+
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, ang: 0, y: 0, vy: 0, alive: false, falling: false, dashCD: 0, dashT: 0, wins: 0, inX: 0, inZ: 0, dashSeq: 0, lastDash: 0, respawn: 0, aiT: 0, aiX: 0, aiZ: 0 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) {
+  world.players.delete(id);
+  const c = cars.get(id);
+  if (c) { scene.remove(c); cars.delete(id); }
+}
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function spawnAll() {
+  const ps = [...world.players.values()];
+  ps.forEach((p, i) => {
+    const a = (i / ps.length) * Math.PI * 2;
+    // 12 cars need a wider circle so nobody spawns touching
+    const sr = Math.min(R0 - 2, Math.max(7, ps.length * 0.75));
+    Object.assign(p, { x: Math.cos(a) * sr, z: Math.sin(a) * sr, vx: 0, vz: 0, y: 0, vy: 0, alive: true, falling: false, dashCD: 0, dashT: 0, ang: Math.atan2(-Math.cos(a), -Math.sin(a)) });
+  });
+}
+
+// Run engine > physics step: drive, dash, bumps, ring edge falls
+const STEP = 1 / 60;
+function physics(dt) {
+  const ps = [...world.players.values()];
+  const canMove = world.phase === 'fight';
+  for (const p of ps) {
+    if (p.falling) {
+      p.vy -= 28 * dt; p.y += p.vy * dt; p.x += p.vx * dt * 0.6; p.z += p.vz * dt * 0.6;
+      if (p.y < -2.6 && !p.splashed) { p.splashed = true; events.push(['s', p.x, p.z]); }
+      continue;
+    }
+    if (!p.alive) continue;
+    p.dashCD = Math.max(0, p.dashCD - dt);
+    p.dashT = Math.max(0, p.dashT - dt);
+    if (canMove) {
+      let ix = p.inX, iz = p.inZ;
+      const l = Math.hypot(ix, iz);
+      if (l > 1) { ix /= l; iz /= l; }
+      p.vx += ix * 26 * dt; p.vz += iz * 26 * dt;
+      if (p.dashSeq !== p.lastDash) {
+        p.lastDash = p.dashSeq;
+        if (p.dashCD <= 0) {
+          const dl = Math.hypot(ix, iz);
+          const dx = dl > 0.1 ? ix / dl : Math.sin(p.ang), dz = dl > 0.1 ? iz / dl : Math.cos(p.ang);
+          p.vx += dx * 17; p.vz += dz * 17; p.dashCD = 1.3; p.dashT = 0.3;
+          events.push(['d', p.id]);
+        }
+      }
+    }
+    const drag = Math.exp(-1.7 * dt);
+    p.vx *= drag; p.vz *= drag;
+    const sp = Math.hypot(p.vx, p.vz), max = p.dashT > 0 ? 26 : 13;
+    if (sp > max) { p.vx *= max / sp; p.vz *= max / sp; }
+    p.x += p.vx * dt; p.z += p.vz * dt;
+    if (sp > 0.6) { let da = Math.atan2(p.vx, p.vz) - p.ang; da = Math.atan2(Math.sin(da), Math.cos(da)); p.ang += da * Math.min(1, dt * 8); }
+  }
+  // bumps: impulse along normal; dashing car counts heavier so the shove wins
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j];
+    if (!a.alive || !b.alive || a.falling || b.falling) continue;
+    const dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
+    if (d >= CAR_R * 2 || d < 1e-4) continue;
+    const nx = dx / d, nz = dz / d, ov = CAR_R * 2 - d;
+    a.x += nx * ov / 2; a.z += nz * ov / 2; b.x -= nx * ov / 2; b.z -= nz * ov / 2;
+    const vrel = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+    if (vrel >= 0) continue;
+    const ma = a.dashT > 0 ? 2.4 : 1, mb = b.dashT > 0 ? 2.4 : 1;
+    const jimp = (-(1 + 0.95) * vrel / (1 / ma + 1 / mb)) * 1.3;
+    a.vx += jimp / ma * nx; a.vz += jimp / ma * nz; b.vx -= jimp / mb * nx; b.vz -= jimp / mb * nz;
+    if (-vrel > 2) events.push(['b', (a.x + b.x) / 2, (a.z + b.z) / 2, Math.min(10, -vrel)]);
+  }
+  for (const p of ps) {
+    if (!p.alive || p.falling) continue;
+    if (Math.hypot(p.x, p.z) > world.ring + 0.25) { p.falling = true; p.alive = false; p.vy = 2; p.splashed = false; p.respawn = 1.6; }
+  }
+}
+
+// Run engine > bots: chase nearest rival, flee edge, dash when lined up
+function botThink(p, dt) {
+  p.aiT -= dt;
+  if (p.aiT > 0) return;
+  p.aiT = 0.12 + rng() * 0.1;
+  let best = null, bd = 1e9;
+  for (const q of world.players.values()) {
+    if (q === p || !q.alive || q.falling) continue;
+    const d = Math.hypot(q.x - p.x, q.z - p.z);
+    if (d < bd) { bd = d; best = q; }
+  }
+  let tx = -p.x, tz = -p.z;
+  if (best) { tx = best.x - p.x + best.x * 0.25; tz = best.z - p.z + best.z * 0.25; }
+  const r = Math.hypot(p.x, p.z);
+  const edge = THREE.MathUtils.smoothstep(r, world.ring - 4.5, world.ring - 1);
+  const l = Math.hypot(tx, tz) || 1;
+  p.inX = THREE.MathUtils.lerp(tx / l, -p.x / (r || 1), edge) + (rng() - 0.5) * 0.4;
+  p.inZ = THREE.MathUtils.lerp(tz / l, -p.z / (r || 1), edge) + (rng() - 0.5) * 0.4;
+  if (best && bd < 5 && edge < 0.5 && rng() < 0.35) p.dashSeq++;
+}
+
+// Game > Phases (host / attract): countdown, fight with shrinking ring, round + match end
+let lastBeep = 0;
+function phases(dt) {
+  const ps = [...world.players.values()];
+  if (world.mode === 'attract') {
+    world.phase = 'fight';
+    world.ring = R0;
+    for (const p of ps) if (!p.alive && p.falling && (p.respawn -= dt) <= 0) { Object.assign(p, { x: (rng() - 0.5) * 6, z: (rng() - 0.5) * 6, vx: 0, vz: 0, y: 0, vy: 0, falling: false, alive: true }); }
+    return;
+  }
+  const inRound = ps.filter((p) => p.inRound);
+  if (world.phase === 'count') {
+    world.t -= dt;
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { world.phase = 'fight'; world.t = 0; events.push(['c', 0]); }
+  } else if (world.phase === 'fight') {
+    world.t += dt;
+    world.ring = Math.max(R_MIN, R0 - Math.max(0, world.t - 10) * 0.16);
+    if (inRound.length <= 1) {
+      // solo practice: respawn instead of ending
+      for (const p of inRound) if (!p.alive && p.falling && (p.respawn -= dt) <= 0) Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, y: 0, vy: 0, falling: false, alive: true });
+    } else {
+      const alive = inRound.filter((p) => p.alive);
+      if (alive.length <= 1) {
+        world.winner = alive[0]?.id ?? null;
+        if (alive[0]) alive[0].wins++;
+        world.phase = 'roundEnd'; world.t = 3.2;
+      }
+    }
+  } else if (world.phase === 'roundEnd') {
+    world.t -= dt;
+    if (world.t <= 0) {
+      const champ = ps.find((p) => p.wins >= 3);
+      if (champ) { world.phase = 'matchEnd'; world.t = 6; world.winner = champ.id; }
+      else startRound();
+    }
+  } else if (world.phase === 'matchEnd') {
+    world.t -= dt;
+    if (world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startRound() {
+  world.round++;
+  world.phase = 'count'; world.t = 3; world.ring = R0; world.winner = null; lastBeep = 4;
+  for (const p of world.players.values()) p.inRound = true;
+  spawnAll();
+}
+
+// Game > Attract mode: bots bump around behind the lobby
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract';
+  world.round = 0;
+  for (let i = 0; i < 4; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  spawnAll();
+}
+
+// Multiplayer > Lobby: join/create room, host Start seeds participants (humans + bots)
+const isTouch = matchMedia('(pointer: coarse)').matches;
+const lobby = createLobby({
+  game: 'bumper-sumo', title: 'Bumper Sumo', emoji: '🛟', accent: '#ff7a45',
+  blurb: 'Bumper cars on a floating ring that keeps shrinking. Ram, dash, shove. Last car on the ring takes the round; first to 3 wins.',
+  maxBots: 11, defaultBots: 3, minPlayers: 2,
+  note: 'Solo? Add bots. Up to 12 per room (humans + bots).',
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', () => syncTop());
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match';
+    world.round = 0;
+    document.getElementById('top').style.display = 'flex';
+    document.getElementById('board').style.display = 'block';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (const p of world.players.values()) p.wins = 0;
+    startRound();
+  },
+  onLobby() {
+    document.getElementById('top').style.display = 'none';
+    document.getElementById('board').style.display = 'none';
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+
+// Multiplayer > Host: keep participants in sync with roster (leavers drop, joiners wait for next round)
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 12 seats: a joining human replaces the newest bot
+    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) removePlayer(bot.id); }
+    const np = addPlayer(p.id, p.nick, p.color, false); np.inRound = false; np.x = 0; np.z = -40;
+  }
+}
+
+// Multiplayer > Net: guests send input 20 Hz, host broadcasts snapshot 20 Hz (+ events)
+const remoteIn = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+function snapshot() {
+  return {
+    g: 's', ph: world.phase, t: +world.t.toFixed(2), ring: +world.ring.toFixed(2), rd: world.round, win: world.winner, ev: events,
+    P: [...world.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.vx.toFixed(2), +p.vz.toFixed(2), +p.ang.toFixed(2), +p.y.toFixed(2), (p.alive ? 1 : 0) | (p.falling ? 2 : 0) | (p.inRound ? 4 : 0) | (p.bot ? 8 : 0), +p.dashT.toFixed(2), p.wins, p.nick, p.color, +p.dashCD.toFixed(2), +p.vy.toFixed(2)]),
+  };
+}
+let snapAt = 0;
+function applySnap(s) {
+  Object.assign(world, { phase: s.ph, t: s.t, ring: s.ring, round: s.rd, winner: s.win });
+  const seen = new Set();
+  for (const a of s.P) {
+    const [id, x, z, vx, vz, ang, y, fl, dashT, wins, nick, color, dashCD, vy] = a;
+    seen.add(id);
+    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 8));
+    Object.assign(p, { x, z, vx, vz, ang, y, vy, alive: !!(fl & 1), falling: !!(fl & 2), inRound: !!(fl & 4), dashT, wins, dashCD });
+    if (p.falling && p.y < -2.6) p.splashed = true;
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+function playEvents(evs) {
+  for (const e of evs) {
+    if (e[0] === 'b') { sfx.bump(e[3]); for (let i = 0; i < 6; i++) puff(e[1], 0.8, e[2], (rng() - 0.5) * 6, rng() * 3, (rng() - 0.5) * 6, 0xfff3c8, 0.4, 0.8); }
+    else if (e[0] === 's') { sfx.splash(); splash(e[1], e[2]); }
+    else if (e[0] === 'd') { sfx.dash(); const p = world.players.get(e[1]); if (p) for (let i = 0; i < 8; i++) puff(p.x, 0.4, p.z, -p.vx * 0.2 + (rng() - 0.5) * 2, rng(), -p.vz * 0.2 + (rng() - 0.5) * 2, 0xffffff, 0.5, 1.2); }
+    else if (e[0] === 'c') sfx.beep(e[1] === 0);
+  }
+}
+
+// Input > Keyboard + touch stick + dash button
+const keys = {};
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (['Space', 'ShiftLeft', 'ShiftRight'].includes(e.code) && !e.repeat) local.dashSeq++;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const local = { x: 0, z: 0, dashSeq: 0 };
+const stick = document.getElementById('stick'), knob = stick.firstElementChild;
+let stickId = null, sx = 0, sz = 0;
+stick.addEventListener('pointerdown', (e) => { stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });
+stick.addEventListener('pointermove', (e) => { if (e.pointerId === stickId) moveStick(e); });
+stick.addEventListener('pointerup', () => { stickId = null; sx = sz = 0; knob.style.transform = ''; });
+function moveStick(e) {
+  const r = stick.getBoundingClientRect();
+  let dx = (e.clientX - r.left - r.width / 2) / (r.width / 2), dz = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+  const l = Math.hypot(dx, dz); if (l > 1) { dx /= l; dz /= l; }
+  sx = dx; sz = dz; knob.style.transform = `translate(${dx * 40}px, ${dz * 40}px)`;
+}
+document.getElementById('dashBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); local.dashSeq++; });
+function readInput() {
+  local.x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + sx;
+  local.z = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) + sz;
+}
+
+// HUD > scoreboard + center banner
+const bigEl = document.getElementById('big');
+let bigText = '';
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; bigEl.style.transform = 'translate(-50%,-50%) scale(1.15)'; setTimeout(() => (bigEl.style.transform = 'translate(-50%,-50%)'), 120); } }
+function hud() {
+  if (world.mode !== 'match') return;
+  const ps = [...world.players.values()].sort((a, b) => b.wins - a.wins);
+  document.getElementById('board').innerHTML = `<div class="hd"><span>Round ${world.round}</span><span>first to 3</span></div>` + ps.map((p) => {
+    const me = p.id === lobby.room?.me;
+    return `<div class="row ${p.inRound && !p.alive ? 'out' : ''}"><i style="background:${p.color}"></i><span class="n">${esc(p.nick)}${me ? ' (you)' : ''}</span><span class="w">${'●'.repeat(p.wins)}${'○'.repeat(Math.max(0, 3 - p.wins))}</span></div>`;
+  }).join('');
+  const nameOf = (id) => esc(world.players.get(id)?.nick ?? 'Nobody');
+  const meIn = world.players.get(lobby.room?.me);
+  if (world.phase === 'count') big(`${Math.max(1, Math.ceil(world.t))}<small>Round ${world.round}${meIn && !meIn.inRound ? ' · spectating' : ''}</small>`);
+  else if (world.phase === 'fight') big(world.t < 0.8 ? 'BUMP!' : meIn && meIn.inRound && !meIn.alive && world.players.size > 1 ? '<small>splash! watching…</small>' : '');
+  else if (world.phase === 'roundEnd') big(world.winner != null ? `${nameOf(world.winner)}<small>takes round ${world.round}</small>` : 'Draw!<small>everyone went swimming</small>');
+  else if (world.phase === 'matchEnd') big(`🏆 ${nameOf(world.winner)}<small>wins the match</small>`);
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Run engine > sim tick (worker-driven, keeps running in background tabs): input, host sim / guest input upload
+let acc = 0, sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') { me.inX = local.x; me.inZ = local.z; me.dashSeq = local.dashSeq; }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { p.inX = inp.x; p.inZ = inp.z; p.dashSeq = inp.d; } }
+    acc += dt;
+    while (acc >= STEP) {
+      for (const p of world.players.values()) if (p.bot && p.alive) botThink(p, STEP);
+      physics(STEP);
+      phases(STEP);
+      acc -= STEP;
+    }
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop: cars, fx, HUD, camera
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim();
+  placeRing(world.ring);
+  // render: guests extrapolate from last snapshot by velocity then smooth
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.15);
+  for (const p of world.players.values()) {
+    let c = cars.get(p.id);
+    if (!c) { c = makeCar(p); cars.set(p.id, c); c.position.set(p.x, p.y, p.z); }
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, ty = p.falling ? p.y + p.vy * age : p.y;
+    const k = hostSim ? 1 : 1 - Math.exp(-dt * 18);
+    c.position.x += (tx - c.position.x) * k; c.position.z += (tz - c.position.z) * k; c.position.y += (ty - c.position.y) * k;
+    if (world.mode === 'match' && !p.inRound) c.position.set(0, -40, 0);
+    let da = p.ang - c.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    c.rotation.y += da * Math.min(1, dt * 12);
+    const sp = Math.hypot(p.vx, p.vz);
+    c.userData.tilt.rotation.x = -Math.min(sp / 26, 0.25) + (p.dashT > 0 ? -0.15 : 0);
+    c.userData.tilt.position.y = Math.sin(time * 9 + p.id) * 0.04 * Math.min(sp, 4);
+    c.userData.flag.rotation.y = Math.sin(time * 10 + p.id) * 0.4;
+    c.visible = c.position.y > -6;
+    if (p.dashT > 0 && rng() < 0.6) puff(c.position.x, 0.4, c.position.z, -p.vx * 0.15, 0.5, -p.vz * 0.15, p.color, 0.35, 0.8);
+  }
+  updateFx(dt);
+  hud();
+  seaU.uTime.value = time;
+  buoys.forEach((b) => { const u = b.userData; b.position.set(Math.cos(u.a) * u.r, -2.9 + Math.sin(time * 1.4 + u.ph) * 0.3, Math.sin(u.a) * u.r); });
+  // camera: framing widens on tall screens so the whole ring always fits
+  const fit = Math.max(1, 1.35 / camera.aspect) * (0.75 + 0.25 * world.ring / R0);
+  camera.position.set(0, 33 * fit, 25 * fit);
+  camera.lookAt(0, -0.5, 1.5);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

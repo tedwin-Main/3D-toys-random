@@ -1,0 +1,5 @@
+node_modules
+wheres-waldo-game/node_modules
+wheres-waldo-game/dist
+.DS_Store
+.env*

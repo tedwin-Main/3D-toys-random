@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Executive Desk Toys</title>
+<style>
+  :root { --ink: #f0ebe3; --card: rgba(24, 18, 14, 0.62); --accent: #e8b04b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #17110d; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 14px; user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 280px; }
+  #intro h1 { margin: 0 0 4px; font-size: 17px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.75; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
+  #bar button { font: inherit; font-size: 13px; font-weight: 600; color: var(--ink); background: transparent; border: 0; padding: 7px 11px; border-radius: 9px; cursor: pointer; }
+  #bar button:hover { background: rgba(255, 255, 255, 0.08); }
+  #bar button.on { background: var(--accent); color: #1b130c; }
+  #bar label { font-size: 12px; opacity: 0.8; display: flex; gap: 6px; align-items: center; }
+  #bar input { width: 110px; accent-color: var(--accent); }
+  #bar .sep { width: 1px; align-self: stretch; background: rgba(255, 255, 255, 0.12); margin: 3px 2px; }
+  .only-wave { display: none !important; }
+  body.wave .only-wave { display: flex !important; }
+  body.wave .only-cradle { display: none !important; }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Executive Desk Toys</h1><p>Newton's cradle: drag a ball (or two) out and let go. Pendulum wave: fifteen tuned pendulums drift through snakes, ripples and back into line every 60 s. Right-drag orbits.</p></div>
+<div id="bar" class="card">
+  <button id="t-cradle" class="on">🔘 Newton's cradle</button><button id="t-wave">🌊 Pendulum wave</button>
+  <div class="sep"></div>
+  <button class="only-cradle" data-pull="1">Pull 1</button><button class="only-cradle" data-pull="2">Pull 2</button><button class="only-cradle" data-pull="3">Pull 3</button><button class="only-cradle" data-pull="-1">Both sides</button>
+  <button class="only-wave" id="w-reset">↺ Release</button><label class="only-wave">speed <input id="w-speed" type="range" min="0" max="100" value="50" /></label><button class="only-wave" id="w-top">⬇ Top view</button>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/desk-toys-newton-cradle/index.html
+ * PURPOSE: chrome Newton's cradle with draggable balls + chained elastic collisions, and a 15-pendulum wave machine on a lamp-lit desk
+ * UI: Executive Desk Toys page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+// Scene > Renderer: dim study, warm lamp pool, chrome reflections from a room env
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x17110d);
+scene.fog = new THREE.Fog(0x17110d, 14, 30);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.05, 100);
+camera.position.set(0.5, 2.1, 5.0);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+controls.touches = { ONE: null, TWO: THREE.TOUCH.DOLLY_ROTATE };
+controls.minDistance = 2;
+controls.maxDistance = 14;
+controls.maxPolarAngle = Math.PI * 0.48;
+scene.add(new THREE.HemisphereLight(0xffe6c8, 0x1a120c, 0.35));
+const lamp = new THREE.SpotLight(0xffd9a0, 60, 20, 0.7, 0.6, 1.6);
+lamp.position.set(-2.6, 5.2, 1.6);
+lamp.target.position.set(0, 0.5, 0);
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(2048, 2048);
+lamp.shadow.bias = -0.0002;
+scene.add(lamp, lamp.target);
+const fillLight = new THREE.DirectionalLight(0x9fb8ff, 0.4);
+fillLight.position.set(4, 3, -3);
+scene.add(fillLight);
+
+// Scene > Desk: walnut top with grain texture, leather pad
+{
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#4a2c1a'; g.fillRect(0, 0, 1024, 512);
+  for (let i = 0; i < 260; i++) {
+    g.strokeStyle = `rgba(${20 + Math.random() * 40},${10 + Math.random() * 20},5,${0.15 + Math.random() * 0.25})`;
+    g.lineWidth = 1 + Math.random() * 2.5;
+    const y = Math.random() * 512;
+    g.beginPath(); g.moveTo(0, y);
+    for (let x = 0; x <= 1024; x += 32) g.lineTo(x, y + Math.sin(x * 0.006 + i) * 10 + Math.sin(x * 0.03 + i * 3) * 2);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const desk = new THREE.Mesh(new THREE.BoxGeometry(16, 0.3, 8), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.35, metalness: 0 }));
+  desk.position.y = -0.15;
+  desk.receiveShadow = true;
+  scene.add(desk);
+  const pad = new THREE.Mesh(new RoundedBoxGeometry(6.5, 0.03, 3.6, 2, 0.015), new THREE.MeshStandardMaterial({ color: 0x1e3a2e, roughness: 0.8 }));
+  pad.position.y = 0.015;
+  pad.receiveShadow = true;
+  scene.add(pad);
+}
+
+// Materials > Shared: chrome, black base, string
+const chrome = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.06, envMapIntensity: 2.4 });
+const blackGloss = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.25 });
+const stringMat = new THREE.LineBasicMaterial({ color: 0xd8d0c0, transparent: true, opacity: 0.7 });
+
+// Cradle > Frame: two chrome arches over a black plinth
+const cradle = new THREE.Group();
+scene.add(cradle);
+const NB = 5, BR = 0.2, CL = 1.35, TOP = 1.95, DEPTH = 0.42;
+const pivotsX = Array.from({ length: NB }, (_, i) => (i - (NB - 1) / 2) * BR * 2.002);
+{
+  const base = new THREE.Mesh(new RoundedBoxGeometry(2.8, 0.14, 1.2, 3, 0.05), blackGloss);
+  base.position.y = 0.07;
+  base.castShadow = base.receiveShadow = true;
+  cradle.add(base);
+  for (const z of [-DEPTH, DEPTH]) {
+    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-1.25, 0.14, z), new THREE.Vector3(-1.25, TOP - 0.15, z), new THREE.Vector3(-1.1, TOP, z), new THREE.Vector3(1.1, TOP, z), new THREE.Vector3(1.25, TOP - 0.15, z), new THREE.Vector3(1.25, 0.14, z)], false, 'catmullrom', 0.1);
+    const bar = new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 0.028, 12), chrome);
+    bar.castShadow = true;
+    cradle.add(bar);
+  }
+}
+const balls = pivotsX.map((px) => {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(BR, 48, 32), chrome);
+  m.castShadow = true;
+  cradle.add(m);
+  const hook = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.008, 6, 12), chrome);
+  cradle.add(hook);
+  const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]);
+  const lines = new THREE.LineSegments(g, stringMat);
+  cradle.add(lines);
+  return { px, th: 0, w: 0, m, hook, lines, held: false };
+});
+
+// Cradle > Physics: pendulum angles + multi-pass elastic contact along x
+const G = 9.81;
+function cradleX(b) { return b.px + Math.sin(b.th) * CL; }
+let clackQueue = [];
+function cradleStep(h) {
+  for (const b of balls) {
+    if (b.held) { b.w = 0; continue; }
+    b.w += (-G / CL) * Math.sin(b.th) * h;
+    b.w *= 1 - 0.05 * h;
+    b.th += b.w * h;
+  }
+  // several passes so momentum walks through the whole row in one step
+  for (let pass = 0; pass < NB * 2; pass++) {
+    for (let i = 0; i < NB - 1; i++) {
+      const a = balls[i], b = balls[i + 1];
+      const gap = cradleX(b) - cradleX(a) - 2 * BR;
+      if (gap >= 0) continue;
+      const va = a.w * CL * Math.cos(a.th), vb = b.w * CL * Math.cos(b.th);
+      if (va > vb) {
+        const e = 0.999, dv = va - vb;
+        let na = vb + (va - vb) * (1 - e) / 2, nb = va - (va - vb) * (1 - e) / 2;
+        if (a.held) { na = 0; nb = Math.max(nb, 0); }
+        if (b.held) { nb = 0; na = Math.min(na, 0); }
+        a.w = na / (CL * Math.cos(a.th)); b.w = nb / (CL * Math.cos(b.th));
+        if (pass === 0 && dv > 0.05) clackQueue.push(dv);
+      }
+      // positional fix: push the free one(s) apart
+      const fix = -gap / CL;
+      if (a.held && !b.held) b.th += fix;
+      else if (b.held && !a.held) a.th -= fix;
+      else if (!a.held && !b.held) { a.th -= fix / 2; b.th += fix / 2; }
+    }
+  }
+}
+function cradlePose() {
+  for (const b of balls) {
+    const x = cradleX(b), y = TOP - Math.cos(b.th) * CL;
+    b.m.position.set(x, y, 0);
+    b.hook.position.set(x, y + BR + 0.02, 0);
+    b.hook.rotation.z = b.th;
+    const p = b.lines.geometry.attributes.position;
+    p.setXYZ(0, b.px, TOP, -DEPTH); p.setXYZ(1, x, y + BR + 0.04, 0);
+    p.setXYZ(2, b.px, TOP, DEPTH); p.setXYZ(3, x, y + BR + 0.04, 0);
+    p.needsUpdate = true;
+  }
+}
+function pull(n) {
+  for (const b of balls) { b.th = 0; b.w = 0; }
+  const a = 0.75;
+  if (n === -1) { balls[0].th = -a; balls[NB - 1].th = a; return; }
+  for (let i = 0; i < n; i++) balls[i].th = -a;
+}
+
+// Wave > Rig: 15 pendulums tuned to 51..65 swings per 60 s
+const wave = new THREE.Group();
+wave.visible = false;
+scene.add(wave);
+const NW = 15, CYCLE = 60, N0 = 51, WR = 0.1, WTOP = 2.5, WSP = 0.27;
+const wavers = [];
+{
+  const base = new THREE.Mesh(new RoundedBoxGeometry(2.2, 0.12, NW * WSP + 0.6, 3, 0.04), blackGloss);
+  base.position.y = 0.06;
+  base.castShadow = base.receiveShadow = true;
+  wave.add(base);
+  for (const z of [-(NW * WSP) / 2 - 0.15, (NW * WSP) / 2 + 0.15]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, WTOP, 12), chrome);
+    post.position.set(0, WTOP / 2, z);
+    post.castShadow = true;
+    wave.add(post);
+  }
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, NW * WSP + 0.3, 12), chrome);
+  beam.rotation.x = Math.PI / 2;
+  beam.position.y = WTOP;
+  wave.add(beam);
+  for (let i = 0; i < NW; i++) {
+    // real lengths are ~30 cm; scale 6x so the rig reads on screen (period stays analytic)
+    const T = CYCLE / (N0 + i), L = 6 * G * (T / (2 * Math.PI)) ** 2;
+    const col = new THREE.Color().setHSL(0.02 + (i / NW) * 0.75, 0.75, 0.55);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(WR, 32, 20), new THREE.MeshStandardMaterial({ color: col, metalness: 0.6, roughness: 0.15 }));
+    m.castShadow = true;
+    wave.add(m);
+    const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]);
+    const lines = new THREE.LineSegments(g, stringMat);
+    wave.add(lines);
+    wavers.push({ z: (i - (NW - 1) / 2) * WSP, L, w: (2 * Math.PI) / T, m, lines });
+  }
+}
+let waveT = 0;
+const AMP = 0.42;
+function wavePose() {
+  for (const p of wavers) {
+    const th = AMP * Math.cos(p.w * waveT);
+    const x = Math.sin(th) * p.L, y = WTOP - Math.cos(th) * p.L;
+    p.m.position.set(x, y, p.z);
+    const a = p.lines.geometry.attributes.position;
+    a.setXYZ(0, 0, WTOP, p.z - 0.12); a.setXYZ(1, x, y, p.z);
+    a.setXYZ(2, 0, WTOP, p.z + 0.12); a.setXYZ(3, x, y, p.z);
+    a.needsUpdate = true;
+  }
+}
+
+// Audio > Clack: short metallic ping, louder for harder hits
+let actx;
+addEventListener('pointerdown', () => (actx ??= new AudioContext()), { once: true });
+function clack(v) {
+  if (!actx) return;
+  const t = actx.currentTime, g = actx.createGain();
+  g.gain.setValueAtTime(Math.min(0.02 + v * 0.18, 0.4), t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  for (const [f, k] of [[2900, 1], [5400, 0.5], [7600, 0.3]]) {
+    const o = actx.createOscillator(), gg = actx.createGain();
+    o.frequency.value = f * (0.98 + Math.random() * 0.04);
+    gg.gain.value = k;
+    o.connect(gg).connect(g);
+    o.start(t); o.stop(t + 0.13);
+  }
+  g.connect(actx.destination);
+}
+
+// Interaction > Drag: grab a ball, set its angle from the pointer on the cradle plane
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), hit = new THREE.Vector3();
+let held = null;
+function setRay(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); }
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || mode !== 'cradle') return;
+  setRay(e);
+  const h = ray.intersectObjects(balls.map((b) => b.m))[0];
+  if (!h) return;
+  held = balls.find((b) => b.m === h.object);
+  held.held = true;
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  setRay(e);
+  if (!held) { renderer.domElement.style.cursor = mode === 'cradle' && ray.intersectObjects(balls.map((b) => b.m)).length ? 'grab' : 'default'; return; }
+  renderer.domElement.style.cursor = 'grabbing';
+  if (ray.ray.intersectPlane(plane, hit)) {
+    const dx = hit.x - held.px, dy = TOP - hit.y;
+    held.th = THREE.MathUtils.clamp(Math.atan2(dx, Math.max(dy, 0.05)), -1.3, 1.3);
+  }
+});
+addEventListener('pointerup', () => { if (held) { held.held = false; held = null; } });
+
+// HUD > Mode switch + actions
+let mode = 'cradle', waveSpeed = 1, topView = false;
+const camGoal = { pos: new THREE.Vector3(0.5, 2.1, 5.0), tgt: new THREE.Vector3(0, 1.0, 0) };
+let camTween = 0;
+function setMode(m) {
+  mode = m;
+  document.body.classList.toggle('wave', m === 'wave');
+  document.getElementById('t-cradle').classList.toggle('on', m === 'cradle');
+  document.getElementById('t-wave').classList.toggle('on', m === 'wave');
+  cradle.visible = m === 'cradle';
+  wave.visible = m === 'wave';
+  topView = false;
+  document.getElementById('w-top').classList.remove('on');
+  if (m === 'wave') { camGoal.pos.set(3.4, 2.0, 5.2); camGoal.tgt.set(0, 1.1, 0); waveT = 0; }
+  else { camGoal.pos.set(0.5, 2.1, 5.0); camGoal.tgt.set(0, 1.0, 0); }
+  camTween = 1;
+}
+document.getElementById('t-cradle').onclick = () => setMode('cradle');
+document.getElementById('t-wave').onclick = () => setMode('wave');
+document.querySelectorAll('[data-pull]').forEach((b) => (b.onclick = () => { actx ??= new AudioContext(); pull(Number(b.dataset.pull)); }));
+document.getElementById('w-reset').onclick = () => (waveT = 0);
+document.getElementById('w-speed').oninput = (e) => (waveSpeed = 2 ** ((e.target.value - 50) / 20));
+document.getElementById('w-top').onclick = (e) => {
+  topView = !topView;
+  e.currentTarget.classList.toggle('on', topView);
+  if (topView) { camGoal.pos.set(0.01, 7.6, 0); camGoal.tgt.set(0, 0.5, 0); } else { camGoal.pos.set(3.4, 2.0, 5.2); camGoal.tgt.set(0, 1.1, 0); }
+  camTween = 1;
+};
+
+// Run engine: fixed substeps for the cradle, analytic wave, camera tweens
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (mode === 'cradle') {
+    const SUB = 40;
+    for (let s = 0; s < SUB; s++) cradleStep(dt / SUB);
+    if (clackQueue.length) { clack(Math.max(...clackQueue)); clackQueue = []; }
+    cradlePose();
+  } else {
+    waveT += dt * waveSpeed;
+    wavePose();
+  }
+  if (camTween > 0) {
+    camTween = Math.max(0, camTween - dt * 1.2);
+    camera.position.lerp(camGoal.pos, 1 - Math.exp(-dt * 4));
+    controls.target.lerp(camGoal.tgt, 1 - Math.exp(-dt * 4));
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+pull(1);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

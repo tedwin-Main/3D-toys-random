@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Firework Night</title>
+<style>
+  :root { --ink: #f1eefa; --card: rgba(10, 10, 24, 0.55); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #03030a; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 260px; }
+  #intro h1 { margin: 0 0 4px; font-size: 17px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.75; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; max-width: calc(100% - 32px); }
+  #bar button { font: inherit; font-size: 12.5px; color: var(--ink); background: transparent; border: 0; padding: 7px 10px; border-radius: 9px; cursor: pointer; opacity: 0.75; }
+  #bar button:hover { background: rgba(255, 255, 255, 0.08); opacity: 1; }
+  #bar button.on { background: rgba(255, 255, 255, 0.16); opacity: 1; }
+  #bar .sep { width: 1px; background: rgba(255, 255, 255, 0.12); margin: 4px; }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Firework Night 🎆</h1><p>Click anywhere in the sky to fire a shell there. Pick a shell type below (keys 1-9), hit Finale for the big one.</p></div>
+<div id="bar" class="card"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/fireworks-show/index.html
+ * PURPOSE: click-to-launch fireworks with many shell types, afterimage trails, bloom, lake reflection, distance-delayed booms
+ * UI: Firework Night page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+
+// Scene > Renderer: fixed night camera with soft mouse parallax
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.5, 3000);
+const CAM_BASE = new THREE.Vector3(0, 9, 95), LOOK = new THREE.Vector3(0, 38, 0);
+camera.position.copy(CAM_BASE);
+camera.lookAt(LOOK);
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const after = new AfterimagePass(0.86);
+composer.addPass(after);
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.2, 0.5, 0.3));
+composer.addPass(new OutputPass());
+
+// Scene > Sky: gradient dome + twinkling stars + moon
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, uniforms: { uTime: { value: 0 }, uFlash: { value: 0 }, uFlashCol: { value: new THREE.Color() } },
+  vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+  fragmentShader: `uniform float uTime; uniform float uFlash; uniform vec3 uFlashCol; varying vec3 vD;
+    float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
+    void main(){ float y = max(vD.y, 0.);
+      vec3 c = mix(vec3(0.05, 0.05, 0.13), vec3(0.008, 0.01, 0.035), pow(y, 0.5));
+      vec3 g = floor(vD * 420.); float s = step(0.9965, h(g)) * (0.5 + 0.5 * sin(uTime * 2. + h(g + 1.) * 40.)) * smoothstep(0.05, 0.3, y);
+      c += s * 0.32;
+      c += uFlashCol * uFlash * 0.12 * (1. - y);
+      gl_FragColor = vec4(c, 1.); }`,
+}));
+scene.add(sky);
+const moon = new THREE.Mesh(new THREE.CircleGeometry(9, 32), new THREE.MeshBasicMaterial({ color: 0xfff4d8 }));
+moon.position.set(-260, 210, -900);
+moon.lookAt(camera.position);
+scene.add(moon);
+
+// Scene > Skyline: silhouettes with random lit windows across the lake
+const skyline = new THREE.Group();
+scene.add(skyline);
+{
+  const winTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = '#05060c'; g.fillRect(0, 0, 64, 256);
+    for (let y = 6; y < 256; y += 10) for (let x = 5; x < 64; x += 9) if (Math.random() < 0.35) { g.fillStyle = Math.random() < 0.8 ? '#ffcf7a' : '#9fd0ff'; g.fillRect(x, y, 4, 5); }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  })();
+  for (let i = 0; i < 70; i++) {
+    const w = 8 + Math.random() * 14, h = 8 + Math.random() ** 2 * 38, d = 8 + Math.random() * 8;
+    const tex = winTex.clone();
+    tex.repeat.set(w / 20, h / 60);
+    tex.offset.set(Math.random(), Math.random());
+    tex.needsUpdate = true;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ map: tex, color: 0x4a4a5c }));
+    m.position.set(-420 + i * 12 + Math.random() * 6, h / 2 - 1, -360 - Math.random() * 60);
+    skyline.add(m);
+  }
+  const hills = new THREE.Mesh(new THREE.PlaneGeometry(2400, 60, 120, 1), new THREE.MeshBasicMaterial({ color: 0x04050a }));
+  const p = hills.geometry.attributes.position;
+  for (let i = 0; i < p.count; i++) if (p.getY(i) > 0) p.setY(i, 30 * (0.4 + 0.6 * Math.abs(Math.sin(p.getX(i) * 0.004) * Math.cos(p.getX(i) * 0.011))) - 30);
+  hills.position.set(0, 10, -420);
+  scene.add(hills);
+}
+
+// Scene > Lake: planar reflection tinted dark blue
+const lake = new Reflector(new THREE.PlaneGeometry(3000, 3000), { textureWidth: innerWidth * 0.5, textureHeight: innerHeight * 0.5, color: 0x55607a, clipBias: 0.003 });
+lake.rotation.x = -Math.PI / 2;
+lake.position.y = -1;
+scene.add(lake);
+const shore = new THREE.Mesh(new THREE.PlaneGeometry(3000, 80), new THREE.MeshBasicMaterial({ color: 0x020205 }));
+shore.rotation.x = -Math.PI / 2;
+shore.position.set(0, -0.8, 120);
+scene.add(shore);
+
+// Particles > Pool: one big additive points cloud updated on the cpu
+const N = 50000;
+const P = {
+  pos: new Float32Array(N * 3), vel: new Float32Array(N * 3), col: new Float32Array(N * 3), base: new Float32Array(N * 3),
+  life: new Float32Array(N), max: new Float32Array(N), size: new Float32Array(N), alpha: new Float32Array(N),
+  drag: new Float32Array(N), grav: new Float32Array(N), kind: new Uint8Array(N), trail: new Float32Array(N), split: new Float32Array(N),
+};
+let head = 0;
+const geo = new THREE.BufferGeometry();
+geo.setAttribute('position', new THREE.BufferAttribute(P.pos, 3));
+geo.setAttribute('color', new THREE.BufferAttribute(P.col, 3));
+geo.setAttribute('size', new THREE.BufferAttribute(P.size, 1));
+geo.setAttribute('alpha', new THREE.BufferAttribute(P.alpha, 1));
+const ptsMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: { value: innerHeight } },
+  vertexShader: `attribute float size; attribute float alpha; attribute vec3 color; uniform float uScale; varying vec3 vC; varying float vA;
+    void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.); gl_Position = projectionMatrix * mv; gl_PointSize = size * uScale / -mv.z; vC = color; vA = alpha; }`,
+  fragmentShader: `varying vec3 vC; varying float vA; void main(){ float d = length(gl_PointCoord - .5); float core = smoothstep(.5, .0, d); gl_FragColor = vec4(vC * (core * core * 1.0 + core * .25) * vA, 1.); }`,
+});
+const points = new THREE.Points(geo, ptsMat);
+points.frustumCulled = false;
+scene.add(points);
+// kinds: 0 dead, 1 spark, 2 rocket, 3 strobe, 4 crossette star, 5 trail ember
+function emit(x, y, z, vx, vy, vz, r, g, b, life, size, opt = {}) {
+  const i = head;
+  head = (head + 1) % N;
+  P.pos.set([x, y, z], i * 3);
+  P.vel.set([vx, vy, vz], i * 3);
+  P.base.set([r, g, b], i * 3);
+  P.col.set([r, g, b], i * 3);
+  P.life[i] = P.max[i] = life;
+  P.size[i] = size;
+  P.alpha[i] = 1;
+  P.drag[i] = opt.drag ?? 1.1;
+  P.grav[i] = opt.grav ?? 9;
+  P.kind[i] = opt.kind ?? 1;
+  P.trail[i] = opt.trail ?? 0;
+  P.split[i] = opt.split ?? 0;
+  return i;
+}
+
+// Shells > Palette + helpers
+const COLORS = [[1, 0.25, 0.3], [1, 0.75, 0.2], [0.35, 0.65, 1], [0.4, 1, 0.5], [0.85, 0.35, 1], [1, 1, 1], [1, 0.5, 0.15], [0.3, 1, 0.95]];
+const pick = () => COLORS[Math.floor(Math.random() * COLORS.length)];
+const GOLD = [1, 0.7, 0.28];
+const _d = new THREE.Vector3();
+function sphereDir() { return _d.randomDirection(); }
+function burst(c, n, speed, col, life, size, opt = {}) {
+  for (let k = 0; k < n; k++) {
+    const d = sphereDir(), s = speed * (0.85 + Math.random() * 0.3);
+    const cc = opt.mix ? (k % 2 ? col : opt.mix) : col;
+    emit(c.x, c.y, c.z, d.x * s, d.y * s, d.z * s, cc[0], cc[1], cc[2], life * (0.8 + Math.random() * 0.4), size, opt);
+  }
+}
+// camera-facing plane basis so shapes read from the viewer
+const right = new THREE.Vector3(1, 0, 0), upv = new THREE.Vector3(0, 1, 0);
+function shape(c, pts2d, speed, col, life, size, tilt = 0) {
+  const ct = Math.cos(tilt), st = Math.sin(tilt);
+  for (const [px, py] of pts2d) {
+    const x = px * ct - py * st, y = px * st + py * ct;
+    const vx = right.x * x * speed, vy = upv.y * y * speed;
+    emit(c.x, c.y, c.z, vx + (Math.random() - 0.5) * 0.4, vy + (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.6, col[0], col[1], col[2], life, size, { drag: 1.4, grav: 4 });
+  }
+}
+
+// Shells > Types: each explodes at c (Vector3)
+const SHELLS = {
+  peony: { label: '🌸 Peony', fn: (c) => burst(c, 220, 26, pick(), 2.0, 1.6) },
+  chrysanthemum: { label: '🌼 Chrysanthemum', fn: (c) => burst(c, 160, 28, pick(), 2.4, 1.3, { trail: 0.03 }) },
+  willow: { label: '🌿 Willow', fn: (c) => burst(c, 180, 20, GOLD, 4.2, 1.2, { drag: 2.4, grav: 5, trail: 0.05 }) },
+  ring: { label: '💍 Ring', fn: (c) => { const col = pick(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 1.2 - 0.6, 0, Math.random() * 1.2 - 0.6)); for (let k = 0; k < 90; k++) { const a = (k / 90) * Math.PI * 2, d = new THREE.Vector3(Math.cos(a), Math.sin(a), 0).applyQuaternion(q).multiplyScalar(24); emit(c.x, c.y, c.z, d.x, d.y, d.z, col[0], col[1], col[2], 2.0, 1.7); } burst(c, 40, 6, [1, 1, 1], 1.0, 1.2); } },
+  heart: { label: '💖 Heart', fn: (c) => { const pts = []; for (let k = 0; k < 110; k++) { const t = (k / 110) * Math.PI * 2; pts.push([(16 * Math.sin(t) ** 3) / 16, (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) / 16]); } shape(c, pts, 22, [1, 0.3, 0.55], 2.2, 1.7, (Math.random() - 0.5) * 0.4); } },
+  smiley: { label: '🙂 Smiley', fn: (c) => { const pts = []; for (let k = 0; k < 80; k++) { const t = (k / 80) * Math.PI * 2; pts.push([Math.cos(t), Math.sin(t)]); } for (let k = 0; k < 26; k++) { const t = Math.PI * 1.15 + (k / 25) * Math.PI * 0.7; pts.push([Math.cos(t) * 0.55, Math.sin(t) * 0.55]); } for (const ex of [-0.35, 0.35]) for (let k = 0; k < 6; k++) pts.push([ex + (Math.random() - 0.5) * 0.08, 0.3 + (Math.random() - 0.5) * 0.08]); shape(c, pts, 22, [1, 0.85, 0.2], 2.2, 1.7); } },
+  crossette: { label: '✳️ Crossette', fn: (c) => { const col = pick(); for (let k = 0; k < 14; k++) { const d = sphereDir().multiplyScalar(18); emit(c.x, c.y, c.z, d.x, d.y, d.z, col[0], col[1], col[2], 0.75, 2.2, { kind: 4, split: 1, trail: 0.02 }); } } },
+  strobe: { label: '✨ Glitter', fn: (c) => { burst(c, 260, 22, [1, 1, 1], 2.8, 1.3, { kind: 3, drag: 1.7, grav: 6 }); crackle(0.5); } },
+  palm: { label: '🌴 Palm', fn: (c) => { for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2, d = new THREE.Vector3(Math.cos(a) * 0.9, 0.55 + Math.random() * 0.2, Math.sin(a) * 0.9).normalize().multiplyScalar(25); emit(c.x, c.y, c.z, d.x, d.y, d.z, GOLD[0], GOLD[1], GOLD[2], 2.8, 3.2, { drag: 1.3, grav: 9, trail: 0.012 }); } burst(c, 60, 10, [1, 0.5, 0.2], 1.2, 1.4); } },
+  double: { label: '🎯 Two-tone', fn: (c) => { const a = pick(); let b = pick(); if (a === b) b = COLORS[(COLORS.indexOf(a) + 3) % COLORS.length]; burst(c, 180, 28, a, 2.2, 1.5); burst(c, 90, 13, b, 1.8, 1.5); } },
+};
+const ORDER = Object.keys(SHELLS);
+
+// Audio > Sounds: launch whistle, distance-delayed boom, crackle
+let actx, soundOn = true;
+function audio() { actx ??= new AudioContext(); }
+function noise(sec) { const len = Math.floor(actx.sampleRate * sec), b = actx.createBuffer(1, len, actx.sampleRate), d = b.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1; return b; }
+function whistle() {
+  if (!actx || !soundOn) return;
+  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(700 + Math.random() * 300, t); o.frequency.exponentialRampToValueAtTime(1800 + Math.random() * 500, t + 1.2);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.1); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.3);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 1.35);
+}
+function boom(distance, big = 1) {
+  if (!actx || !soundOn) return;
+  const t = actx.currentTime + distance / 340, s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noise(2.2);
+  f.type = 'lowpass'; f.frequency.setValueAtTime(1600, t); f.frequency.exponentialRampToValueAtTime(90, t + 1.4);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.9 * big, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.1);
+  s.connect(f).connect(g).connect(actx.destination); s.start(t);
+}
+function crackle(delay) {
+  if (!actx || !soundOn) return;
+  for (let k = 0; k < 40; k++) {
+    const t = actx.currentTime + delay + 0.3 + Math.random() * 1.6, s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+    s.buffer = noise(0.03);
+    f.type = 'highpass'; f.frequency.value = 2500;
+    g.gain.value = 0.08 + Math.random() * 0.1;
+    s.connect(f).connect(g).connect(actx.destination); s.start(t);
+  }
+}
+
+// Shells > Launch: rocket rises with sparks, pops at target height
+const rockets = [];
+let selected = 'random';
+function launch(tx, ty, type = selected) {
+  audio();
+  const x = tx + (Math.random() - 0.5) * 4, z = (Math.random() - 0.5) * 30;
+  const h = Math.max(ty, 18);
+  const vy = Math.sqrt(2 * 22 * h);
+  const i = emit(x, 0, z, (tx - x) * 0.2, vy, 0, 1, 0.8, 0.5, 10, 1.4, { kind: 2, drag: 0, grav: 22 });
+  rockets.push({ i, type: type === 'random' ? ORDER[Math.floor(Math.random() * ORDER.length)] : type });
+  whistle();
+}
+let flash = 0;
+const flashCol = new THREE.Color();
+function explode(r) {
+  const j = r.i * 3, c = new THREE.Vector3(P.pos[j], P.pos[j + 1], P.pos[j + 2]);
+  P.life[r.i] = 0;
+  SHELLS[r.type].fn(c);
+  const col = P.base.subarray(((head - 1 + N) % N) * 3, ((head - 1 + N) % N) * 3 + 3);
+  flashCol.setRGB(col[0], col[1], col[2]);
+  flash = 1;
+  boom(c.distanceTo(camera.position) * 0.5, r.type === 'willow' ? 1.2 : 1);
+}
+
+// HUD > Shell picker + actions
+const bar = document.getElementById('bar');
+const mk = (label, fn, cls = '') => { const b = document.createElement('button'); b.textContent = label; b.className = cls; b.onclick = fn; bar.appendChild(b); return b; };
+const typeBtns = {};
+typeBtns.random = mk('🎲 Random', () => select('random'), 'on');
+for (const k of ORDER) typeBtns[k] = mk(SHELLS[k].label, () => select(k));
+function select(k) { selected = k; for (const [n, b] of Object.entries(typeBtns)) b.classList.toggle('on', n === k); }
+bar.appendChild(Object.assign(document.createElement('div'), { className: 'sep' }));
+let autoShow = false;
+mk('🎆 Finale', () => finale());
+const autoBtn = mk('🔁 Auto show', (e) => { autoShow = !autoShow; e.currentTarget.classList.toggle('on', autoShow); });
+mk('🔊 Sound', (e) => { soundOn = !soundOn; e.currentTarget.classList.toggle('on', soundOn); }, 'on');
+function finale() { for (let k = 0; k < 28; k++) setTimeout(() => launch((Math.random() - 0.5) * 120, 30 + Math.random() * 45, 'random'), k * 140 + Math.random() * 100); }
+
+// Interaction > Click: aim at the vertical show plane z=0
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), showPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), hit = new THREE.Vector3();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (ray.ray.intersectPlane(showPlane, hit) && hit.y > 8) launch(hit.x, hit.y);
+});
+const mouse = new THREE.Vector2();
+addEventListener('pointermove', (e) => mouse.set((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1));
+addEventListener('keydown', (e) => {
+  const n = Number(e.key);
+  if (n >= 1 && n <= ORDER.length) select(ORDER[n - 1]);
+  if (e.key === '0') select('random');
+  if (e.code === 'Space') { e.preventDefault(); launch((Math.random() - 0.5) * 100, 30 + Math.random() * 40); }
+  if (e.key === 'f') finale();
+});
+
+// Run engine: integrate particles, rockets, trails, crossette splits, strobe, flash
+const clock = new THREE.Clock();
+let autoT = 1.5;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.033), t = clock.elapsedTime;
+  for (let i = 0; i < N; i++) {
+    if (P.life[i] <= 0) { if (P.alpha[i] !== 0) { P.alpha[i] = 0; P.size[i] = 0; } continue; }
+    const j = i * 3, k = P.kind[i];
+    P.life[i] -= dt;
+    const dr = Math.exp(-P.drag[i] * dt);
+    P.vel[j] *= dr; P.vel[j + 1] = P.vel[j + 1] * dr - P.grav[i] * dt; P.vel[j + 2] *= dr;
+    P.pos[j] += P.vel[j] * dt; P.pos[j + 1] += P.vel[j + 1] * dt; P.pos[j + 2] += P.vel[j + 2] * dt;
+    const f = P.life[i] / P.max[i];
+    let a = Math.min(1, f * 2.2) * Math.min(1, (P.max[i] - P.life[i]) * 6 + 0.25);
+    if (k === 3) a *= Math.sin(t * 40 + i) > 0.3 ? 1.3 : 0.05;
+    P.alpha[i] = a;
+    // embers cool from white-hot toward their color
+    const heat = Math.max(0, f - 0.88) * 2.5;
+    P.col[j] = Math.min(1, P.base[j] + heat); P.col[j + 1] = Math.min(1, P.base[j + 1] + heat); P.col[j + 2] = Math.min(1, P.base[j + 2] + heat);
+    if (P.trail[i] > 0 && Math.random() < dt / P.trail[i]) emit(P.pos[j], P.pos[j + 1], P.pos[j + 2], (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.6, 0, P.base[j] * 0.9, P.base[j + 1] * 0.7, P.base[j + 2] * 0.5, 0.6 + Math.random() * 0.5, 0.7, { drag: 3, grav: 2, kind: 5 });
+    if (k === 2 && Math.random() < 0.7) emit(P.pos[j], P.pos[j + 1] - 0.5, P.pos[j + 2], (Math.random() - 0.5) * 2, -3 - Math.random() * 3, (Math.random() - 0.5) * 2, 1, 0.6, 0.25, 0.5, 0.8, { drag: 2, grav: 6, kind: 5 });
+    if (k === 4 && P.life[i] <= 0) {
+      for (let q = 0; q < 4; q++) { const d = sphereDir().multiplyScalar(11); emit(P.pos[j], P.pos[j + 1], P.pos[j + 2], d.x, d.y, d.z, P.base[j], P.base[j + 1], P.base[j + 2], 1.2, 1.4, { drag: 1.5, grav: 7 }); }
+      if (actx && soundOn && Math.random() < 0.3) crackle(0);
+    }
+  }
+  for (let r = rockets.length - 1; r >= 0; r--) {
+    const i = rockets[r].i;
+    if (P.vel[i * 3 + 1] <= 2) { explode(rockets[r]); rockets.splice(r, 1); }
+  }
+  for (const n of ['position', 'color', 'size', 'alpha']) geo.attributes[n].needsUpdate = true;
+  flash = Math.max(0, flash - dt * 2.5);
+  sky.material.uniforms.uFlash.value = flash;
+  sky.material.uniforms.uFlashCol.value.copy(flashCol);
+  sky.material.uniforms.uTime.value = t;
+  if (autoShow && (autoT -= dt) < 0) { launch((Math.random() - 0.5) * 110, 28 + Math.random() * 45, 'random'); autoT = 0.5 + Math.random() * 1.6; }
+  camera.position.set(CAM_BASE.x + mouse.x * 4, CAM_BASE.y - mouse.y * 1.5, CAM_BASE.z);
+  camera.lookAt(LOOK);
+  composer.render();
+  requestAnimationFrame(loop);
+}
+// opening: a few shells so the page isn't empty
+setTimeout(() => { for (let k = 0; k < 4; k++) setTimeout(() => launch(-45 + k * 30, 38 + Math.random() * 20, ORDER[k * 2]), k * 450); }, 400);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  ptsMat.uniforms.uScale.value = innerHeight;
+});
+</script>
+</body>
+</html>

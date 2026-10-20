@@ -1,0 +1,21 @@
+# Render Blueprint. Free web services spin down after 15 minutes of inactivity
+# and cold-start on the next request (~30-60s) -- the first person to open the
+# link wakes it, everyone joining after gets a warm server.
+#
+# Keep this at ONE instance: lobby state lives in server memory, so a second
+# replica would silently split players across servers that cannot see each other.
+services:
+  - type: web
+    name: wheres-waldo-game
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: npm ci && npm run build
+    # No compile step: the server runs TypeScript directly via native type stripping.
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      # Must be >= 22.18 or native TS type stripping is unavailable and boot fails.
+      - key: NODE_VERSION
+        value: "24"

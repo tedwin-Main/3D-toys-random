@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sky Postman</title>
+<style>
+  :root { --ink: #1d2433; --card: rgba(255, 255, 255, 0.78); --accent: #e0413a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe6f5; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 14px; box-shadow: 0 6px 24px rgba(20, 40, 70, 0.15); user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 290px; }
+  #intro h1 { margin: 0 0 4px; font-size: 18px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.8; }
+  #hud { top: 16px; right: 16px; padding: 10px 14px; display: grid; grid-template-columns: auto auto; gap: 2px 14px; font-variant-numeric: tabular-nums; font-size: 12px; }
+  #hud b { font-size: 20px; text-align: right; }
+  #hud span { align-self: center; opacity: 0.7; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); padding: 6px; display: flex; gap: 4px; }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); background: transparent; border: 0; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
+  #bar button:hover { background: rgba(0, 0, 0, 0.06); }
+  #bar button.on { background: var(--ink); color: #fff; }
+  #toast { position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%); font-size: 40px; font-weight: 800; color: #fff; text-shadow: 0 3px 18px rgba(0, 0, 0, 0.35); opacity: 0; transition: opacity 0.25s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #reticle { position: fixed; left: 50%; top: 50%; width: 10px; height: 10px; margin: -5px; border: 2px solid rgba(255, 255, 255, 0.8); border-radius: 50%; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Sky Postman ✉️</h1><p>Mouse steers: left/right banks, up/down pitches (or WASD / arrows). Shift = boost. Fly through the golden rings, don't kiss the mountains.</p></div>
+<div id="hud" class="card"><span>speed</span><b id="spd">0</b><span>altitude</span><b id="alt">0</b><span>rings</span><b id="rings">0</b><span>best</span><b id="best">0</b></div>
+<div id="bar" class="card"><button id="view">🎥 Chase</button><button id="time">🌤 Day</button><button id="invert">↕ Normal</button></div>
+<div id="toast"></div>
+<div id="reticle"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/infinite-terrain-flyover/index.html
+ * PURPOSE: arcade plane over endless chunked low-poly terrain with rings, contrails, crashes and time-of-day skies
+ * UI: Sky Postman page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// Scene > Renderer + camera
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.3, 3000);
+scene.fog = new THREE.Fog(0xcfe6f5, 160, 420);
+
+// Terrain > Noise: hashed 2D value noise, fbm, height field shared by mesh + collision
+function hash2(x, z) {
+  let h = Math.imul(x, 374761393) ^ Math.imul(z, 668265263) ^ 0x5bd1e995;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, z) {
+  const xi = Math.floor(x), zi = Math.floor(z), xf = x - xi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = zf * zf * (3 - 2 * zf);
+  const a = hash2(xi, zi), b = hash2(xi + 1, zi), c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, z, oct) {
+  let s = 0, a = 0.5, f = 1;
+  for (let i = 0; i < oct; i++) { s += a * vnoise(x * f, z * f); f *= 2.02; a *= 0.5; }
+  return s / (1 - 0.5 ** oct);
+}
+const sstep = (e0, e1, x) => { const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1); return t * t * (3 - 2 * t); };
+function height(x, z) {
+  const e = fbm(x * 0.0028, z * 0.0028, 5);
+  const ridge = 1 - Math.abs(fbm(x * 0.006 + 50, z * 0.006, 4) * 2 - 1);
+  return (e - 0.43) * 170 + ridge ** 3 * 95 * sstep(0.47, 0.7, e) + (fbm(x * 0.03, z * 0.03, 3) - 0.5) * 6;
+}
+
+// Terrain > Palette: per-triangle color by height + jitter for the low-poly look
+const C = {
+  sand: new THREE.Color(0xe4d39a), grass: new THREE.Color(0x7cb050), grass2: new THREE.Color(0x5e9a3e), forest: new THREE.Color(0x3f7a3a),
+  rock: new THREE.Color(0x8a7d6e), rock2: new THREE.Color(0x6e665e), snow: new THREE.Color(0xf6f8fb), seabed: new THREE.Color(0xc9b98a),
+};
+const _col = new THREE.Color();
+function terrainColor(h, slope, jitter) {
+  if (h < 2.2) return _col.copy(h < 0 ? C.seabed : C.sand);
+  if (h > 92 + jitter * 14 && slope < 0.75) return _col.copy(C.snow);
+  if (slope > 0.6 || h > 70) return _col.copy(C.rock).lerp(C.rock2, jitter);
+  if (h > 38) return _col.copy(C.forest).lerp(C.rock, sstep(38, 70, h) * 0.6);
+  return _col.copy(C.grass).lerp(C.grass2, jitter).lerp(C.forest, sstep(14, 38, h));
+}
+
+// Terrain > Trees: one merged low-poly pine (vertex colored) reused by every chunk
+const treeGeo = (() => {
+  const trunk = new THREE.CylinderGeometry(0.35, 0.45, 2, 5).translate(0, 1, 0);
+  const crown = new THREE.ConeGeometry(2.2, 6, 6).translate(0, 5, 0);
+  const top = new THREE.ConeGeometry(1.5, 3.6, 6).translate(0, 7.6, 0);
+  const paint = (g, hex) => { const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) a.set([c.r, c.g, c.b], i * 3); g.setAttribute('color', new THREE.BufferAttribute(a, 3)); return g.toNonIndexed(); };
+  return mergeGeometries([paint(trunk, 0x6b4a2e), paint(crown, 0x2f6b34), paint(top, 0x3b8040)]);
+})();
+const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.9 });
+const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.95 });
+
+// Terrain > Chunks: ring of chunks around the plane, built a few per frame, recycled when far
+const CHUNK = 96, SEG = 30, RADIUS = 4;
+const chunks = new Map();
+const buildQueue = [];
+function buildChunk(cx, cz) {
+  const ox = cx * CHUNK, oz = cz * CHUNK, step = CHUNK / SEG, N = SEG + 1;
+  const hs = new Float32Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) hs[j * N + i] = height(ox + i * step, oz + j * step);
+  const pos = new Float32Array(SEG * SEG * 18), col = new Float32Array(SEG * SEG * 18);
+  let k = 0;
+  const tri = (ax, az, ay, bx, bz, by, qx, qz, qy) => {
+    pos.set([ax, ay, az, bx, by, bz, qx, qy, qz], k);
+    const hAvg = (ay + by + qy) / 3;
+    // slope from triangle normal y
+    const ux = bx - ax, uy = by - ay, uz = bz - az, vx = qx - ax, vy = qy - ay, vz = qz - az;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const slope = 1 - Math.abs(ny) / Math.hypot(nx, ny, nz);
+    const c = terrainColor(hAvg, slope * 2.2, hash2(Math.floor(ax * 7), Math.floor(az * 7)));
+    for (let t = 0; t < 3; t++) col.set([c.r, c.g, c.b], k + t * 3);
+    k += 9;
+  };
+  for (let j = 0; j < SEG; j++) for (let i = 0; i < SEG; i++) {
+    const x0 = i * step, z0 = j * step, x1 = x0 + step, z1 = z0 + step;
+    const h00 = hs[j * N + i], h10 = hs[j * N + i + 1], h01 = hs[(j + 1) * N + i], h11 = hs[(j + 1) * N + i + 1];
+    tri(x0, z0, h00, x0, z1, h01, x1, z0, h10);
+    tri(x1, z0, h10, x0, z1, h01, x1, z1, h11);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  const group = new THREE.Group();
+  const mesh = new THREE.Mesh(g, terrainMat);
+  mesh.position.set(ox, 0, oz);
+  group.add(mesh);
+  // trees on gentle green land only
+  const spots = [];
+  for (let t = 0; t < 140; t++) {
+    const x = ox + hash2(cx * 131 + t, cz * 71) * CHUNK, z = oz + hash2(cx * 17, cz * 191 + t) * CHUNK;
+    const h = height(x, z);
+    if (h < 4 || h > 62) continue;
+    if (Math.abs(height(x + 2, z) - h) + Math.abs(height(x, z + 2) - h) > 3.2) continue;
+    if (fbm(x * 0.01 + 9, z * 0.01, 2) < 0.48) continue;
+    spots.push([x, h, z, 0.7 + hash2(t, cx + cz) * 0.8]);
+  }
+  if (spots.length) {
+    const trees = new THREE.InstancedMesh(treeGeo, treeMat, spots.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+    spots.forEach(([x, h, z, sc], i) => trees.setMatrixAt(i, m.compose(p.set(x, h - 0.4, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, sc * 9), s.setScalar(sc))));
+    group.add(trees);
+  }
+  scene.add(group);
+  return group;
+}
+function updateChunks(px, pz, force = false) {
+  const ccx = Math.floor(px / CHUNK), ccz = Math.floor(pz / CHUNK);
+  const want = new Set();
+  for (let dz = -RADIUS; dz <= RADIUS; dz++) for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+    if (dx * dx + dz * dz > RADIUS * RADIUS + 2) continue;
+    const key = `${ccx + dx},${ccz + dz}`;
+    want.add(key);
+    if (!chunks.has(key) && !buildQueue.some((b) => b.key === key)) buildQueue.push({ key, cx: ccx + dx, cz: ccz + dz, d: dx * dx + dz * dz });
+  }
+  for (const [key, group] of chunks) {
+    if (want.has(key)) continue;
+    scene.remove(group);
+    group.traverse((o) => { if (o.isMesh && o.geometry !== treeGeo) o.geometry.dispose(); if (o.isInstancedMesh) o.dispose(); });
+    chunks.delete(key);
+  }
+  for (let i = buildQueue.length - 1; i >= 0; i--) if (!want.has(buildQueue[i].key)) buildQueue.splice(i, 1);
+  buildQueue.sort((a, b) => a.d - b.d);
+  const budget = force ? Infinity : 2;
+  for (let n = 0; n < budget && buildQueue.length; n++) { const b = buildQueue.shift(); chunks.set(b.key, buildChunk(b.cx, b.cz)); }
+}
+
+// Scene > Water: flat-shaded wavy sheet snapped to a grid under the camera
+const waterMat = new THREE.MeshStandardMaterial({ color: 0x2f86c2, flatShading: true, transparent: true, opacity: 0.86, roughness: 0.25, metalness: 0.1 });
+const waterU = { uTime: { value: 0 } };
+waterMat.onBeforeCompile = (sh) => {
+  sh.uniforms.uTime = waterU.uTime;
+  sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    vec2 wp = (modelMatrix * vec4(transformed, 1.)).xz;
+    transformed.y += sin(wp.x * 0.09 + uTime * 1.3) * 0.45 + cos(wp.y * 0.11 + uTime * 1.1) * 0.4;`);
+};
+const WATER_STEP = 8;
+const water = new THREE.Mesh(new THREE.PlaneGeometry(900, 900, 112, 112).rotateX(-Math.PI / 2), waterMat);
+scene.add(water);
+
+// Scene > Sky: gradient dome with sun disc, follows camera
+const skyU = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3() }, sunCol: { value: new THREE.Color() } };
+const sky = new THREE.Mesh(new THREE.SphereGeometry(1400, 32, 16), new THREE.ShaderMaterial({
+  uniforms: skyU, side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+  fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vD;
+    void main(){ vec3 d = normalize(vD); float s = max(dot(d, normalize(sunDir)), 0.);
+      vec3 c = mix(horizon, top, pow(max(d.y, 0.), 0.55));
+      c += sunCol * (pow(s, 900.) * 6. + pow(s, 12.) * 0.35);
+      gl_FragColor = vec4(c, 1.);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+}));
+sky.renderOrder = -1;
+scene.add(sky);
+const hemi = new THREE.HemisphereLight(0xffffff, 0x557a3a, 1);
+const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+scene.add(hemi, sun, sun.target);
+
+// Scene > Time of day presets
+const TIMES = [
+  { name: '🌤 Day', top: 0x3d8ee0, horizon: 0xcfe6f5, sunDir: [0.4, 0.75, 0.35], sunCol: 0xfff6e0, light: 2.4, hemiSky: 0xd8ecff, hemiGround: 0x5a7a3e, hemiI: 1.0, water: 0x2f86c2 },
+  { name: '🌅 Sunset', top: 0x2b3f86, horizon: 0xf7a35c, sunDir: [0.85, 0.07, -0.35], sunCol: 0xffa060, light: 2.2, hemiSky: 0xf6b98a, hemiGround: 0x3a2a40, hemiI: 0.8, water: 0x2a5d8f },
+  { name: '🌙 Dusk', top: 0x060b22, horizon: 0x26365e, sunDir: [-0.3, 0.45, 0.6], sunCol: 0x9fb8ff, light: 0.55, hemiSky: 0x4a5c8a, hemiGround: 0x101624, hemiI: 0.55, water: 0x15325a },
+];
+let timeIdx = 0;
+function applyTime() {
+  const t = TIMES[timeIdx];
+  skyU.top.value.set(t.top); skyU.horizon.value.set(t.horizon); skyU.sunDir.value.set(...t.sunDir).normalize(); skyU.sunCol.value.set(t.sunCol);
+  scene.fog.color.set(t.horizon);
+  sun.color.set(t.sunCol); sun.intensity = t.light;
+  hemi.color.set(t.hemiSky); hemi.groundColor.set(t.hemiGround); hemi.intensity = t.hemiI;
+  waterMat.color.set(t.water);
+  document.getElementById('time').textContent = t.name;
+  document.body.style.background = `#${new THREE.Color(t.horizon).getHexString()}`;
+}
+applyTime();
+
+// Scene > Clouds: puffy flat-shaded clusters wrapped around the plane
+const cloudGeo = (() => {
+  const parts = [];
+  for (let i = 0; i < 7; i++) {
+    const r = 4 + Math.random() * 5;
+    parts.push(new THREE.IcosahedronGeometry(r, 1).translate((Math.random() - 0.5) * 22, (Math.random() - 0.3) * 4, (Math.random() - 0.5) * 12));
+  }
+  return mergeGeometries(parts);
+})();
+const clouds = new THREE.InstancedMesh(cloudGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x9aa6b8, emissiveIntensity: 0.45, flatShading: true, roughness: 1, transparent: true, opacity: 0.92 }), 46);
+const cloudData = [];
+{
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < clouds.count; i++) {
+    cloudData.push({ x: (Math.random() - 0.5) * 900, y: 120 + Math.random() * 70, z: (Math.random() - 0.5) * 900, s: 0.8 + Math.random() * 1.6, r: Math.random() * 6 });
+  }
+  clouds.frustumCulled = false;
+  scene.add(clouds);
+}
+const _cm = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3(), _cpos = new THREE.Vector3();
+function updateClouds(px, pz, dt) {
+  for (let i = 0; i < cloudData.length; i++) {
+    const c = cloudData[i];
+    c.x += dt * 3;
+    // wrap into a 900-wide window centred on the plane
+    c.x = px + ((((c.x - px + 450) % 900) + 900) % 900) - 450;
+    c.z = pz + ((((c.z - pz + 450) % 900) + 900) % 900) - 450;
+    clouds.setMatrixAt(i, _cm.compose(_cpos.set(c.x, c.y, c.z), _cq.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, c.r), _cs.set(c.s, c.s * 0.7, c.s)));
+  }
+  clouds.instanceMatrix.needsUpdate = true;
+}
+
+// Plane > Model: chunky red monoplane, nose +z, spinning prop
+const plane = new THREE.Group();
+const prop = new THREE.Group();
+{
+  const red = new THREE.MeshStandardMaterial({ color: 0xe0413a, flatShading: true, roughness: 0.5 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xf4f1ea, flatShading: true, roughness: 0.6 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2b2f3a, flatShading: true, roughness: 0.7 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x8fd3ff, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.75 });
+  const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); plane.add(m); return m; };
+  add(new THREE.CylinderGeometry(0.55, 0.28, 5.2, 8), red, 0, 0, -0.3, Math.PI / 2);
+  add(new THREE.CylinderGeometry(0.62, 0.55, 1.2, 8), white, 0, 0, 2.5, Math.PI / 2);
+  add(new THREE.SphereGeometry(0.5, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), glass, 0, 0.42, 0.6);
+  add(new THREE.BoxGeometry(7.4, 0.14, 1.3), red, 0, -0.2, 0.7);
+  add(new THREE.BoxGeometry(1.6, 0.15, 1.32), white, -2.9, -0.19, 0.7);
+  add(new THREE.BoxGeometry(1.6, 0.15, 1.32), white, 2.9, -0.19, 0.7);
+  add(new THREE.BoxGeometry(2.8, 0.1, 0.8), red, 0, 0.05, -2.6);
+  add(new THREE.BoxGeometry(0.1, 1.2, 0.9), white, 0, 0.6, -2.65);
+  add(new THREE.CylinderGeometry(0.05, 0.05, 0.9, 4), dark, -0.8, -0.65, 1.0);
+  add(new THREE.CylinderGeometry(0.05, 0.05, 0.9, 4), dark, 0.8, -0.65, 1.0);
+  add(new THREE.CylinderGeometry(0.28, 0.28, 0.18, 10), dark, -0.8, -1.1, 1.0, 0, 0, Math.PI / 2);
+  add(new THREE.CylinderGeometry(0.28, 0.28, 0.18, 10), dark, 0.8, -1.1, 1.0, 0, 0, Math.PI / 2);
+  prop.position.set(0, 0, 3.15);
+  prop.add(new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.5, 8).rotateX(Math.PI / 2), white));
+  prop.add(new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.22, 0.06), dark));
+  plane.add(prop);
+  // mail sack on the back, it's a postman after all
+  add(new THREE.SphereGeometry(0.38, 6, 5), new THREE.MeshStandardMaterial({ color: 0xc9a36a, flatShading: true }), 0, 0.35, -1.1);
+}
+scene.add(plane);
+
+// Plane > Contrails: wingtip ribbons with fading alpha
+const TRAIL = 70;
+function makeTrail() {
+  const pos = new Float32Array(TRAIL * 2 * 3), alpha = new Float32Array(TRAIL * 2), idx = [];
+  for (let i = 0; i < TRAIL - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  for (let i = 0; i < TRAIL; i++) alpha[i * 2] = alpha[i * 2 + 1] = (1 - i / TRAIL) ** 1.5 * 0.45;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('alpha', new THREE.BufferAttribute(alpha, 1));
+  g.setIndex(idx);
+  const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: 'attribute float alpha; varying float vA; void main(){ vA = alpha; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+    fragmentShader: 'varying float vA; void main(){ gl_FragColor = vec4(1., 1., 1., vA); }',
+  }));
+  m.frustumCulled = false;
+  scene.add(m);
+  return { m, pts: [], local: null };
+}
+const trails = [makeTrail(), makeTrail()];
+trails[0].local = new THREE.Vector3(-3.7, -0.2, 0.4);
+trails[1].local = new THREE.Vector3(3.7, -0.2, 0.4);
+const _tp = new THREE.Vector3(), _tu = new THREE.Vector3();
+function updateTrails(show) {
+  for (const t of trails) {
+    t.m.visible = show;
+    _tp.copy(t.local).applyMatrix4(plane.matrixWorld);
+    t.pts.unshift(_tp.clone());
+    if (t.pts.length > TRAIL) t.pts.pop();
+    const a = t.m.geometry.attributes.position;
+    _tu.set(0, 0.12, 0).applyQuaternion(plane.quaternion);
+    for (let i = 0; i < TRAIL; i++) {
+      const p = t.pts[Math.min(i, t.pts.length - 1)];
+      a.setXYZ(i * 2, p.x + _tu.x, p.y + _tu.y, p.z + _tu.z);
+      a.setXYZ(i * 2 + 1, p.x - _tu.x, p.y - _tu.y, p.z - _tu.z);
+    }
+    a.needsUpdate = true;
+  }
+}
+
+// Effects > Explosion: burst of embers + smoke, gravity, fade
+const BOOM = 220;
+const boomPos = new Float32Array(BOOM * 3), boomCol = new Float32Array(BOOM * 3), boomVel = new Float32Array(BOOM * 3);
+const boomGeo = new THREE.BufferGeometry();
+boomGeo.setAttribute('position', new THREE.BufferAttribute(boomPos, 3));
+boomGeo.setAttribute('color', new THREE.BufferAttribute(boomCol, 3));
+const boom = new THREE.Points(boomGeo, new THREE.PointsMaterial({ size: 1.4, vertexColors: true, transparent: true }));
+boom.frustumCulled = false;
+boom.visible = false;
+scene.add(boom);
+let boomT = 0;
+function explode(p) {
+  for (let i = 0; i < BOOM; i++) {
+    boomPos.set([p.x, p.y, p.z], i * 3);
+    const v = new THREE.Vector3().randomDirection().multiplyScalar(6 + Math.random() * 22);
+    v.y = Math.abs(v.y) * 1.2;
+    boomVel.set([v.x, v.y, v.z], i * 3);
+  }
+  boomT = 0;
+  boom.visible = true;
+}
+function updateBoom(dt) {
+  if (!boom.visible) return;
+  boomT += dt;
+  for (let i = 0; i < BOOM; i++) {
+    boomVel[i * 3 + 1] -= 14 * dt;
+    for (let k = 0; k < 3; k++) { boomVel[i * 3 + k] *= 1 - 1.2 * dt; boomPos[i * 3 + k] += boomVel[i * 3 + k] * dt; }
+    const f = Math.min(boomT / 1.2, 1), hot = i % 3 !== 0;
+    const c = hot ? [1, 0.55 - f * 0.4, 0.15 - f * 0.1] : [0.35, 0.33, 0.32];
+    boomCol.set(c.map((x) => x * (1 - f * 0.6)), i * 3);
+  }
+  boomGeo.attributes.position.needsUpdate = boomGeo.attributes.color.needsUpdate = true;
+  if (boomT > 2.4) boom.visible = false;
+}
+
+// Gameplay > Rings: golden hoops chained ahead, pass through to score
+const ringGeo = new THREE.TorusGeometry(7, 0.55, 8, 28);
+const rings = [];
+let lastRing = null, score = 0, best = 0;
+try { best = Number(localStorage.getItem('sky-postman-best')) || 0; } catch {}
+function spawnRing() {
+  const base = lastRing ? lastRing.position : plane.position;
+  const dir = lastRing ? lastRing.userData.dir.clone() : fwd.clone().setY(0).normalize();
+  dir.applyAxisAngle(THREE.Object3D.DEFAULT_UP, (Math.random() - 0.5) * 0.9);
+  const p = base.clone().addScaledVector(dir, lastRing ? 150 : 120);
+  const ground = Math.max(height(p.x, p.z), 0);
+  // keep rings clear of peaks along the way by sampling midpoints
+  let clear = ground;
+  for (let t = 0.25; t < 1; t += 0.25) { const q = base.clone().lerp(p, t); clear = Math.max(clear, height(q.x, q.z)); }
+  p.y = Math.max(lastRing ? ground + 24 + Math.random() * 26 : plane.position.y - 4, clear + 14);
+  const r = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0xffa400, emissiveIntensity: 0.6, roughness: 0.3, metalness: 0.6 }));
+  r.position.copy(p);
+  r.lookAt(p.clone().add(dir));
+  r.userData = { dir, hit: false, t: 0 };
+  scene.add(r);
+  rings.push(r);
+  lastRing = r;
+}
+function resetRings() {
+  for (const r of rings) scene.remove(r);
+  rings.length = 0;
+  lastRing = null;
+  for (let i = 0; i < 4; i++) spawnRing();
+}
+
+// Effects > Audio: engine drone pitch by speed, chime on ring, thud on crash
+let actx, engOsc, engGain;
+function audio() {
+  if (actx) return;
+  actx = new AudioContext();
+  engOsc = actx.createOscillator();
+  engOsc.type = 'sawtooth';
+  const f = actx.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 420;
+  engGain = actx.createGain();
+  engGain.gain.value = 0.035;
+  engOsc.connect(f).connect(engGain).connect(actx.destination);
+  engOsc.start();
+}
+function chime() {
+  if (!actx) return;
+  [880, 1320, 1760].forEach((fr, i) => {
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * 0.06;
+    o.frequency.value = fr; o.type = 'triangle';
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.15, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.55);
+  });
+}
+function thud() {
+  if (!actx) return;
+  const len = actx.sampleRate * 0.9, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  const s = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = buf; f.type = 'lowpass'; f.frequency.value = 500; g.gain.value = 0.6;
+  s.connect(f).connect(g).connect(actx.destination); s.start();
+}
+addEventListener('pointerdown', audio, { once: true });
+addEventListener('keydown', audio, { once: true });
+
+// Input > Mouse + keys: mouse offset from center steers, keys override until mouse moves
+const keys = {};
+let mouse = { x: 0, y: 0 }, useMouse = true, invert = false;
+addEventListener('pointermove', (e) => { mouse.x = (e.clientX / innerWidth) * 2 - 1; mouse.y = -((e.clientY / innerHeight) * 2 - 1); useMouse = true; });
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { useMouse = false; e.preventDefault(); }
+  if (e.code === 'KeyC') cycleView();
+  if (e.code === 'KeyT') cycleTime();
+  if (e.code === 'KeyI') toggleInvert();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const VIEWS = ['🎥 Chase', '👀 Cockpit', '🎬 Cinematic'];
+let view = 0;
+function cycleView() { view = (view + 1) % VIEWS.length; document.getElementById('view').textContent = VIEWS[view]; cine = null; }
+function cycleTime() { timeIdx = (timeIdx + 1) % TIMES.length; applyTime(); }
+function toggleInvert() { invert = !invert; document.getElementById('invert').textContent = invert ? '↕ Inverted' : '↕ Normal'; document.getElementById('invert').classList.toggle('on', invert); }
+document.getElementById('view').onclick = cycleView;
+document.getElementById('time').onclick = cycleTime;
+document.getElementById('invert').onclick = toggleInvert;
+const toastEl = document.getElementById('toast');
+let toastT = 0;
+function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); toastT = 1.2; }
+
+// Plane > Flight: arcade yaw/pitch/roll, bank turns, dive speeds up
+let yaw = 0, pitch = 0, roll = 0, speed = 48, crashed = 0;
+const fwd = new THREE.Vector3(0, 0, 1);
+const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+function respawn() {
+  const h = Math.max(height(plane.position.x, plane.position.z), 0);
+  plane.position.y = h + 70;
+  pitch = 0; roll = 0; speed = 48; crashed = 0;
+  plane.visible = true;
+  for (const t of trails) t.pts.length = 0;
+  score = 0;
+  resetRings();
+}
+function fly(dt) {
+  let rollIn = 0, pitchIn = 0;
+  if (useMouse) { rollIn = THREE.MathUtils.clamp(mouse.x * 1.4, -1, 1); pitchIn = THREE.MathUtils.clamp(mouse.y * 1.6, -1, 1); }
+  else {
+    rollIn = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+    pitchIn = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  }
+  if (invert) pitchIn = -pitchIn;
+  // small dead zone so a resting mouse flies straight
+  if (Math.abs(pitchIn) < 0.06) pitchIn = 0;
+  roll += (rollIn * 1.05 - roll) * (1 - Math.exp(-dt * 3));
+  pitch = THREE.MathUtils.clamp(pitch + pitchIn * 1.15 * dt, -1.2, 1.2);
+  if (!pitchIn) pitch *= 1 - 0.35 * dt;
+  yaw -= Math.sin(roll) * 1.15 * dt;
+  const boost = keys.ShiftLeft || keys.ShiftRight ? 1 : 0;
+  const target = 48 + boost * 42 - Math.sin(pitch) * 30;
+  speed += (target - speed) * (1 - Math.exp(-dt * 1.2));
+  _e.set(-pitch, yaw, roll);
+  plane.quaternion.setFromEuler(_e);
+  fwd.set(0, 0, 1).applyQuaternion(plane.quaternion);
+  plane.position.addScaledVector(fwd, speed * dt);
+  prop.rotation.z += dt * (30 + speed);
+  if (engOsc) { engOsc.frequency.value = 55 + speed * 1.1; engGain.gain.value = crashed ? 0 : 0.03 + boost * 0.015; }
+}
+
+// Camera > Views: chase spring, cockpit, cinematic leapfrog
+const camPos = new THREE.Vector3(), camLook = new THREE.Vector3(), _up = new THREE.Vector3(), _back = new THREE.Vector3();
+let cine = null, shake = 0;
+function updateCamera(dt) {
+  if (view === 0) {
+    _back.copy(fwd).multiplyScalar(-16).add(plane.position);
+    _back.y += 5;
+    camPos.lerp(_back, 1 - Math.exp(-dt * 5));
+    camLook.copy(plane.position).addScaledVector(fwd, 12);
+    camera.up.set(0, 1, 0);
+    camera.position.copy(camPos);
+    camera.lookAt(camLook);
+  } else if (view === 1) {
+    _up.set(0, 1, 0).applyQuaternion(plane.quaternion);
+    camera.position.copy(plane.position).addScaledVector(_up, 1.0).addScaledVector(fwd, 0.4);
+    camera.up.copy(_up);
+    camera.lookAt(camLook.copy(camera.position).addScaledVector(fwd, 10));
+    camPos.copy(camera.position);
+  } else {
+    if (!cine || cine.distanceTo(plane.position) > 170) {
+      cine = plane.position.clone().addScaledVector(fwd, 110).add(new THREE.Vector3((Math.random() - 0.5) * 60, 0, (Math.random() - 0.5) * 60));
+      cine.y = Math.max(height(cine.x, cine.z), 0) + 6 + Math.random() * 20;
+    }
+    camera.up.set(0, 1, 0);
+    camera.position.copy(cine);
+    camera.lookAt(plane.position);
+    camPos.copy(camera.position);
+  }
+  if (shake > 0) { camera.position.add(new THREE.Vector3().randomDirection().multiplyScalar(shake)); shake *= Math.exp(-dt * 4); if (shake < 0.02) shake = 0; }
+  // keep the camera out of the ground
+  const gh = Math.max(height(camera.position.x, camera.position.z), 0) + 1.5;
+  if (camera.position.y < gh) camera.position.y = gh;
+}
+
+// Run engine: chunks, flight, rings, collisions, HUD
+const clock = new THREE.Clock();
+const _lr = new THREE.Vector3();
+const spdEl = document.getElementById('spd'), altEl = document.getElementById('alt'), ringsEl = document.getElementById('rings'), bestEl = document.getElementById('best');
+bestEl.textContent = best;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
+  if (!crashed) fly(dt);
+  else if ((crashed += dt) > 2.6) respawn();
+  plane.updateMatrixWorld();
+  updateChunks(plane.position.x, plane.position.z);
+  water.position.set(Math.round(camera.position.x / WATER_STEP) * WATER_STEP, 0, Math.round(camera.position.z / WATER_STEP) * WATER_STEP);
+  waterU.uTime.value = t;
+  sky.position.copy(camera.position);
+  sun.position.copy(plane.position).addScaledVector(skyU.sunDir.value, 200);
+  sun.target.position.copy(plane.position);
+  updateClouds(plane.position.x, plane.position.z, dt);
+  updateTrails(!crashed && view !== 1);
+  updateBoom(dt);
+
+  if (!crashed) {
+    const ground = Math.max(height(plane.position.x, plane.position.z), 0.4);
+    if (plane.position.y < ground + 0.9) {
+      crashed = 0.001;
+      plane.visible = false;
+      explode(plane.position);
+      thud();
+      shake = 1.6;
+      toast(score ? `💥 ${score} ring${score > 1 ? 's' : ''}` : '💥 Oops');
+    }
+    for (const r of rings) {
+      r.userData.t += dt;
+      r.rotation.z += dt * 0.6;
+      if (r.userData.hit) continue;
+      _lr.copy(plane.position);
+      r.worldToLocal(_lr);
+      if (Math.abs(_lr.z) < 2.5 && Math.hypot(_lr.x, _lr.y) < 6.6) {
+        r.userData.hit = true;
+        r.material.color.set(0x7dff9a); r.material.emissive.set(0x2fd05a);
+        score++;
+        if (score > best) { best = score; try { localStorage.setItem('sky-postman-best', best); } catch {} }
+        chime();
+        speed += 12;
+        toast(['✉️ Delivered!', '✨ Nice!', '🎯 Bullseye', '📬 +1'][score % 4]);
+      }
+    }
+    // recycle rings far behind the plane
+    for (let i = rings.length - 1; i >= 0; i--) {
+      const r = rings[i];
+      _lr.subVectors(r.position, plane.position);
+      if (_lr.dot(fwd) < -40 && _lr.length() > 60) { scene.remove(r); rings.splice(i, 1); spawnRing(); }
+    }
+  }
+  for (const r of rings) {
+    // next unhit ring pulses so you know where to go
+    const s = r === rings.find((q) => !q.userData.hit) ? 1 + Math.sin(t * 6) * 0.06 : 1;
+    r.scale.setScalar(s);
+  }
+  updateCamera(dt);
+  if (toastT > 0 && (toastT -= dt) <= 0) toastEl.classList.remove('show');
+  spdEl.textContent = Math.round(speed * 3.6);
+  altEl.textContent = Math.round(plane.position.y);
+  ringsEl.textContent = score;
+  bestEl.textContent = best;
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+plane.position.set(0, Math.max(height(0, 0), 0) + 70, 0);
+camPos.set(0, plane.position.y + 5, -16);
+updateChunks(0, 0, true);
+resetRings();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
