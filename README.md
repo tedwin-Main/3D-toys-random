@@ -1,25 +1,25 @@
 # 3D Toy Box
 
-Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 12 players. One Node server hosts everything: static toys, the websocket room relay, and the Where's Waldo app.
+Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 12 players. One Node server hosts everything: static toys, and the websocket room relay.
 
 ## Run locally
 
 ```sh
-npm run setup   # first time: installs ws + builds the Waldo bundle
+npm run setup   # first time: installs ws
 npm start       # http://localhost:5055/3d-toys/  (PORT env to change)
 ```
 
-`backend/start-server.js` serves every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, Waldo (bundle + its own lobby socket) at `/3d-toys/wheres-waldo-game/`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:5055/3d-toys/`. Needs Node >= 22.18 (Waldo's server code runs as TypeScript via native type stripping).
+`backend/start-server.js` serves every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:5055/3d-toys/`. Needs Node >= 20.
 
 ## Deploy on Render
 
 1. Render Dashboard > New > Blueprint > pick this repo. `render.yaml` defines one free web service.
-2. Build: `npm ci && npm run build:waldo`. Start: `npm start`. Render injects `PORT`; health check hits `/health`.
+2. Build: `npm ci`. Start: `npm start`. Render injects `PORT`; health check hits `/health`.
 3. Open `https://<service>.onrender.com/3d-toys/`. Invite links in the lobby use that public URL.
 
 Notes:
 
-- Keep it at one instance: rooms and Waldo lobbies live in server memory.
+- Keep it at one instance: rooms live in server memory.
 - Free tier sleeps after 15 min idle; the first visit wakes it (~30-60 s).
 - Toys load three.js from `cdn.jsdelivr.net`; networks that block that CDN will show blank toys.
 
@@ -56,7 +56,7 @@ Notes:
 
 Rooms via `backend/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test.
 
-- `wheres-waldo-game/`: multiplayer Where's Waldo (React + ws, history in tedwin-Main/wheres-waldo-game). Race / hide & seek, seeded crowds, server-validated clicks; mounted by backend/start-server.js at /3d-toys/wheres-waldo-game/
+- `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-12 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
 - `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick
 - `tank-battle-maze/`: online 12-tank deathmatch: seeded maze (backtracker + loops, merged wall boxes, occupancy LOS grid), ricochet shells, crates, BFS bots that lead + dodge, kill feed, minimap, twin touch sticks
 - `paint-territory/`: online turf painting: 48x48 owner grid as premultiplied DataTexture + wobbly-edge floor shader, delta + 1 s keyframe sync, paint bombs, terrain-dependent speed, mirrored seeded pillars, bots seeking unclaimed/enemy turf

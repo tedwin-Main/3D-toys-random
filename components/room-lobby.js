@@ -1,6 +1,6 @@
 /**
  * FILE: RANDOM_dump/3d-toys/components/room-lobby.js
- * PURPOSE: drop-in lobby overlay for multiplayer toys: nickname, create/join by code, invite links (local + LAN), roster, host bots + Start, back-to-lobby after a match
+ * PURPOSE: drop-in lobby overlay for multiplayer toys: nickname, create/join by code, invite links (local + LAN), roster, host bots + settings + Start, back-to-lobby after a match
  * UI: lobby overlay on every multiplayer toy
  * USED BY: multiplayer toy pages (e.g. bumper-sumo-arena/index.html)
  * KEY EXPORTS: createLobby
@@ -37,6 +37,10 @@ const CSS = `
 .lb-wait { color: #9aa3b8; font-size: 14px; text-align: center; padding: 10px; }
 .lb-foot { margin-top: 16px; display: flex; gap: 8px; }
 .lb-foot .lb-btn.main { flex: 1; }
+.lb-set { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 14px; }
+.lb-set select { font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 9px; border: 1px solid #2c3142; background: #0f121a; color: inherit; }
+.lb-set b { color: #f2f4fa; }
+.lb-set span { color: #9aa3b8; }
 .lb-note { color: #6f7890; font-size: 12px; margin-top: 10px; line-height: 1.5; }
 `;
 
@@ -47,11 +51,12 @@ const store = {
 
 /**
  * opts: { game, title, emoji, blurb, accent, maxBots, defaultBots, minPlayers, note,
- *         maxTotal (seat cap, default 12), onJoin(room), onStart({ seed, bots, isHost }), onLobby() }
+ *         maxTotal (seat cap, default 12), settings ([{ key, label, options: [[value, label]], value }], host picks),
+ *         onJoin(room), onStart({ seed, bots, isHost, late, settings }), onLobby() }
  * Lobby control messages carry `_lobby`; games must ignore data with that key.
  */
 export function createLobby(opts) {
-  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 12, note = '' } = opts;
+  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 12, note = '', settings = [] } = opts;
   if (!document.getElementById('lb-style')) {
     const st = document.createElement('style');
     st.id = 'lb-style';
@@ -63,7 +68,7 @@ export function createLobby(opts) {
   wrap.style.setProperty('--lb-accent', accent);
   document.body.append(wrap);
   const urlRoom = new URLSearchParams(location.search).get('room') ?? '';
-  const state = { room: null, running: false, seed: 0, bots: defaultBots, lan: null };
+  const state = { room: null, running: false, seed: 0, bots: defaultBots, lan: null, settings: Object.fromEntries(settings.map((s) => [s.key, s.value])) };
   fetch('/3d-toys/lan.json').then((r) => r.json()).then((j) => { state.lan = j; if (state.room) renderRoom(); }).catch(() => {});
 
   // Lobby > Join panel: nickname + create or join by code
@@ -125,6 +130,7 @@ export function createLobby(opts) {
       <label>Players (${humans})</label>
       <div class="lb-players"></div>
       ${r.isHost && botMax ? `<label>Bots</label><div class="lb-bots"><input type="range" min="0" max="${botMax}" step="1" value="${state.bots}" class="lb-bot-in" /><b class="lb-bot-n">${state.bots}</b></div>` : ''}
+      ${settings.length ? '<label>Settings</label><div class="lb-set"></div>' : ''}
       ${r.isHost ? `<div class="lb-foot"><button class="lb-btn lb-leave">Leave</button><button class="lb-btn main lb-start">Start</button></div>` : `<div class="lb-wait">Waiting for host to start…</div><div class="lb-foot"><button class="lb-btn lb-leave">Leave</button></div>`}
       ${note ? `<div class="lb-note">${note}</div>` : ''}
     </div>`;
@@ -146,6 +152,23 @@ export function createLobby(opts) {
       c.querySelector('span').textContent = p.nick;
       wrap.querySelector('.lb-players').append(c);
     }
+    // Lobby > Room panel > Settings: host selects, guests read-only
+    for (const s of settings) {
+      const set = wrap.querySelector('.lb-set');
+      const lab = document.createElement('span');
+      lab.textContent = s.label;
+      set.append(lab);
+      if (r.isHost) {
+        const sel = document.createElement('select');
+        for (const [v, l] of s.options) sel.append(new Option(l, v, false, String(v) === String(state.settings[s.key])));
+        sel.onchange = () => { state.settings[s.key] = s.options.find(([v]) => String(v) === sel.value)[0]; r.send({ _lobby: 'settings', values: state.settings }); };
+        set.append(sel);
+      } else {
+        const b = document.createElement('b');
+        b.textContent = s.options.find(([v]) => String(v) === String(state.settings[s.key]))?.[1] ?? '';
+        set.append(b);
+      }
+    }
     const bi = wrap.querySelector('.lb-bot-in');
     if (bi) bi.oninput = () => { state.bots = +bi.value; wrap.querySelector('.lb-bot-n').textContent = bi.value; syncStart(); };
     const start = wrap.querySelector('.lb-start');
@@ -164,14 +187,17 @@ export function createLobby(opts) {
     const seen = new Set(r.players.map((p) => p.id));
     r.on('roster', (players) => {
       // late joiner while a match runs: host sends them the start packet directly
-      if (r.isHost && state.running) for (const p of players) if (!seen.has(p.id) && p.id !== r.me) r.send({ _lobby: 'start', seed: state.seed, bots: state.bots, late: true }, { to: p.id });
+      if (r.isHost && state.running) for (const p of players) if (!seen.has(p.id) && p.id !== r.me) r.send({ _lobby: 'start', seed: state.seed, bots: state.bots, settings: state.settings, late: true }, { to: p.id });
+      // newcomers in the room panel need current host settings
+      if (r.isHost && !state.running && settings.length) r.send({ _lobby: 'settings', values: state.settings });
       players.forEach((p) => seen.add(p.id));
       renderRoom();
     });
     r.on('host', () => renderRoom());
     r.on('data', (d) => {
       if (!d || !d._lobby) return;
-      if (d._lobby === 'start') { state.running = true; state.seed = d.seed; state.bots = d.bots; wrap.hidden = true; opts.onStart?.({ seed: d.seed, bots: d.bots, isHost: r.isHost, late: !!d.late }); }
+      if (d._lobby === 'settings') { Object.assign(state.settings, d.values); renderRoom(); }
+      if (d._lobby === 'start') { state.running = true; state.seed = d.seed; state.bots = d.bots; Object.assign(state.settings, d.settings); wrap.hidden = true; opts.onStart?.({ seed: d.seed, bots: d.bots, isHost: r.isHost, late: !!d.late, settings: { ...state.settings } }); }
       if (d._lobby === 'lobby') { state.running = false; wrap.hidden = false; renderRoom(); opts.onLobby?.(); }
     });
     r.on('close', () => { state.running = false; state.room = null; wrap.hidden = false; renderJoin('Disconnected from room.'); opts.onLobby?.(); });
@@ -183,15 +209,16 @@ export function createLobby(opts) {
     const r = state.room;
     state.seed = Math.floor(Math.random() * 2 ** 31);
     state.running = true;
-    r.send({ _lobby: 'start', seed: state.seed, bots: state.bots });
+    r.send({ _lobby: 'start', seed: state.seed, bots: state.bots, settings: state.settings });
     wrap.hidden = true;
-    opts.onStart?.({ seed: state.seed, bots: state.bots, isHost: true, late: false });
+    opts.onStart?.({ seed: state.seed, bots: state.bots, isHost: true, late: false, settings: { ...state.settings } });
   }
 
   const api = {
     room: null,
     get running() { return state.running; },
     get bots() { return state.bots; },
+    get settings() { return { ...state.settings }; },
     // host only: end match, everyone back to the room panel
     backToLobby() {
       if (!state.room?.isHost) return;

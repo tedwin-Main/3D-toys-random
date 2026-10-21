@@ -1,5 +1,5 @@
-# Render Blueprint for the whole toy box (static toys + room relay + Waldo).
-# Keep ONE instance: multiplayer rooms and Waldo lobbies live in server memory,
+# Render Blueprint for the whole toy box (static toys + room relay).
+# Keep ONE instance: multiplayer rooms live in server memory,
 # so a second replica would split players across servers that cannot see each other.
 # Free web services sleep after 15 min idle; the first visit cold-starts (~30-60 s).
 services:
@@ -8,10 +8,9 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm ci && npm run build:waldo
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      # Waldo's socket code is TypeScript run by native type stripping: needs Node >= 22.18
       - key: NODE_VERSION
         value: "24"

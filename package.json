@@ -6,13 +6,12 @@
   "scripts": {
     "start": "node backend/start-server.js",
     "dev": "node --watch backend/start-server.js",
-    "build:waldo": "cd wheres-waldo-game && npm ci && npm run build",
-    "setup": "npm install && npm run build:waldo"
+    "setup": "npm install"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=20"
   }
 }

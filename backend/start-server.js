@@ -1,7 +1,7 @@
 /**
  * FILE: RANDOM_dump/3d-toys/backend/start-server.js
- * PURPOSE: one-port server for whole toy box: static toys under /3d-toys/, Waldo bundle + socket, room relay socket for multiplayer toys
- * UI: every 3D Toy Box page (static), Waldo Hunt, multiplayer toys (websocket)
+ * PURPOSE: one-port server for whole toy box: static toys under /3d-toys/, room relay socket for multiplayer toys
+ * UI: every 3D Toy Box page (static), multiplayer toys (websocket)
  * USED BY: npm start (3d-toys/package.json)
  * KEY EXPORTS: none (boots http server on PORT, default 5055)
  */
@@ -13,10 +13,7 @@ import { createRoomRelay } from './room-relay.js';
 
 const PORT = Number(process.env.PORT ?? 5055);
 const ROOT = join(import.meta.dirname, '..');
-const WALDO = join(ROOT, 'wheres-waldo-game');
-const WALDO_DIST = join(WALDO, 'dist');
 const BASE = '/3d-toys/';
-const WALDO_BASE = '/3d-toys/wheres-waldo-game/';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -43,7 +40,7 @@ async function sendFile(res, file) {
   res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-cache' }).end(body);
 }
 
-// Run engine: static hosting; folders serve index.html, Waldo falls back to its SPA shell
+// Run engine: static hosting; folders serve index.html
 const http = createServer(async (req, res) => {
   const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
   if (path === '/health') return res.writeHead(200).end('ok');
@@ -55,15 +52,8 @@ const http = createServer(async (req, res) => {
     return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ip, port: PORT }));
   }
   try {
-    if (path.startsWith(WALDO_BASE)) {
-      let file = safeJoin(WALDO_DIST, path.slice(WALDO_BASE.length) || 'index.html');
-      const st = file && (await stat(file).catch(() => null));
-      if (!st || st.isDirectory()) file = join(WALDO_DIST, 'index.html');
-      return await sendFile(res, file);
-    }
-    if (path === WALDO_BASE.slice(0, -1)) return res.writeHead(302, { location: WALDO_BASE }).end();
     let file = safeJoin(ROOT, path.slice(BASE.length));
-    // keep server code, deps and the Waldo repo source private
+    // keep server code + deps private
     const relTop = path.slice(BASE.length).split('/')[0];
     if (!file || ['backend', 'node_modules', 'package.json', 'package-lock.json'].includes(relTop)) return res.writeHead(404).end('not found');
     let st = await stat(file).catch(() => null);
@@ -79,20 +69,12 @@ const http = createServer(async (req, res) => {
   }
 });
 
-// Cloud Sync: websocket doorways by path (room relay for toys, Waldo's own lobby server)
+// Cloud Sync: room relay socket for multiplayer toys
 const relay = createRoomRelay();
-let waldoWss = null;
-try {
-  const { createWaldoWss } = await import(join(WALDO, 'backend/routes/game-socket.ts'));
-  waldoWss = createWaldoWss(new Map());
-} catch (e) {
-  console.warn('waldo socket unavailable (run `npm run build:waldo`):', e.message);
-}
 http.on('upgrade', (req, socket, head) => {
   const path = (req.url ?? '').split('?')[0];
   if (path === BASE + 'rooms') return relay.handleUpgrade(req, socket, head);
-  if (path === WALDO_BASE + 'ws' && waldoWss) return waldoWss.handleUpgrade(req, socket, head, (ws) => waldoWss.emit('connection', ws, req));
   socket.destroy();
 });
 
-http.listen(PORT, () => console.log(`3d toy box on http://localhost:${PORT}${BASE}  (rooms ws ${BASE}rooms, waldo ws ${WALDO_BASE}ws)`));
+http.listen(PORT, () => console.log(`3d toy box on http://localhost:${PORT}${BASE}  (rooms ws ${BASE}rooms)`));
