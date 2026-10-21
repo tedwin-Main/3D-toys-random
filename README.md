@@ -74,6 +74,7 @@ Rooms via `backend/room-relay.js` (4-letter code, share `?room=CODE`, host-autho
 - `snowball-fight-arena/`: Online FFA snowball fight up to 14 with bots; lob over forts that crumble and regrow, freeze rivals, 2-minute match.
 - `musical-chairs-party/`: Online musical chairs up to 14 with bots; procedural disco loop, beat-synced floor, random chair pop-ups, shove dash, ghosts spectate.
 - `lava-rise-climb/`: Online lava-climb race up to 14 with bots; seeded spiral tower, moving platforms, double jump, head stomps, height meter.
+- `king-of-the-hill/`: Crown Keep, online king of the hill up to 14 with bots; crown ring hops between 7 hilltops with a ghost-ring warning, solo holder scores, contested ring scores nobody, shove-dash knockback + stun, fall off the island and respawn at the edge.
 
 ## How these were made
 
