@@ -22,16 +22,13 @@
   #bar { bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; }
   #bar button { font: inherit; font-size: 13px; font-weight: 700; border: 0; background: transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; color: var(--ink); }
   #bar button:hover { background: rgba(0,0,0,0.06); }
-  #touch { position: fixed; bottom: 80px; right: 16px; display: none; gap: 8px; }
-  #touch button { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--card); font-size: 20px; }
-  @media (pointer: coarse) { #touch { display: flex; } #intro p { display: none; } }
+  @media (pointer: coarse) { #intro p { display: none; } }
 </style>
 </head>
 <body>
 <div id="intro" class="card"><h1>Lawn Stripes</h1><p><kbd>W</kbd><kbd>S</kbd> drive · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>C</kbd> camera<br>Mow in straight passes, alternate direction for those satisfying stripes. Grass slowly grows back.</p></div>
 <div id="stats" class="card"><div id="pct">0%</div><div id="sub">lawn mowed · 0 clippings</div><div class="meter"><div id="meter"></div></div></div>
 <div id="bar" class="card"><button id="regrow">🌱 Regrow: on</button><button id="reset">🌾 Fresh lawn</button><button id="cam">🎥 Camera</button></div>
-<div id="touch"><button data-key="a">◀</button><button data-key="s">▼</button><button data-key="w">▲</button><button data-key="d">▶</button></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -46,6 +43,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer: sky, fog, lights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -305,16 +303,12 @@ function startEngine() {
   engine = { a, o1, o2, g };
 }
 
-// Input > Keys, touch, buttons
+// Input > Keys, phone joystick, buttons
 const keys = {};
 let camMode = 0, regrow = true;
 addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; startEngine(); if (e.key.toLowerCase() === 'c') cycleCam(); });
 addEventListener('keyup', (e) => (keys[e.key.toLowerCase()] = false));
-for (const b of document.querySelectorAll('#touch button')) {
-  const k = b.dataset.key;
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); keys[k] = true; startEngine(); });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (keys[k] = false));
-}
+createTouchPad({ onStart: () => startEngine(), onMove: (x, y) => Object.assign(keys, { a: x < -0.35, d: x > 0.35, w: y > 0.35, s: y < -0.35 }) });
 function cycleCam() {
   camMode = (camMode + 1) % 3;
   controls.enabled = camMode === 2;

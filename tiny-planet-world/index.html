@@ -20,9 +20,7 @@
   #bar { bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; }
   #bar button { font: inherit; font-size: 13px; font-weight: 700; border: 0; background: transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; }
   #bar button:hover { background: rgba(0, 0, 0, 0.06); }
-  #touch { position: fixed; bottom: 80px; right: 16px; display: none; gap: 8px; }
-  #touch button { width: 56px; height: 56px; border-radius: 50%; border: 0; background: var(--card); font-size: 20px; }
-  @media (pointer: coarse) { #touch { display: flex; } #intro p { display: none; } }
+  @media (pointer: coarse) { #intro p { display: none; } }
 </style>
 </head>
 <body>
@@ -32,7 +30,6 @@
 </div>
 <div id="hud" class="card"><div class="big" id="sky">☀️ Day</div><div class="small"><span id="trees">0</span> trees planted · <span id="speed">time ×1</span></div></div>
 <div id="bar" class="card"><button id="regen">🌍 New world</button><button id="timeBtn">⏩ Time</button><button id="viewBtn">🎥 View</button></div>
-<div id="touch"><button data-key="a">◀</button><button data-key="w">▲</button><button data-key="d">▶</button><button data-key=" ">⤒</button></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -47,6 +44,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer: canvas + camera + orbit controls
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -426,7 +424,7 @@ const heroParts = {};
   hero.scale.setScalar(s);
 }
 
-// Input > Keyboard + touch + buttons
+// Input > Keyboard + phone joystick + JUMP button
 const keys = {};
 let followCam = true, timeScale = 1, planted = 0;
 addEventListener('keydown', (e) => {
@@ -437,11 +435,8 @@ addEventListener('keydown', (e) => {
   if (k === 't') toggleTime();
 });
 addEventListener('keyup', (e) => (keys[e.key.toLowerCase()] = false));
-for (const b of document.querySelectorAll('#touch button')) {
-  const k = b.dataset.key;
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); keys[k] = true; if (k === ' ') jump(); });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (keys[k] = false));
-}
+const pad = createTouchPad({ buttons: [{ id: 'jump', label: 'JUMP', color: 'rgba(90, 200, 120, 0.6)' }], onMove: (x, y) => Object.assign(keys, { a: x < -0.35, d: x > 0.35, w: y > 0.35, s: y < -0.35 }) });
+pad.onPress('jump', () => jump());
 function jump() { if (player.y <= 0.001) { player.vy = 3.4; blip(520, 0.12, 900); } }
 function toggleView() {
   followCam = !followCam;

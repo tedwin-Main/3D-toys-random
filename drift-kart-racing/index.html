@@ -26,10 +26,7 @@
   #result button, #btns button { font: inherit; font-weight: 800; border: 0; border-radius: 10px; padding: 9px 16px; cursor: pointer; background: var(--accent); color: #1a1408; margin-top: 10px; }
   #btns { bottom: 18px; left: 18px; padding: 6px 8px; display: flex; gap: 6px; }
   #btns button { margin: 0; background: rgba(255, 255, 255, 0.12); color: #fff; font-size: 13px; padding: 7px 10px; }
-  #touch { position: fixed; inset: auto 0 90px 0; display: none; justify-content: space-between; padding: 0 18px; pointer-events: none; }
-  #touch div { display: flex; gap: 10px; pointer-events: auto; }
-  #touch button { width: 64px; height: 64px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.25); color: #fff; font-size: 24px; }
-  @media (pointer: coarse) { #touch { display: flex; } #hud .keys { display: none; } }
+  @media (pointer: coarse) { #hud .keys { display: none; } }
 </style>
 </head>
 <body>
@@ -45,7 +42,6 @@
 <div id="btns" class="card"><button id="restart">↺ Restart</button><button id="newtrack">🎲 New track</button><button id="cam">🎥 Camera</button></div>
 <div id="center"></div>
 <div id="result" class="card"><h2 id="r-title">Finished!</h2><p id="r-pos"></p><p id="r-time"></p><p id="r-best"></p><button id="again">Race again</button></div>
-<div id="touch"><div><button data-k="left">◀</button><button data-k="right">▶</button></div><div><button data-k="drift">⤳</button><button data-k="brake">▼</button><button data-k="gas">▲</button></div></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -60,6 +56,7 @@
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer + camera
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -334,7 +331,7 @@ function puff(x, z, vx, vz) {
   smokeLife[i] = 1;
 }
 
-// Input > Keys + touch buttons
+// Input > Keys + phone joystick (steer + pedals) + DRIFT button
 const keys = {};
 addEventListener('keydown', (e) => {
   keys[e.code] = true;
@@ -345,10 +342,14 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
 const touch = {};
-document.querySelectorAll('#touch button').forEach((b) => {
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); touch[b.dataset.k] = true; startAudio(); });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (touch[b.dataset.k] = false));
+const pad = createTouchPad({
+  // 90px up clears the Restart / Camera bar and speedo
+  bottom: 90,
+  buttons: [{ id: 'drift', label: 'DRIFT', color: 'rgba(255, 140, 60, 0.55)' }],
+  onStart: () => startAudio(),
+  onMove: (x, y) => Object.assign(touch, { left: x < -0.35, right: x > 0.35, gas: y > 0.35, brake: y < -0.35 }),
 });
+Object.defineProperty(touch, 'drift', { get: () => pad.held.drift });
 function resetToTrack() {
   const i = player.idx, p = track.P[i];
   Object.assign(player, { x: p.x, z: p.z, h: Math.atan2(track.Tn[i].x, track.Tn[i].z), vx: 0, vz: 0 });

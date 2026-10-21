@@ -33,10 +33,7 @@
   #results .row { display: flex; gap: 10px; padding: 3px 0; font-size: 15px; }
   #results .row b { width: 28px; }
   #results .row span { flex: 1; }
-  #touch { position: fixed; inset: auto 0 18px 0; display: none; justify-content: space-between; padding: 0 18px; pointer-events: none; }
-  #touch div { display: flex; gap: 10px; pointer-events: auto; }
-  #touch button { width: 70px; height: 70px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, 0.25); color: #fff; font-size: 22px; font-weight: 900; }
-  @media (pointer: coarse) { #touch { display: flex; } #hint { display: none; } #map { bottom: auto; top: 70px; } }
+  @media (pointer: coarse) { #hint { display: none; } #map { bottom: auto; top: 70px; } }
 </style>
 </head>
 <body>
@@ -48,7 +45,6 @@
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <canvas id="map" width="190" height="150"></canvas>
 <div id="results" class="card"></div>
-<div id="touch"><div><button data-k="left">◀</button><button data-k="right">▶</button></div><div><button data-k="item">🎁</button><button data-k="drift">⤴</button><button data-k="brake">▼</button><button data-k="gas">▲</button></div></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -56,8 +52,8 @@
 <script type="module">
 /**
  * FILE: 3d-toys/kart-race-online/index.html
- * PURPOSE: online 12-kart 3-lap race on a seeded circuit: drift physics for every kart, item boxes (boost, banana, homing shell), live positions; host-authoritative sim
- * UI: Kart Party GP page (lobby overlay, position + lap HUD, item slot, minimap, results, touch pedals)
+ * PURPOSE: online 14-kart 3-lap race on a seeded circuit: drift physics for every kart, item boxes (boost, banana, homing shell), live positions; host-authoritative sim
+ * UI: Kart Party GP page (lobby overlay, position + lap HUD, item slot, minimap, results, phone joystick + ITEM / DRIFT buttons)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
  */
@@ -65,6 +61,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer, camera, sky, sun that follows the camera focus
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -106,7 +103,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400).rotateX(-Math.
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Track > Build: star-shaped closed spline, wide for 12 karts, road + curbs + gantry + crowd + trees + pads + item rows
+// Track > Build: star-shaped closed spline, wide for 14 karts, road + curbs + gantry + crowd + trees + pads + item rows
 const W = 18, NS = 1000;
 const track = { P: [], Tn: [], Sd: [], curv: [], vmax: [], len: 0, group: new THREE.Group(), pads: [], boxes: [] };
 scene.add(track.group);
@@ -322,8 +319,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Zoom', 'Turbo Tina', 'Revs', 'Skid', 'Nitro', 'Vroom', 'Piston', 'Drift King', 'Lugnut', 'Sparky', 'Gears', 'Torque'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Zoom', 'Turbo Tina', 'Revs', 'Skid', 'Nitro', 'Vroom', 'Piston', 'Drift King', 'Lugnut', 'Sparky', 'Gears', 'Torque', 'Clutch', 'Muffler'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const LAPS = 3, ITEMS = ['boost', 'banana', 'shell'], ITEM_ICON = { boost: '🍄', banana: '🍌', shell: '🐢' };
 const world = { mode: 'attract', phase: 'race', t: 0, raceT: 0, karts: new Map(), bananas: [], shells: [], order: [], endT: 0, seed: 3 };
 const karts3d = new Map();
@@ -510,9 +507,9 @@ function startAttract() {
 // Multiplayer > Lobby: track seed in start packet
 const lobby = createLobby({
   game: 'kart-party', title: 'Kart Party GP', emoji: '🏎️', accent: '#ffd23f',
-  blurb: 'Up to 12 karts, 3 laps, a fresh circuit every race. Drift with Space, grab ? boxes for boosts, bananas and homing shells.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 karts per room (humans + bots). Phones get touch pedals.',
+  blurb: 'Up to 14 karts, 3 laps, a fresh circuit every race. Drift with Space, grab ? boxes for boosts, bananas and homing shells.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 karts per room (humans + bots). Phones get touch pedals.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -545,9 +542,9 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.karts.values()]) if (!p.bot && !ids.has(p.id)) removeKart(p.id);
   for (const p of players) if (!world.karts.has(p.id)) {
-    // keep 12 seats: a joining human takes over the last-placed bot's kart position
+    // keep 14 seats: a joining human takes over the last-placed bot's kart position
     let from = null;
-    if (world.karts.size >= 12) { from = [...world.karts.values()].filter((q) => q.bot).sort((a, b) => a.prog - b.prog)[0]; if (from) removeKart(from.id); }
+    if (world.karts.size >= 14) { from = [...world.karts.values()].filter((q) => q.bot).sort((a, b) => a.prog - b.prog)[0]; if (from) removeKart(from.id); }
     const k = addKart(p.id, p.nick, p.color, false);
     const src = from ?? [...world.karts.values()].sort((a, b) => a.prog - b.prog)[0];
     if (src && src !== k) Object.assign(k, { x: src.x, z: src.z, h: src.h, idx: src.idx, lastIdx: src.idx, lap: src.lap, half: src.half });
@@ -621,10 +618,13 @@ addEventListener('keydown', (e) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
-document.querySelectorAll('#touch button').forEach((b) => {
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); touch[b.dataset.k] = true; if (b.dataset.k === 'item') local.itemSeq++; });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (touch[b.dataset.k] = false));
+// Kart Party > phone controls: joystick steers + gas / brake, ITEM + DRIFT buttons
+const pad = createTouchPad({
+  buttons: [{ id: 'item', label: 'ITEM', color: 'rgba(255, 210, 63, 0.55)' }, { id: 'drift', label: 'DRIFT', color: 'rgba(255, 140, 60, 0.55)' }],
+  onMove: (x, y) => Object.assign(touch, { left: x < -0.35, right: x > 0.35, gas: y > 0.35, brake: y < -0.35 }),
 });
+pad.onPress('item', () => local.itemSeq++);
+Object.defineProperty(touch, 'drift', { get: () => pad.held.drift });
 function readInput() {
   local.gas = (keys.KeyW || keys.ArrowUp || touch.gas ? 1 : 0) - (keys.KeyS || keys.ArrowDown || touch.brake ? 1 : 0);
   local.steer = (keys.KeyA || keys.ArrowLeft || touch.left ? 1 : 0) - (keys.KeyD || keys.ArrowRight || touch.right ? 1 : 0);

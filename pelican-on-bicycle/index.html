@@ -18,9 +18,7 @@
   #stats .big { font-size: 28px; font-weight: 800; line-height: 1; }
   #stats .small { font-size: 12px; opacity: 0.7; margin-top: 4px; }
   #mode { bottom: 16px; left: 16px; font-size: 12px; padding: 8px 12px; }
-  #touch { position: fixed; bottom: 16px; right: 16px; display: none; gap: 8px; }
-  #touch button { width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--card); font-size: 22px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); }
-  @media (pointer: coarse) { #touch { display: flex; } #intro p { display: none; } }
+  @media (pointer: coarse) { #intro p { display: none; } }
 </style>
 </head>
 <body>
@@ -30,9 +28,6 @@
 </div>
 <div id="stats" class="card"><div class="big"><span id="fish">0</span> 🐟</div><div class="small"><span id="speed">0</span> km/h · <span id="dist">0</span> m</div></div>
 <div id="mode" class="card">Camera: chase</div>
-<div id="touch">
-  <button data-key="a">◀</button><button data-key="s">▼</button><button data-key="w">▲</button><button data-key="d">▶</button><button data-key=" ">🔔</button>
-</div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -47,6 +42,7 @@
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer: canvas, shadows, tone mapping
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -450,7 +446,7 @@ const sfx = {
   splash: () => tone(300, 0.4, 'sawtooth', 0.06, 60),
 };
 
-// HUD > Input: keyboard + touch buttons
+// HUD > Input: keyboard + phone joystick + BELL button
 const keys = {};
 const camModes = ['chase', 'orbit', 'cinematic'];
 let camMode = 0;
@@ -471,11 +467,9 @@ addEventListener('keydown', (e) => {
   if (k === ' ' || k.startsWith('arrow')) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.key.toLowerCase()] = false));
-for (const btn of document.querySelectorAll('#touch button')) {
-  const k = btn.dataset.key;
-  btn.addEventListener('pointerdown', (e) => { e.preventDefault(); press(k); keys[k] = true; });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, () => (keys[k] = false));
-}
+// 64px up clears the Camera mode card
+const pad = createTouchPad({ bottom: 64, buttons: [{ id: 'bell', label: '🔔', color: 'rgba(255, 196, 0, 0.6)' }], onMove: (x, y) => Object.assign(keys, { a: x < -0.35, d: x > 0.35, w: y > 0.35, s: y < -0.35 }) });
+pad.onPress('bell', () => press(' '));
 
 // HUD > Camera: orbit controls for free-look mode
 const controls = new OrbitControls(camera, renderer.domElement);

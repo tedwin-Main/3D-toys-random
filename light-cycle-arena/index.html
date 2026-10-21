@@ -31,10 +31,7 @@
   #top b { padding: 0 6px; letter-spacing: 0.15em; color: #2de2e6; }
   #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
   #map { position: fixed; right: 14px; bottom: 14px; border-radius: 12px; background: var(--card); border: 1px solid rgba(120, 220, 255, 0.18); }
-  #touch { position: fixed; inset: 0; display: none; pointer-events: none; }
-  #touch button { position: absolute; bottom: 24px; width: 84px; height: 84px; border-radius: 50%; border: 0; background: rgba(45, 226, 230, 0.22); color: #fff; font-size: 28px; font-weight: 900; pointer-events: auto; }
-  #touch .l { left: 20px; } #touch .r { left: 116px; } #touch .b { right: 22px; background: rgba(255, 110, 199, 0.35); font-size: 16px; }
-  @media (pointer: coarse) { #touch { display: block; } #hint { display: none; } #map { bottom: auto; top: 110px; width: 130px; height: 130px; } }
+  @media (pointer: coarse) { #hint { display: none; } #map { bottom: auto; top: 110px; width: 130px; height: 130px; } }
 </style>
 </head>
 <body>
@@ -44,7 +41,6 @@
 <div id="hint" class="card"><b>A / D</b> or <b>← / →</b> turn 90° · <b>Space / W</b> boost · <b>C</b> camera · don't hit any light wall</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <canvas id="map" width="160" height="160"></canvas>
-<div id="touch"><button class="l" data-k="left">↰</button><button class="r" data-k="right">↱</button><button class="b" data-k="boost">BOOST</button></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -52,8 +48,8 @@
 <script type="module">
 /**
  * FILE: 3d-toys/light-cycle-arena/index.html
- * PURPOSE: online light-cycle battle for up to 12: 90° turns, boost energy, glowing trail walls on a 100x100 grid, flood-fill bots, 5 rounds; host-authoritative grid sim
- * UI: Light Cycles page (lobby overlay, alive counter, energy bar, standings, minimap, touch turn buttons)
+ * PURPOSE: online light-cycle battle for up to 14: 90° turns, boost energy, glowing trail walls on a 100x100 grid, flood-fill bots, 5 rounds; host-authoritative grid sim
+ * UI: Light Cycles page (lobby overlay, alive counter, energy bar, standings, minimap, phone joystick flick-turns + BOOST button)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
  */
@@ -64,6 +60,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createTouchPad } from '../components/touch-joystick.js';
 
 // Scene > Renderer + bloom, neon grid floor, arena walls
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -77,7 +74,7 @@ scene.fog = new THREE.Fog(0x02040a, 60, 170);
 const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.1, 500);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.45, 0.35);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.45, 0.4, 0.4);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 scene.add(new THREE.HemisphereLight(0x88ccff, 0x050510, 0.6));
@@ -126,18 +123,21 @@ function nameTag(nick, color) {
   return s;
 }
 const chassisMat = new THREE.MeshStandardMaterial({ color: 0x0c1220, roughness: 0.3, metalness: 0.7 });
+// Cycles > neon color: scale each hue to same luminance (HDR, pre-tonemap) so purple/pink/orange bloom like yellow
+// bloom high-pass is all-or-nothing at threshold 0.4; raw hex luminance spans 0.34 (purple) to 0.94 (white); trails get 0.75 since opacity 0.62 cuts them
+function neon(hex, lum = 0.65) { const c = new THREE.Color(hex); return c.multiplyScalar(lum / Math.max(0.05, 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b)); }
 const MAXSEG = 700;
 const segGeo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
 const cycles3d = new Map();
 function makeCycle(p) {
   const g = new THREE.Group(), bike = new THREE.Group();
-  const glow = new THREE.MeshBasicMaterial({ color: p.color });
+  const glow = new THREE.MeshBasicMaterial({ color: neon(p.color) });
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.5, 2.2), chassisMat); body.position.y = 0.6;
   const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x0a0f1a, metalness: 0.9, roughness: 0.1 })); canopy.position.set(0, 0.82, 0.2); canopy.scale.set(1, 0.8, 2);
   const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 2.24), glow); stripe.position.y = 0.6;
   bike.add(body, canopy, stripe);
   for (const z of [-0.85, 0.85]) { const w = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.07, 8, 24).rotateY(Math.PI / 2), glow); w.position.set(0, 0.42, z); bike.add(w); }
-  const trailMat = new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+  const trailMat = new THREE.MeshBasicMaterial({ color: neon(p.color, 0.75), transparent: true, opacity: 0.85, side: THREE.DoubleSide });
   const trail = new THREE.InstancedMesh(segGeo, trailMat, MAXSEG);
   trail.count = 0; trail.frustumCulled = false;
   const tag = nameTag(p.nick, p.color);
@@ -195,12 +195,13 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Flynn', 'Quorra', 'Rinzler', 'Byte', 'Pixel', 'Vector', 'Glitch', 'Neon', 'Raster', 'Sector', 'Kernel', 'Cache'];
-const BOT_COLORS = ['#ff9f43', '#c77dff', '#5ee07a', '#ff6ec7', '#ffd23f', '#a3e635', '#3fa7ff', '#ff5a5f', '#14b8a6', '#f8fafc', '#8b5cf6', '#2de2e6'];
+const BOT_NAMES = ['Flynn', 'Quorra', 'Rinzler', 'Byte', 'Pixel', 'Vector', 'Glitch', 'Neon', 'Raster', 'Sector', 'Kernel', 'Cache', 'Daemon', 'Proxy'];
+const BOT_COLORS = ['#ff9f43', '#c77dff', '#5ee07a', '#ff6ec7', '#ffd23f', '#a3e635', '#3fa7ff', '#ff5a5f', '#14b8a6', '#f8fafc', '#8b5cf6', '#2de2e6', '#00ffa3', '#ff3df5'];
 const ROUNDS = 5, SPEED = 17, BOOST = 28;
-// 12 spawns in a starburst: 3 abreast per direction, all heading outward so no early crossings
+// 16 spawns in a starburst: 3 abreast per direction at 8 out, plus 4 corner riders at 14 out, all heading outward so no early crossings
+// corner lane offset 14 > 8 keeps it clear of every inner rider path
 const SLOTS = [];
-for (const k of [0, -6, 6]) for (let dir = 0; dir < 4; dir++) { const [dx, dz] = DIRS[dir]; SLOTS.push({ x: dx * 8 - dz * k + 0.5, z: dz * 8 + dx * k + 0.5, dir }); }
+for (const [out, k] of [[8, 0], [8, -6], [8, 6], [14, 14]]) for (let dir = 0; dir < 4; dir++) { const [dx, dz] = DIRS[dir]; SLOTS.push({ x: dx * out - dz * k + 0.5, z: dz * out + dx * k + 0.5, dir }); }
 const world = { mode: 'attract', phase: 'count', t: 3, round: 1, players: new Map(), outCount: 0, winner: null };
 let events = [];
 const rng = Math.random;
@@ -343,8 +344,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'light-cycles', title: 'Light Cycles', emoji: '🏍️', accent: '#2de2e6',
   blurb: 'Ride, turn at right angles, leave a wall of light. Box others in, never touch a wall. Last cycle running takes the round.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 riders per room (humans + bots). 5 rounds, points for outlasting others.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 riders per room (humans + bots). 5 rounds, points for outlasting others.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -375,8 +376,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: replace a bot (crashed ones first); late joiner rides from next round
-    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
+    // keep 14 seats: replace a bot (crashed ones first); late joiner rides from next round
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
     const n = addPlayer(p.id, p.nick, p.color, false);
     n.alive = false; n.gid = nextGid++; n.x = 0; n.z = 0;
   }
@@ -445,7 +446,7 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ord = (n) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || 'th');
 
-// Input > turns queue (edge-triggered), boost hold, camera toggle, touch buttons
+// Input > turns queue (edge-triggered), boost hold, camera toggle, phone joystick + BOOST
 const local = { turnLog: [], n: 0, boost: false };
 const keys = {};
 let camMode = 0;
@@ -465,10 +466,14 @@ addEventListener('keydown', (e) => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
-const touchHeld = {};
-document.querySelectorAll('#touch button').forEach((b) => {
-  b.addEventListener('pointerdown', (e) => { e.preventDefault(); const k = b.dataset.k; if (k === 'left') localTurn(-1); else if (k === 'right') localTurn(1); else touchHeld.boost = true; });
-  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => (touchHeld[b.dataset.k] = false));
+// flick stick left/right = one 90° turn; must ease back under 0.3 before the next flick
+let flickArmed = true;
+const pad = createTouchPad({
+  buttons: [{ id: 'boost', label: 'BOOST', color: 'rgba(255, 110, 199, 0.5)' }],
+  onMove: (x) => {
+    if (flickArmed && Math.abs(x) > 0.6) { flickArmed = false; localTurn(Math.sign(x)); }
+    else if (Math.abs(x) < 0.3) flickArmed = true;
+  },
 });
 function sendInput() { lobby.room?.send({ g: 'i', b: local.boost ? 1 : 0, n: local.n, q: local.turnLog }); }
 
@@ -518,7 +523,7 @@ function drawMap() {
 let sendT = 0;
 const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
 function simTick(dt) {
-  local.boost = !!(keys.Space || keys.KeyW || keys.ArrowUp || touchHeld.boost);
+  local.boost = !!(keys.Space || keys.KeyW || keys.ArrowUp || pad.held.boost || pad.y > 0.5);
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
