@@ -1,6 +1,6 @@
 # 3D Toy Box
 
-Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 12 players. One Node server hosts everything: static toys, and the websocket room relay.
+Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 14 players. One Node server hosts everything: static toys, and the websocket room relay.
 
 ## Run locally
 
@@ -60,17 +60,34 @@ Notes:
 
 Rooms via `backend/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test.
 
-- `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-12 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
+- `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
 - `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick
-- `tank-battle-maze/`: online 12-tank deathmatch: seeded maze (backtracker + loops, merged wall boxes, occupancy LOS grid), ricochet shells, crates, BFS bots that lead + dodge, kill feed, minimap, twin touch sticks
+- `tank-battle-maze/`: online 14-tank deathmatch: seeded maze (backtracker + loops, merged wall boxes, occupancy LOS grid), ricochet shells, crates, BFS bots that lead + dodge, kill feed, minimap, twin touch sticks
 - `paint-territory/`: online turf painting: 48x48 owner grid as premultiplied DataTexture + wobbly-edge floor shader, delta + 1 s keyframe sync, paint bombs, terrain-dependent speed, mirrored seeded pillars, bots seeking unclaimed/enemy turf
-- `kart-race-online/`: Online 12-kart race: drift physics, item boxes (boost, banana, homing shell), seeded circuits, 3 laps, live positions.
-- `mini-golf-party/`: Simultaneous online mini golf for up to 12: drag-back putting, ball-to-ball collisions, 6 holes (bumpers, windmills, slopes, water, sand), simulation-planning bots, scorecard.
-- `hex-drop-survival/`: Online last-one-standing for up to 12: three hex floors where touched tiles drop, jump gaps, bots that hunt solid ground, 3 rounds of points.
-- `voxel-build-together/`: Co-op voxel builder for up to 12: live cursors with names, host-ordered edits, 16-color palette, undo, save/load in browser, auto-building attract mode.
-- `light-cycle-arena/`: Online light-cycle battle for up to 12: grid-exact trails, boost energy, flood-fill bots, bloom neon, minimap, 5 rounds.
-- `bomb-tag-arena/`: Online hot-potato tag for up to 12: bombs pass on contact with no tag-backs, dash, blast knockback, chase/flee bots, waves until one survives.
-- `rocket-ball-soccer/`: Online car soccer, Blue vs Orange up to 6v6 with bots; boost, ball cam, goal confetti, sudden death.
-- `snowball-fight-arena/`: Online FFA snowball fight up to 12 with bots; lob over forts that crumble and regrow, freeze rivals, 2-minute match.
-- `musical-chairs-party/`: Online musical chairs up to 12 with bots; procedural disco loop, beat-synced floor, random chair pop-ups, shove dash, ghosts spectate.
-- `lava-rise-climb/`: Online lava-climb race up to 12 with bots; seeded spiral tower, moving platforms, double jump, head stomps, height meter.
+- `kart-race-online/`: Online 14-kart race: drift physics, item boxes (boost, banana, homing shell), seeded circuits, 3 laps, live positions.
+- `mini-golf-party/`: Simultaneous online mini golf for up to 14: drag-back putting, ball-to-ball collisions, 6 holes (bumpers, windmills, slopes, water, sand), simulation-planning bots, scorecard.
+- `hex-drop-survival/`: Online last-one-standing for up to 14: three hex floors where touched tiles drop, jump gaps, bots that hunt solid ground, 3 rounds of points.
+- `voxel-build-together/`: Co-op voxel builder for up to 14: live cursors with names, host-ordered edits, 16-color palette, undo, save/load in browser, auto-building attract mode.
+- `light-cycle-arena/`: Online light-cycle battle for up to 14: grid-exact trails, boost energy, flood-fill bots, bloom neon, minimap, 5 rounds.
+- `bomb-tag-arena/`: Online hot-potato tag for up to 14: bombs pass on contact with no tag-backs, dash, blast knockback, chase/flee bots, waves until one survives.
+- `rocket-ball-soccer/`: Online car soccer, Blue vs Orange up to 7v7 with bots; boost, ball cam, goal confetti, sudden death.
+- `snowball-fight-arena/`: Online FFA snowball fight up to 14 with bots; lob over forts that crumble and regrow, freeze rivals, 2-minute match.
+- `musical-chairs-party/`: Online musical chairs up to 14 with bots; procedural disco loop, beat-synced floor, random chair pop-ups, shove dash, ghosts spectate.
+- `lava-rise-climb/`: Online lava-climb race up to 14 with bots; seeded spiral tower, moving platforms, double jump, head stomps, height meter.
+
+## How these were made
+
+Every toy was picked and built by Claude Code in a `/goal /loop` session from the two prompts below (verbatim, typos kept). No per-toy prompt exists.
+
+### Prompt 1: single-player toys
+
+```
+/goal /loop create various fancy interactive 3d projects that i usually see in reddit (e.g mini 3d world, horse running around in track, pelican on bicycle) in RANDOM_dump folder. Create till weekly usage runs out
+```
+
+### Prompt 2: multiplayer games
+
+```
+in the main menu of the 3d toys e.g http://localhost:5055/3d-toys/# > add nav to filter between single or multiplayer > move /Users/sloth/ALL PROJECTS/Wheres_Waldo_Game / into this 3D toys folder and combine with these 3d toys games as well. After the implementation is done for the original planned single player 3D toy games > create on the multiplayer aspect /
+/goal use the same concept as the 3d-toys created but just for multiplayer and keep creating until weekly usage runs out
+```

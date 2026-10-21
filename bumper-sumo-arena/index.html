@@ -249,8 +249,8 @@ const sfx = {
 };
 
 // Game > World: same shape on host and guests; host simulates, guests mirror snapshots
-const BOT_NAMES = ['Bonk', 'Wobbles', 'Turbo', 'Pip', 'Mochi', 'Zippy', 'Rumble', 'Noodle', 'Biscuit', 'Ziggy', 'Pogo', 'Waffles'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Bonk', 'Wobbles', 'Turbo', 'Pip', 'Mochi', 'Zippy', 'Rumble', 'Noodle', 'Biscuit', 'Ziggy', 'Pogo', 'Waffles', 'Bumpy', 'Squeak'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const world = { mode: 'attract', phase: 'fight', t: 0, ring: R0, round: 0, winner: null, players: new Map() };
 const cars = new Map();
 let events = [];
@@ -271,7 +271,7 @@ function spawnAll() {
   const ps = [...world.players.values()];
   ps.forEach((p, i) => {
     const a = (i / ps.length) * Math.PI * 2;
-    // 12 cars need a wider circle so nobody spawns touching
+    // 14 cars need a wider circle so nobody spawns touching
     const sr = Math.min(R0 - 2, Math.max(7, ps.length * 0.75));
     Object.assign(p, { x: Math.cos(a) * sr, z: Math.sin(a) * sr, vx: 0, vz: 0, y: 0, vy: 0, alive: true, falling: false, dashCD: 0, dashT: 0, ang: Math.atan2(-Math.cos(a), -Math.sin(a)) });
   });
@@ -417,8 +417,8 @@ const isTouch = matchMedia('(pointer: coarse)').matches;
 const lobby = createLobby({
   game: 'bumper-sumo', title: 'Bumper Sumo', emoji: '🛟', accent: '#ff7a45',
   blurb: 'Bumper cars on a floating ring that keeps shrinking. Ram, dash, shove. Last car on the ring takes the round; first to 3 wins.',
-  maxBots: 11, defaultBots: 3, minPlayers: 2,
-  note: 'Solo? Add bots. Up to 12 per room (humans + bots).',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Solo? Add bots. Up to 14 per room (humans + bots).',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -454,8 +454,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: a joining human replaces the newest bot
-    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) removePlayer(bot.id); }
+    // keep 14 seats: a joining human replaces the newest bot
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) removePlayer(bot.id); }
     const np = addPlayer(p.id, p.nick, p.color, false); np.inRound = false; np.x = 0; np.z = -40;
   }
 }

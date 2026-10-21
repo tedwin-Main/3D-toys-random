@@ -51,12 +51,12 @@ const store = {
 
 /**
  * opts: { game, title, emoji, blurb, accent, maxBots, defaultBots, minPlayers, note,
- *         maxTotal (seat cap, default 12), settings ([{ key, label, options: [[value, label]], value }], host picks),
+ *         maxTotal (seat cap, default 14), settings ([{ key, label, options: [[value, label]], value }], host picks),
  *         onJoin(room), onStart({ seed, bots, isHost, late, settings }), onLobby() }
  * Lobby control messages carry `_lobby`; games must ignore data with that key.
  */
 export function createLobby(opts) {
-  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 12, note = '', settings = [] } = opts;
+  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 14, note = '', settings = [] } = opts;
   if (!document.getElementById('lb-style')) {
     const st = document.createElement('style');
     st.id = 'lb-style';
@@ -119,7 +119,7 @@ export function createLobby(opts) {
     const r = state.room;
     if (!r || state.running) return;
     const humans = r.players.length;
-    // humans + bots never exceed the 12-seat room cap
+    // humans + bots never exceed the 14-seat room cap
     const botMax = Math.max(0, Math.min(maxBots, maxTotal - humans));
     state.bots = Math.min(state.bots, botMax);
     wrap.innerHTML = `<div class="lb-card">

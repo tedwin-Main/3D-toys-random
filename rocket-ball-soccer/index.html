@@ -47,7 +47,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/rocket-ball-soccer/index.html
- * PURPOSE: online car soccer for up to 12 (6v6): arcade cars with boost, big bouncing ball, auto-balanced Blue vs Orange teams, role-based bots, 3-minute match; host-authoritative sim
+ * PURPOSE: online car soccer for up to 14 (7v7): arcade cars with boost, big bouncing ball, auto-balanced Blue vs Orange teams, role-based bots, 3-minute match; host-authoritative sim
  * UI: Turbo Ball page (lobby overlay, scoreboard + clock, team lists, boost gauge, touch stick)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -271,7 +271,7 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Striker', 'Keeper', 'Nitro', 'Volley', 'Header', 'Bicycle', 'Panenka', 'Rabona', 'Chip', 'Nutmeg', 'Curler', 'Sweeper'];
+const BOT_NAMES = ['Striker', 'Keeper', 'Nitro', 'Volley', 'Header', 'Bicycle', 'Panenka', 'Rabona', 'Chip', 'Nutmeg', 'Curler', 'Sweeper', 'Libero', 'Tiki'];
 const MATCH_TIME = 180, CAR_R = 1.35;
 const world = { mode: 'attract', phase: 'count', t: 3, clock: MATCH_TIME, score: [0, 0], players: new Map(), ball: { x: 0, y: BR, z: 0, vx: 0, vy: 0, vz: 0, last: null }, lastGoal: null };
 let events = [];
@@ -466,8 +466,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'turbo-ball', title: 'Turbo Ball', emoji: '⚽', accent: '#3fa7ff',
   blurb: 'Car soccer, Blue vs Orange, up to 6 a side. Boost into a giant ball and bang it into the other goal. Three minutes, sudden death if tied.',
-  maxBots: 11, defaultBots: 6, minPlayers: 2,
-  note: 'Up to 12 cars per room (6v6, humans + bots). Teams balance automatically.',
+  maxBots: 13, defaultBots: 6, minPlayers: 2,
+  note: 'Up to 14 cars per room (7v7, humans + bots). Teams balance automatically.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -502,8 +502,8 @@ function onRoster(players) {
   for (const p of players) if (!world.players.has(p.id)) {
     const n = [0, 1].map((t) => [...world.players.values()].filter((q) => q.team === t).length);
     const t = n[0] <= n[1] ? 0 : 1;
-    // keep 12 seats: a joining human takes a bot's place on the smaller team
-    if (world.players.size >= 12) { const bot = [...world.players.values()].find((q) => q.bot && q.team === t); if (bot) removePlayer(bot.id); }
+    // keep 14 seats: a joining human takes a bot's place on the smaller team
+    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot && q.team === t); if (bot) removePlayer(bot.id); }
     const car = addPlayer(p.id, p.nick, p.color, false, t);
     Object.assign(car, { x: (t === 0 ? -1 : 1) * (L - 6), z: 0, h: t === 0 ? Math.PI / 2 : -Math.PI / 2 });
   }

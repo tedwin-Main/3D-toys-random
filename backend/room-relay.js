@@ -7,9 +7,9 @@
  */
 import { WebSocketServer } from 'ws';
 
-const MAX_PLAYERS = 12;
+const MAX_PLAYERS = 14;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6'];
+const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6', '#ffb4a2', '#4361ee'];
 
 export function createRoomRelay() {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });

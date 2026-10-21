@@ -93,7 +93,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/wheres-waldo-game/index.html
- * PURPOSE: online Where's Waldo for up to 12: race to spot him in a seeded crowd (best of 5) or take turns hiding him; Malaysian maps, decoys ramp each round; host-authoritative rounds, clicks, scores; bots
+ * PURPOSE: online Where's Waldo for up to 14: race to spot him in a seeded crowd (best of 5) or take turns hiding him; Malaysian maps, decoys ramp each round; host-authoritative rounds, clicks, scores; bots
  * UI: Waldo Hunt page (lobby overlay + host settings, HUD pills + round clock, pannable crowd canvas + minimap, target card, round end, final standings)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -1901,7 +1901,7 @@ const PLACE_MS = 45000;
 const NEXT_MS = 15000;
 const DRAG_SLOP = 5;
 const KEY_PAN_SPEED = 900;
-const BOT_NAMES = ['Ali', 'Mei Ling', 'Raju', 'Siti', 'Ah Kow', 'Nurul', 'Devi', 'Hafiz', 'Jun Wei', 'Aisyah', 'Kumar'];
+const BOT_NAMES = ['Ali', 'Mei Ling', 'Raju', 'Siti', 'Ah Kow', 'Nurul', 'Devi', 'Hafiz', 'Jun Wei', 'Aisyah', 'Kumar', 'Farid', 'Priya'];
 const HAT_WORDS = { bobble: 'bobble hat', beanie: 'beanie', cap: 'cap', sunhat: 'sun hat', helmet: 'helmet', tudung: 'tudung', songkok: 'songkok', none: 'no hat' };
 const ACC_WORDS = { glasses: 'glasses', bag: 'shoulder bag', scarf: 'scarf', cane: 'walking cane', balloon: 'balloon', none: 'no extras' };
 const $ = (id) => document.getElementById(id);
@@ -2110,8 +2110,8 @@ function onRoster(players) {
   for (const p of [...H.players.values()]) if (!p.bot && p.connected && !ids.has(p.id)) hostDrop(p.id);
   for (const p of players) {
     if (H.players.has(p.id)) continue;
-    // keep 12 seats: a late human bumps a bot
-    if ([...H.players.values()].filter((q) => q.connected).length >= 12) {
+    // keep 14 seats: a late human bumps a bot
+    if ([...H.players.values()].filter((q) => q.connected).length >= 14) {
       const bot = [...H.players.values()].find((q) => q.bot && q.connected && q.id !== H.hiderId);
       if (bot) bot.connected = false;
     }
@@ -2481,8 +2481,8 @@ function attract() {
 const lobby = createLobby({
   game: 'waldo-hunt', title: 'Waldo Hunt', emoji: '🔎', accent: '#e8413c',
   blurb: 'Where’s Waldo, online. Race the room to spot him in a seeded crowd of lookalikes, or take turns hiding him for everyone else.',
-  maxBots: 11, defaultBots: 0, minPlayers: 1,
-  note: 'Up to 12 per room (humans + bots). Race: best of 5, decoys ramp each round. Hide & seek: everyone hides once; a bot fills in if you are alone.',
+  maxBots: 13, defaultBots: 0, minPlayers: 1,
+  note: 'Up to 14 per room (humans + bots). Race: best of 5, decoys ramp each round. Hide & seek: everyone hides once; a bot fills in if you are alone.',
   settings: [
     { key: 'mode', label: 'Mode', options: [['race', 'Race (best of 5)'], ['hide', 'Hide & seek']], value: 'race' },
     { key: 'difficulty', label: 'Difficulty', options: [['easy', 'Easy'], ['normal', 'Normal'], ['hard', 'Hard']], value: 'normal' },

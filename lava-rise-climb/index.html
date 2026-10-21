@@ -43,7 +43,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/lava-rise-climb/index.html
- * PURPOSE: online lava-climb race for up to 12: seeded spiral tower of floating + moving platforms, double jump, head stomps, rising lava eliminates; crown at the top or last one alive wins; each client simulates its own jumper, host runs bots + lava + rules
+ * PURPOSE: online lava-climb race for up to 14: seeded spiral tower of floating + moving platforms, double jump, head stomps, rising lava eliminates; crown at the top or last one alive wins; each client simulates its own jumper, host runs bots + lava + rules
  * UI: Floor Is Lava page (lobby overlay, status line, height meter, jump button, touch stick)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -239,8 +239,8 @@ const sfx = {
 };
 
 // Game > World + shared jumper physics (used by host for bots, by every client for its own jumper)
-const BOT_NAMES = ['Ember', 'Magma', 'Cinder', 'Pumice', 'Basalt', 'Sizzle', 'Scorch', 'Obsidian', 'Flint', 'Ash', 'Blaze', 'Smoky'];
-const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffd23f', '#2ec27e', '#a970ff', '#ff7bd5', '#00c2c7', '#ffffff', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a'];
+const BOT_NAMES = ['Ember', 'Magma', 'Cinder', 'Pumice', 'Basalt', 'Sizzle', 'Scorch', 'Obsidian', 'Flint', 'Ash', 'Blaze', 'Smoky', 'Vulcan', 'Pyro'];
+const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffd23f', '#2ec27e', '#a970ff', '#ff7bd5', '#00c2c7', '#ffffff', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a', '#ff9f1c', '#b388ff'];
 const PR = 0.45, PH = 1.2, G = 32, RUN = 7.5, JUMP = 12.5, DJUMP = 10.5;
 const world = { mode: 'attract', phase: 'count', t: 2, time: 0, lavaT: 0, lava: -4, winner: null, seed: 1, deaths: 0, players: new Map() };
 let events = [];
@@ -417,8 +417,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'floor-is-lava', title: 'Floor Is Lava', emoji: '🌋', accent: '#ff7a2e',
   blurb: 'Race up a spiral tower while the lava rises. Double jump, ride moving platforms, stomp on heads. Touch the crown or be the last one not cooked.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 climbers per room (humans + bots). Same tower for everyone in a match.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 climbers per room (humans + bots). Same tower for everyone in a match.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -454,8 +454,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: drop a cooked bot first, then any bot
-    if (world.players.size >= 12) { const bot = [...world.players.values()].find((q) => q.bot && q.out) ?? [...world.players.values()].find((q) => q.bot); if (bot) removePlayer(bot.id); }
+    // keep 14 seats: drop a cooked bot first, then any bot
+    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot && q.out) ?? [...world.players.values()].find((q) => q.bot); if (bot) removePlayer(bot.id); }
     const late = addPlayer(p.id, p.nick, p.color, false);
     // mid-climb joiners spectate; during the countdown they can still play
     Object.assign(late, { out: world.phase !== 'count', x: 0, y: 0, z: 4.6, ground: plats[0] });

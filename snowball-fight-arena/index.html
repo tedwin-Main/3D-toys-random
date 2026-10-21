@@ -54,7 +54,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/snowball-fight-arena/index.html
- * PURPOSE: online free-for-all snowball fight for up to 12: aim with the mouse, lob arcing snowballs over crumbling snow forts, 3 hits freezes a player; 2-minute match; host-authoritative sim
+ * PURPOSE: online free-for-all snowball fight for up to 14: aim with the mouse, lob arcing snowballs over crumbling snow forts, 3 hits freezes a player; 2-minute match; host-authoritative sim
  * UI: Snowball Brawl page (lobby overlay, clock, scoreboard, freeze feed, ammo + hits pips, touch stick)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -255,8 +255,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Frosty', 'Blizzard', 'Flurry', 'Sleet', 'Icicle', 'Yeti', 'Slushy', 'Avalanche', 'Mitten', 'Powder', 'Tundra', 'Snowcone'];
-const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffb000', '#2ec27e', '#a970ff', '#ff7b2f', '#00c2c7', '#ff5fbf', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a'];
+const BOT_NAMES = ['Frosty', 'Blizzard', 'Flurry', 'Sleet', 'Icicle', 'Yeti', 'Slushy', 'Avalanche', 'Mitten', 'Powder', 'Tundra', 'Snowcone', 'Glacier', 'Frostbite'];
+const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffb000', '#2ec27e', '#a970ff', '#ff7b2f', '#00c2c7', '#ff5fbf', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a', '#7ae7ff', '#c0ca33'];
 const PR = 0.7, SPEED = 7.5, G = 20, MAX_AMMO = 5, CD = 0.38, REGEN = 0.75, RANGE = 22, MATCH = 120, HITS = 3, FREEZE_T = 3, INV_T = 1.6;
 const world = { mode: 'attract', phase: 'count', t: 2, clock: MATCH, players: new Map(), balls: new Map(), walls: WALLS.map(() => ({ hp: WALL_HP, down: 0 })), nextBall: 1 };
 let events = [];
@@ -439,8 +439,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'snowball-brawl', title: 'Snowball Brawl', emoji: '☃️', accent: '#6cc6ff',
   blurb: 'Free-for-all snowball fight. Aim with the mouse, lob over the snow forts, and freeze rivals with three hits. Most freezes in two minutes wins.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 players per room (humans + bots). Forts crumble when hit and regrow.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 players per room (humans + bots). Forts crumble when hit and regrow.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -472,8 +472,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: a joining human takes a bot's place
-    if (world.players.size >= 12) { const bot = [...world.players.values()].find((q) => q.bot); if (bot) removePlayer(bot.id); }
+    // keep 14 seats: a joining human takes a bot's place
+    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot); if (bot) removePlayer(bot.id); }
     const a = rng() * Math.PI * 2, kid = addPlayer(p.id, p.nick, p.color, false);
     Object.assign(kid, { x: Math.cos(a) * 21, z: Math.sin(a) * 21, inv: INV_T });
   }

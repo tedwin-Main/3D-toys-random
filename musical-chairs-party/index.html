@@ -44,7 +44,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/musical-chairs-party/index.html
- * PURPOSE: online musical chairs for up to 12: dance on a disco floor while the music plays, chairs pop up at random spots when it stops, shove rivals to grab one; one fewer chair each round; host-authoritative sim
+ * PURPOSE: online musical chairs for up to 14: dance on a disco floor while the music plays, chairs pop up at random spots when it stops, shove rivals to grab one; one fewer chair each round; host-authoritative sim
  * UI: Chair Scramble page (lobby overlay, round status, alive board, shove button, touch stick)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -247,8 +247,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Boogie', 'Disco', 'Funky', 'Groove', 'Shimmy', 'Twist', 'Hustle', 'Moonwalk', 'Salsa', 'Tango', 'Waltz', 'Robot'];
-const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffb000', '#2ec27e', '#a970ff', '#ff7b2f', '#00c2c7', '#ff5fbf', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a'];
+const BOT_NAMES = ['Boogie', 'Disco', 'Funky', 'Groove', 'Shimmy', 'Twist', 'Hustle', 'Moonwalk', 'Salsa', 'Tango', 'Waltz', 'Robot', 'Cha-Cha', 'Mambo'];
+const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffb000', '#2ec27e', '#a970ff', '#ff7b2f', '#00c2c7', '#ff5fbf', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a', '#7ae7ff', '#c0ca33'];
 const PR = 0.55, SPEED = 7, DASH_V = 15, DASH_CD = 1.4, CHAIR_R = 0.75;
 const world = { mode: 'attract', phase: 'count', t: 2, round: 0, players: new Map(), chairs: [], claimT: 0, winner: null };
 let events = [];
@@ -434,8 +434,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'chair-scramble', title: 'Chair Scramble', emoji: '🪑', accent: '#ff3ea5',
   blurb: 'Musical chairs on a disco floor. Dance while the music plays; when it stops, chairs pop up anywhere. Grab one, shove anyone in your way. One fewer chair every round.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 dancers per room (humans + bots). Late joiners watch as ghosts until the next match.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 dancers per room (humans + bots). Late joiners watch as ghosts until the next match.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -468,8 +468,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) { if (p.seat >= 0) world.chairs[p.seat].by = null; removePlayer(p.id); }
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: drop an eliminated bot first, then any bot
-    if (world.players.size >= 12) { const bot = [...world.players.values()].find((q) => q.bot && q.out) ?? [...world.players.values()].find((q) => q.bot); if (bot) { if (bot.seat >= 0) world.chairs[bot.seat].by = null; removePlayer(bot.id); } }
+    // keep 14 seats: drop an eliminated bot first, then any bot
+    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot && q.out) ?? [...world.players.values()].find((q) => q.bot); if (bot) { if (bot.seat >= 0) world.chairs[bot.seat].by = null; removePlayer(bot.id); } }
     const late = addPlayer(p.id, p.nick, p.color, false);
     Object.assign(late, { out: world.phase !== 'count', x: 0, z: R - 2 });
   }

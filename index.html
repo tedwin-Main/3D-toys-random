@@ -132,7 +132,7 @@ TOYS.forEach((t, i) => {
   a.className = 'card';
   a.href = `#${t.dir}`;
   a.dataset.dir = t.dir;
-  a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 12</span>' : ''}${t.emoji}</div>
+  a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 14</span>' : ''}${t.emoji}</div>
     <div class="body"><h2>${t.title}</h2><p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
   const prev = a.querySelector('.preview');
   let timer;

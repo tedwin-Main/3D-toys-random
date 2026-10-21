@@ -49,7 +49,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/hex-drop-survival/index.html
- * PURPOSE: online last-one-standing for up to 12: three stacked hex floors, every tile drops shortly after it is stepped on; host-authoritative sim, 3 rounds
+ * PURPOSE: online last-one-standing for up to 14: three stacked hex floors, every tile drops shortly after it is stepped on; host-authoritative sim, 3 rounds
  * UI: Hex Drop page (lobby overlay, alive counter, round standings, banner, touch stick + jump)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -196,8 +196,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Jelly', 'Wobbles', 'Bean', 'Squish', 'Hopper', 'Noodle', 'Gumdrop', 'Pip', 'Marsh', 'Boing', 'Taffy', 'Sprout'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Jelly', 'Wobbles', 'Bean', 'Squish', 'Hopper', 'Noodle', 'Gumdrop', 'Pip', 'Marsh', 'Boing', 'Taffy', 'Sprout', 'Fizz', 'Dumpling'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const ROUNDS = 3, SPEED = 7.2, JUMP = 11.5, GRAV = 30;
 const world = { mode: 'attract', phase: 'count', t: 3, round: 1, players: new Map(), outCount: 0, winner: null };
 let events = [], trig = [];
@@ -341,8 +341,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'hex-drop', title: 'Hex Drop', emoji: '🟣', accent: '#ff7ac6',
   blurb: 'Three floors of hex tiles. Every tile you touch drops a moment later. Keep running, jump the gaps, be the last bean standing.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 beans per room (humans + bots). 3 rounds, points for outlasting others.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 beans per room (humans + bots). 3 rounds, points for outlasting others.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -373,8 +373,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: replace a bot (already-out ones first); late joiner sits out the current round
-    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
+    // keep 14 seats: replace a bot (already-out ones first); late joiner sits out the current round
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
     const n = addPlayer(p.id, p.nick, p.color, false);
     if (world.phase !== 'count') { n.alive = false; n.y = OUT_Y - 5; }
     else { n.x = (rng() - 0.5) * 4; n.z = (rng() - 0.5) * 4; n.ground = true; }

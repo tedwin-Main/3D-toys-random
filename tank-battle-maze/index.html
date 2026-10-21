@@ -53,7 +53,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/tank-battle-maze/index.html
- * PURPOSE: online 12-player tank deathmatch in a seeded maze: tank controls + mouse turret, ricochet shells, power-up crates, bots with BFS pathing; host-authoritative sim
+ * PURPOSE: online 14-player tank deathmatch in a seeded maze: tank controls + mouse turret, ricochet shells, power-up crates, bots with BFS pathing; host-authoritative sim
  * UI: Tank Brawl page (lobby overlay, scoreboard, kill feed, minimap, twin touch sticks)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -303,7 +303,7 @@ function noise(len, vol, f0, f1) {
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
   s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
 }
-// volume falls off with distance from camera focus so 12 tanks don't turn into noise
+// volume falls off with distance from camera focus so 14 tanks don't turn into noise
 const focus = new THREE.Vector3();
 const near = (x, z) => Math.max(0.15, 1 - Math.hypot(x - focus.x, z - focus.z) / 60);
 const sfx = {
@@ -315,8 +315,8 @@ const sfx = {
 };
 
 // Game > World state (host simulates; guests mirror snapshots)
-const BOT_NAMES = ['Sarge', 'Rusty', 'Boomer', 'Tread', 'Gizmo', 'Major Tom', 'Bolt', 'Clank', 'Dozer', 'Pixel', 'Spud', 'Ace'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Sarge', 'Rusty', 'Boomer', 'Tread', 'Gizmo', 'Major Tom', 'Bolt', 'Clank', 'Dozer', 'Pixel', 'Spud', 'Ace', 'Tracker', 'Howitzer'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const MATCH_TIME = 180, KILL_CAP = 15, TANK_R = 1.25, SHELL_R = 0.28, SHELL_V = 23, MAX_SHELLS = 5;
 const world = { mode: 'attract', phase: 'play', t: 0, tanks: new Map(), shells: [], crates: [], crateId: 1, crateT: 4, winner: null, seed: 1 };
 const tanks3d = new Map();
@@ -531,8 +531,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'tank-brawl', title: 'Tank Brawl', emoji: '🪖', accent: '#ffd84d',
   blurb: 'Free-for-all tanks in a fresh maze each match. Shells ricochet up to 3 times, crates give triple shot, shield or speed. Most kills in 3 minutes wins.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 tanks per room (humans + bots). Phones: left stick drives, right stick aims + fires.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 tanks per room (humans + bots). Phones: left stick drives, right stick aims + fires.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -567,8 +567,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.tanks.values()]) if (!p.bot && !ids.has(p.id)) removeTank(p.id);
   for (const p of players) if (!world.tanks.has(p.id)) {
-    // keep 12 seats: a joining human replaces the newest bot
-    if (world.tanks.size >= 12) { const bot = [...world.tanks.values()].filter((q) => q.bot).pop(); if (bot) removeTank(bot.id); }
+    // keep 14 seats: a joining human replaces the newest bot
+    if (world.tanks.size >= 14) { const bot = [...world.tanks.values()].filter((q) => q.bot).pop(); if (bot) removeTank(bot.id); }
     addTank(p.id, p.nick, p.color, false);
   }
 }

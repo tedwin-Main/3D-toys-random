@@ -48,7 +48,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/voxel-build-together/index.html
- * PURPOSE: shared voxel sandbox for up to 12 builders: place, erase, paint and pick blocks together, live colored cursors, host-ordered edits, save/load in browser
+ * PURPOSE: shared voxel sandbox for up to 14 builders: place, erase, paint and pick blocks together, live colored cursors, host-ordered edits, save/load in browser
  * UI: Block Party page (lobby overlay, tool + palette bar, builders list, room bar with save/load/clear)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -224,9 +224,9 @@ const big = (h) => (document.getElementById('big').innerHTML = h);
 // Multiplayer > Lobby: no bots, everyone just builds
 const lobby = createLobby({
   game: 'block-party', title: 'Block Party', emoji: '🧱', accent: '#facc15',
-  blurb: 'A shared voxel plate for up to 12 builders. Everyone sees each other’s cursors live. Build a castle, a pixel heart, a giant duck.',
+  blurb: 'A shared voxel plate for up to 14 builders. Everyone sees each other’s cursors live. Build a castle, a pixel heart, a giant duck.',
   maxBots: 0, minPlayers: 1,
-  note: 'Up to 12 builders per room. Host can save, load and clear the build.',
+  note: 'Up to 14 builders per room. Host can save, load and clear the build.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -421,7 +421,7 @@ function hud(dt) {
   hudT = 0.25;
   const room = lobby.room;
   document.getElementById('info').innerHTML = `<b>${cells.size}</b> blocks · tool <b>${TOOLS.find((t) => t[0] === state.tool)[1]}</b> · <span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;background:${PALETTE[state.color]}"></span>`;
-  document.getElementById('builders').innerHTML = `<div style="opacity:.6;margin-bottom:3px">Builders (${room.players.length}/12)</div>` + room.players.map((p) => `<div class="row ${p.id === room.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.id === room.host ? ' ⭐' : ''}</span><em>${state.placed.get(p.id) ?? 0}</em></div>`).join('');
+  document.getElementById('builders').innerHTML = `<div style="opacity:.6;margin-bottom:3px">Builders (${room.players.length}/14)</div>` + room.players.map((p) => `<div class="row ${p.id === room.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.id === room.host ? ' ⭐' : ''}</span><em>${state.placed.get(p.id) ?? 0}</em></div>`).join('');
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 

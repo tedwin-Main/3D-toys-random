@@ -48,7 +48,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/paint-territory/index.html
- * PURPOSE: online 12-player turf painting: goo blobs roll paint onto a 48x48 floor, paint bombs, speed on own color, 90 s timer, live share bar; host-authoritative grid with delta + keyframe sync
+ * PURPOSE: online 14-player turf painting: goo blobs roll paint onto a 48x48 floor, paint bombs, speed on own color, 90 s timer, live share bar; host-authoritative grid with delta + keyframe sync
  * UI: Splat Turf page (lobby overlay, share bar, standings, touch stick)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -272,8 +272,8 @@ const sfx = {
 };
 
 // Game > World state
-const BOT_NAMES = ['Gloop', 'Splotch', 'Drip', 'Blorb', 'Smudge', 'Goober', 'Squish', 'Puddle', 'Blot', 'Jelly', 'Splash', 'Ooze'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Gloop', 'Splotch', 'Drip', 'Blorb', 'Smudge', 'Goober', 'Squish', 'Puddle', 'Blot', 'Jelly', 'Splash', 'Ooze', 'Smear', 'Glob'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const MATCH_TIME = 90, R = 0.9;
 const world = { mode: 'attract', phase: 'play', t: 0, players: new Map(), bombs: [], winner: null, seed: 7 };
 const blobs = new Map();
@@ -448,8 +448,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'splat-turf', title: 'Splat Turf', emoji: '🎨', accent: '#ff4fa3',
   blurb: 'Roll your goo blob around and paint the floor your color. You zoom on your own paint and crawl on theirs. Paint bombs splat big circles. Most turf after 90 seconds wins.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 blobs per room (humans + bots).',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 blobs per room (humans + bots).',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -482,9 +482,9 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: joiner takes over the newest bot's paint slot
+    // keep 14 seats: joiner takes over the newest bot's paint slot
     let slot = 0;
-    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) { slot = bot.slot; removePlayer(bot.id); } }
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) { slot = bot.slot; removePlayer(bot.id); } }
     const np = addPlayer(p.id, p.nick, p.color, false);
     if (!slot) { slot = palette.length; palette.push(p.color); } else palette[slot] = p.color;
     np.slot = slot; np.x = 0; np.z = 0; resolve(np);

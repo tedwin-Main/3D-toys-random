@@ -53,7 +53,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/bomb-tag-arena/index.html
- * PURPOSE: online hot-potato tag for up to 12: bombs pass on contact, holders blow up when the fuse ends, waves until one survives; host-authoritative sim, 3 rounds
+ * PURPOSE: online hot-potato tag for up to 14: bombs pass on contact, holders blow up when the fuse ends, waves until one survives; host-authoritative sim, 3 rounds
  * UI: Hot Potato page (lobby overlay, fuse timer, alive counter, standings, banner, touch stick + dash)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -232,8 +232,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Spud', 'Tater', 'Fritz', 'Hashbrown', 'Wedge', 'Gnocchi', 'Mash', 'Chip', 'Russet', 'Yukon', 'Rosti', 'Latke'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Spud', 'Tater', 'Fritz', 'Hashbrown', 'Wedge', 'Gnocchi', 'Mash', 'Chip', 'Russet', 'Yukon', 'Rosti', 'Latke', 'Tot', 'Fry'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const ROUNDS = 3, SPEED = 7.4, PR = 0.78;
 const world = { mode: 'attract', phase: 'count', t: 3, round: 1, fuse: 0, fuseMax: 1, players: new Map(), outCount: 0, winner: null };
 let events = [];
@@ -393,8 +393,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'hot-potato', title: 'Hot Potato', emoji: '💣', accent: '#ff6b5a',
   blurb: 'Someone is holding a lit bomb. Bump into a player to pass it. When the fuse ends, whoever holds one goes boom. Last one standing wins.',
-  maxBots: 11, defaultBots: 5, minPlayers: 2,
-  note: 'Up to 12 players per room (humans + bots). 3 rounds, points for outlasting others.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 players per room (humans + bots). 3 rounds, points for outlasting others.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -429,8 +429,8 @@ function onRoster(players) {
     removePlayer(p.id);
   }
   for (const p of players) if (!world.players.has(p.id)) {
-    // keep 12 seats: replace a bot (knocked-out ones first); late joiner plays from the next round
-    if (world.players.size >= 12) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
+    // keep 14 seats: replace a bot (knocked-out ones first); late joiner plays from the next round
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
     const n = addPlayer(p.id, p.nick, p.color, false);
     if (world.phase !== 'count') n.alive = false;
   }

@@ -55,7 +55,7 @@
 <script type="module">
 /**
  * FILE: 3d-toys/mini-golf-party/index.html
- * PURPOSE: online mini golf for up to 12: everyone putts the same hole at once, balls collide, 6 floating-island holes (bumpers, windmills, slopes, water, sand); host-authoritative physics
+ * PURPOSE: online mini golf for up to 14: everyone putts the same hole at once, balls collide, 6 floating-island holes (bumpers, windmills, slopes, water, sand); host-authoritative physics
  * UI: Putt Party page (lobby overlay, hole HUD, live leaderboard, scorecard, drag-to-putt aim)
  * USED BY: 3d-toys/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -482,8 +482,8 @@ const sfx = {
 };
 
 // Game > World
-const BOT_NAMES = ['Birdie', 'Bogey Bob', 'Chip', 'Eagle Eye', 'Fore!', 'Gimme', 'Hacker', 'Lumpy', 'Mulligan', 'Putty', 'Sandy', 'Tee-Rex'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590'];
+const BOT_NAMES = ['Birdie', 'Bogey Bob', 'Chip', 'Eagle Eye', 'Fore!', 'Gimme', 'Hacker', 'Lumpy', 'Mulligan', 'Putty', 'Sandy', 'Tee-Rex', 'Albatross', 'Shank'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const world = { mode: 'attract', phase: 'intro', t: 2.5, hole: 0, ht: 0, balls: new Map() };
 let events = [];
 const rng = Math.random;
@@ -591,8 +591,8 @@ function startAttract() {
 const lobby = createLobby({
   game: 'mini-golf', title: 'Putt Party', emoji: '⛳', accent: '#5ee07a',
   blurb: 'Everyone putts the same hole at the same time. Balls bump, bumpers boing, windmills swat. 6 holes, lowest total wins.',
-  maxBots: 11, defaultBots: 3, minPlayers: 2,
-  note: 'Up to 12 golfers per room (humans + bots). Drag back to aim on phone or mouse.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 golfers per room (humans + bots). Drag back to aim on phone or mouse.',
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -623,8 +623,8 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id));
   for (const b of [...world.balls.values()]) if (!b.bot && !ids.has(b.id)) removeBall(b.id);
   for (const p of players) if (!world.balls.has(p.id)) {
-    // keep 12 seats: a joining human replaces the worst bot
-    if (world.balls.size >= 12) { const bot = [...world.balls.values()].filter((b) => b.bot).sort((a, c) => score(c) - score(a))[0]; if (bot) removeBall(bot.id); }
+    // keep 14 seats: a joining human replaces the worst bot
+    if (world.balls.size >= 14) { const bot = [...world.balls.values()].filter((b) => b.bot).sort((a, c) => score(c) - score(a))[0]; if (bot) removeBall(bot.id); }
     const b = addBall(p.id, p.nick, p.color, false);
     for (let h = 0; h < world.hole; h++) b.scores[h] = HOLES[h].par + 2;
     const t = teeSpot(world.balls.size - 1);
