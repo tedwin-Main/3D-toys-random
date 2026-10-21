@@ -1,5 +1,5 @@
 /**
- * FILE: RANDOM_dump/3d-toys/components/room-lobby.js
+ * FILE: 3d-toys/components/room-lobby.js
  * PURPOSE: drop-in lobby overlay for multiplayer toys: nickname, create/join by code, invite links (local + LAN), roster, host bots + settings + Start, back-to-lobby after a match
  * UI: lobby overlay on every multiplayer toy
  * USED BY: multiplayer toy pages (e.g. bumper-sumo-arena/index.html)

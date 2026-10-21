@@ -1,0 +1,43 @@
+<!doctype html>
+<!--
+  FILE: 3d-toys/physics-portfolio-builder/viewer.html
+  PURPOSE: published portfolio shell: CDN import map, fonts, styles, mount; exported as zip index.html
+  UI: Viewer
+  USED BY: Builder > Top bar > Preview site (?draft=1), export-site.js (template entry)
+  KEY EXPORTS: none
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portfolio</title>
+    <meta name="description" content="" />
+    <meta property="og:title" content="" />
+    <meta property="og:description" content="" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230a0c0b'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23f2f1e9'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@100..900&family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&family=Space+Grotesk:wght@300..700&display=swap" />
+    <link rel="stylesheet" href="frontend/components/shared.css" />
+    <link rel="stylesheet" href="frontend/components/viewer.css" />
+    <!-- no build: CDN modules; react-dom marks react external so one React instance -->
+    <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+      "react": "https://esm.sh/react@19.1.1",
+      "react-dom/client": "https://esm.sh/react-dom@19.1.1/client?external=react",
+      "htm": "https://esm.sh/htm@3.1.1",
+      "idb-keyval": "https://esm.sh/idb-keyval@6.3.0",
+      "gsap": "https://cdn.jsdelivr.net/npm/gsap@3.15.0/index.js",
+      "gsap/ScrollTrigger": "https://cdn.jsdelivr.net/npm/gsap@3.15.0/ScrollTrigger.js",
+      "lenis": "https://esm.sh/lenis@1.3.27"
+    } }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>This portfolio needs JavaScript for its 3D scene.</noscript>
+    <script type="module" src="frontend/viewer-main.js"></script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 /**
- * FILE: RANDOM_dump/3d-toys/backend/room-relay.js
+ * FILE: 3d-toys/backend/room-relay.js
  * PURPOSE: game-agnostic websocket room relay: join by game + 4-letter code, roster, host election + migration, message fan-out
  * UI: every multiplayer toy (via components/room-client.js)
  * USED BY: backend/start-server.js

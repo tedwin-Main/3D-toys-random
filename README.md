@@ -5,8 +5,9 @@ Interactive Three.js toys (CDN import map, no build, all procedural) plus online
 ## Run locally
 
 ```sh
-npm run setup   # first time: installs ws
+npm run setup   # first time: installs ws (+ Rapier for tests)
 npm start       # http://localhost:5055/3d-toys/  (PORT env to change)
+npm test        # pool + Break Builder engine tests (node --test)
 ```
 
 `backend/start-server.js` serves every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:5055/3d-toys/`. Needs Node >= 20.
@@ -53,6 +54,7 @@ Notes:
 - `synthwave-night-drive/`: endless synthwave drive with traffic near-miss scoring, procedural music, bloom + CRT pass
 - `bonsai-garden/`: Bonsai Bench: procedural bonsai (maple / cherry / pine), click-to-prune with tumbling cut branches, season scrub with falling leaves, petals and snow, wind sway.
 - `eight-ball-pool/`: Back Room 8-Ball: real-physics pool (pockets + jaws, spin, 240 Hz), full 8-ball rules, practice or Easy / Pro bot that simulates its shots; ES modules + module worker, tests via `node --test eight-ball-pool/backend/`.
+- `physics-portfolio-builder/`: Break Builder: no-code portfolio where each project is a ball, marble or domino in a baked physics break (custom rolling-ball engine + Rapier in a module worker); scroll plays the break, settled scene is the nav; Export zip = static no-build site. Old Vite history in tedwin-Main/physics-portfolio-builder.
 
 ## Multiplayer
 

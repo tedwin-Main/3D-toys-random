@@ -6,12 +6,16 @@
   "scripts": {
     "start": "node backend/start-server.js",
     "dev": "node --watch backend/start-server.js",
-    "setup": "npm install"
+    "setup": "npm install",
+    "test": "node --test eight-ball-pool/backend/ physics-portfolio-builder/backend/ physics-portfolio-builder/frontend/components/"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0"
   }
 }

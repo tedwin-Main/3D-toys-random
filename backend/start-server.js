@@ -1,5 +1,5 @@
 /**
- * FILE: RANDOM_dump/3d-toys/backend/start-server.js
+ * FILE: 3d-toys/backend/start-server.js
  * PURPOSE: one-port server for whole toy box: static toys under /3d-toys/, room relay socket for multiplayer toys
  * UI: every 3D Toy Box page (static), multiplayer toys (websocket)
  * USED BY: npm start (3d-toys/package.json)

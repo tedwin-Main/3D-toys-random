@@ -1,5 +1,5 @@
 /**
- * FILE: RANDOM_dump/3d-toys/components/toy-list.js
+ * FILE: 3d-toys/components/toy-list.js
  * PURPOSE: single source of toy metadata for gallery grid + viewer nav
  * UI: 3D Toy Box home grid, viewer nav pill + dropdown
  * USED BY: 3d-toys/index.html
@@ -48,4 +48,5 @@ export const TOYS = [
   { "dir": "musical-chairs-party", "emoji": "🪑", "title": "Chair Scramble", "desc": "Musical chairs for 2-12 on a disco floor: chairs pop up anywhere when the music stops, shove your way to a seat", "tags": ["multiplayer", "party", "music"], "bg": "#120a1e", "players": "multi" },
   { "dir": "lava-rise-climb", "emoji": "🌋", "title": "Floor Is Lava", "desc": "Lava-climb race for 2-12: double-jump up a seeded spiral tower, stomp heads, outrun the rising lava, grab the crown", "tags": ["multiplayer", "platformer", "race"], "bg": "#2a0a0a", "players": "multi" },
   { "dir": "bonsai-garden", "emoji": "🌳", "title": "Bonsai Bench", "desc": "Procedural bonsai in a glazed pot: click branches to snip them off, scrub through seasons (autumn leaf fall, winter snow, cherry petals), wind sway.", "tags": ["nature", "pruning", "seasons"], "bg": "linear-gradient(160deg,#e9efe4,#8fc43c)" },
+  { "dir": "physics-portfolio-builder", "emoji": "💥", "title": "Break Builder", "desc": "Turn your projects into balls, marbles or dominoes in a real physics break. Scroll plays the break, the settled scene is your portfolio nav. Export a static site zip.", "tags": ["builder", "physics", "portfolio"], "bg": "linear-gradient(160deg,#f2f1e9,#1f6b3a)", "preview": false },
 ];
