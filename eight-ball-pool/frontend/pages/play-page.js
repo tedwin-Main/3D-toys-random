@@ -1,13 +1,14 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/pages/play-page.jsx
+ * FILE: 3d-toys/eight-ball-pool/frontend/pages/play-page.js
  * PURPOSE: 8-ball game screen: menu, turn flow (you / bot), shots via worker, ball in hand, replay, game over
  * UI: Play (whole page: menu, table, HUD, game over)
- * USED BY: main.jsx
+ * USED BY: main.js
  * KEY EXPORTS: PlayPage
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ArrowCounterClockwise, ArrowsClockwise, CameraRotate, FastForward, X } from '@phosphor-icons/react'
+import { html } from '../components/html.js'
+import { ArrowCounterClockwise, ArrowsClockwise, CameraRotate, FastForward, X } from '../components/game-icons.js'
 import {
   GAME_CONFIG, HEAD_STRING_Z, TABLE, createRack, findFreeSpot, isPlacementValid, placeCueBall, respotBall,
 } from '../../backend/pool-game-physics.js'
@@ -15,7 +16,7 @@ import { applyShot, createGame, legalTargets } from '../../backend/pool-game-rul
 import { createPoolTableScene } from '../components/pool-table-scene.js'
 import { attachAimInput } from '../components/pool-aim-input.js'
 import { chooseBotShot, simulateShotAsync } from '../components/pool-shot-client.js'
-import { PlayerCards, PowerBar, SpinPad } from '../components/pool-controls.jsx'
+import { PlayerCards, PowerBar, SpinPad } from '../components/pool-controls.js'
 
 const RADIUS = GAME_CONFIG.ball.radius
 const FINE_POINTER = typeof window !== 'undefined' && window.matchMedia( '(hover: hover) and (pointer: fine)' ).matches
@@ -362,89 +363,87 @@ export function PlayPage() {
             : 'Tap or drag to aim · pull power bar down, release'
           : ''
 
-  return (
-    <main className="play" data-phase={ phase }>
-      <div className="play-stage" onPointerDown={ () => { if ( playing ) skip() } }>
-        <canvas ref={ canvasRef } className="play-canvas" aria-label="Pool table" />
+  return html`
+    <main className="play" data-phase=${ phase }>
+      <div className="play-stage" onPointerDown=${ () => { if ( playing ) skip() } }>
+        <canvas ref=${ canvasRef } className="play-canvas" aria-label="Pool table" />
       </div>
 
-      { failed && (
+      ${ failed && html`
         <div className="play-panel play-fallback">
           <h1>Table unavailable</h1>
           <p>This device could not start WebGL, which the table needs.</p>
         </div>
-      ) }
+      ` }
 
-      { phase === 'menu' && !failed && (
-        // Play > menu: pick mode
+      ${ phase === 'menu' && !failed && html`
+        <!-- Play > menu: pick mode -->
         <div className="play-menu">
           <div className="play-panel">
             <p className="play-kicker">Back room</p>
             <h1>8-Ball</h1>
             <p className="play-lede">Real table physics. Break, run the rack, sink the 8.</p>
             <div className="play-modes">
-              { MODES.map( ( item ) => (
-                <button key={ item.label } type="button" className="play-mode" onClick={ () => startGame( item.mode, item.difficulty ) }>
-                  <span>{ item.label }</span>
-                  <small>{ item.note }</small>
+              ${ MODES.map( ( item ) => html`
+                <button key=${ item.label } type="button" className="play-mode" onClick=${ () => startGame( item.mode, item.difficulty ) }>
+                  <span>${ item.label }</span>
+                  <small>${ item.note }</small>
                 </button>
-              ) ) }
+              ` ) }
             </div>
-            <p className="play-keys">{ FINE_POINTER ? 'Mouse aims · press and pull back to shoot · C swaps camera' : 'Tap to aim · drag to fine-tune · pull the power bar' }</p>
+            <p className="play-keys">${ FINE_POINTER ? 'Mouse aims · press and pull back to shoot · C swaps camera' : 'Tap to aim · drag to fine-tune · pull the power bar' }</p>
           </div>
         </div>
-      ) }
+      ` }
 
-      { game && phase !== 'menu' && (
-        <>
-          <header ref={ topRef } className="play-top">
-            <button type="button" className="play-icon" onClick={ toMenu } aria-label="Back to menu"><X size={ 18 } weight="bold" /></button>
-            <PlayerCards game={ game } />
-            <div className="play-tools">
-              <button type="button" className="play-icon" onClick={ toggleCamera } aria-label={ cameraMode === 'overhead' ? 'Cue camera' : 'Overhead camera' } aria-pressed={ cameraMode === 'cue' }>
-                <CameraRotate size={ 18 } />
-              </button>
-              <button type="button" className="play-icon" onClick={ replay } disabled={ !canReplay || !( phase === 'aim' || phase === 'over' ) } aria-label="Replay last shot">
-                <ArrowCounterClockwise size={ 18 } />
-              </button>
-              <button type="button" className="play-icon" onClick={ () => startGame( game.mode, game.difficulty ) } aria-label="New rack">
-                <ArrowsClockwise size={ 18 } />
-              </button>
-            </div>
-          </header>
-
-          <div className="play-toast" aria-live="polite">
-            { toast && <span key={ toast.key }>{ toast.text }</span> }
-          </div>
-
-          <aside ref={ controlsRef } className="play-controls" data-hidden={ !canAct }>
-            <SpinPad spin={ spin } disabled={ !canAct } onSpin={ setSpin } />
-            <PowerBar power={ power } disabled={ !canAct } onPower={ setPower } onShoot={ shoot } />
-          </aside>
-
-          { playing && (
-            <button type="button" className="play-skip" onClick={ skip }>
-              <FastForward size={ 16 } weight="fill" /> Skip
+      ${ game && phase !== 'menu' && html`
+        <header ref=${ topRef } className="play-top">
+          <button type="button" className="play-icon" onClick=${ toMenu } aria-label="Back to menu"><${ X } size=${ 18 } /></button>
+          <${ PlayerCards } game=${ game } />
+          <div className="play-tools">
+            <button type="button" className="play-icon" onClick=${ toggleCamera } aria-label=${ cameraMode === 'overhead' ? 'Cue camera' : 'Overhead camera' } aria-pressed=${ cameraMode === 'cue' }>
+              <${ CameraRotate } size=${ 18 } />
             </button>
-          ) }
-          { hint && <p className="play-hint">{ hint }</p> }
+            <button type="button" className="play-icon" onClick=${ replay } disabled=${ !canReplay || !( phase === 'aim' || phase === 'over' ) } aria-label="Replay last shot">
+              <${ ArrowCounterClockwise } size=${ 18 } />
+            </button>
+            <button type="button" className="play-icon" onClick=${ () => startGame( game.mode, game.difficulty ) } aria-label="New rack">
+              <${ ArrowsClockwise } size=${ 18 } />
+            </button>
+          </div>
+        </header>
 
-          { phase === 'over' && (
-            // Play > game over: result + rematch
-            <div className="play-menu">
-              <div className="play-panel">
-                <p className="play-kicker">{ game.mode === 'practice' ? 'Table cleared' : 'Game over' }</p>
-                <h1>{ game.message }</h1>
-                <div className="play-modes">
-                  <button type="button" className="play-mode" onClick={ () => startGame( game.mode, game.difficulty ) }><span>Rack again</span></button>
-                  <button type="button" className="play-mode" onClick={ replay } disabled={ !canReplay }><span>Replay last shot</span></button>
-                  <button type="button" className="play-mode" onClick={ toMenu }><span>Menu</span></button>
-                </div>
+        <div className="play-toast" aria-live="polite">
+          ${ toast && html`<span key=${ toast.key }>${ toast.text }</span>` }
+        </div>
+
+        <aside ref=${ controlsRef } className="play-controls" data-hidden=${ !canAct }>
+          <${ SpinPad } spin=${ spin } disabled=${ !canAct } onSpin=${ setSpin } />
+          <${ PowerBar } power=${ power } disabled=${ !canAct } onPower=${ setPower } onShoot=${ shoot } />
+        </aside>
+
+        ${ playing && html`
+          <button type="button" className="play-skip" onClick=${ skip }>
+            <${ FastForward } size=${ 16 } /> Skip
+          </button>
+        ` }
+        ${ hint && html`<p className="play-hint">${ hint }</p>` }
+
+        ${ phase === 'over' && html`
+          <!-- Play > game over: result + rematch -->
+          <div className="play-menu">
+            <div className="play-panel">
+              <p className="play-kicker">${ game.mode === 'practice' ? 'Table cleared' : 'Game over' }</p>
+              <h1>${ game.message }</h1>
+              <div className="play-modes">
+                <button type="button" className="play-mode" onClick=${ () => startGame( game.mode, game.difficulty ) }><span>Rack again</span></button>
+                <button type="button" className="play-mode" onClick=${ replay } disabled=${ !canReplay }><span>Replay last shot</span></button>
+                <button type="button" className="play-mode" onClick=${ toMenu }><span>Menu</span></button>
               </div>
             </div>
-          ) }
-        </>
-      ) }
+          </div>
+        ` }
+      ` }
     </main>
-  )
+  `
 }

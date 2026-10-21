@@ -2,7 +2,7 @@
  * FILE: 3d-toys/eight-ball-pool/frontend/components/play.css
  * PURPOSE: 8-ball page: reset + tokens, full-bleed table, glass HUD, power bar, spin pad, menu + game-over panels
  * UI: Play (whole page)
- * USED BY: main.jsx
+ * USED BY: eight-ball-pool/index.html
  * KEY EXPORTS: none
  */
 
@@ -47,8 +47,8 @@ button {
   --glass-line: rgba(242, 241, 233, 0.14);
   --gold: #e8c25a;
   --hot: #e0583a;
-  --font-display: "Space Grotesk Variable", sans-serif;
-  --font-body: "Inter Variable", sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-body: "Inter", sans-serif;
   position: fixed;
   inset: 0;
   overflow: hidden;
@@ -109,6 +109,18 @@ button {
   gap: 10px;
   padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   pointer-events: none;
+}
+
+/* framed by toy box: clear gallery nav pill (12px top + ~46px tall) */
+[data-embedded="true"] .play-top {
+  padding-top: calc(max(14px, env(safe-area-inset-top)) + 54px);
+}
+
+/* phones keep bottom toast (see max-width 640px) */
+@media (min-width: 641px) {
+  [data-embedded="true"] .play-toast {
+    top: calc(max(14px, env(safe-area-inset-top)) + 150px);
+  }
 }
 
 .play-top > * {

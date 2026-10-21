@@ -2,7 +2,7 @@
  * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-table-scene.js
  * PURPOSE: three.js 8-ball table: felt, cushions + pockets built from physics geometry, balls, cue stick, aim guide, shot playback, camera
  * UI: Play > table (menu backdrop, aiming, shot playback, ball in hand)
- * USED BY: play-page.jsx
+ * USED BY: play-page.js
  * KEY EXPORTS: createPoolTableScene, BALL_COLORS
  */
 
@@ -241,7 +241,7 @@ export function createPoolTableScene( { canvas } ) {
   scene.add( buildTable() )
 
   // Play > balls: shared sphere, per-ball texture; base turn so numbers start face-up at random yaw
-  const fontFamily = '"Space Grotesk Variable", sans-serif'
+  const fontFamily = '"Space Grotesk", sans-serif'
   const sphere = new THREE.SphereGeometry( RADIUS, IS_TOUCH ? 32 : 48, IS_TOUCH ? 20 : 32 )
   const random = createRandom( 77 )
   const ballMeshes = []

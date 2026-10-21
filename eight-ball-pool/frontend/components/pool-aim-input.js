@@ -2,7 +2,7 @@
  * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-aim-input.js
  * PURPOSE: table pointer + keyboard controls: hover/tap/drag aim, press-and-pull-back shot, ball-in-hand drag, arrow/space keys
  * UI: Play > table (aim, shoot, place cue ball)
- * USED BY: play-page.jsx
+ * USED BY: play-page.js
  * KEY EXPORTS: attachAimInput
  */
 

@@ -2,7 +2,7 @@
  * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-shot-client.js
  * PURPOSE: promise wrapper over pool shot worker, one shared worker per tab
  * UI: Play > shot, Play > vs Bot
- * USED BY: play-page.jsx
+ * USED BY: play-page.js
  * KEY EXPORTS: simulateShotAsync, chooseBotShot
  */
 
