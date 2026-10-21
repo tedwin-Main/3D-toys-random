@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bonsai Bench</title>
+<style>
+  :root { --ink: #2b2620; --card: rgba(255, 250, 240, 0.72); --accent: #c2462c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9efe4; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; color: var(--ink); }
+  canvas { display: block; touch-action: none; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(10px); border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 14px; user-select: none; }
+  #intro { top: 16px; left: 16px; padding: 12px 16px; max-width: 280px; }
+  #intro h1 { margin: 0 0 4px; font-size: 17px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.55; opacity: 0.8; }
+  #intro b { color: var(--accent); }
+  #panel { top: 16px; right: 16px; padding: 12px 14px; width: 230px; display: grid; gap: 10px; }
+  #panel .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  #panel label { font-size: 12px; display: grid; gap: 3px; }
+  #panel label span { display: flex; justify-content: space-between; opacity: 0.85; }
+  #panel input { width: 100%; accent-color: var(--accent); }
+  #panel button { flex: 1; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--ink); background: rgba(0, 0, 0, 0.06); border: 0; padding: 7px 8px; border-radius: 9px; cursor: pointer; }
+  #panel button:hover { background: rgba(0, 0, 0, 0.12); }
+  #panel button.on { background: var(--accent); color: #fff; }
+  #count { font-size: 12px; opacity: 0.7; text-align: center; }
+  @media (max-width: 640px) { #intro { display: none; } #panel { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; } }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Bonsai Bench</h1><p>A procedural bonsai grows in its pot. <b>Click a branch</b> to snip it off and watch it tumble; hover shows what goes. Drag to turn the bench, scrub the seasons, turn up the wind.</p></div>
+<div id="panel" class="card">
+  <div class="row" id="styles"></div>
+  <label><span>Season <b id="seasonName">Spring</b></span><input id="season" type="range" min="0" max="399" value="40" /></label>
+  <label><span>Wind</span><input id="wind" type="range" min="0" max="100" value="25" /></label>
+  <div class="row"><button id="newTree">New tree</button><button id="regrow">Regrow</button><button id="auto">Auto seasons</button></div>
+  <div id="count">0 snips</div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: RANDOM_dump/3d-toys/bonsai-garden/index.html
+ * PURPOSE: procedural bonsai in a glazed pot: recursive branch growth, click-to-prune with falling cut branches, wind sway, season scrub (leaf color, fall, snow), drifting petals/leaves
+ * UI: Bonsai Bench page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// Scene > Renderer + camera
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xe9efe4);
+scene.fog = new THREE.Fog(0xe9efe4, 14, 30);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.5;
+const camera = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(2.5, 4.2, 10);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2.6, 0);
+controls.enableDamping = true;
+controls.minDistance = 4;
+controls.maxDistance = 18;
+controls.maxPolarAngle = Math.PI * 0.52;
+
+// Scene > Light: warm sun with soft shadows, sky fill
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
+sun.position.set(5, 9, 4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -6, right: 6, top: 7, bottom: -3, near: 1, far: 25 });
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+const hemi = new THREE.HemisphereLight(0xdfeeff, 0x6b5a44, 0.9);
+scene.add(hemi);
+
+// Bench > Table + backdrop wall
+const bench = new THREE.Mesh(new THREE.BoxGeometry(12, 0.4, 6), new THREE.MeshStandardMaterial({ color: 0x8a6440, roughness: 0.65 }));
+bench.position.y = -0.2;
+bench.receiveShadow = true;
+scene.add(bench);
+for (let i = -5; i <= 5; i++) {
+  const slat = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.401, 6), new THREE.MeshStandardMaterial({ color: 0x5e4128 }));
+  slat.position.set(i * 1.0 + 0.5, -0.2, 0);
+  scene.add(slat);
+}
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xd9d2c0, roughness: 1 });
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 20), wallMat);
+wall.position.set(0, 6, -4);
+wall.receiveShadow = true;
+scene.add(wall);
+
+// Bench > Pot: lathe-turned glazed bowl, soil, moss + pebbles
+const POT_TOP = 1.05;
+{
+  const pts = [[0, 0], [1.25, 0], [1.45, 0.08], [1.55, 0.3], [1.62, 0.9], [1.72, 1.0], [1.72, 1.08], [1.5, 1.08], [1.46, 0.98]].map(([x, y]) => new THREE.Vector2(x, y));
+  const pot = new THREE.Mesh(new THREE.LatheGeometry(pts, 48), new THREE.MeshPhysicalMaterial({ color: 0x2f5a6b, roughness: 0.25, clearcoat: 0.8, side: THREE.DoubleSide }));
+  pot.castShadow = pot.receiveShadow = true;
+  scene.add(pot);
+  for (let i = 0; i < 4; i++) {
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.3), pot.material);
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    foot.position.set(Math.cos(a) * 1.05, -0.03, Math.sin(a) * 1.05);
+    scene.add(foot);
+  }
+  const soil = new THREE.Mesh(new THREE.CircleGeometry(1.48, 40), new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 1 }));
+  soil.rotation.x = -Math.PI / 2;
+  soil.position.y = 0.98;
+  soil.receiveShadow = true;
+  scene.add(soil);
+  const mossMat = new THREE.MeshStandardMaterial({ color: 0x5e7d34, roughness: 1, flatShading: true });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a968c, roughness: 0.8, flatShading: true });
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, r = 0.35 + Math.random() * 1.0;
+    const isStone = i % 4 === 0;
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(isStone ? 0.1 + Math.random() * 0.08 : 0.16 + Math.random() * 0.14, 0), isStone ? stoneMat : mossMat);
+    m.scale.y = isStone ? 0.6 : 0.35;
+    m.position.set(Math.cos(a) * r, 0.99, Math.sin(a) * r);
+    m.castShadow = true;
+    scene.add(m);
+  }
+}
+
+// Tree > Styles: branching rules + foliage palette per season (spring, summer, autumn, winter)
+const STYLES = {
+  maple: { name: 'Maple', depth: 6, spread: 0.95, split: [2, 3], shrink: 0.7, leaf: 0.3, cones: false, petals: false,
+    colors: [0x8fc43c, 0x3f7d2a, 0xd2481e, 0x7a5a3a], petal: 0xd65a22 },
+  cherry: { name: 'Cherry', depth: 6, spread: 1.0, split: [2, 3], shrink: 0.7, leaf: 0.29, cones: false, petals: true,
+    colors: [0xf6b7c9, 0x5f9a3a, 0xc9822e, 0x7a5a3a], petal: 0xf9c4d4 },
+  pine: { name: 'Pine', depth: 5, spread: 1.15, split: [2, 3], shrink: 0.74, leaf: 0.42, cones: true, petals: false,
+    colors: [0x3e6b35, 0x2f5a2c, 0x35602f, 0x3b5f3a], petal: 0x6b8a4a },
+};
+let style = STYLES.maple;
+const SEASONS = ['Spring', 'Summer', 'Autumn', 'Winter'];
+
+// Tree > Builder: seeded recursive branches; each node = group (sway pivot) + bark mesh + tip group
+const barkMat = new THREE.MeshStandardMaterial({ color: 0x5b4330, roughness: 0.9 });
+const hoverMat = new THREE.MeshStandardMaterial({ color: 0xc2462c, roughness: 0.6, emissive: 0x6a1a0a });
+const hoverLeafMat = new THREE.MeshStandardMaterial({ color: 0xf08a6a, roughness: 0.85, flatShading: true, transparent: true, opacity: 0.75 });
+const barkGeo = new THREE.CylinderGeometry(0.72, 1, 1, 8, 1).translate(0, 0.5, 0);
+const leafGeo = new THREE.IcosahedronGeometry(1, 1);
+{
+  // lumpy foliage pads instead of perfect balls
+  const p = leafGeo.attributes.position;
+  for (let i = 0; i < p.count; i++) { const k = 0.82 + Math.random() * 0.3; p.setXYZ(i, p.getX(i) * k, p.getY(i) * k * 0.62, p.getZ(i) * k); }
+  leafGeo.computeVertexNormals();
+}
+const jointGeo = new THREE.SphereGeometry(1, 8, 6);
+const coneGeo = new THREE.ConeGeometry(1, 0.9, 7).translate(0, 0.2, 0);
+const leafMats = [0, 1, 2].map(() => new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true }));
+let seed = 1 + Math.floor(Math.random() * 1e9);
+let rng = mulberry(seed);
+function mulberry(a) {
+  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const root = new THREE.Group();
+root.position.y = 0.98;
+scene.add(root);
+let nodes = [], leaves = [], pickables = [], growT = 0, snips = 0;
+const TRUNK_SEGS = 3;
+function addNode(parent, len, rad, level, yaw, tilt) {
+  const g = new THREE.Group();
+  g.rotation.order = 'YXZ';
+  g.rotation.set(tilt, yaw, 0);
+  parent.add(g);
+  const bark = new THREE.Mesh(barkGeo, barkMat);
+  bark.scale.set(rad, len, rad);
+  bark.castShadow = bark.receiveShadow = true;
+  g.add(bark);
+  const tip = new THREE.Group();
+  tip.position.y = len;
+  g.add(tip);
+  // knuckle at each bend so segments read as one limb
+  const joint = new THREE.Mesh(jointGeo, barkMat);
+  joint.scale.setScalar(rad * 0.74);
+  joint.position.y = len;
+  joint.castShadow = true;
+  g.add(joint);
+  const node = { g, bark, tip, level, baseX: tilt, phase: rng() * 6.28, alive: true, len };
+  bark.userData.node = node;
+  joint.userData.node = node;
+  nodes.push(node);
+  if (level >= TRUNK_SEGS) pickables.push(bark);
+  return node;
+}
+function branch(parent, len, rad, depth, level) {
+  if (depth >= style.depth) {
+    // tip foliage pad (pine: stacked cones)
+    const s = style.leaf * (0.75 + rng() * 0.5);
+    const pad = new THREE.Mesh(style.cones ? coneGeo : leafGeo, leafMats[Math.floor(rng() * 3)]);
+    pad.scale.setScalar(s);
+    pad.position.set((rng() - 0.5) * 0.1, s * 0.25, (rng() - 0.5) * 0.1);
+    pad.rotation.y = rng() * 6.28;
+    pad.castShadow = true;
+    pad.userData.leafMat = pad.material;
+    parent.add(pad);
+    leaves.push({ mesh: pad, base: s, level });
+    return;
+  }
+  const n = style.split[0] + (rng() < 0.45 ? style.split[1] - style.split[0] : 0);
+  const yaw0 = rng() * 6.28;
+  for (let i = 0; i < n; i++) {
+    // first child = leader: keeps climbing, others splay out
+    const lead = i === 0;
+    const tilt = (lead ? 0.38 : style.spread) * (0.6 + rng() * 0.6) * (style.cones && !lead ? 1.3 : 1);
+    const l = len * style.shrink * (lead ? 1 : 0.85 + rng() * 0.25);
+    const node = addNode(parent, l, rad * 0.68, level, yaw0 + (i / n) * 6.28 + (rng() - 0.5) * 0.8, tilt);
+    branch(node.tip, l, rad * 0.68, depth + 1, level + 1);
+  }
+  if (depth >= style.depth - 2 && rng() < 0.6) {
+    // inner pads so the canopy is not hollow
+    const pad = new THREE.Mesh(style.cones ? coneGeo : leafGeo, leafMats[Math.floor(rng() * 3)]);
+    const s = style.leaf * (0.6 + rng() * 0.3);
+    pad.scale.setScalar(s);
+    pad.castShadow = true;
+    pad.userData.leafMat = pad.material;
+    parent.add(pad);
+    leaves.push({ mesh: pad, base: s, level });
+  }
+}
+function buildTree(keepSeed) {
+  if (!keepSeed) seed = 1 + Math.floor(Math.random() * 1e9);
+  rng = mulberry(seed);
+  root.clear();
+  nodes = []; leaves = []; pickables = [];
+  growT = 0;
+  // informal-upright trunk: a few bent segments before first fork
+  let parent = root, rad = 0.34;
+  for (let i = 0; i < TRUNK_SEGS; i++) {
+    const node = addNode(parent, 0.55 + rng() * 0.25, rad, i, rng() * 6.28, i === 0 ? 0.08 : 0.2 + rng() * 0.25);
+    parent = node.tip;
+    rad *= 0.85;
+  }
+  branch(parent, 0.95, rad, 0, TRUNK_SEGS);
+  // nebari: flared surface roots at trunk base
+  for (let i = 0; i < 5; i++) {
+    const rootM = new THREE.Mesh(barkGeo, barkMat);
+    rootM.scale.set(0.16, 0.55 + rng() * 0.3, 0.16);
+    rootM.rotation.set(0, i * 1.26 + rng(), 0);
+    rootM.rotateX(1.42);
+    rootM.castShadow = true;
+    root.add(rootM);
+  }
+}
+
+// Tree > Snip: hover highlights subtree, click detaches it as falling debris
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let hovered = null;
+const falling = [];
+function pickAt(e) {
+  mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  return ray.intersectObjects(pickables, false)[0]?.object.userData.node ?? null;
+}
+function paintSubtree(node, on) {
+  node.g.traverse((o) => {
+    if (o.userData.node) o.material = on ? hoverMat : barkMat;
+    if (o.userData.leafMat) o.material = on ? hoverLeafMat : o.userData.leafMat;
+  });
+}
+function setHover(node) {
+  if (hovered === node) return;
+  if (hovered) paintSubtree(hovered, false);
+  hovered = node;
+  if (hovered) paintSubtree(hovered, true);
+  renderer.domElement.style.cursor = node ? 'pointer' : '';
+}
+function snip(node) {
+  setHover(null);
+  node.g.traverse((o) => { if (o.userData.node) { o.userData.node.alive = false; pickables = pickables.filter((p) => p !== o); } });
+  leaves = leaves.filter((l) => { let alive = true; l.mesh.traverseAncestors((a) => { if (a === node.g) alive = false; }); return alive; });
+  scene.attach(node.g);
+  falling.push({ obj: node.g, v: new THREE.Vector3((Math.random() - 0.5) * 1.2, 0.8, (Math.random() - 0.5) * 1.2), spin: new THREE.Vector3(Math.random() * 3, 0, Math.random() * 3), rest: 0 });
+  snips++;
+  $('count').textContent = `${snips} snip${snips === 1 ? '' : 's'}`;
+  snipSound();
+}
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' && !e.buttons) setHover(pickAt(e)); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  // short press = snip, drag = orbit
+  const start = downAt;
+  downAt = null;
+  if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 6) return;
+  const node = pickAt(e);
+  if (node && node.alive) snip(node);
+});
+
+// Sound > snip: short filtered noise click from WebAudio, no files
+let actx = null;
+function snipSound() {
+  actx ??= new AudioContext();
+  const len = actx.sampleRate * 0.06, buf = actx.createBuffer(1, len, actx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 6);
+  const src = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = buf; f.type = 'highpass'; f.frequency.value = 2600; g.gain.value = 0.5;
+  src.connect(f).connect(g).connect(actx.destination);
+  src.start();
+}
+
+// Weather > Drifters: instanced petals / leaves / snowflakes that flutter onto the bench
+const MAX_P = 500;
+const pGeo = new THREE.PlaneGeometry(0.09, 0.065);
+const pMesh = new THREE.InstancedMesh(pGeo, new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.8 }), MAX_P);
+pMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+pMesh.frustumCulled = false;
+scene.add(pMesh);
+const parts = Array.from({ length: MAX_P }, () => ({ on: false, p: new THREE.Vector3(), v: new THREE.Vector3(), r: new THREE.Euler(), rs: 0, life: 0, landed: false, ph: 0 }));
+let pNext = 0;
+const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpS = new THREE.Vector3(), tmpV = new THREE.Vector3(), white = new THREE.Color(0xffffff);
+function spawn(pos, color, snow) {
+  const idx = pNext, q = parts[idx];
+  pNext = (pNext + 1) % MAX_P;
+  Object.assign(q, { on: true, landed: false, life: snow ? 10 : 7, rs: 2 + Math.random() * 4, ph: Math.random() * 6.28, snow });
+  q.p.copy(pos);
+  q.v.set((Math.random() - 0.5) * 0.3, -0.2, (Math.random() - 0.5) * 0.3);
+  q.r.set(Math.random() * 6, Math.random() * 6, 0);
+  pMesh.setColorAt(idx, color);
+}
+function randomLeafPos() {
+  const l = leaves[Math.floor(Math.random() * leaves.length)];
+  if (!l) return null;
+  return l.mesh.getWorldPosition(tmpV).add(new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.4));
+}
+
+// UI > Panel: style chips, season, wind, tree buttons
+const $ = (id) => document.getElementById(id);
+for (const [key, s] of Object.entries(STYLES)) {
+  const b = document.createElement('button');
+  b.textContent = s.name;
+  b.onclick = () => { style = s; [...$('styles').children].forEach((c) => c.classList.toggle('on', c === b)); buildTree(false); };
+  if (s === style) b.classList.add('on');
+  $('styles').append(b);
+}
+$('newTree').onclick = () => buildTree(false);
+$('regrow').onclick = () => { snips = 0; $('count').textContent = '0 snips'; buildTree(true); };
+let autoSeason = false;
+$('auto').onclick = () => { autoSeason = !autoSeason; $('auto').classList.toggle('on', autoSeason); };
+
+// Season > Look: blend leaf colors, leaf amount, background + light per season (0..4 wraps)
+const cA = new THREE.Color(), cB = new THREE.Color(), bgC = new THREE.Color();
+const BG = [0xe9efe4, 0xe7f0f7, 0xf3e6d6, 0xe6ebf1];
+const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+function seasonLook(s) {
+  const i = Math.floor(s) % 4, j = (i + 1) % 4, f = smooth(0.55, 1, s - Math.floor(s));
+  cA.setHex(style.colors[i]).lerp(cB.setHex(style.colors[j]), f);
+  const shades = [0.85, 1, 1.15];
+  // snow dusting on evergreen in winter
+  const snow = style.cones ? Math.max(0, 1 - Math.abs(s - 3.3) / 0.8) * 0.45 : 0;
+  leafMats.forEach((m, k) => m.color.copy(cA).multiplyScalar(shades[k]).lerp(white, snow));
+  bgC.setHex(BG[i]).lerp(cB.setHex(BG[j]), f);
+  scene.background.copy(bgC);
+  scene.fog.color.copy(bgC);
+  sun.color.setHSL(0.1, 0.6, i === 3 ? 0.88 : 0.82 + f * 0.02);
+  // deciduous: leaves thin late autumn, gone in winter, bud back late winter
+  const amt = style.cones ? 1 : 1 - smooth(2.45, 2.95, s) + smooth(3.7, 3.98, s);
+  $('seasonName').textContent = SEASONS[Math.floor(s + 0.2) % 4];
+  return { amt, i, f };
+}
+
+// Run engine: grow, sway, debris physics, drifters, render
+const clock = new THREE.Clock();
+let t = 0, spawnAcc = 0, lastAmt = 1;
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  t += dt;
+  if (autoSeason) $('season').value = (+$('season').value + dt * 8) % 400;
+  const s = +$('season').value / 100, wind = +$('wind').value / 100;
+  const look = seasonLook(s);
+  growT = Math.min(1, growT + dt * 0.35);
+  const gust = wind * (0.55 + 0.45 * Math.sin(t * 0.7) * Math.sin(t * 0.23));
+  const levels = TRUNK_SEGS + style.depth;
+  for (const n of nodes) {
+    if (!n.alive) continue;
+    // grow outward level by level, then sway more toward the tips
+    const k = Math.min(1, Math.max(0.001, growT * (levels + 1) - n.level));
+    n.g.scale.setScalar(k);
+    const flex = 0.012 + n.level * 0.012;
+    n.g.rotation.x = n.baseX + Math.sin(t * 2.1 + n.phase) * gust * flex + gust * flex * 0.8;
+    n.g.rotation.z = Math.cos(t * 1.7 + n.phase) * gust * flex * 0.6;
+  }
+  for (const l of leaves) l.mesh.scale.setScalar(l.base * Math.max(0.001, look.amt));
+  // drifters: cherry petals in spring, falling leaves while canopy thins, snow in winter
+  let rate = 0, col = cA, snow = false;
+  if (style.petals && look.i === 0) { rate = 10; col = new THREE.Color(style.petal); }
+  if (look.amt < lastAmt - 1e-4 || (look.i === 2 && !style.cones)) { rate = Math.max(rate, 14); col = new THREE.Color(style.colors[2]); }
+  if (look.i === 3 && look.f < 0.6) { rate = 40; col = white; snow = true; }
+  lastAmt = look.amt;
+  spawnAcc += rate * dt * (growT > 0.95 ? 1 : 0);
+  while (spawnAcc >= 1) {
+    spawnAcc--;
+    const pos = snow ? new THREE.Vector3((Math.random() - 0.5) * 10, 8, (Math.random() - 0.5) * 5) : randomLeafPos();
+    if (pos) spawn(pos, col, snow);
+  }
+  parts.forEach((q, idx) => {
+    if (!q.on) { tmpM.makeScale(0, 0, 0); pMesh.setMatrixAt(idx, tmpM); return; }
+    if (!q.landed) {
+      q.v.x += (gust * 1.4 - q.v.x) * dt * 1.5 + Math.sin(t * 3 + q.ph) * dt * 0.8;
+      q.v.y = Math.max(q.v.y - 3 * dt, q.snow ? -0.9 : -0.55);
+      q.p.addScaledVector(q.v, dt);
+      q.r.x += q.rs * dt;
+      q.r.y += q.rs * 0.7 * dt;
+      // lands on bench top or pot rim/soil
+      const onPot = Math.hypot(q.p.x, q.p.z) < 1.5;
+      const floor = onPot ? 1.0 : Math.abs(q.p.x) < 6 && Math.abs(q.p.z) < 3 ? 0.005 : -20;
+      if (q.p.y <= floor + 0.01) { q.p.y = floor + 0.01; q.landed = true; q.r.set(-Math.PI / 2, 0, q.r.z); }
+    } else q.life -= dt;
+    if (q.life <= 0 || q.p.y < -10) q.on = false;
+    const sc = q.landed ? Math.min(1, q.life) : 1;
+    tmpS.setScalar(q.snow ? sc * 0.6 : sc);
+    pMesh.setMatrixAt(idx, tmpM.compose(q.p, tmpQ.setFromEuler(q.r), tmpS));
+  });
+  pMesh.instanceMatrix.needsUpdate = true;
+  if (pMesh.instanceColor) pMesh.instanceColor.needsUpdate = true;
+  // cut branches: tumble, settle on bench, shrink away
+  for (let i = falling.length - 1; i >= 0; i--) {
+    const f = falling[i];
+    if (f.obj.position.y > 0.12) {
+      f.v.y -= 9.8 * dt;
+      f.obj.position.addScaledVector(f.v, dt);
+      f.obj.rotation.x += f.spin.x * dt;
+      f.obj.rotation.z += f.spin.z * dt;
+    } else {
+      f.obj.position.y = 0.12;
+      f.rest += dt;
+      if (f.rest > 3) f.obj.scale.multiplyScalar(1 - dt * 2);
+      if (f.rest > 5) { scene.remove(f.obj); falling.splice(i, 1); }
+    }
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+buildTree(false);
+frame();
+</script>
+</body>
+</html>
