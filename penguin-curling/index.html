@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Penguin Curling</title>
+<style>
+  :root { --ink: #fff; --card: rgba(16, 24, 40, 0.62); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe8f7; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .a { font-size: 30px; font-weight: 900; line-height: 1; color: #7fd1ff; font-variant-numeric: tabular-nums; }
+  #info .a small { font-size: 15px; color: #fff; opacity: 0.75; }
+  #info .m { font-size: 13px; margin-top: 4px; opacity: 0.9; }
+  #phase { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 16px; font-weight: 800; display: none; white-space: nowrap; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 190px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row small { min-width: 22px; text-align: right; color: #7fd1ff; font-weight: 800; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 26px; text-align: right; opacity: 0.85; }
+  #board .row.me span { color: #7fd1ff; font-weight: 800; }
+  #big { position: fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(32px, 8vw, 80px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.3em; font-weight: 700; }
+  #power { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); width: min(280px, 60vw); height: 20px; padding: 3px; border-radius: 12px; display: none; }
+  #power div { height: 100%; width: 0; border-radius: 9px; background: linear-gradient(90deg, #6ee7b7, #ffd23f, #ff4d4d); }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #7fd1ff; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse) { #hint { display: none; } #power { bottom: 200px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="a" id="round"></div><div class="m" id="mine"></div></div>
+<div id="phase" class="card"></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="power" class="card"><div id="powerFill"></div></div>
+<div id="hint" class="card"><b>A/D</b> aim · hold <b>Space</b> to charge, release to belly-slide · while sliding: hold <b>Space</b> to sweep (go farther), <b>A/D</b> to lean · stop closest to the 🐟</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/penguin-curling/index.html
+ * PURPOSE: online penguin curling for up to 14: everyone aims + charges at once, belly-slides down the ice, sweeps and leans to stop nearest the fish, knocks rivals away; host-authoritative sim
+ * UI: Penguin Curling page (lobby overlay, round counter, phase card, standings, power bar, banner, phone joystick + SLIDE)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../components/room-lobby.js';
+import { startTicker } from '../components/room-client.js';
+import { createTouchPad } from '../components/touch-joystick.js';
+
+// Scene > Renderer, sky, ice sheet, snow banks, lake past the back edge, mountains, trees, igloo
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcfe8f7);
+scene.fog = new THREE.Fog(0xcfe8f7, 60, 190);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 400);
+scene.add(new THREE.HemisphereLight(0xf4fbff, 0x8fb3c9, 1.6));
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.1);
+sun.position.set(14, 40, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 12, bottom: -56, near: 1, far: 120 });
+sun.target.position.set(0, 0, -22);
+scene.add(sun, sun.target);
+const XW = 8.5, FRONT = 6, BACK = -47, HOG = -22;
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const iceTex = canvasTex(512, 1536, (g, w, h) => {
+  g.fillStyle = '#eaf6ff'; g.fillRect(0, 0, w, h);
+  // skate scratches + pebble specks so speed reads on a near-white surface
+  for (let i = 0; i < 260; i++) { g.strokeStyle = `rgba(150,190,220,${0.08 + Math.random() * 0.12})`; g.lineWidth = 1 + Math.random(); g.beginPath(); const x = Math.random() * w, y = Math.random() * h; g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 60, y + (Math.random() - 0.5) * 160); g.stroke(); }
+  for (let i = 0; i < 5000; i++) { g.fillStyle = `rgba(255,255,255,${Math.random() * 0.8})`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+});
+const iceLen = FRONT - BACK;
+const ice = new THREE.Mesh(new THREE.BoxGeometry(XW * 2, 0.6, iceLen), [0, 0, 1, 0, 0, 0].map((k) => new THREE.MeshStandardMaterial(k ? { map: iceTex, roughness: 0.12, metalness: 0.05 } : { color: 0xb9dcf2, roughness: 0.3, transparent: true, opacity: 0.9 })));
+ice.position.set(0, -0.3, (FRONT + BACK) / 2); ice.receiveShadow = true;
+scene.add(ice);
+for (const [z, c] of [[0, 0xe63946], [HOG, 0x3a86ff], [BACK + 0.15, 0x1d3557]]) {
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(XW * 2, 0.16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: c }));
+  line.position.set(0, 0.006, z);
+  scene.add(line);
+}
+const snowMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(240, 110).rotateX(-Math.PI / 2), snowMat);
+ground.position.set(0, -0.06, BACK + 55); ground.receiveShadow = true;
+scene.add(ground);
+const lake = new THREE.Mesh(new THREE.PlaneGeometry(240, 140).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x2b6f97, roughness: 0.15, metalness: 0.2 }));
+lake.position.set(0, -0.55, BACK - 70);
+scene.add(lake);
+for (let k = 0; k < 18; k++) {
+  const floe = new THREE.Mesh(new THREE.CylinderGeometry(1 + Math.random() * 2.5, 1.4 + Math.random() * 2.5, 0.3, 7), snowMat);
+  floe.position.set((Math.random() - 0.5) * 90, -0.45, BACK - 6 - Math.random() * 70); floe.rotation.y = Math.random() * 3;
+  scene.add(floe);
+}
+for (const s of [-1, 1]) {
+  const bank = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, iceLen), snowMat);
+  bank.position.set(s * (XW + 1), 0.35, (FRONT + BACK) / 2); bank.castShadow = bank.receiveShadow = true;
+  scene.add(bank);
+  for (let z = FRONT; z > BACK; z -= 2.2) { const lump = new THREE.Mesh(new THREE.SphereGeometry(0.7 + Math.random() * 0.3, 10, 8), snowMat); lump.position.set(s * (XW + 1 + (Math.random() - 0.5) * 0.6), 0.7, z); lump.scale.y = 0.6; scene.add(lump); }
+}
+const pineMat = new THREE.MeshStandardMaterial({ color: 0x2f6b4f, flatShading: true }), trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a30 });
+for (let k = 0; k < 46; k++) {
+  const s = k % 2 ? 1 : -1, x = s * (13 + Math.random() * 30), z = 12 - Math.random() * 62, h = 3 + Math.random() * 4;
+  const t = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.2, 6), trunkMat); trunk.position.y = 0.6;
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(h * 0.35, h, 8), pineMat); cone.position.y = 1 + h / 2; cone.castShadow = true;
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(h * 0.17, h * 0.42, 8), snowMat); cap.position.y = 1 + h * 0.8;
+  t.add(trunk, cone, cap); t.position.set(x, 0, z);
+  scene.add(t);
+}
+for (let k = 0; k < 9; k++) {
+  const h = 30 + Math.random() * 30, m = new THREE.Mesh(new THREE.ConeGeometry(h * 0.8, h, 7), new THREE.MeshStandardMaterial({ color: 0xa9bfd1, flatShading: true }));
+  m.position.set(-110 + k * 27 + Math.random() * 10, h / 2 - 2, BACK - 110 - Math.random() * 30);
+  const top = new THREE.Mesh(new THREE.ConeGeometry(h * 0.32, h * 0.4, 7), snowMat); top.position.y = h * 0.3; m.add(top);
+  scene.add(m);
+}
+const igloo = new THREE.Mesh(new THREE.SphereGeometry(3, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), snowMat);
+igloo.position.set(-15, 0, 8); igloo.castShadow = true;
+scene.add(igloo);
+
+// Target > house rings (blue, white, red, white) with a fish on the button
+const RINGS = [[1.0, 5], [2.2, 3], [3.5, 2], [5.0, 1]];
+const house = new THREE.Group();
+[[5.0, 0x3a86ff], [3.5, 0xffffff], [2.2, 0xe63946], [1.0, 0xffffff]].forEach(([r, c], k) => {
+  const d = new THREE.Mesh(new THREE.CircleGeometry(r, 56).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: c, roughness: 0.2, transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -1 - k, polygonOffsetUnits: -1 - k }));
+  d.position.y = 0.004 + k * 0.002; d.receiveShadow = true;
+  house.add(d);
+});
+const fish = new THREE.Group();
+{
+  const fm = new THREE.MeshStandardMaterial({ color: 0xff8c42, roughness: 0.4, metalness: 0.2 });
+  const fb = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 10), fm); fb.scale.set(1.4, 0.5, 0.7);
+  const ft = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.3, 4), fm); ft.rotation.z = Math.PI / 2; ft.position.x = -0.5;
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0x111111 })); eye.position.set(0.28, 0.06, 0.15);
+  fish.add(fb, ft, eye); fish.position.y = 0.12;
+}
+house.add(fish);
+scene.add(house);
+
+// Players > penguins: black body, white belly + face, beak, flippers, feet, scarf in player color, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(16,24,40,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.4, 0.6, 1); s.position.y = 1.9; s.renderOrder = 5;
+  return s;
+}
+const ballGeo = new THREE.SphereGeometry(1, 24, 18);
+const blackMat = new THREE.MeshStandardMaterial({ color: 0x1d2433, roughness: 0.55 });
+const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf8fbff, roughness: 0.6 });
+const orangeMat = new THREE.MeshStandardMaterial({ color: 0xffa62b, roughness: 0.5 });
+const players3d = new Map();
+function part(mat, [sx, sy, sz], [x, y, z], shadow = true) { const m = new THREE.Mesh(ballGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = shadow; return m; }
+function makePenguin(p) {
+  const g = new THREE.Group(), pose = new THREE.Group();
+  const scarfMat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.7 });
+  pose.add(part(blackMat, [0.5, 0.62, 0.46], [0, 0, 0]), part(whiteMat, [0.38, 0.5, 0.3], [0, -0.04, 0.2], false));
+  pose.add(part(blackMat, [0.32, 0.32, 0.32], [0, 0.66, 0]), part(whiteMat, [0.22, 0.2, 0.14], [0, 0.66, 0.2], false));
+  for (const s of [-1, 1]) pose.add(part(blackMat, [0.05, 0.05, 0.05], [s * 0.1, 0.72, 0.31], false));
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.24, 8), orangeMat); beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.62, 0.42);
+  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.08, 8, 20), scarfMat); scarf.rotation.x = Math.PI / 2; scarf.position.y = 0.4;
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.4), scarfMat); tail.position.set(0.18, 0.3, -0.36); tail.rotation.x = 0.6;
+  const flips = [-1, 1].map((s) => { const f = part(blackMat, [0.07, 0.36, 0.18], [s * 0.5, 0.02, 0], true); f.rotation.z = s * 0.25; return f; });
+  pose.add(beak, scarf, tail, ...flips);
+  for (const s of [-1, 1]) pose.add(part(orangeMat, [0.13, 0.05, 0.2], [s * 0.17, -0.6, 0.12]));
+  pose.position.y = 0.62;
+  const tag = nameTag(p.nick, p.color);
+  g.add(pose, tag);
+  g.userData = { pose, flips, tag, sink: 0 };
+  scene.add(g);
+  return g;
+}
+
+// Players > own aim arrow: flat arrow on the ice, length = charge
+const arrow = new THREE.Group();
+{
+  const sh = new THREE.Shape();
+  sh.moveTo(-0.12, 0); sh.lineTo(0.12, 0); sh.lineTo(0.12, 1); sh.lineTo(0.35, 1); sh.lineTo(0, 1.5); sh.lineTo(-0.35, 1); sh.lineTo(-0.12, 1); sh.closePath();
+  const m = new THREE.Mesh(new THREE.ShapeGeometry(sh).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3a86ff, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
+  m.position.z = 0.6; m.position.y = 0.02;
+  arrow.add(m); arrow.visible = false;
+}
+scene.add(arrow);
+
+// FX > ice spray on knocks + sweeps, lake splashes, snowfall
+const PUFF = 500;
+const puffGeo = new THREE.BufferGeometry();
+const puffPos = new Float32Array(PUFF * 3), puffVel = new Float32Array(PUFF * 3), puffLife = new Float32Array(PUFF);
+puffGeo.setAttribute('position', new THREE.BufferAttribute(puffPos, 3));
+const puffs = new THREE.Points(puffGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.22, transparent: true, opacity: 0.9 }));
+puffs.frustumCulled = false;
+scene.add(puffs);
+for (let i = 0; i < PUFF; i++) puffPos[i * 3 + 1] = -99;
+let puffNext = 0;
+function burst(x, y, z, n, spd, up = 2) {
+  for (let k = 0; k < n; k++) {
+    const i = puffNext++ % PUFF, a = Math.random() * Math.PI * 2, s = spd * (0.4 + Math.random());
+    puffPos.set([x, y, z], i * 3); puffVel.set([Math.cos(a) * s, up * (0.5 + Math.random()), Math.sin(a) * s], i * 3); puffLife[i] = 0.5 + Math.random() * 0.4;
+  }
+}
+const SNOW = 700, snowPos = new Float32Array(SNOW * 3);
+for (let i = 0; i < SNOW; i++) snowPos.set([(Math.random() - 0.5) * 80, Math.random() * 30, 20 - Math.random() * 90], i * 3);
+const snowGeo = new THREE.BufferGeometry(); snowGeo.setAttribute('position', new THREE.BufferAttribute(snowPos, 3));
+const snow = new THREE.Points(snowGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.8 }));
+snow.frustumCulled = false;
+scene.add(snow);
+
+// Audio > launch whoosh, knock clack, splash, sweep brush, points, countdown, fanfare
+let actx = null, noiseBuf;
+function audio() {
+  if (actx) return;
+  actx = new AudioContext();
+  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+addEventListener('pointerdown', audio, { once: true });
+addEventListener('keydown', audio, { once: true });
+function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
+  if (!actx) return;
+  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
+}
+function noise(len, vol, f0, f1) {
+  if (!actx) return;
+  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
+}
+const sfx = {
+  launch(me) { noise(0.5, me ? 0.16 : 0.04, 2600, 500); },
+  knock(s, me) { const v = Math.min(1, s / 10) * (me ? 0.3 : 0.12); tone(300, 130, 0.14, v, 'triangle'); noise(0.08, v, 1800, 300); },
+  splash() { noise(0.7, 0.2, 1600, 150); tone(520, 140, 0.35, 0.05); },
+  sweep() { noise(0.07, 0.035, 5200, 2600); },
+  point(n) { [880, 1108, 1318].slice(0, Math.min(3, Math.ceil(n / 2))).forEach((f, i) => tone(f, f, 0.12, 0.07, 'triangle', i * 0.08)); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
+};
+
+// Game > World
+const BOT_NAMES = ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Mumble', 'Pebble', 'Iceberg', 'Snowy', 'Kowalski', 'Rico', 'Chilly', 'Frosty', 'Sardine', 'Puddles'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+const ROUNDS = 8, AIM_T = 7, PR = 0.5, FR = 4.5, FR_SWEEP = 2.9, VMIN = 5, VMAX = 22, LEAN = 1.8;
+const world = { mode: 'attract', phase: 'count', t: 3, round: 0, rounds: ROUNDS, hx: 0, hz: -37, best: 0, players: new Map(), winner: null };
+let events = [];
+const rng = Math.random;
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, ax: 0, held: false, armed: false, charging: false, launched: false, out: false, sweep: false, score: 0, last: 0, plan: null, skill: 0.35 + rng() * 0.55 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function lineUp() {
+  const ps = [...world.players.values()], n = ps.length, gap = Math.min(1.6, 14 / Math.max(1, n - 1));
+  // rotate slots each round so nobody is stuck on the awkward outside angle
+  ps.forEach((p, k) => {
+    const slot = (k + world.round) % n;
+    Object.assign(p, { x: (slot - (n - 1) / 2) * gap, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, sweep: false, plan: null });
+  });
+}
+function startRound() {
+  world.round++;
+  world.hx = (rng() - 0.5) * 8; world.hz = -33 - rng() * 7; world.best = 0;
+  lineUp();
+  world.phase = 'count'; world.t = world.round === 1 ? (world.mode === 'attract' ? 1.5 : 3.5) : 1.6;
+}
+function startMatch() {
+  for (const p of world.players.values()) { p.score = 0; p.last = 0; }
+  Object.assign(world, { round: 0, rounds: world.mode === 'attract' ? 3 : ROUNDS, winner: null });
+  startRound();
+}
+
+// Run engine > aim + charge meter, launch, belly-slide friction, sweep, lean, banks, lake
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const tri = (u) => 1 - Math.abs(1 - (u % 2));
+function launch(p, pow = p.pow) {
+  const v = VMIN + pow * (VMAX - VMIN);
+  Object.assign(p, { launched: true, charging: false, pow, vx: Math.sin(p.aim) * v, vz: -Math.cos(p.aim) * v });
+  events.push(['l', p.id]);
+}
+function stepPlayer(p, dt) {
+  if (p.out) return;
+  if (!p.launched) {
+    if (world.phase !== 'aim') return;
+    p.aim = clamp(p.aim + p.ax * 0.7 * dt, -0.4, 0.4);
+    // must let go once per round so a key held from last round can't fire instantly
+    if (!p.held) p.armed = true;
+    if (p.held && p.armed && !p.charging) { p.charging = true; p.chT = 0; }
+    if (p.charging) { p.chT += dt; p.pow = tri(p.chT * 0.85); if (!p.held) launch(p); }
+    return;
+  }
+  const sp = Math.hypot(p.vx, p.vz);
+  p.sweep = p.held && sp > 0.3;
+  if (sp < 1e-3) { p.vx = p.vz = 0; return; }
+  const ns = Math.max(0, sp - (p.sweep ? FR_SWEEP : FR) * dt);
+  if (sp > 1) { const px = -p.vz / sp, pz = p.vx / sp; p.vx += px * p.ax * LEAN * dt; p.vz += pz * p.ax * LEAN * dt; }
+  const l = Math.hypot(p.vx, p.vz) || 1;
+  p.vx *= ns / l; p.vz *= ns / l;
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  if (Math.abs(p.x) > XW - PR) { p.x = Math.sign(p.x) * (XW - PR); if (Math.abs(p.vx) > 1.5) events.push(['x', p.id, +p.x.toFixed(1), +p.z.toFixed(1)]); p.vx *= -0.6; }
+  if (p.z > FRONT - PR) { p.z = FRONT - PR; p.vz *= -0.5; }
+  if (p.z < BACK) { Object.assign(p, { out: true, vx: 0, vz: 0, z: BACK - 1.1, sweep: false }); events.push(['s', p.id]); }
+}
+function collide(ps) {
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j];
+    if (a.out || b.out || (!a.launched && !b.launched)) continue;
+    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d > PR * 2 || d < 1e-4) continue;
+    const nx = dx / d, nz = dz / d, pen = PR * 2 - d;
+    const vr = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
+    // a penguin still on the start line acts like a fixed post: only the slider moves
+    if (!a.launched || !b.launched) {
+      const m = a.launched ? a : b, s = a.launched ? -1 : 1;
+      m.x += nx * s * pen; m.z += nz * s * pen;
+      const vn = m.vx * nx + m.vz * nz;
+      if (vn * s < 0) { m.vx -= 1.8 * vn * nx; m.vz -= 1.8 * vn * nz; }
+      continue;
+    }
+    a.x -= nx * pen / 2; a.z -= nz * pen / 2; b.x += nx * pen / 2; b.z += nz * pen / 2;
+    if (vr < 0) {
+      const jj = -1.92 * vr / 2;
+      a.vx -= jj * nx; a.vz -= jj * nz; b.vx += jj * nx; b.vz += jj * nz;
+      if (-vr > 1.5) events.push(['k', a.id, b.id, +((a.x + b.x) / 2).toFixed(1), +((a.z + b.z) / 2).toFixed(1), +(-vr).toFixed(1)]);
+    }
+  }
+}
+
+// Run engine > bots: aim at the fish (or knock the leader off it), release at the right charge, sweep if short, lean toward the line
+function botThink(p) {
+  if (p.out) { p.held = false; return; }
+  if (!p.launched) {
+    if (world.phase !== 'aim') { p.held = false; p.ax = 0; return; }
+    p.plan ??= { at: AIM_T - 0.6 - rng() * 4.5, tx: world.hx, tz: world.hz, want: null };
+    const pl = p.plan;
+    if (pl.want === null && world.t <= pl.at + 0.8) {
+      const sitters = [...world.players.values()].filter((q) => q !== p && q.launched && !q.out && Math.hypot(q.vx, q.vz) < 0.1 && Math.hypot(q.x - world.hx, q.z - world.hz) < 3.5);
+      let extra = 0;
+      if (sitters.length && rng() < 0.45 * p.skill) {
+        const t = sitters.sort((a, b) => Math.hypot(a.x - world.hx, a.z - world.hz) - Math.hypot(b.x - world.hx, b.z - world.hz))[0];
+        pl.tx = t.x; pl.tz = t.z; extra = 4;
+      }
+      const err = 1.1 - p.skill;
+      pl.tx += (rng() - 0.5) * 3.5 * err; pl.tz += (rng() - 0.5) * 6 * err;
+      const v = Math.sqrt(2 * FR * (Math.hypot(pl.tx - p.x, pl.tz - p.z) + extra));
+      pl.want = clamp((v - VMIN) / (VMAX - VMIN) + (rng() - 0.5) * 0.3 * err, 0.04, 1);
+    }
+    p.ax = clamp((Math.atan2(pl.tx - p.x, -(pl.tz - p.z)) - p.aim) * 6, -1, 1);
+    p.held = world.t <= pl.at && !(p.charging && Math.abs(p.pow - pl.want) < 0.025);
+    return;
+  }
+  const sp = Math.hypot(p.vx, p.vz);
+  if (sp < 0.3) { p.held = false; p.ax = 0; return; }
+  const ux = p.vx / sp, uz = p.vz / sp, tx = p.plan?.tx ?? world.hx, tz = p.plan?.tz ?? world.hz;
+  const dx = tx - p.x, dz = tz - p.z, ahead = dx * ux + dz * uz, lat = dx * -uz + dz * ux;
+  p.held = ahead > (sp * sp) / (2 * FR) + 0.4 && rng() < p.skill * 0.8;
+  p.ax = clamp(lat * 0.6, -1, 1) * p.skill;
+}
+
+// Game > Phases: countdown, aim (7 s), slide (until all stop), round scores, final standings
+let lastBeep = 0;
+function scoreRound(ps) {
+  let best = null, bd = Infinity;
+  for (const p of ps) {
+    p.last = 0;
+    if (p.out) continue;
+    const d = Math.hypot(p.x - world.hx, p.z - world.hz);
+    for (const [r, pts] of RINGS) if (d < r) { p.last = pts; break; }
+    if (p.last && d < bd) { bd = d; best = p; }
+  }
+  // closest to the fish gets a +2 bonus on top of its ring points
+  if (best) best.last += 2;
+  for (const p of ps) { p.score += p.last; if (p.last) events.push(['p', p.id, p.last]); }
+  world.best = best?.id ?? 0;
+  events.push(['b', world.best, best?.last ?? 0]);
+  world.phase = 'score'; world.t = 3.2;
+}
+function phases(dt) {
+  const ps = [...world.players.values()];
+  world.t -= dt;
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'aim'; world.t = AIM_T; }
+  } else if (world.phase === 'aim') {
+    if (world.t <= 0 || ps.every((p) => p.launched)) {
+      for (const p of ps) if (!p.launched) launch(p, p.charging ? p.pow : 0.5 + rng() * 0.2);
+      world.phase = 'slide'; world.t = 10;
+    }
+  } else if (world.phase === 'slide') {
+    if (world.t <= 0 || ps.every((p) => p.out || Math.hypot(p.vx, p.vz) < 0.05)) scoreRound(ps);
+  } else if (world.phase === 'score' && world.t <= 0) {
+    if (world.round < world.rounds) startRound();
+    else {
+      const top = ps.reduce((a, b) => (b.score > (a?.score ?? -1) ? b : a), null);
+      world.winner = top?.id ?? null;
+      if (top) events.push(['w', top.id]);
+      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
+    }
+  } else if (world.phase === 'final' && world.t <= 0) {
+    if (world.mode === 'attract') startMatch();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract';
+  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  startMatch();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'penguin-curling', title: 'Penguin Curling', emoji: '🐧', accent: '#7fd1ff',
+  blurb: 'Everyone slides at once. Aim, charge, belly-slide down the ice and stop closest to the fish. Sweep to glide farther, lean to curl, knock rivals out of the rings.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: `Up to 14 penguins per room (humans + bots). ${ROUNDS} rounds, rings score 5/3/2/1, closest to the fish +2.`,
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match';
+    ['info', 'board', 'phase'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    document.getElementById('top').style.display = 'flex';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startMatch();
+  },
+  onLobby() {
+    ['info', 'board', 'top', 'phase', 'power'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 14 seats: a late human takes the lowest-scoring bot's place
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.score - b.score)[0]; if (bot) removePlayer(bot.id); }
+    // late joiner sits out the current round at the side of the start line
+    Object.assign(addPlayer(p.id, p.nick, p.color, false), { x: XW - 0.6, z: 3, launched: world.phase !== 'count' });
+  }
+}
+
+// Multiplayer > Net: guest input 20 Hz, host snapshots with events
+const remoteIn = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+function snapshot() {
+  return {
+    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, rs: world.rounds, hx: f2(world.hx), hz: f2(world.hz), b: world.best, win: world.winner, ev: events,
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0), p.score, p.last, p.nick, p.color]),
+  };
+}
+let snapAt = 0;
+function applySnap(s) {
+  Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, rounds: s.rs, hx: s.hx, hz: s.hz, best: s.b, winner: s.win });
+  const seen = new Set();
+  for (const [id, x, z, vx, vz, aim, pow, fl, score, last, nick, color] of s.P) {
+    seen.add(id);
+    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    Object.assign(p, { x, z, vx, vz, aim, pow, launched: !!(fl & 2), out: !!(fl & 4), charging: !!(fl & 8), sweep: !!(fl & 16), score, last });
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+let shake = 0;
+function playEvents(evs) {
+  const me = lobby.room?.me, match = world.mode === 'match';
+  for (const e of evs) {
+    const p = world.players.get(e[1]);
+    if (e[0] === 'k') { burst(e[3], 0.5, e[4], 12, 3); if (match) sfx.knock(e[5], e[1] === me || e[2] === me); if ((e[1] === me || e[2] === me) && match) shake = 0.35; }
+    else if (e[0] === 'x') { burst(e[2], 0.4, e[3], 6, 2); if (match && e[1] === me) sfx.knock(4, true); }
+    else if (e[0] === 'l' && p) { burst(p.x, 0.2, p.z, 8, 2, 1); if (match) sfx.launch(e[1] === me); }
+    else if (e[0] === 's' && p) { burst(p.x, -0.3, BACK - 1.1, 26, 3, 5); if (match) sfx.splash(); if (e[1] === me && match) flash('<small>too far!</small>💦 splash', 1.6); }
+    else if (e[0] === 'p' && e[1] === me && match) sfx.point(e[2]);
+    else if (e[0] === 'b' && match) { const b = world.players.get(e[1]); flash(b ? `<small>closest to the fish</small>🐟 ${esc(b.nick)} +${e[2]}` : '<small>nobody in the rings</small>🥶', 2.6); }
+    else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you are the ice champion!' : 'ice champion'}</small>🏆 ${esc(p.nick)}`, 4); }
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > keyboard + phone joystick + SLIDE button (hold to charge, hold again to sweep)
+const keys = {}, local = { x: 0, held: false };
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const pad = createTouchPad({ buttons: [{ id: 'slide', label: 'SLIDE', color: 'rgba(58, 134, 255, 0.75)' }], onStart: audio });
+function readInput() {
+  local.x = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x, -1, 1);
+  local.held = !!(keys.Space || keys.KeyW || keys.ArrowUp || pad.held.slide);
+}
+
+// HUD > round counter, phase card, power bar, standings with last-round points, banner
+const bigEl = document.getElementById('big'), phaseEl = document.getElementById('phase'), powerEl = document.getElementById('power'), powerFill = document.getElementById('powerFill');
+let bigText = '', phaseText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.8) { big(t); flashT = len; }
+let hudT = 0;
+function hud(dt) {
+  flashT -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  const me = world.players.get(lobby.room?.me), ph = world.phase, secs = Math.max(0, Math.ceil(world.t));
+  const mySp = me ? Math.hypot(me.vx, me.vz) : 0;
+  if (ph === 'count') big(world.round === 1 ? `<small>stop closest to the fish</small>${Math.max(1, secs)}` : `<small>get ready</small>round ${world.round}`);
+  else if (ph === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${secs}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  const t = ph === 'count' ? `🐧 round ${world.round} of ${world.rounds}`
+    : ph === 'aim' ? (me && !me.launched ? `aim · hold SLIDE to charge, release to go · ${secs}s` : `waiting for sliders · ${secs}s`)
+    : ph === 'slide' ? (me?.launched && !me.out && mySp > 0.3 ? '🧹 hold SLIDE to sweep farther · steer to lean' : 'sliding…')
+    : ph === 'score' ? '🎯 round scores' : '🏁 final standings';
+  if (t !== phaseText) { phaseText = t; phaseEl.textContent = t; }
+  const showPow = ph === 'aim' && me && !me.launched;
+  powerEl.style.display = showPow ? 'block' : 'none';
+  if (showPow) powerFill.style.width = `${Math.round(me.pow * 100)}%`;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  document.getElementById('round').innerHTML = `${world.round}<small> / ${world.rounds} rounds</small>`;
+  document.getElementById('mine').textContent = me ? `you: ${me.score} pts · last round +${me.last}` : 'rings 5 / 3 / 2 / 1 · closest +2';
+  const r = [...world.players.values()].sort((a, b) => b.score - a.score);
+  const showLast = ph === 'score' || ph === 'final';
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.best && showLast ? '🐟 ' : ''}${esc(p.nick)}</span><small>${showLast && p.last ? `+${p.last}` : ''}</small><em>${p.score}</em></div>`).join('');
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') Object.assign(me, { ax: local.x, held: local.held });
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { ax: inp.x, held: !!inp.h }); }
+    const ps = [...world.players.values()];
+    for (const p of ps) if (p.bot) botThink(p);
+    for (const p of ps) stepPlayer(p, dt);
+    collide(ps);
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), h: local.held ? 1 : 0 }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 9, 11), camLook = new THREE.Vector3(0, 0, -14), _v = new THREE.Vector3();
+let sweepT = 0;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim(), meId = lobby.room?.me;
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  let idx = 0;
+  const n = world.players.size;
+  for (const p of world.players.values()) {
+    let g = players3d.get(p.id);
+    if (!g) { g = makePenguin(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
+    const u = g.userData, sp = Math.hypot(p.vx, p.vz);
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    // new round teleports everyone back to the line: snap instead of gliding 40 m
+    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) { g.position.set(tx, 0, tz); u.sink = 0; }
+    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
+    u.sink = p.out ? Math.min(u.sink + dt, 2) : 0;
+    g.position.y = p.out ? -Math.min(1.4, u.sink * 1.2) + Math.sin(time * 6) * 0.05 : 0;
+    const heading = p.launched && sp > 0.3 ? Math.atan2(p.vx, p.vz) : !p.launched ? Math.atan2(Math.sin(p.aim), -Math.cos(p.aim)) : null;
+    if (heading !== null) { let dh = heading - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); g.rotation.y += dh * Math.min(1, dt * 12); }
+    const belly = p.launched && !p.out, k = Math.min(1, dt * 10);
+    u.pose.rotation.x += ((belly ? 1.45 : p.charging ? -0.3 * p.pow : 0) - u.pose.rotation.x) * k;
+    u.pose.position.y += ((belly ? 0.46 : 0.62) - u.pose.position.y) * k;
+    u.pose.rotation.z = p.out ? Math.sin(time * 14) * 0.4 : !p.launched ? Math.sin(time * 3 + p.id) * 0.05 : 0;
+    const flap = p.sweep ? Math.sin(time * 30) * 0.6 : p.out ? Math.sin(time * 20) : belly ? 1.1 : 0;
+    u.flips.forEach((f, s) => (f.rotation.z = (s ? 1 : -1) * (0.25 + Math.abs(flap))));
+    u.tag.visible = !p.out || u.sink < 1;
+    // neighbours on the start line alternate tag height so 14 names stay readable
+    u.tag.position.y = p.launched ? 1.9 : 1.9 + ((idx++ + world.round) % n & 1) * 0.55;
+    if (p.sweep && rng() < 0.4) burst(g.position.x + p.vx * 0.08, 0.1, g.position.z + p.vz * 0.08, 1, 1.2, 1);
+  }
+  // own aim arrow: shows heading + charge while waiting on the line
+  const me = world.players.get(meId), mg = me && players3d.get(me.id);
+  arrow.visible = !!(mg && world.phase === 'aim' && !me.launched);
+  if (arrow.visible) {
+    arrow.position.set(mg.position.x, 0, mg.position.z);
+    arrow.rotation.y = Math.atan2(Math.sin(me.aim), -Math.cos(me.aim));
+    arrow.scale.set(1, 1, 1.4 + me.pow * 3.5);
+    arrow.children[0].material.color.setHSL(0.36 - me.pow * 0.36, 0.9, 0.55);
+  }
+  sweepT -= dt;
+  if (me?.sweep && sweepT <= 0) { sweepT = 0.13; sfx.sweep(); }
+  house.position.x += (world.hx - house.position.x) * Math.min(1, dt * 4);
+  house.position.z += (world.hz - house.position.z) * Math.min(1, dt * 4);
+  fish.rotation.y = time * 0.8;
+  for (let i = 0; i < PUFF; i++) {
+    if (puffLife[i] <= 0) continue;
+    puffLife[i] -= dt; puffVel[i * 3 + 1] -= 9 * dt;
+    for (let k = 0; k < 3; k++) puffPos[i * 3 + k] += puffVel[i * 3 + k] * dt;
+    if (puffLife[i] <= 0) puffPos[i * 3 + 1] = -99;
+  }
+  puffGeo.attributes.position.needsUpdate = true;
+  for (let i = 0; i < SNOW; i++) {
+    snowPos[i * 3 + 1] -= dt * 1.4; snowPos[i * 3] += Math.sin(time + i) * dt * 0.3;
+    if (snowPos[i * 3 + 1] < 0) snowPos[i * 3 + 1] = 30;
+  }
+  snowGeo.attributes.position.needsUpdate = true;
+  hud(dt);
+  // camera: start line while aiming, chase own penguin while it slides, house view for the finish
+  const fit = Math.max(1, 1.2 / camera.aspect), ph = world.phase, mySp = me ? Math.hypot(me.vx, me.vz) : 0;
+  let cp, cl;
+  if (mg && me.launched && !me.out && mySp > 1.2) { cp = _v.set(mg.position.x * 0.7 + world.hx * 0.3, 6 * fit, mg.position.z + 9 * fit); cl = [mg.position.x * 0.5 + world.hx * 0.5, 0, mg.position.z - 9]; }
+  else if (ph === 'count' || (ph === 'aim' && !me?.launched)) { const mx = mg ? mg.position.x : 0; cp = _v.set(mx * 0.3, 10.5 * fit, 13.5 * fit); cl = [mx * 0.2, 0, -15]; }
+  else { cp = _v.set(world.hx * 0.5, 14 * fit, world.hz + 15 * fit); cl = [world.hx * 0.8, 0, world.hz + 1]; }
+  camPos.lerp(cp, 1 - Math.exp(-dt * 2.2));
+  camLook.lerp(_v.set(...cl), 1 - Math.exp(-dt * 2.2));
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
