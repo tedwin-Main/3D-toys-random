@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Sheepdog Rush</title>
+<style>
+  :root { --ink: #fff; --card: rgba(16, 24, 40, 0.62); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a8dcff; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .a { font-size: 30px; font-weight: 900; line-height: 1; color: #b8f26a; font-variant-numeric: tabular-nums; }
+  #info .a small { font-size: 15px; color: #fff; opacity: 0.75; }
+  #info .m { font-size: 13px; margin-top: 4px; opacity: 0.9; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; opacity: 0.85; }
+  #board .row.me span { color: #b8f26a; font-weight: 800; }
+  #big { position: fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(32px, 8vw, 80px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.3em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #b8f26a; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse) { #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="a" id="clock"></div><div class="m" id="mine"></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> bark (scatters sheep) · sheep run away from dogs: get behind them and drive them into <b>your</b> colored pen · ✨ golden sheep = 3</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/sheepdog-rush/index.html
+ * PURPOSE: online sheepdog herding for up to 14: a shared flock flees from dogs, each dog drives sheep into its own colored pen on the field edge, bark to scatter; host-authoritative sim
+ * UI: Sheepdog Rush page (lobby overlay, match clock, standings, pen signs, banner, phone joystick + BARK)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../components/room-lobby.js';
+import { startTicker } from '../components/room-client.js';
+import { createTouchPad } from '../components/touch-joystick.js';
+
+// Scene > Renderer, sky, round meadow, outer fields, trees, barn
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa8dcff);
+scene.fog = new THREE.Fog(0xa8dcff, 90, 220);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 500);
+scene.add(new THREE.HemisphereLight(0xf2f8ff, 0x5a7a3a, 1.5));
+const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
+sun.position.set(-20, 50, 24);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 140 });
+scene.add(sun);
+const R_FIELD = 28, GATE_W = 4.4, PEN_D = 4.4, PEN_W = 6;
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const grassTex = canvasTex(1024, 1024, (g, w, h) => {
+  g.fillStyle = '#86c95a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 11000; i++) { g.fillStyle = `hsl(${88 + Math.random() * 24},${42 + Math.random() * 18}%,${38 + Math.random() * 18}%)`; g.fillRect(Math.random() * w, Math.random() * h, 3, 6); }
+  // clover + daisy specks so the meadow reads at the high camera
+  for (let i = 0; i < 260; i++) { g.fillStyle = Math.random() < 0.5 ? '#fff' : '#ffe066'; g.beginPath(); g.arc(Math.random() * w, Math.random() * h, 2.5, 0, 7); g.fill(); }
+});
+const meadow = new THREE.Mesh(new THREE.CircleGeometry(R_FIELD + PEN_D + 3, 96).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.95 }));
+meadow.receiveShadow = true;
+scene.add(meadow);
+const outerTex = grassTex.clone(); outerTex.wrapS = outerTex.wrapT = THREE.RepeatWrapping; outerTex.repeat.set(6, 6);
+const outer = new THREE.Mesh(new THREE.PlaneGeometry(500, 500).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: outerTex, color: 0xb9d8a0, roughness: 1 }));
+outer.position.y = -0.05; outer.receiveShadow = true;
+scene.add(outer);
+const leafMat = new THREE.MeshStandardMaterial({ color: 0x4f9a3a, flatShading: true }), barkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a30 });
+for (let k = 0; k < 40; k++) {
+  const a = Math.random() * Math.PI * 2, r = R_FIELD + 14 + Math.random() * 50, t = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.4, 2, 6), barkMat); trunk.position.y = 1;
+  const top = new THREE.Mesh(new THREE.IcosahedronGeometry(1.8 + Math.random() * 1.2, 0), leafMat); top.position.y = 3.2; top.castShadow = true;
+  t.add(trunk, top); t.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+  scene.add(t);
+}
+{
+  const barn = new THREE.Group(), red = new THREE.MeshStandardMaterial({ color: 0xb23a2e, roughness: 0.8 }), white = new THREE.MeshStandardMaterial({ color: 0xf4efe6 });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(10, 6, 8), red); box.position.y = 3; box.castShadow = true;
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(5.8, 5.8, 8.4, 3, 1), new THREE.MeshStandardMaterial({ color: 0x5b3a2a })); roof.rotation.set(Math.PI / 2, 0, Math.PI / 2); roof.position.y = 7.2; roof.scale.set(1, 1, 0.55);
+  const door = new THREE.Mesh(new THREE.BoxGeometry(3.4, 4, 0.2), white); door.position.set(0, 2, 4.05);
+  barn.add(box, roof, door); barn.position.set(-30, 0, -46); barn.rotation.y = 0.5;
+  scene.add(barn);
+}
+
+// Pens > one colored pen per dog around the edge, gaps in the ring fence at each gate, sign with owner + count
+const woodMat = new THREE.MeshStandardMaterial({ color: 0xc89a62, roughness: 0.9 });
+const postGeo = new THREE.BoxGeometry(0.22, 1.3, 0.22), railGeo = new THREE.BoxGeometry(1, 0.14, 0.1);
+const penGroup = new THREE.Group();
+scene.add(penGroup);
+let pens = [], penKey = '';
+const penAngle = (k, n) => (k / n) * Math.PI * 2 + 0.3;
+function rail(group, x0, z0, x1, z1, mat = woodMat) {
+  const l = Math.hypot(x1 - x0, z1 - z0);
+  for (const y of [0.45, 0.95]) { const r = new THREE.Mesh(railGeo, mat); r.scale.x = l; r.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); r.rotation.y = -Math.atan2(z1 - z0, x1 - x0); r.castShadow = true; group.add(r); }
+  for (const [x, z] of [[x0, z0], [x1, z1]]) { const p = new THREE.Mesh(postGeo, mat); p.position.set(x, 0.65, z); p.castShadow = true; group.add(p); }
+}
+function penSign(nick, color, n) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = color; g.beginPath(); g.roundRect(8, 8, 240, 80, 18); g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.roundRect(8, 60, 240, 28, [0, 0, 18, 18]); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = 'bold 34px ui-rounded, system-ui, sans-serif'; g.fillText(`🐑 ${n}`, 128, 48);
+  g.font = 'bold 20px ui-rounded, system-ui, sans-serif'; g.fillText(nick, 128, 81, 220);
+  return c;
+}
+function buildPens(list) {
+  penGroup.clear();
+  const n = list.length, half = GATE_W / 2 / R_FIELD;
+  pens = list.map(({ id, nick, color }, k) => {
+    const a = penAngle(k, n), g = new THREE.Group();
+    g.position.set(Math.sin(a) * (R_FIELD + PEN_D / 2), 0, Math.cos(a) * (R_FIELD + PEN_D / 2));
+    g.rotation.y = a;
+    const colMat = new THREE.MeshStandardMaterial({ color, roughness: 0.7 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(PEN_W, PEN_D).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.45, roughness: 1 }));
+    floor.position.y = 0.02; floor.receiveShadow = true;
+    g.add(floor);
+    const w = PEN_W / 2, d = PEN_D / 2;
+    // local +z points away from the field center; the open front faces the flock
+    rail(g, -w, d, w, d, colMat); rail(g, -w, -d, -w, d, colMat); rail(g, w, -d, w, d, colMat);
+    rail(g, -w, -d, -GATE_W / 2, -d, colMat); rail(g, GATE_W / 2, -d, w, -d, colMat);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.6, 6), woodMat); pole.position.set(w, 1.8, d);
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.75), new THREE.MeshStandardMaterial({ color, side: THREE.DoubleSide })); flag.position.set(w - 0.62, 3.2, d);
+    g.add(pole, flag);
+    const canvas = penSign(nick, color, 0), tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, transparent: true }));
+    sign.scale.set(4, 1.5, 1); sign.position.set(0, 3.4, d + 0.6); sign.renderOrder = 6;
+    g.add(sign);
+    penGroup.add(g);
+    return { id, nick, color, a, half, sign, tex, canvas, flag, shown: -1 };
+  });
+  // ring fence: posts every ~2.4 m, skipping each gate opening
+  const steps = Math.ceil((Math.PI * 2 * R_FIELD) / 2.4);
+  const inGateA = (th) => pens.some((p) => Math.abs(Math.atan2(Math.sin(th - p.a), Math.cos(th - p.a))) < p.half);
+  for (let i = 0; i < steps; i++) {
+    const t0 = (i / steps) * Math.PI * 2, t1 = ((i + 1) / steps) * Math.PI * 2;
+    if (inGateA(t0) || inGateA(t1)) continue;
+    rail(penGroup, Math.sin(t0) * R_FIELD, Math.cos(t0) * R_FIELD, Math.sin(t1) * R_FIELD, Math.cos(t1) * R_FIELD);
+  }
+  // gate posts so each opening is clearly framed even where the ring step skipped them
+  for (const p of pens) for (const s of [-1, 1]) { const th = p.a + s * p.half, post = new THREE.Mesh(postGeo, woodMat); post.position.set(Math.sin(th) * R_FIELD, 0.65, Math.cos(th) * R_FIELD); post.scale.y = 1.4; penGroup.add(post); }
+}
+// Run engine > which pen gate (if any) is at this field angle
+function gateAt(x, z) {
+  const n = pens.length;
+  if (!n) return -1;
+  const th = Math.atan2(x, z), k = ((Math.round((th - 0.3) / ((Math.PI * 2) / n)) % n) + n) % n, p = pens[k];
+  return Math.abs(Math.atan2(Math.sin(th - p.a), Math.cos(th - p.a))) < p.half ? k : -1;
+}
+
+// Players > border collies: black body, white chest + snout, ears, wagging tail, collar in player color, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(16,24,40,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.2, 0.55, 1); s.position.y = 1.9; s.renderOrder = 5;
+  return s;
+}
+const ballGeo = new THREE.SphereGeometry(1, 18, 14), legGeo = new THREE.CylinderGeometry(0.07, 0.06, 0.5, 6);
+const furMat = new THREE.MeshStandardMaterial({ color: 0x1f2128, roughness: 0.8 }), chestMat = new THREE.MeshStandardMaterial({ color: 0xf5f2ea, roughness: 0.8 });
+function blob(mat, [sx, sy, sz], [x, y, z]) { const m = new THREE.Mesh(ballGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; return m; }
+const players3d = new Map();
+function makeDog(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  body.add(blob(furMat, [0.32, 0.3, 0.62], [0, 0.62, 0]), blob(chestMat, [0.24, 0.24, 0.3], [0, 0.6, 0.38]));
+  const head = new THREE.Group();
+  head.add(blob(furMat, [0.27, 0.25, 0.27], [0, 0, 0]), blob(chestMat, [0.13, 0.11, 0.2], [0, -0.06, 0.24]), blob(furMat, [0.05, 0.04, 0.04], [0, -0.02, 0.43]));
+  for (const s of [-1, 1]) { const ear = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 6), furMat); ear.position.set(s * 0.15, 0.24, -0.02); ear.rotation.z = -s * 0.3; head.add(ear); head.add(blob(chestMat, [0.04, 0.04, 0.03], [s * 0.1, 0.06, 0.24])); }
+  head.position.set(0, 0.95, 0.55);
+  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.05, 6, 16), new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 }));
+  collar.position.set(0, 0.8, 0.45); collar.rotation.x = 1.1;
+  const tail = new THREE.Group(), tm = blob(furMat, [0.07, 0.07, 0.3], [0, 0, -0.25]);
+  tail.add(tm, blob(chestMat, [0.06, 0.06, 0.08], [0, 0, -0.52])); tail.position.set(0, 0.75, -0.58); tail.rotation.x = 0.5;
+  const legs = [[-0.17, 0.35], [0.17, 0.35], [-0.17, -0.35], [0.17, -0.35]].map(([x, z]) => { const l = new THREE.Mesh(legGeo, furMat); l.position.set(x, 0.25, z); l.castShadow = true; body.add(l); return l; });
+  body.add(head, collar, tail);
+  const tag = nameTag(p.nick, p.color);
+  g.add(body, tag);
+  g.userData = { body, head, tail, legs };
+  g.scale.setScalar(1.45);
+  scene.add(g);
+  return g;
+}
+
+// Sheep > fluffy wool cluster, black face + legs; golden fleece variant worth 3
+const woolMat = new THREE.MeshStandardMaterial({ color: 0xf7f4ec, roughness: 1 });
+const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.35, metalness: 0.6, emissive: 0x6a4a00, emissiveIntensity: 0.4 });
+const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.7 });
+const sheep3d = [];
+function makeSheep() {
+  const g = new THREE.Group(), body = new THREE.Group(), wool = [];
+  for (const [x, y, z, r] of [[0, 0.7, 0, 0.5], [0, 0.82, 0.28, 0.36], [0, 0.82, -0.28, 0.38], [0.22, 0.74, 0, 0.34], [-0.22, 0.74, 0, 0.34], [0, 0.98, 0, 0.32]]) {
+    const m = new THREE.Mesh(ballGeo, woolMat); m.scale.setScalar(r); m.position.set(x, y, z); m.castShadow = true; body.add(m); wool.push(m);
+  }
+  const head = blob(faceMat, [0.18, 0.2, 0.24], [0, 0.82, 0.62]);
+  for (const s of [-1, 1]) head.add(blob(faceMat, [0.7, 0.25, 0.4], [s * 1.1, 0.4, -0.2]));
+  const legs = [[-0.18, 0.25], [0.18, 0.25], [-0.18, -0.25], [0.18, -0.25]].map(([x, z]) => { const l = new THREE.Mesh(legGeo, faceMat); l.position.set(x, 0.25, z); body.add(l); return l; });
+  body.add(head);
+  g.add(body);
+  g.scale.setScalar(1.25);
+  g.userData = { body, wool, legs, gold: false, h: 0 };
+  scene.add(g);
+  return g;
+}
+
+// FX > wool puffs when sheep are penned, bark rings
+const PUFF = 500;
+const puffGeo = new THREE.BufferGeometry();
+const puffPos = new Float32Array(PUFF * 3), puffVel = new Float32Array(PUFF * 3), puffLife = new Float32Array(PUFF);
+puffGeo.setAttribute('position', new THREE.BufferAttribute(puffPos, 3));
+const puffs = new THREE.Points(puffGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.4, transparent: true, opacity: 0.9 }));
+puffs.frustumCulled = false;
+scene.add(puffs);
+for (let i = 0; i < PUFF; i++) puffPos[i * 3 + 1] = -99;
+let puffNext = 0;
+function burst(x, y, z, n, spd) {
+  for (let k = 0; k < n; k++) {
+    const i = puffNext++ % PUFF, a = Math.random() * Math.PI * 2, s = spd * (0.4 + Math.random());
+    puffPos.set([x, y, z], i * 3); puffVel.set([Math.cos(a) * s, 2 + Math.random() * 3, Math.sin(a) * s], i * 3); puffLife[i] = 0.6 + Math.random() * 0.4;
+  }
+}
+const rings = Array.from({ length: 8 }, () => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+  m.position.y = 0.06; m.userData.t = 1; scene.add(m);
+  return m;
+});
+let ringNext = 0;
+function barkRing(x, z, color) { const r = rings[ringNext++ % rings.length]; r.position.set(x, 0.06, z); r.material.color.set(color); r.userData.t = 0; }
+
+// Audio > woof, baa, pen chime, golden sparkle, countdown, fanfare
+let actx = null, noiseBuf;
+function audio() {
+  if (actx) return;
+  actx = new AudioContext();
+  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+addEventListener('pointerdown', audio, { once: true });
+addEventListener('keydown', audio, { once: true });
+function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
+  if (!actx) return;
+  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
+}
+function noise(len, vol, f0, f1) {
+  if (!actx) return;
+  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
+  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
+  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
+}
+function baa(vol) {
+  if (!actx) return;
+  // wobbly sawtooth through a vowel-ish bandpass reads as a bleat
+  const t = actx.currentTime, o = actx.createOscillator(), lfo = actx.createOscillator(), lg = actx.createGain(), bp = actx.createBiquadFilter(), g = actx.createGain();
+  o.type = 'sawtooth'; o.frequency.setValueAtTime(380 + Math.random() * 120, t);
+  lfo.frequency.value = 22; lg.gain.value = 18; lfo.connect(lg).connect(o.frequency);
+  bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 3;
+  g.gain.setValueAtTime(0.001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.05); g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+  o.connect(bp).connect(g).connect(actx.destination); o.start(t); lfo.start(t); o.stop(t + 0.5); lfo.stop(t + 0.5);
+}
+const sfx = {
+  woof(me) { const v = me ? 0.2 : 0.06; tone(520, 240, 0.12, v, 'square'); noise(0.1, v, 1400, 300); tone(480, 220, 0.12, v * 0.8, 'square', 0.16); },
+  pen(me, gold) { if (me) { [784, 1046, 1318].forEach((f, i) => tone(f, f, 0.14, 0.08, 'triangle', i * 0.07)); if (gold) [1568, 2093].forEach((f, i) => tone(f, f, 0.2, 0.05, 'sine', 0.22 + i * 0.08)); } else baa(0.03); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
+};
+
+// Game > World
+const BOT_NAMES = ['Shep', 'Bess', 'Fly', 'Moss', 'Rex', 'Nell', 'Gyp', 'Jess', 'Cap', 'Floss', 'Bob', 'Meg', 'Tess', 'Sweep'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+const MATCH_T = 150, WIN_N = 30, SPEED = 8.5, DR = 0.55, FLEE_R = 6.5, S_MAX = 6, BARK_R = 9, BARK_CD = 1.8;
+const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, players: new Map(), sheep: [], winner: null };
+let events = [];
+const rng = Math.random;
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, pen: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, mx: 0, mz: 0, barkSeq: 0, lastBark: 0, barkCD: 0, barkT: 0, score: 0, skill: 0.55 + rng() * 0.4, aim: null, aimT: 0 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function spawnSheep(s) {
+  const a = rng() * Math.PI * 2, r = rng() * 9;
+  // golden fleece is rare and worth 3, so packs of dogs fight over it
+  Object.assign(s, { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, dead: 0, gold: rng() < 0.08, boost: 0, wa: rng() * 7, wt: rng() * 2, ws: 0.5 });
+}
+function assignPens() {
+  const ps = [...world.players.values()];
+  ps.forEach((p, k) => (p.pen = k));
+  buildPens(ps);
+}
+function startMatch() {
+  assignPens();
+  const ps = [...world.players.values()], n = ps.length;
+  ps.forEach((p) => { const a = penAngle(p.pen, n); Object.assign(p, { x: Math.sin(a) * (R_FIELD - 4), z: Math.cos(a) * (R_FIELD - 4), vx: 0, vz: 0, face: a + Math.PI, score: 0, barkCD: 0, aim: null }); });
+  world.sheep = Array.from({ length: Math.min(50, Math.max(22, 16 + n * 3)) }, () => { const s = {}; spawnSheep(s); return s; });
+  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, winner: null });
+}
+
+// Run engine > dogs: run, bark impulse on nearby sheep, stay inside the ring fence
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function stepDog(p, dt) {
+  const frozen = world.phase !== 'play';
+  let mx = frozen ? 0 : p.mx, mz = frozen ? 0 : p.mz;
+  const ml = Math.hypot(mx, mz);
+  if (ml > 1) { mx /= ml; mz /= ml; }
+  const acc = 46 * dt;
+  p.vx += clamp(mx * SPEED - p.vx, -acc, acc);
+  p.vz += clamp(mz * SPEED - p.vz, -acc, acc);
+  if (ml > 0.1) p.face = Math.atan2(mx, mz);
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  const r = Math.hypot(p.x, p.z);
+  if (r > R_FIELD - 0.7) { p.x *= (R_FIELD - 0.7) / r; p.z *= (R_FIELD - 0.7) / r; }
+  p.barkCD -= dt; p.barkT -= dt;
+  if (p.barkSeq !== p.lastBark) {
+    p.lastBark = p.barkSeq;
+    if (p.barkCD <= 0 && !frozen) {
+      p.barkCD = BARK_CD; p.barkT = 0.3;
+      for (const s of world.sheep) {
+        if (s.dead) continue;
+        const dx = s.x - p.x, dz = s.z - p.z, l = Math.hypot(dx, dz);
+        if (l < BARK_R && l > 1e-3) { const k = 4 + 9 * (1 - l / BARK_R); s.vx += (dx / l) * k; s.vz += (dz / l) * k; s.boost = 0.7; }
+      }
+      events.push(['b', p.id]);
+    }
+  }
+}
+function bumpDogs(ps) {
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d > DR * 2 || d < 1e-4) continue;
+    const nx = dx / d, nz = dz / d, pen = (DR * 2 - d) / 2;
+    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
+  }
+}
+
+// Run engine > flock: flee dogs, separate, loose cohesion, graze-wander, ring fence with gate openings into pens
+function stepSheep(s, dt, dogs) {
+  if (s.dead > 0) { s.dead -= dt; if (s.dead <= 0) { spawnSheep(s); events.push(['n', world.sheep.indexOf(s)]); } return; }
+  let ax = 0, az = 0, panic = 0, cx = 0, cz = 0, cn = 0;
+  for (const d of dogs) {
+    const dx = s.x - d.x, dz = s.z - d.z, l = Math.hypot(dx, dz);
+    if (l < FLEE_R && l > 1e-3) { const w = 1 - l / FLEE_R; ax += (dx / l) * w * 30; az += (dz / l) * w * 30; panic = Math.max(panic, w); }
+    // dogs are solid: sheep get shoved out of the way
+    if (l < 1.05 && l > 1e-3) { s.x = d.x + (dx / l) * 1.05; s.z = d.z + (dz / l) * 1.05; }
+  }
+  for (const o of world.sheep) {
+    if (o === s || o.dead) continue;
+    const dx = s.x - o.x, dz = s.z - o.z, l2 = dx * dx + dz * dz;
+    if (l2 > 49) continue;
+    cx += o.x; cz += o.z; cn++;
+    if (l2 < 1.69 && l2 > 1e-6) { const l = Math.sqrt(l2); ax += (dx / l) * (1.3 - l) * 16; az += (dz / l) * (1.3 - l) * 16; }
+  }
+  if (cn) { ax += (cx / cn - s.x) * 0.5; az += (cz / cn - s.z) * 0.5; }
+  if (panic < 0.05) {
+    s.wt -= dt;
+    if (s.wt <= 0) { s.wt = 1 + rng() * 3; s.wa = rng() * Math.PI * 2; s.ws = rng() < 0.4 ? 0 : 0.7; }
+    ax += (Math.sin(s.wa) * s.ws - s.vx) * 2; az += (Math.cos(s.wa) * s.ws - s.vz) * 2;
+  }
+  s.vx += ax * dt; s.vz += az * dt;
+  const damp = Math.exp(-dt * (panic > 0.05 ? 1.2 : 3));
+  s.vx *= damp; s.vz *= damp;
+  s.boost -= dt;
+  const sp = Math.hypot(s.vx, s.vz), max = s.boost > 0 ? 10 : S_MAX;
+  if (sp > max) { s.vx *= max / sp; s.vz *= max / sp; }
+  s.x += s.vx * dt; s.z += s.vz * dt;
+  const r = Math.hypot(s.x, s.z);
+  if (r < R_FIELD - 0.5) return;
+  const k = gateAt(s.x, s.z);
+  if (k >= 0) { if (r > R_FIELD + 1.6) penSheep(s, k); return; }
+  // off a gate: fence stops it (also catches sheep sliding sideways out of a gate mouth)
+  s.x *= (R_FIELD - 0.5) / r; s.z *= (R_FIELD - 0.5) / r;
+  const vr = (s.vx * s.x + s.vz * s.z) / (R_FIELD - 0.5);
+  if (vr > 0) { s.vx -= (vr * s.x) / (R_FIELD - 0.5); s.vz -= (vr * s.z) / (R_FIELD - 0.5); }
+}
+function penSheep(s, k) {
+  const owner = [...world.players.values()].find((p) => p.pen === k);
+  const pts = s.gold ? 3 : 1;
+  if (owner && world.phase === 'play') owner.score += pts;
+  events.push(['p', owner?.id ?? 0, +s.x.toFixed(1), +s.z.toFixed(1), s.gold ? 1 : 0]);
+  s.dead = 1.5; s.vx = s.vz = 0;
+}
+
+// Run engine > bots: pick a sheep near own gate, circle behind it, walk it in, bark when lined up
+function botThink(p, dt) {
+  const n = pens.length, a = penAngle(p.pen, n), gx = Math.sin(a) * (R_FIELD + 1), gz = Math.cos(a) * (R_FIELD + 1);
+  p.aimT -= dt;
+  let s = p.aim !== null ? world.sheep[p.aim] : null;
+  if (!s || s.dead || p.aimT <= 0) {
+    let best = -1, bc = Infinity;
+    world.sheep.forEach((q, i) => {
+      if (q.dead) return;
+      const c = Math.hypot(q.x - p.x, q.z - p.z) * 0.6 + Math.hypot(q.x - gx, q.z - gz) - (q.gold ? 10 : 0) + rng() * 4;
+      if (c < bc) { bc = c; best = i; }
+    });
+    p.aim = best < 0 ? null : best; p.aimT = 2 + rng() * 2;
+    s = p.aim !== null ? world.sheep[p.aim] : null;
+  }
+  if (!s) { p.mx = p.mz = 0; return; }
+  const sgx = gx - s.x, sgz = gz - s.z, sgl = Math.hypot(sgx, sgz) || 1, ux = sgx / sgl, uz = sgz / sgl;
+  const dx = p.x - s.x, dz = p.z - s.z, along = dx * ux + dz * uz;
+  let tx, tz, k = 1;
+  if (along > -1.5) {
+    // dog is between sheep and gate: swing wide around the side it is already on
+    const side = dx * -uz + dz * ux >= 0 ? 1 : -1;
+    tx = s.x - uz * side * 4.5 - ux * 2; tz = s.z + ux * side * 4.5 - uz * 2;
+  } else {
+    const hx = s.x - ux * 3.2, hz = s.z - uz * 3.2;
+    if (Math.hypot(p.x - hx, p.z - hz) > 1.6) { tx = hx; tz = hz; }
+    else { tx = s.x + ux * 2; tz = s.z + uz * 2; k = 0.45 + p.skill * 0.25; }
+    if (p.barkCD <= 0 && sgl < 13 && Math.hypot(dx, dz) < 4.5 && rng() < 0.03 * p.skill) p.barkSeq++;
+  }
+  const r = Math.hypot(tx, tz);
+  if (r > R_FIELD - 1) { tx *= (R_FIELD - 1) / r; tz *= (R_FIELD - 1) / r; }
+  const lx = tx - p.x, lz = tz - p.z, l = Math.hypot(lx, lz);
+  if (l > 1e-3) { const m = Math.min(1, l / 0.8) * k * (0.8 + p.skill * 0.2); p.mx = (lx / l) * m; p.mz = (lz / l) * m; } else p.mx = p.mz = 0;
+}
+
+// Game > Phases: countdown, play, final standings
+let lastBeep = 0;
+function phases(dt) {
+  const ps = [...world.players.values()];
+  world.t -= dt;
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'play'; }
+  } else if (world.phase === 'play') {
+    world.left -= dt;
+    const top = ps.reduce((a, b) => (b.score > (a?.score ?? -1) ? b : a), null);
+    if (world.left <= 0 || (top && top.score >= WIN_N)) {
+      world.winner = top?.id ?? null;
+      if (top) events.push(['w', top.id]);
+      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
+    }
+  } else if (world.phase === 'final' && world.t <= 0) {
+    if (world.mode === 'attract') startMatch();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract';
+  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  startMatch();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'sheepdog-rush', title: 'Sheepdog Rush', emoji: '🐑', accent: '#b8f26a',
+  blurb: 'One big flock, a pen for every dog. Sheep run from dogs: get behind them, drive them through your gate, bark to scatter a rival\'s herd. Golden sheep count triple.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: `Up to 14 dogs per room (humans + bots). First to ${WIN_N} sheep or most after 2½ minutes.`,
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match';
+    ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    document.getElementById('top').style.display = 'flex';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3.5; world.sheep = []; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startMatch();
+  },
+  onLobby() {
+    ['info', 'board', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  let changed = false;
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) { removePlayer(p.id); changed = true; }
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 14 seats: a late human takes over the lowest-scoring bot's pen and count
+    const bot = world.players.size >= 14 ? [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.score - b.score)[0] : null;
+    const np = addPlayer(p.id, p.nick, p.color, false);
+    if (bot) { Object.assign(np, { x: bot.x, z: bot.z, score: bot.score }); removePlayer(bot.id); }
+    changed = true;
+  }
+  // pens follow the seat list, so any join/leave re-spaces them around the ring
+  if (changed) assignPens();
+}
+
+// Multiplayer > Net: guest input 20 Hz, host snapshots with events (dogs + packed flock)
+const remoteIn = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f1 = (v) => Math.round(v * 10) / 10, f2 = (v) => Math.round(v * 100) / 100;
+function snapshot() {
+  return {
+    g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.barkT > 0 ? 2 : 0), p.score, p.pen, p.nick, p.color]),
+    S: world.sheep.flatMap((s) => [f1(s.x), f1(s.z), (s.gold ? 1 : 0) | (s.dead > 0 ? 2 : 0)]),
+  };
+}
+let snapAt = 0;
+function applySnap(s) {
+  Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, winner: s.win });
+  const seen = new Set();
+  for (const [id, x, z, vx, vz, face, fl, score, pen, nick, color] of s.P) {
+    seen.add(id);
+    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    Object.assign(p, { x, z, vx, vz, face, barkT: fl & 2 ? 0.1 : 0, score, pen });
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  const n = s.S.length / 3;
+  while (world.sheep.length < n) world.sheep.push({ x: 0, z: 0, vx: 0, vz: 0, dead: 0, gold: false });
+  world.sheep.length = n;
+  for (let i = 0; i < n; i++) Object.assign(world.sheep[i], { x: s.S[i * 3], z: s.S[i * 3 + 1], gold: !!(s.S[i * 3 + 2] & 1), dead: s.S[i * 3 + 2] & 2 ? 1 : 0 });
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+function playEvents(evs) {
+  const me = lobby.room?.me, match = world.mode === 'match';
+  for (const e of evs) {
+    const p = world.players.get(e[1]);
+    if (e[0] === 'b' && p) { barkRing(p.x, p.z, p.color); if (match) sfx.woof(e[1] === me); }
+    else if (e[0] === 'p') { burst(e[2], 0.8, e[3], e[4] ? 26 : 14, 3); if (match) sfx.pen(e[1] === me, e[4]); if (e[1] === me && match) flash(e[4] ? '<small>golden fleece!</small>✨ +3' : '<small>penned</small>🐑 +1', 0.9); }
+    else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'top dog!' : 'top dog'}</small>🏆 ${esc(p.nick)}`, 4); }
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > keyboard + phone joystick + BARK button
+const keys = {}, local = { x: 0, z: 0, barkSeq: 0 };
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if ((e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.barkSeq++;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const pad = createTouchPad({ buttons: [{ id: 'bark', label: 'BARK', color: 'rgba(184, 242, 106, 0.7)' }], onStart: audio });
+pad.onPress('bark', () => local.barkSeq++);
+function readInput() {
+  local.x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x;
+  local.z = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) - pad.y;
+}
+
+// HUD > match clock, own count, standings, banner
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.8) { big(t); flashT = len; }
+let hudT = 0;
+const mmss = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+function hud(dt) {
+  flashT -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  const me = world.players.get(lobby.room?.me);
+  if (world.phase === 'count') big(`<small>herd sheep into your pen</small>${Math.max(1, Math.ceil(world.t))}`);
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  document.getElementById('clock').innerHTML = `${mmss(world.left)}<small> left</small>`;
+  document.getElementById('mine').textContent = `${me ? `you: ${me.score} sheep · ` : ''}first to ${WIN_N} · ✨ = 3`;
+  const r = [...world.players.values()].sort((a, b) => b.score - a.score);
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>🐑${p.score}</em></div>`).join('');
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, barkSeq: local.barkSeq });
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, barkSeq: inp.b }); }
+    const ps = [...world.players.values()];
+    if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, dt);
+    for (const p of ps) stepDog(p, dt);
+    bumpDogs(ps);
+    for (const s of world.sheep) stepSheep(s, dt, ps);
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    if (world.phase === 'play') world.left -= dt;
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), b: local.barkSeq }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 46, 30), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim();
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  // pens: rebuild when the seat list changes (guests learn it from snapshots)
+  const plist = [...world.players.values()].sort((a, b) => a.pen - b.pen);
+  const key = plist.map((p) => `${p.id}:${p.pen}`).join(',');
+  if (key !== penKey) { penKey = key; buildPens(plist); }
+  for (const pen of pens) {
+    const owner = world.players.get(pen.id);
+    if (owner && owner.score !== pen.shown) {
+      pen.shown = owner.score;
+      const c = penSign(owner.nick, owner.color, owner.score);
+      pen.canvas.getContext('2d').clearRect(0, 0, 256, 96); pen.canvas.getContext('2d').drawImage(c, 0, 0); pen.tex.needsUpdate = true;
+    }
+    pen.flag.rotation.y = Math.sin(time * 3 + pen.a * 5) * 0.3;
+  }
+  for (const p of world.players.values()) {
+    let g = players3d.get(p.id);
+    if (!g) { g = makeDog(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
+    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
+    let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    g.rotation.y += dh * Math.min(1, dt * 14);
+    const u = g.userData, sp = Math.min(Math.hypot(p.vx, p.vz) / SPEED, 1), ph = time * 16 + p.id;
+    u.body.position.y = Math.abs(Math.sin(ph)) * sp * 0.12;
+    u.legs.forEach((l, i) => (l.rotation.x = Math.sin(ph + (i % 2 ? Math.PI : 0) + (i > 1 ? Math.PI / 2 : 0)) * sp * 0.8));
+    u.tail.rotation.y = Math.sin(time * 18 + p.id) * 0.6;
+    u.head.rotation.x = p.barkT > 0 ? -0.4 : 0;
+  }
+  world.sheep.forEach((s, i) => {
+    let g = sheep3d[i];
+    if (!g) { g = sheep3d[i] = makeSheep(); g.position.set(s.x, 0, s.z); }
+    const u = g.userData;
+    g.visible = !s.dead;
+    if (s.gold !== u.gold) { u.gold = s.gold; for (const m of u.wool) m.material = s.gold ? goldMat : woolMat; }
+    if (s.dead) return;
+    const a = hostSim ? 1 : 1 - Math.exp(-dt * 12);
+    if (Math.hypot(s.x - g.position.x, s.z - g.position.z) > 6) g.position.set(s.x, 0, s.z);
+    const dx = (s.x - g.position.x) * a, dz = (s.z - g.position.z) * a;
+    g.position.x += dx; g.position.z += dz;
+    const sp = Math.hypot(dx, dz) / Math.max(dt, 1e-3);
+    if (sp > 0.3) { u.h = Math.atan2(dx, dz); }
+    let dh = u.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    g.rotation.y += dh * Math.min(1, dt * 8);
+    const k = Math.min(sp / S_MAX, 1), ph = time * 14 + i;
+    u.body.position.y = Math.abs(Math.sin(ph)) * k * 0.2;
+    u.legs.forEach((l, j) => (l.rotation.x = Math.sin(ph + (j % 2 ? Math.PI : 0)) * k * 0.7));
+  });
+  for (let i = world.sheep.length; i < sheep3d.length; i++) sheep3d[i].visible = false;
+  for (const r of rings) {
+    if (r.userData.t >= 1) continue;
+    r.userData.t += dt / 0.5;
+    r.scale.setScalar(1 + r.userData.t * (BARK_R - 1));
+    r.material.opacity = 0.8 * (1 - r.userData.t);
+  }
+  for (let i = 0; i < PUFF; i++) {
+    if (puffLife[i] <= 0) continue;
+    puffLife[i] -= dt; puffVel[i * 3 + 1] -= 9 * dt;
+    for (let k = 0; k < 3; k++) puffPos[i * 3 + k] += puffVel[i * 3 + k] * dt;
+    if (puffLife[i] <= 0) puffPos[i * 3 + 1] = -99;
+  }
+  puffGeo.attributes.position.needsUpdate = true;
+  hud(dt);
+  // camera: whole meadow in view, nudged toward own dog
+  const me = world.players.get(lobby.room?.me), mg = me && players3d.get(me.id);
+  const fx = mg ? mg.position.x * 0.4 : 0, fz = mg ? mg.position.z * 0.4 : 0;
+  const fit = Math.max(1, 1.25 / camera.aspect);
+  camPos.lerp(_v.set(fx, 35 * fit, fz + 24 * fit), 1 - Math.exp(-dt * 3));
+  camLook.lerp(_v.set(fx, 0, fz + 2), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

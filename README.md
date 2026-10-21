@@ -77,6 +77,7 @@ Rooms via `backend/room-relay.js` (4-letter code, share `?room=CODE`, host-autho
 - `king-of-the-hill/`: Crown Keep, online king of the hill up to 14 with bots; crown ring hops between 7 hilltops with a ghost-ring warning, everyone inside shares 1 pt/s, shove-dash knockback + stun, fall off the island and respawn at the edge.
 - `pirate-cannon-clash/`: Cannon Cove, online pirate ship battle up to 14 with bots; sails + helm on a rolling wave sea, port/starboard 3-ball broadsides with arcing shot, 9 palm islands for cover, repair barrels, sink feed + minimap, first to 8 sinks.
 - `penguin-curling/`: Penguin Curling, online simultaneous curling up to 14 with bots; ping-pong charge meter, belly-slide with sweep (less friction) + lean (curl), elastic penguin knocks, lake past the back line, house moves each round, rings 5/3/2/1 + closest-to-fish bonus, 8 rounds.
+- `sheepdog-rush/`: Sheepdog Rush, online herding up to 14 with bots; boids flock (flee dogs, separation, cohesion, graze-wander), one pen per dog with gates cut in the ring fence, bark impulse ring, golden sheep worth 3, bots circle behind a sheep and walk it in, first to 30.
 
 ## How these were made
 
