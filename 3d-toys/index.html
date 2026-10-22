@@ -15,6 +15,9 @@
   #home h1 { font-size: clamp(32px, 6vw, 56px); margin: 0; letter-spacing: -0.03em; }
   #home header p { color: var(--muted); max-width: 600px; line-height: 1.6; }
   .count { color: var(--accent); }
+  /* Home > header > link to sibling page */
+  .xlink { display: inline-block; margin-top: 4px; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+  .xlink:hover { background: var(--accent); color: #1a1408; }
   /* Home > filter tabs */
   #filters { max-width: 1200px; margin: 0 auto; padding: 0 24px 22px; display: flex; gap: 8px; flex-wrap: wrap; }
   #filters button { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 600; }
@@ -66,7 +69,8 @@
 <section id="home">
   <header>
     <h1>3D Toy Box</h1>
-    <p>Tiny interactive Three.js toys, all procedural, no assets. <span class="count" id="count"></span> so far. Hover a card for a live preview, click to play. Inside a toy: <b>[</b> / <b>]</b> flip between toys. Multiplayer toys use 4-letter room codes: open a second tab or send the invite link to a friend on your network.</p>
+    <p>Tiny games: Three.js toys plus classic 2D arcade games, all procedural, no assets. <span class="count" id="count"></span> so far. Hover a card for a live preview, click to play. Inside a toy: <b>[</b> / <b>]</b> flip between toys. Multiplayer toys use 4-letter room codes: open a second tab or send the invite link to a friend on your network.</p>
+    <a class="xlink" href="/">Render Studio ↗</a>
   </header>
   <nav id="filters"></nav>
   <main id="grid"></main>

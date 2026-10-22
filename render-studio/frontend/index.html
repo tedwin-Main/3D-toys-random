@@ -18,6 +18,9 @@
   #home h1 span { color: var(--accent); }
   #home header p { color: var(--muted); max-width: 680px; line-height: 1.6; }
   .count { color: var(--accent); }
+  /* Home > header > link to sibling page */
+  .xlink { display: inline-block; margin-top: 4px; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+  .xlink:hover { background: var(--accent); color: #1a1408; }
   /* Home > category tabs, grouped rows */
   #filters { max-width: 1240px; margin: 0 auto; padding: 0 24px 24px; display: grid; gap: 10px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
@@ -92,7 +95,8 @@
 <section id="home">
   <header>
     <h1>Render <span>Studio</span></h1>
-    <p>One-prompt frontier-model tests and generated media in one place: shaders, 3D scenes, physics, games, motion, Blender renders, Remotion video. <span class="count" id="count"></span>. Each card has a short explanation and the <b>prompt</b> that produced it. Hover to preview, click to open; in the viewer <b>[</b> / <b>]</b> flip, <b>i</b> info, <b>Esc</b> back.</p>
+    <p>One-prompt frontier-model tests and generated media in one place: shaders, 3D scenes, physics simulations, motion, Blender renders, Remotion video. <span class="count" id="count"></span>. Each card has a short explanation and the <b>prompt</b> that produced it. Hover to preview, click to open; in the viewer <b>[</b> / <b>]</b> flip, <b>i</b> info, <b>Esc</b> back.</p>
+    <a class="xlink" href="/3d-toys/">3D Toy Box ↗</a>
   </header>
   <nav id="filters"></nav>
   <div id="empty" hidden></div>
@@ -128,7 +132,7 @@ const $ = (id) => document.getElementById(id);
 const stage = $('stage'), nav = $('nav'), menu = $('menu'), tab = $('tab'), info = $('info');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const ICON = { model: '🧊', video: '🎬', image: '🖼️', page: '✨', link: '🧸' };
-const GROUPS = [['live', 'Live demos'], ['rendered', 'Rendered'], ['links', 'Toy Box']];
+const GROUPS = [['live', 'Live demos'], ['rendered', 'Rendered']];
 const HINT = { models: '.glb / .gltf', 'blender-renders': '.mp4 / .png', 'remotion-videos': '.mp4', videos: '.mp4 / .webm / .mov', images: '.png / .jpg / .webp' };
 const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
 

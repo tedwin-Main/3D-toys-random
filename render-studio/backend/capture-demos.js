@@ -10,7 +10,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { listDemos } from './list-assets.js';
-import { TOYS } from '../../3d-toys/components/toy-list.js';
+import { TOYS, SIMS } from '../../3d-toys/components/toy-list.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const DEMOS = join(ROOT, 'frontend', 'demos');
@@ -87,10 +87,10 @@ const server = await ensureServer();
 await mkdir(TMP, { recursive: true });
 // real GPU (Metal) so shaders + fps match a laptop, not SwiftShader
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
-// --toys swaps the demo list for 3d-toys pages; posters land in media/toy-posters/<dir>.png
+// --toys swaps the demo list for 3d-toys pages (games + sims); posters land in media/toy-posters/<dir>.png
 const TOY_POSTERS = join(ROOT, 'media', 'toy-posters');
 const demos = flags.has('--toys')
-  ? TOYS.filter((t) => !only.length || only.includes(t.dir)).map((t) => ({ name: t.dir, url: `3d-toys/${t.dir}/`, capture: 4500, toy: true }))
+  ? [...TOYS, ...SIMS].filter((t) => !only.length || only.includes(t.dir)).map((t) => ({ name: t.dir, url: `3d-toys/${t.dir}/`, capture: 4500, toy: true }))
   : (await listDemos(DEMOS)).filter((d) => !only.length || only.includes(d.name));
 if (flags.has('--toys')) await mkdir(TOY_POSTERS, { recursive: true });
 const report = [];
