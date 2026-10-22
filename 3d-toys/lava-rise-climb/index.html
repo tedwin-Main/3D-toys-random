@@ -241,7 +241,8 @@ const sfx = {
 // Game > World + shared jumper physics (used by host for bots, by every client for its own jumper)
 const BOT_NAMES = ['Ember', 'Magma', 'Cinder', 'Pumice', 'Basalt', 'Sizzle', 'Scorch', 'Obsidian', 'Flint', 'Ash', 'Blaze', 'Smoky', 'Vulcan', 'Pyro'];
 const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffd23f', '#2ec27e', '#a970ff', '#ff7bd5', '#00c2c7', '#ffffff', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a', '#ff9f1c', '#b388ff'];
-const PR = 0.45, PH = 1.2, G = 32, RUN = 7.5, JUMP = 12.5, DJUMP = 10.5;
+// single jump peaks JUMP²/2G ≈ 3.3 m: clears the 1.75–2.5 m tower step without a perfect double jump
+const PR = 0.45, PH = 1.2, G = 32, RUN = 7.5, JUMP = 14.5, DJUMP = 11.5;
 const world = { mode: 'attract', phase: 'count', t: 2, time: 0, lavaT: 0, lava: -4, winner: null, seed: 1, deaths: 0, players: new Map() };
 let events = [];
 const rng = Math.random, clamp = (v, a, b) => Math.max(a, Math.min(b, v));

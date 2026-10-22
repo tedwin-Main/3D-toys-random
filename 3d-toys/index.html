@@ -11,12 +11,12 @@
   button { font: inherit; color: inherit; }
 
   /* Home > gallery grid */
-  #home header { padding: 56px 24px 24px; max-width: 1200px; margin: 0 auto; }
+  #home header { padding: 56px 24px 24px; max-width: 1200px; margin: 0 auto; position: relative; }
   #home h1 { font-size: clamp(32px, 6vw, 56px); margin: 0; letter-spacing: -0.03em; }
   #home header p { color: var(--muted); max-width: 600px; line-height: 1.6; }
   .count { color: var(--accent); }
-  /* Home > header > link to sibling page */
-  .xlink { display: inline-block; margin-top: 4px; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+  /* Home > header > top-right link to sibling page */
+  .xlink { position: absolute; top: 18px; right: 24px; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
   .xlink:hover { background: var(--accent); color: #1a1408; }
   /* Home > filter tabs */
   #filters { max-width: 1200px; margin: 0 auto; padding: 0 24px 22px; display: flex; gap: 8px; flex-wrap: wrap; }
