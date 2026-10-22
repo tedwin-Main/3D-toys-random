@@ -19,7 +19,7 @@ Both servers serve every toy under `/3d-toys/`, the room relay socket at `/3d-to
 ## Deploy on Render
 
 1. Render Dashboard > New > Blueprint > pick this repo. Root `render.yaml` defines one free web service.
-2. Build: `npm ci --prefix 3d-toys && npm ci --prefix render-studio --omit=dev`. Start: `npm start`. Render injects `PORT`; health check hits `/health`.
+2. Build: `npm ci` (npm workspaces install both folders). Start: `npm start`. Render injects `PORT`; health check hits `/health`.
 3. Open `https://<service>.onrender.com/3d-toys/` for toys, `/` for Render Studio. Invite links in the lobby use that public URL.
 
 Notes:

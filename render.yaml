@@ -9,8 +9,8 @@ services:
     runtime: node
     plan: free
     branch: main
-    # --omit=dev skips Playwright (capture tool is local-only)
-    buildCommand: npm ci --prefix 3d-toys && npm ci --prefix render-studio --omit=dev
+    # npm workspaces: one root lockfile installs 3d-toys + render-studio
+    buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health
     envVars:

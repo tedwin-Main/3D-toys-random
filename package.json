@@ -3,8 +3,12 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
+  "workspaces": [
+    "3d-toys",
+    "render-studio"
+  ],
   "scripts": {
-    "setup": "npm ci --prefix 3d-toys && npm ci --prefix render-studio",
+    "setup": "npm install",
     "start": "node render-studio/backend/start-server.js",
     "dev": "node --watch render-studio/backend/start-server.js",
     "toys": "npm start --prefix 3d-toys",

@@ -10,7 +10,7 @@ render-studio/    one-prompt frontier-model demos + Blender / Remotion / Python 
 ## Run
 
 ```sh
-npm run setup   # first time: npm ci in both folders
+npm run setup   # first time: installs both folders (npm workspaces)
 npm start       # http://localhost:5066/  studio, /3d-toys/ toys, /3d-toys/rooms multiplayer relay
 npm run toys    # toy box alone on http://localhost:5055/3d-toys/
 npm test        # toy engine tests
