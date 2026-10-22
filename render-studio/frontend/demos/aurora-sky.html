@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aurora Sky</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="6" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="aurora borealis, layered noise, stars, reflections, GLSL" />
+<meta name="description" content="Northern lights over a still mountain lake, all in one fragment shader: aurora curtains built from 40 stacked layers of warped noise with a green-to-violet height gradient, a twinkling starfield with the Milky Way band, mountain silhouettes and a rippled lake reflection. Tests layered volumetric tricks, colour and composition with no textures." />
+<meta name="prompt" content="Create a single HTML file with a WebGL2 fragment shader of the aurora borealis over a mountain lake at night. Build the aurora from many stacked layers of animated noise so it ripples like curtains, green at the base and violet at the top, add a twinkling starfield and a faint Milky Way, dark mountain silhouettes, and a lake that reflects everything with gentle ripples. Drag to look around, with sliders for intensity and speed." />
+<style>
+  :root { --ink: #eaf6f2; --muted: #93aba6; --panel: rgba(6, 12, 18, 0.6); --accent: #5ef2a8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02050a; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 64px 1fr 36px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #022014; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Aurora Sky</h1><p>layered-noise aurora · lake reflection · one shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Intensity <input id="glow" type="range" min="0.2" max="2" step="0.01" value="0.8"><output id="glow-o"></output></label>
+  <label>Speed <input id="speed" type="range" min="0" max="3" step="0.01" value="1"><output id="speed-o"></output></label>
+  <div class="btns"><button data-pal="0" class="on">Classic</button><button data-pal="1">Crimson</button><button data-pal="2">Ice</button></div>
+  <div class="hint">Drag to look around</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/aurora-sky.html
+ * PURPOSE: WebGL2 aurora: stacked noise curtains, stars + Milky Way, mountain silhouette, rippled lake reflection
+ * UI: Render Studio > Shaders > Aurora Sky
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uTime; uniform float uGlow; uniform int uPal; uniform mat3 uCam;
+out vec4 o;
+mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
+float tri(float x){ return clamp(abs(fract(x) - .5), .01, .49); }
+vec2 tri2(vec2 p){ return vec2(tri(p.x) + tri(p.y), tri(p.y + tri(p.x))); }
+// triangle-wave noise: cheap, ridged, reads like aurora rays
+float triNoise(vec2 p, float spd, float t){
+  float z = 1.8, z2 = 2.5, rz = 0.;
+  p *= rot(p.x * .06);
+  vec2 bp = p;
+  for (int i = 0; i < 5; i++) {
+    vec2 dg = tri2(bp * 1.85) * .75;
+    dg *= rot(t * spd);
+    p -= dg / z2;
+    bp *= 1.3; z2 *= .45; z *= .42;
+    p *= 1.21 + (rz - 1.) * .02;
+    rz += tri(p.x + tri(p.y)) * z;
+    p *= -mat2(.95534, .29552, -.29552, .95534);
+  }
+  return clamp(1. / pow(rz * 29., 1.3), 0., .55);
+}
+vec3 palette(float i){
+  if (uPal == 1) return sin(1. - vec3(.95, 2.15, 1.75) + i * .043) * .5 + .5;
+  if (uPal == 2) return sin(1. - vec3(2.15, -.2, -.6) + i * .043) * .5 + .5;
+  return sin(1. - vec3(2.15, -.5, 1.2) + i * .043) * .5 + .5;
+}
+vec4 aurora(vec3 ro, vec3 rd){
+  vec4 col = vec4(0), avg = vec4(0);
+  for (int i = 0; i < 40; i++) {
+    float of = .006 * fract(sin(gl_FragCoord.x * 12.9898 + gl_FragCoord.y * 78.233) * 43758.5) * smoothstep(0., 15., float(i));
+    float pt = ((.8 + pow(float(i), 1.4) * .002) - ro.y) / (rd.y * 2. + .4);
+    pt -= of;
+    vec3 bpos = ro + pt * rd;
+    float rzt = triNoise(bpos.zx, .06, uTime);
+    // sharpen so dark sky shows between curtains
+    rzt = pow(rzt / .55, 2.4) * .8;
+    vec4 c2 = vec4(palette(float(i)) * rzt, rzt);
+    avg = mix(avg, c2, .5);
+    col += avg * exp2(-float(i) * .065 - 2.5) * smoothstep(0., 5., float(i));
+  }
+  col *= clamp(rd.y * 15. + .4, 0., 1.);
+  return col * 2.2 * uGlow;
+}
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+vec3 stars(vec3 rd){
+  vec3 c = vec3(0);
+  for (int l = 0; l < 3; l++) {
+    float sc = 180. + float(l) * 160.;
+    vec2 uv = vec2(atan(rd.x, rd.z), asin(clamp(rd.y, -1., 1.))) * sc / 3.14159;
+    vec2 id = floor(uv), f = fract(uv) - .5;
+    float r = h21(id + float(l) * 17.);
+    if (r > .985) {
+      vec2 off = vec2(h21(id + 3.1), h21(id + 7.7)) - .5;
+      float d = length(f - off * .7);
+      float tw = .6 + .4 * sin(uTime * (2. + r * 6.) + r * 60.);
+      c += mix(vec3(.75, .85, 1.), vec3(1., .85, .7), h21(id + 1.3)) * smoothstep(.12, 0., d) * tw * (r - .985) * 90.;
+    }
+  }
+  // Milky Way: tilted band of soft noise
+  vec3 bd = rd; bd.xy *= rot(.55); bd.yz *= rot(.3);
+  float band = exp(-bd.y * bd.y * 18.);
+  float n = h21(floor(rd.xz * 220.)) * .4 + .6;
+  c += vec3(.35, .32, .42) * band * .22 * n;
+  return c;
+}
+float mountain(float az){
+  float h = 0.; float a = .5, f = 1.;
+  for (int i = 0; i < 6; i++) { h += a * (sin(az * f * 3. + float(i) * 1.7) * .5 + .5); a *= .5; f *= 2.1; }
+  return .02 + h * .11 * (.7 + .3 * sin(az * 1.3 + .5));
+}
+vec3 sky(vec3 rd){
+  vec3 c = mix(vec3(.004, .01, .025), vec3(.03, .05, .09), pow(1. - max(rd.y, 0.), 4.));
+  c += stars(rd) * smoothstep(0., .05, rd.y);
+  vec4 a = aurora(vec3(0, 0, -6.7), rd);
+  c = c * (1. - a.a) + a.rgb;
+  return c;
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  vec3 rd = normalize(uCam * vec3(uv, 1.3));
+  vec3 col;
+  float az = atan(rd.x, rd.z);
+  float mh = mountain(az);
+  if (rd.y > 0.) {
+    col = sky(rd);
+    if (rd.y < mh) col = vec3(.003, .005, .009);
+  } else {
+    // lake: mirrored ray with ripples, mountains reflected too
+    vec3 rr = vec3(rd.x, -rd.y, rd.z);
+    float dist = .02 / max(-rd.y, .002);
+    vec2 wp = rd.xz * dist * 40.;
+    rr.xz += vec2(sin(wp.x * 3. + uTime * .9) + sin(wp.y * 5.1 - uTime * .7), cos(wp.y * 4. + uTime)) * .004;
+    rr = normalize(rr);
+    col = rr.y < mountain(atan(rr.x, rr.z)) ? vec3(.004, .007, .012) : sky(rr);
+    col *= .4 * (1. - exp(-(-rd.y) * 30.)) + .2;
+  }
+  col = 1. - exp(-col * 1.25);
+  col = pow(col, vec3(1. / 2.2));
+  o = vec4(col, 1.);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uTime', 'uGlow', 'uPal', 'uCam'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Aurora > look: drag yaw/pitch, slow pan when idle
+const cam = { yaw: 0, pitch: 0.16, vyaw: 0, vpitch: 0 };
+let lastInput = -1e9, drag = null, pal = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = [e.clientX, e.clientY]; lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.vyaw = -(e.clientX - drag[0]) * 0.004; cam.vpitch = -(e.clientY - drag[1]) * 0.004;
+  drag = [e.clientX, e.clientY]; lastInput = performance.now();
+});
+cv.addEventListener('pointerup', () => (drag = null));
+cv.addEventListener('pointercancel', () => (drag = null));
+
+// Aurora > Panel: sliders and palette buttons
+const glow = $('glow'), speed = $('speed');
+const showVals = () => { $('glow-o').textContent = Number(glow.value).toFixed(2); $('speed-o').textContent = Number(speed.value).toFixed(1); };
+glow.oninput = speed.oninput = showVals;
+showVals();
+document.querySelectorAll('[data-pal]').forEach((b) => (b.onclick = () => {
+  pal = Number(b.dataset.pal);
+  document.querySelectorAll('[data-pal]').forEach((x) => x.classList.toggle('on', x === b));
+}));
+
+// Aurora > adaptive resolution: hold ~55+ fps by scaling render buffer
+let scale = Math.min(devicePixelRatio || 1, 1.25), ftAvg = 16, frames = 0, stable = 0;
+function resize() {
+  cv.width = Math.round(innerWidth * scale);
+  cv.height = Math.round(innerHeight * scale);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now(), time = 0, fps = 60, fpsN = 0, fpsT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  ftAvg = ftAvg * 0.92 + dt * 1000 * 0.08;
+  if (++frames % 30 === 0) {
+    stable = ftAvg < 17.5 ? stable + 1 : 0;
+    const next = ftAvg > 20 ? scale * 0.85 : stable > 10 ? scale * 1.05 : scale;
+    if (stable > 10) stable = 0;
+    const clamped = Math.min(Math.min(devicePixelRatio || 1, 1.25), Math.max(0.35, next));
+    if (Math.abs(clamped - scale) > 0.01) { scale = clamped; resize(); }
+  }
+  time += dt * Number(speed.value);
+  const idle = now - lastInput > 3000;
+  if (idle) cam.vyaw += (Math.sin(now / 9000) * 0.0008 - cam.vyaw) * 0.05;
+  cam.yaw += cam.vyaw; cam.pitch = Math.min(0.9, Math.max(-0.4, cam.pitch + cam.vpitch));
+  cam.vyaw *= idle ? 1 : 0.88; cam.vpitch *= 0.88;
+  // look-at basis (column-major mat3: right, up, forward)
+  const cp = Math.cos(cam.pitch);
+  const f = [Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), Math.cos(cam.yaw) * cp];
+  let r = [f[2], 0, -f[0]];
+  const rl = Math.hypot(...r); r = r.map((v) => v / rl);
+  const u = [f[1] * r[2] - f[2] * r[1], f[2] * r[0] - f[0] * r[2], f[0] * r[1] - f[1] * r[0]];
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uTime, time);
+  gl.uniform1f(U.uGlow, Number(glow.value));
+  gl.uniform1i(U.uPal, pal);
+  gl.uniformMatrix3fv(U.uCam, false, [...r, ...u, ...f]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${fps} fps<br>${cv.width}×${cv.height}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

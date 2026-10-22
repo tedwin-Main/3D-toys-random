@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>L-System Trees</title>
+<meta name="category" content="generators" />
+<meta name="order" content="3" />
+<meta name="capture" content="4600" />
+<meta name="tags" content="3D L-systems, stochastic rules, pipe-model branch radii, tropism, growth shader, GLB export" />
+<meta name="description" content="Procedural trees from stochastic 3D L-systems: a turtle with yaw, pitch and roll draws the branching string, tropism bends limbs toward light or gravity, and branch radii come from the pipe model so trunks thicken where branches join. Trees grow in with a distance-from-root shader, sway in the wind, and export as a GLB you can drop into Blender or a game engine." />
+<meta name="prompt" content="Write a 3D L-system tree generator in a single HTML file with Three.js. Support stochastic rewrite rules and a 3D turtle (+ - & ^ / \\ [ ]), tropism, and pipe-model branch thickness. Offer presets for oak, pine, cherry blossom and willow with sliders for iterations, angle, length decay, tropism and leaf density, a growth animation, wind sway, autumn colours, and an Export GLB button using GLTFExporter." />
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<style>
+  :root { --ink: #f4f1ea; --muted: #b3ab9c; --line: rgba(244, 241, 234, 0.14); --panel: rgba(20, 24, 22, 0.72); --accent: #9fd38a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; background: linear-gradient(180deg, #8fb3cf 0%, #d9c9b0 58%, #b9a98d 100%); }
+  canvas { display: block; }
+  #title { position: fixed; left: 20px; top: 18px; pointer-events: none; color: #1d2420; }
+  #title h1 { margin: 0; font-size: 22px; letter-spacing: -0.2px; }
+  #title p { margin: 3px 0 0; font-size: 12.5px; color: rgba(29, 36, 32, 0.7); }
+  #lstr { position: fixed; left: 20px; bottom: 18px; max-width: min(520px, calc(100vw - 360px)); padding: 9px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font: 600 11.5px ui-monospace, "SF Mono", monospace; color: var(--muted); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); line-height: 1.5; }
+  #lstr b { color: var(--ink); }
+  #panel { position: fixed; right: 16px; top: 16px; width: 290px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 14px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); display: flex; flex-direction: column; gap: 10px; }
+  .species { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .species button, .btns button { height: 34px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--ink); font: 700 12px ui-rounded, system-ui, sans-serif; cursor: pointer; }
+  .species button.on { background: rgba(159, 211, 138, 0.22); border-color: rgba(159, 211, 138, 0.7); }
+  label { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12.5px; color: var(--muted); }
+  label output { color: var(--ink); font: 600 12px ui-monospace, "SF Mono", monospace; }
+  input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  .btns button.on { background: rgba(255, 190, 110, 0.22); border-color: rgba(255, 190, 110, 0.7); }
+  .btns button.primary { background: var(--accent); color: #142012; border-color: transparent; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .stat { padding: 6px 8px; border-radius: 9px; background: rgba(0, 0, 0, 0.25); }
+  .stat b { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  @media (max-width: 700px) {
+    #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-height: 42vh; padding: 10px; gap: 8px; }
+    #lstr { display: none; }
+    #title { left: 14px; top: 12px; } #title h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div id="title"><h1>L-System Trees</h1><p>Stochastic 3D grammar · pipe-model radii · GLB export</p></div>
+<div id="lstr"></div>
+<div id="panel">
+  <div class="species" id="species"></div>
+  <div id="sliders" style="display:flex;flex-direction:column;gap:9px"></div>
+  <div class="btns"><button id="regrow">Regrow</button><button id="season">Autumn</button><button id="wind" class="on">Wind</button><button id="glb" class="primary">GLB ↓</button></div>
+  <div class="stats">
+    <div class="stat"><b id="sSeg">0</b><span>Branches</span></div>
+    <div class="stat"><b id="sLeaf">0</b><span>Leaves</span></div>
+    <div class="stat"><b id="sTri">0</b><span>Tris</span></div>
+  </div>
+</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/lsystem-tree-gltf.html
+ * PURPOSE: stochastic 3D L-system tree generator (turtle, tropism, pipe-model radii) with growth + wind shaders and GLB export
+ * UI: Render Studio > Generators > L-System Trees
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+const $ = (id) => document.getElementById(id);
+const mobile = innerWidth < 700;
+
+// Grammar > species presets: axiom, stochastic rules [prob, successor], turtle + look params
+const SPECIES = {
+  Oak: {
+    axiom: 'FA', iter: 6, angle: 31, decay: 0.79, tropism: 0.06, tdir: [0, 1, 0], leaves: 3, rTip: 0.011, leaf: [0.2, 0.13], jitter: 9,
+    rules: { A: [[0.55, 'F[&FAL]/////[&FAL]///////[&FAL]'], [0.3, 'F[&FAL]///////[&FAL]////[&FL]'], [0.15, 'F[&&FAL]//////[^FAL]']] },
+    summer: ['#4f7d2e', '#6a9a36', '#3e6a25', '#86ad45'], autumn: ['#c9611f', '#e0902a', '#a63f1d', '#e9b440'], bark: '#5b4632',
+  },
+  Pine: {
+    axiom: 'A', iter: 9, angle: 41, decay: 0.72, tropism: 0.13, tdir: [0, -1, 0], leaves: 5, rTip: 0.01, leaf: [0.012, 0.26], jitter: 5,
+    rules: { A: [[1, 'F[&&BL]////[&&BL]////[&&BL]////[&&BL]////[&&BL]/A']], B: [[0.7, 'F[-L][+L]B'], [0.3, 'F[-FL][+L]B']] },
+    summer: ['#1f4a2e', '#2a5c38', '#183f27', '#355f3a'], autumn: ['#3a5a2e', '#4b6a33', '#2a4a26', '#6b7a3a'], bark: '#4a3526',
+  },
+  Sakura: {
+    axiom: 'FA', iter: 6, angle: 34, decay: 0.77, tropism: 0.03, tdir: [0, 1, 0], leaves: 4, rTip: 0.012, leaf: [0.12, 0.12], jitter: 14,
+    rules: { A: [[0.6, 'F[&FAL]////[&FAL]////[&FAL]'], [0.4, 'F[&FAL]///////[&&FAL]']] },
+    summer: ['#ffc3d6', '#ffd9e5', '#f7a8c4', '#ffe9f1'], autumn: ['#d2643a', '#e89a4a', '#b8482c', '#f1c15a'], bark: '#3e2c2a',
+  },
+  Willow: {
+    axiom: 'FFFA', iter: 6, angle: 30, decay: 0.85, tropism: 0.34, tdir: [0, -1, 0], leaves: 4, rTip: 0.009, leaf: [0.04, 0.24], jitter: 8,
+    rules: { A: [[0.6, 'F[&FAL]////[&FAL]////[&FAL]'], [0.4, 'F[&FAL]//////[&FAL]']] },
+    summer: ['#7fa63d', '#97b84a', '#6b9036', '#a9c45d'], autumn: ['#c6a23a', '#d8b64a', '#a8842c', '#e0c66a'], bark: '#5e4a36',
+  },
+};
+// ?species=Pine&seed=42 makes a tree shareable
+const qs = new URLSearchParams(location.search);
+let species = SPECIES[qs.get('species')] ? qs.get('species') : 'Oak', autumn = false, wind = true, seed = +qs.get('seed') || 21;
+const params = {};
+const resetParams = () => { const s = SPECIES[species]; Object.assign(params, { iter: s.iter, angle: s.angle, decay: s.decay, tropism: s.tropism, leaves: s.leaves }); };
+resetParams();
+
+// Grammar > seeded RNG + rewriting
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+let rnd = Math.random;
+function rewrite(s, rules, n) {
+  for (let k = 0; k < n; k++) {
+    let out = '';
+    for (const ch of s) {
+      const r = rules[ch];
+      if (!r) { out += ch; continue; }
+      let x = rnd(), pick = r[r.length - 1][1];
+      for (const [p, succ] of r) { if (x < p) { pick = succ; break; } x -= p; }
+      out += pick;
+    }
+    s = out;
+  }
+  return s;
+}
+
+// Turtle > walk the string; segments keep parent links for the pipe model
+function interpret(str, sp) {
+  const segs = [], leaves = [];
+  const ang = (params.angle * Math.PI) / 180, jit = (sp.jitter * Math.PI) / 180;
+  const T = new THREE.Vector3(...sp.tdir);
+  let st = { p: new THREE.Vector3(), q: new THREE.Quaternion(), len: 0.62, parent: -1, dist: 0 };
+  const stack = [];
+  const AX = { X: new THREE.Vector3(1, 0, 0), Y: new THREE.Vector3(0, 1, 0), Z: new THREE.Vector3(0, 0, 1) };
+  const turn = (axis, a) => st.q.multiply(new THREE.Quaternion().setFromAxisAngle(AX[axis], a + (rnd() - 0.5) * jit));
+  const H = new THREE.Vector3();
+  for (const ch of str) {
+    switch (ch) {
+      case 'F': {
+        H.set(0, 1, 0).applyQuaternion(st.q);
+        const p1 = st.p.clone().addScaledVector(H, st.len * (0.85 + rnd() * 0.3));
+        segs.push({ p0: st.p.clone(), p1, parent: st.parent, kids: 0, tips: 0, d0: st.dist, d1: st.dist + st.len });
+        if (st.parent >= 0) segs[st.parent].kids++;
+        st.parent = segs.length - 1; st.dist += st.len; st.p = p1;
+        // tropism: bend heading toward T proportional to |H x T|
+        const axis = new THREE.Vector3().crossVectors(H, T), m = axis.length();
+        if (m > 1e-4) st.q.premultiply(new THREE.Quaternion().setFromAxisAngle(axis.divideScalar(m), params.tropism * m));
+        break;
+      }
+      case '+': turn('Z', ang); break;
+      case '-': turn('Z', -ang); break;
+      case '&': turn('X', ang); break;
+      case '^': turn('X', -ang); break;
+      case '/': turn('Y', ang); break;
+      case '\\': turn('Y', -ang); break;
+      case '|': turn('Y', Math.PI); break;
+      case '[': stack.push({ ...st, p: st.p.clone(), q: st.q.clone() }); st.len *= params.decay; break;
+      case ']': st = stack.pop(); break;
+      case 'L': leaves.push({ p: st.p.clone(), q: st.q.clone(), dist: st.dist, size: st.len }); break;
+    }
+  }
+  // pipe model: radius ~ (tips below) ^ 0.5, children appear after parents so one reverse pass suffices
+  for (let i = segs.length - 1; i >= 0; i--) {
+    const s = segs[i];
+    if (!s.kids) s.tips = 1;
+    if (s.parent >= 0) segs[s.parent].tips += s.tips;
+  }
+  return { segs, leaves };
+}
+
+// Geometry > bark tubes + leaf cards with aDist (normalised distance from root) for the growth shader
+function buildTree() {
+  const sp = SPECIES[species];
+  rnd = mulberry(seed * 7919 + species.length);
+  const str = rewrite(sp.axiom, sp.rules, params.iter);
+  const { segs, leaves } = interpret(str, sp);
+  let maxD = 0;
+  segs.forEach((s) => (maxD = Math.max(maxD, s.d1)));
+  const R = 7, pos = [], nor = [], dist = [], col = [], idx = [];
+  const bark = new THREE.Color(sp.bark).multiplyScalar(1.7), tmp = new THREE.Color();
+  const dir = new THREE.Vector3(), u = new THREE.Vector3(), v = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(1, 0, 0);
+  const radius = (tips) => sp.rTip * Math.pow(tips, 0.5);
+  const childMax = new Float32Array(segs.length);
+  segs.forEach((s) => { if (s.parent >= 0) childMax[s.parent] = Math.max(childMax[s.parent], s.tips); });
+  for (let si = 0; si < segs.length; si++) {
+    const s = segs[si];
+    dir.subVectors(s.p1, s.p0).normalize();
+    u.crossVectors(dir, Math.abs(dir.y) < 0.95 ? up : side).normalize();
+    v.crossVectors(dir, u);
+    const r0 = radius(s.tips), r1 = s.kids ? radius(childMax[si] || 1) : sp.rTip * 0.6;
+    const base = pos.length / 3;
+    for (let e = 0; e < 2; e++) {
+      const c = e ? s.p1 : s.p0, r = e ? r1 : r0;
+      for (let k = 0; k < R; k++) {
+        const a = (k / R) * Math.PI * 2, nx = Math.cos(a) * u.x + Math.sin(a) * v.x, ny = Math.cos(a) * u.y + Math.sin(a) * v.y, nz = Math.cos(a) * u.z + Math.sin(a) * v.z;
+        pos.push(c.x + nx * r, c.y + ny * r, c.z + nz * r); nor.push(nx, ny, nz);
+        dist.push((e ? s.d1 : s.d0) / maxD);
+        tmp.copy(bark).multiplyScalar(0.8 + rnd() * 0.35); col.push(tmp.r, tmp.g, tmp.b);
+      }
+    }
+    for (let k = 0; k < R; k++) { const a = base + k, b = base + ((k + 1) % R), c = a + R, d = b + R; idx.push(a, c, b, b, c, d); }
+  }
+  const bg = new THREE.BufferGeometry();
+  bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  bg.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  bg.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  bg.setAttribute('aDist', new THREE.Float32BufferAttribute(dist, 1));
+  bg.setIndex(idx);
+  // leaves: diamond cards, random orientation around each L
+  const lp = [], ln = [], lc = [], ld = [];
+  const pal = (autumn ? sp.autumn : sp.summer).map((h) => new THREE.Color(h));
+  const [lw, ll] = sp.leaf, q = new THREE.Quaternion(), e = new THREE.Euler(), o = new THREE.Vector3();
+  const corners = [[0, 0], [lw, ll * 0.28], [lw * 0.8, ll * 0.7], [0, ll], [-lw * 0.8, ll * 0.7], [-lw, ll * 0.28]];
+  // foliage normals point away from the crown centre so the canopy shades as one soft volume
+  const crown = new THREE.Vector3();
+  leaves.forEach((L) => crown.add(L.p));
+  crown.divideScalar(Math.max(1, leaves.length));
+  const fn = new THREE.Vector3();
+  const per = Math.round(params.leaves * (species === 'Pine' ? 2 : 1));
+  for (const L of leaves) {
+    for (let k = 0; k < per; k++) {
+      e.set(rnd() * Math.PI * 2, rnd() * Math.PI * 2, rnd() * Math.PI * 2); q.setFromEuler(e);
+      o.set((rnd() - 0.5), (rnd() - 0.5), (rnd() - 0.5)).multiplyScalar(L.size * 0.6).add(L.p);
+      const s = 0.75 + rnd() * 0.5;
+      const c = pal[Math.floor(rnd() * pal.length)].clone().multiplyScalar(0.85 + rnd() * 0.3);
+      const n = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+      fn.subVectors(o, crown).normalize();
+      n.lerp(fn, 0.75).normalize();
+      const pts = corners.map(([x, y]) => new THREE.Vector3(x * s, y * s, 0).applyQuaternion(q).add(o));
+      // both windings with the same crown normal: DoubleSide would flip back-face normals and darken half the canopy
+      for (const [a, b, cc] of [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 5], [0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 5, 4]]) for (const P of [pts[a], pts[b], pts[cc]]) { lp.push(P.x, P.y, P.z); ln.push(n.x, n.y, n.z); lc.push(c.r, c.g, c.b); ld.push(Math.min(1, L.dist / maxD + 0.02)); }
+    }
+  }
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.Float32BufferAttribute(lp, 3));
+  lg.setAttribute('normal', new THREE.Float32BufferAttribute(ln, 3));
+  lg.setAttribute('color', new THREE.Float32BufferAttribute(lc, 3));
+  lg.setAttribute('aDist', new THREE.Float32BufferAttribute(ld, 1));
+  $('sSeg').textContent = segs.length.toLocaleString();
+  $('sLeaf').textContent = (lp.length / 72).toLocaleString();
+  $('sTri').textContent = (idx.length / 3 + lp.length / 9).toLocaleString();
+  const rules = Object.entries(sp.rules).map(([k, r]) => `<b>${k}</b> → ${r.map(([p, s]) => `${s}${r.length > 1 ? ` (${p})` : ''}`).join(' | ')}`).join('<br>');
+  $('lstr').innerHTML = `axiom <b>${sp.axiom}</b> · n=${params.iter} · δ=${params.angle}° · ${str.length.toLocaleString()} symbols<br>${rules}`;
+  return { bg, lg };
+}
+
+// Scene > renderer, sun + sky light, ground with soft falloff
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.05, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.7;
+controls.maxPolarAngle = Math.PI * 0.49;
+scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x6b5a3e, 1.3));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
+sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.radius = 4; sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+const gc = document.createElement('canvas'); gc.width = gc.height = 256;
+const gx = gc.getContext('2d'), gr = gx.createRadialGradient(128, 128, 0, 128, 128, 128);
+gr.addColorStop(0, 'rgba(110,128,70,1)'); gr.addColorStop(0.55, 'rgba(126,134,82,0.85)'); gr.addColorStop(1, 'rgba(185,169,141,0)');
+gx.fillStyle = gr; gx.fillRect(0, 0, 256, 256);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(14, 64), new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(gc), transparent: true, roughness: 1, depthWrite: false }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+const shadowCatcher = new THREE.Mesh(new THREE.CircleGeometry(14, 64), new THREE.ShadowMaterial({ opacity: 0.3 }));
+shadowCatcher.rotation.x = -Math.PI / 2; shadowCatcher.position.y = 0.002; shadowCatcher.receiveShadow = true;
+scene.add(shadowCatcher);
+
+// Shaders > growth reveal (discard beyond uGrow) + wind sway rising with height
+const U = { uGrow: { value: 0 }, uTime: { value: 0 }, uWind: { value: 1 }, uH: { value: 5 } };
+function patch(mat, leaf) {
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aDist; varying float vDist; uniform float uTime, uWind, uH;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vDist = aDist;
+        float hgt = clamp(position.y / uH, 0.0, 1.5);
+        float sway = hgt * hgt * uWind;
+        transformed.x += sway * (sin(uTime * 1.3 + position.y * 0.7) * 0.09 + sin(uTime * 2.7 + position.z) * 0.03);
+        transformed.z += sway * cos(uTime * 1.1 + position.y * 0.6) * 0.07;
+        ${leaf ? 'transformed += uWind * 0.025 * vec3(sin(uTime * 7.0 + aDist * 90.0), cos(uTime * 6.0 + aDist * 70.0), 0.0);' : ''}`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vDist; uniform float uGrow;')
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vDist > uGrow) discard;');
+  };
+  return mat;
+}
+const barkMat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 }), false);
+const leafMat = patch(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }), true);
+// depth materials need the same patch, or shadows would show the ungrown tree
+const barkDepth = patch(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }), false);
+const leafDepth = patch(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide }), true);
+let barkMesh = null, leafMesh = null, growT = 0;
+
+// Generators > rebuild tree, refit sun shadow + camera
+function regrow(keepCamera) {
+  const { bg, lg } = buildTree();
+  for (const m of [barkMesh, leafMesh]) if (m) { scene.remove(m); m.geometry.dispose(); }
+  barkMesh = new THREE.Mesh(bg, barkMat); barkMesh.customDepthMaterial = barkDepth;
+  leafMesh = new THREE.Mesh(lg, leafMat); leafMesh.customDepthMaterial = leafDepth;
+  for (const m of [barkMesh, leafMesh]) { m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; scene.add(m); }
+  const box = new THREE.Box3().setFromObject(leafMesh).union(new THREE.Box3().setFromObject(barkMesh));
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  U.uH.value = Math.max(1, size.y);
+  const ext = Math.max(size.x, size.y, size.z);
+  sun.position.set(c.x + ext * 0.8, ext * 1.6, c.z + ext * 0.6); sun.target.position.copy(c);
+  Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 0.1, far: ext * 5 });
+  sun.shadow.camera.updateProjectionMatrix();
+  controls.target.set(c.x, size.y * 0.5, c.z);
+  if (!keepCamera) {
+    const d = (size.y * 1.55 + ext * 0.35) / Math.min(1, camera.aspect / 0.9);
+    camera.position.set(c.x + d * 0.8, size.y * 0.42, c.z + d * 0.6);
+  }
+  growT = 0;
+}
+
+// UI > species buttons, sliders, actions
+const SL = [['iter', 'Iterations', 2, 10, 1], ['angle', 'Branch angle', 10, 60, 1], ['decay', 'Length decay', 0.6, 0.92, 0.01], ['tropism', 'Tropism', 0, 0.4, 0.01], ['leaves', 'Leaf density', 0, 8, 1]];
+function buildSliders() {
+  $('sliders').innerHTML = '';
+  for (const [k, label, min, max, step] of SL) {
+    const el = document.createElement('label');
+    el.innerHTML = `${label}<output>${params[k]}</output><input type="range" min="${min}" max="${max}" step="${step}" value="${params[k]}" />`;
+    const inp = el.querySelector('input');
+    // iterations explode string length, so rebuild on release; others rebuild live
+    inp.addEventListener(k === 'iter' ? 'change' : 'input', () => { params[k] = +inp.value; el.querySelector('output').textContent = inp.value; regrow(true); growT = 9; });
+    inp.addEventListener('input', () => (el.querySelector('output').textContent = inp.value));
+    $('sliders').append(el);
+  }
+}
+Object.keys(SPECIES).forEach((name) => {
+  const b = document.createElement('button');
+  b.textContent = name; b.className = name === species ? 'on' : '';
+  b.onclick = () => { species = name; document.querySelectorAll('#species button').forEach((x) => x.classList.toggle('on', x === b)); resetParams(); buildSliders(); seed = 1 + Math.floor(Math.random() * 999); regrow(); };
+  $('species').append(b);
+});
+$('regrow').onclick = () => { seed = 1 + Math.floor(Math.random() * 999); regrow(true); };
+$('season').onclick = () => { autumn = !autumn; $('season').classList.toggle('on', autumn); regrow(true); growT = 9; };
+$('wind').onclick = () => { wind = !wind; $('wind').classList.toggle('on', wind); };
+// Generators > GLB: clean clones (plain materials, no growth attribute) through GLTFExporter
+$('glb').onclick = () => {
+  const g = new THREE.Group();
+  g.name = `${species}-tree`;
+  for (const [m, name, mat] of [[barkMesh, 'bark', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 })], [leafMesh, 'leaves', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide })]]) {
+    const geo = m.geometry.clone();
+    geo.deleteAttribute('aDist');
+    const out = new THREE.Mesh(geo, mat);
+    out.name = name;
+    g.add(out);
+  }
+  new GLTFExporter().parse(g, (bin) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bin], { type: 'model/gltf-binary' }));
+    a.download = `${species.toLowerCase()}-tree-${seed}.glb`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, (err) => console.warn('GLB export failed', err), { binary: true });
+};
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+// Scene > keep tree clear of the side panel (desktop) / bottom sheet (mobile)
+const offset = () => camera.setViewOffset(innerWidth, innerHeight, innerWidth < 700 ? 0 : 140, innerWidth < 700 ? innerHeight * 0.17 : 0, innerWidth, innerHeight);
+offset(); addEventListener('resize', offset);
+
+buildSliders();
+regrow();
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta());
+  growT += dt;
+  // ease-out growth over ~3.2 s
+  const k = Math.min(1, growT / 3.2);
+  U.uGrow.value = 1 - Math.pow(1 - k, 2.2) + (k >= 1 ? 0.05 : 0);
+  U.uTime.value += dt;
+  U.uWind.value += ((wind ? 1 : 0) - U.uWind.value) * 0.05;
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

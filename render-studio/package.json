@@ -1,0 +1,17 @@
+{
+  "name": "render-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node backend/start-server.js",
+    "dev": "node --watch backend/start-server.js",
+    "capture": "node backend/capture-demos.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
+}

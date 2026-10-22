@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Drum Machine</title>
+<meta name="category" content="apps" />
+<meta name="order" content="8" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="WebAudio synthesis, lookahead scheduler, swing, step sequencer" />
+<meta name="description" content="A 16-step drum machine with every sound synthesized live in WebAudio: an 808-style pitch-swept kick, noise snare and clap, metallic hats from stacked square waves, toms, rim and cowbell. A lookahead scheduler keeps timing tight while the UI animates, swing delays every off-beat sixteenth, accents boost velocity, and each track has mute and level. Four genre presets and a randomiser; it plays by itself when idle. Tests audio timing that does not drift and a dense, readable control surface." />
+<meta name="prompt" content="Build a 16-step drum machine in a single HTML file using the Web Audio API with all sounds synthesized, no samples: kick, snare, clap, closed and open hi-hat, tom, rim and cowbell. Use a lookahead scheduler so timing stays tight, add tempo and swing controls, accents, per-track mute and volume, a moving playhead, a few preset patterns and a randomize button, styled like a piece of hardware." />
+<style>
+  :root { --ink: #ecebe6; --muted: #8e8b80; --body: #1c1c1f; --panel: #26262a; --line: #34343a; --orange: #ff7a1a; --amber: #ffc34d; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(ellipse at 50% 30%, #2c2c31, #0e0e10 75%); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  body { display: grid; place-items: center; }
+  .unit { --s: 1; width: 960px; padding: 18px 22px 22px; border-radius: 16px; transform: scale(var(--s)); background: linear-gradient(180deg, #2a2a2f, #1a1a1d); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 2px 0 #0b0b0c, 0 30px 60px rgba(0, 0, 0, 0.6); }
+  .head { display: flex; align-items: center; gap: 18px; margin-bottom: 14px; }
+  .logo { font: 800 22px/1 ui-rounded, system-ui, sans-serif; letter-spacing: -0.02em; }
+  .logo b { color: var(--orange); }
+  .logo small { display: block; font: 600 9.5px ui-monospace, Menlo, monospace; letter-spacing: 0.2em; color: var(--muted); margin-top: 4px; }
+  .lcd { min-width: 150px; height: 46px; border-radius: 6px; background: #120d06; box-shadow: inset 0 2px 6px #000; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 600 22px ui-monospace, Menlo, monospace; color: var(--amber); text-shadow: 0 0 8px rgba(255, 195, 77, 0.6); }
+  .lcd small { font-size: 10px; color: #a07a2a; text-shadow: none; }
+  .ctl { display: flex; flex-direction: column; gap: 4px; font: 600 10px ui-monospace, Menlo, monospace; letter-spacing: 0.12em; color: var(--muted); }
+  .ctl input { width: 120px; accent-color: var(--orange); }
+  .sp { flex: 1; }
+  .btn { height: 38px; min-width: 46px; padding: 0 12px; border-radius: 8px; border: 0; cursor: pointer; font: 700 12px inherit; color: var(--ink); background: linear-gradient(#3a3a40, #2b2b30); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 2px 0 #0d0d0f; }
+  .btn:active { transform: translateY(1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 1px 0 #0d0d0f; }
+  .btn.play { background: linear-gradient(#ff8f3d, #e7650e); color: #1a0c00; min-width: 70px; }
+  .btn.on { color: var(--orange); }
+  .presets { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .presets .btn { height: 28px; font-size: 11px; }
+  .presets .btn.on { background: linear-gradient(#4a3a2a, #3a2a1a); }
+  .grid { display: grid; gap: 7px; }
+  .row { display: grid; grid-template-columns: 92px 28px repeat(16, 1fr) 60px; gap: 5px; align-items: center; }
+  .name { font: 700 11px ui-monospace, Menlo, monospace; letter-spacing: 0.08em; color: var(--muted); }
+  .mute { width: 26px; height: 26px; border-radius: 6px; border: 0; background: #2f2f35; color: var(--muted); font: 700 10px inherit; cursor: pointer; }
+  .mute.on { background: #5a2020; color: #ffb3b3; }
+  .step { height: 38px; border-radius: 6px; border: 0; cursor: pointer; background: linear-gradient(#3d3d44, #2f2f35); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 0 #121214; position: relative; transition: filter 0.08s; }
+  .step.q { background: linear-gradient(#45454d, #36363c); }
+  .step.on { background: linear-gradient(#ff9a4d, #ef6c10); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 0 #7a3305, 0 0 14px rgba(255, 122, 26, 0.35); }
+  .step.acc { background: linear-gradient(#ffd27a, #ffab1f); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 0 #8a5a05, 0 0 18px rgba(255, 195, 77, 0.55); }
+  .step.hit { filter: brightness(1.7); }
+  .step.ph::after { content: ""; position: absolute; left: 4px; right: 4px; bottom: -7px; height: 3px; border-radius: 2px; background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .row input[type=range] { width: 60px; accent-color: var(--orange); }
+  .leds { display: grid; grid-template-columns: 92px 28px repeat(16, 1fr) 60px; gap: 5px; margin-top: 10px; }
+  .leds i { height: 5px; border-radius: 3px; background: #2c2c31; }
+  .leds i.on { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+  .title { position: fixed; left: 20px; top: 18px; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  @media (max-width: 760px) { .title { display: none; } }
+  /* phones: drop scaling, tighten columns, hide per-track level */
+  .unit.narrow { width: calc(100vw - 12px); padding: 12px 8px 14px; transform: none; }
+  .narrow .head { flex-wrap: wrap; gap: 10px; }
+  .narrow .head .sp { display: none; }
+  .narrow .ctl input { width: 96px; }
+  .narrow .row, .narrow .leds { grid-template-columns: 50px 22px repeat(16, 1fr); gap: 3px; }
+  .narrow .row input[type=range] { display: none; }
+  .narrow .name { font-size: 9px; letter-spacing: 0; }
+  .narrow .step { height: 34px; border-radius: 4px; }
+  .narrow .mute { width: 22px; height: 22px; }
+</style>
+</head>
+<body>
+<div class="title"><h1>Drum Machine</h1><p>click steps · shift-click or long-press to accent · space plays</p></div>
+<div class="unit" id="unit">
+  <div class="head">
+    <div class="logo">RHYTHM<b>·16</b><small>SYNTH PERCUSSION</small></div>
+    <div class="lcd"><span id="bpmv">112</span><small>BPM</small><span id="stepv">01</span></div>
+    <label class="ctl">TEMPO<input id="bpm" type="range" min="60" max="180" value="112"></label>
+    <label class="ctl">SWING <span id="swv">18%</span><input id="swing" type="range" min="0" max="60" value="18"></label>
+    <div class="sp"></div>
+    <button class="btn" id="rand">RAND</button><button class="btn" id="clear">CLR</button><button class="btn play" id="play">▶ PLAY</button>
+  </div>
+  <div class="presets" id="presets"></div>
+  <div class="grid" id="grid"></div>
+  <div class="leds" id="leds"></div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/drum-machine.html
+ * PURPOSE: 16-step drum machine: synthesized 8-voice kit, lookahead scheduler, swing, accents, mute/level, presets, idle playback
+ * UI: Render Studio > Apps & UI > Drum Machine
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__drums (test hook: pattern, setStep, swingOffset, load)
+ */
+const $ = (id) => document.getElementById(id);
+const TRACKS = ['KICK', 'SNARE', 'CLAP', 'HAT', 'OPEN HAT', 'TOM', 'RIM', 'COWBELL'];
+
+// Audio > kit: each voice(t, vel, out) schedules its own nodes at time t
+let ac = null, bus = null, noiseBuf = null;
+function audio() {
+  if (ac) return;
+  ac = new AudioContext();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  bus = ac.createGain(); bus.gain.value = 0.8; bus.connect(comp).connect(ac.destination);
+  noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+const env = (t, peak, dec, out) => { const gn = ac.createGain(); gn.gain.setValueAtTime(peak, t); gn.gain.exponentialRampToValueAtTime(0.0008, t + dec); gn.connect(out); return gn; };
+const noise = (t, dur) => { const s = ac.createBufferSource(); s.buffer = noiseBuf; s.start(t); s.stop(t + dur); return s; };
+let openHat = null;
+const KIT = [
+  (t, v, o) => { const os = ac.createOscillator(); os.frequency.setValueAtTime(150, t); os.frequency.exponentialRampToValueAtTime(42, t + 0.12); os.connect(env(t, v * 1.1, 0.5, o)); os.start(t); os.stop(t + 0.55);
+    const ck = ac.createOscillator(); ck.type = 'square'; ck.frequency.value = 1400; ck.connect(env(t, v * 0.08, 0.008, o)); ck.start(t); ck.stop(t + 0.02); },
+  (t, v, o) => { const n = noise(t, 0.25), hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1200; n.connect(hp).connect(env(t, v * 0.55, 0.18, o));
+    const os = ac.createOscillator(); os.type = 'triangle'; os.frequency.setValueAtTime(240, t); os.frequency.exponentialRampToValueAtTime(160, t + 0.08); os.connect(env(t, v * 0.5, 0.12, o)); os.start(t); os.stop(t + 0.15); },
+  (t, v, o) => { const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 0.9;
+    // clap: three quick bursts then a tail
+    [0, 0.011, 0.023].forEach((dt) => noise(t + dt, 0.02).connect(bp));
+    const tail = noise(t + 0.03, 0.2); tail.connect(bp); bp.connect(env(t, v * 0.9, 0.2, o)); },
+  (t, v, o) => hat(t, v * 0.35, 0.05, o),
+  (t, v, o) => { openHat = hat(t, v * 0.3, 0.38, o); },
+  (t, v, o) => { const os = ac.createOscillator(); os.frequency.setValueAtTime(190, t); os.frequency.exponentialRampToValueAtTime(95, t + 0.25); os.connect(env(t, v * 0.7, 0.35, o)); os.start(t); os.stop(t + 0.4); },
+  (t, v, o) => { const os = ac.createOscillator(); os.type = 'square'; os.frequency.value = 1700; const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; os.connect(bp).connect(env(t, v * 0.35, 0.03, o)); os.start(t); os.stop(t + 0.05); },
+  (t, v, o) => { const e = env(t, v * 0.25, 0.3, o), bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 800; bp.connect(e);
+    [540, 800].forEach((f) => { const os = ac.createOscillator(); os.type = 'square'; os.frequency.value = f; os.connect(bp); os.start(t); os.stop(t + 0.32); }); },
+];
+function hat(t, v, dec, o) {
+  // 808 metal: six detuned squares through a highpass
+  const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const e = env(t, v, dec, o); hp.connect(e);
+  // closed hat chokes a ringing open hat
+  if (dec < 0.1 && openHat) { try { openHat.gain.cancelScheduledValues(t); openHat.gain.setTargetAtTime(0.0001, t, 0.01); } catch { /* gone */ } openHat = null; }
+  [205.3, 304.4, 369.6, 522.7, 540, 800].forEach((f) => { const os = ac.createOscillator(); os.type = 'square'; os.frequency.value = f * 1.7; os.connect(hp); os.start(t); os.stop(t + dec + 0.05); });
+  return e;
+}
+
+// Pattern: 0 off, 1 on, 2 accent
+const pat = TRACKS.map(() => new Array(16).fill(0));
+const mute = TRACKS.map(() => false), level = TRACKS.map((_, i) => (i === 3 || i === 4 ? 0.7 : 0.9));
+const P = (s) => s.split('').map((c) => (c === 'x' ? 1 : c === 'X' ? 2 : 0));
+const PRESETS = {
+  'Boom Bap': { bpm: 92, swing: 34, rows: ['X.....x...x.....', '....X.......X...', '................', 'x.x.x.x.x.x.x.xx', '................', '.............x..', '..........x.....', '................'] },
+  House: { bpm: 124, swing: 8, rows: ['X...X...X...X...', '................', '....x.......x...', '..x...x...x...x.', '..X...X...X...X.', '................', '...x.......x..x.', '................'] },
+  Electro: { bpm: 118, swing: 0, rows: ['X..x..x...X..x..', '....X.......X...', '....x.......x..x', 'xxxxxxxXxxxxxxxX', '................', '..........x.x.x.', '.x..x..x.x..x...', 'x.....x.....x...'] },
+  Funk: { bpm: 104, swing: 22, rows: ['X..x..x.x.X.....', '....X..x.x..X..x', '................', 'x.xXx.xXx.xXx.xX', '.......x.......x', '..............xx', '..x.......x.....', 'X...x.......x...'] },
+};
+function loadPreset(name) {
+  const p = PRESETS[name];
+  p.rows.forEach((r, i) => (pat[i] = P(r)));
+  setBpm(p.bpm); setSwing(p.swing);
+  current = name; paintGrid();
+}
+let current = 'Boom Bap';
+
+// Scheduler: 25 ms timer schedules any steps that fall inside the next 120 ms
+let bpm = 112, swing = 0.18, playing = false, step = 0, nextT = 0, timer = null;
+const queue = [];
+function stepDur() { return 60 / bpm / 4; }
+function schedule() {
+  while (nextT < ac.currentTime + 0.12) {
+    // swing pushes odd sixteenths late by a fraction of a step
+    const t = nextT + (step % 2 ? swing * stepDur() * 0.66 : 0);
+    pat.forEach((row, i) => { if (row[step] && !mute[i]) KIT[i](t, (row[step] === 2 ? 1 : 0.72) * level[i], bus); });
+    queue.push({ step, t });
+    nextT += stepDur();
+    step = (step + 1) % 16;
+  }
+}
+function start() { audio(); if (ac.state === 'suspended') ac.resume(); playing = true; step = 0; nextT = ac.currentTime + 0.05; queue.length = 0; schedule(); timer = setInterval(schedule, 25); $('play').textContent = '■ STOP'; }
+function stop() { playing = false; clearInterval(timer); $('play').textContent = '▶ PLAY'; shown = -1; paintHead(); }
+
+// UI > grid
+const cells = [];
+function buildGrid() {
+  $('grid').innerHTML = TRACKS.map((name, i) => `<div class="row"><span class="name">${name}</span><button class="mute" data-m="${i}">M</button>${Array.from({ length: 16 }, (_, s) => `<button class="step${Math.floor(s / 4) % 2 ? ' q' : ''}" data-t="${i}" data-s="${s}"></button>`).join('')}<input type="range" min="0" max="1" step="0.01" value="${level[i]}" data-l="${i}"></div>`).join('');
+  $('leds').innerHTML = '<span></span><span></span>' + Array.from({ length: 16 }, () => '<i></i>').join('');
+  $('grid').querySelectorAll('.step').forEach((b) => (cells[b.dataset.t * 16 + Number(b.dataset.s)] = b));
+  $('presets').innerHTML = Object.keys(PRESETS).map((n) => `<button class="btn" data-p="${n}">${n}</button>`).join('');
+}
+function paintGrid() {
+  cells.forEach((b, k) => { const v = pat[(k / 16) | 0][k % 16]; b.classList.toggle('on', v === 1); b.classList.toggle('acc', v === 2); });
+  $('grid').querySelectorAll('.mute').forEach((b) => b.classList.toggle('on', mute[b.dataset.m]));
+  $('presets').querySelectorAll('.btn').forEach((b) => b.classList.toggle('on', b.dataset.p === current));
+}
+let shown = -1;
+function paintHead() {
+  cells.forEach((b, k) => { const on = k % 16 === shown; b.classList.toggle('ph', on && (k / 16 | 0) === TRACKS.length - 1); b.classList.toggle('hit', on && pat[(k / 16) | 0][k % 16] > 0); });
+  $('leds').querySelectorAll('i').forEach((l, s) => l.classList.toggle('on', s === shown));
+  $('stepv').textContent = String(shown + 1 || 1).padStart(2, '0');
+}
+// UI follows audio time: pop scheduled steps whose time has arrived
+function frame() {
+  if (playing && ac) { while (queue.length && queue[0].t <= ac.currentTime) { shown = queue.shift().step; paintHead(); } }
+  else if (playing === false && demoVisual) { const s = Math.floor(performance.now() / (stepDur() * 1000)) % 16; if (s !== shown) { shown = s; paintHead(); } }
+  requestAnimationFrame(frame);
+}
+function setBpm(v) { bpm = v; $('bpm').value = v; $('bpmv').textContent = v; }
+function setSwing(v) { swing = v / 100; $('swing').value = v; $('swv').textContent = `${v}%`; }
+
+let lastInput = -1e9, demoVisual = true;
+function userAct() { lastInput = performance.now(); demoVisual = false; }
+// accent by shift-click or a 400 ms press on touch
+let pressT = null;
+$('grid').addEventListener('pointerdown', (e) => {
+  userAct();
+  const b = e.target.closest('.step');
+  if (b) { const t = Number(b.dataset.t), s = Number(b.dataset.s); pressT = setTimeout(() => { pat[t][s] = 2; paintGrid(); pressT = 'done'; }, 400); b.dataset.shift = e.shiftKey ? 1 : 0; }
+  const m = e.target.closest('.mute'); if (m) { mute[m.dataset.m] = !mute[m.dataset.m]; paintGrid(); }
+});
+$('grid').addEventListener('pointerup', (e) => {
+  const b = e.target.closest('.step'); if (!b) return;
+  if (pressT === 'done') { pressT = null; return; }
+  clearTimeout(pressT); pressT = null;
+  const t = Number(b.dataset.t), s = Number(b.dataset.s);
+  pat[t][s] = b.dataset.shift === '1' ? (pat[t][s] === 2 ? 0 : 2) : pat[t][s] ? 0 : 1;
+  current = null; paintGrid();
+  // audition the sound when switching a step on while stopped
+  if (pat[t][s] && !playing) { audio(); if (ac.state === 'suspended') ac.resume(); KIT[t](ac.currentTime, 0.8 * level[t], bus); }
+});
+$('grid').addEventListener('input', (e) => { if (e.target.dataset.l) level[e.target.dataset.l] = Number(e.target.value); });
+$('presets').onclick = (e) => { const b = e.target.closest('[data-p]'); if (b) { userAct(); loadPreset(b.dataset.p); } };
+$('play').onclick = () => { userAct(); playing ? stop() : start(); };
+$('bpm').oninput = (e) => { userAct(); setBpm(Number(e.target.value)); };
+$('swing').oninput = (e) => { userAct(); setSwing(Number(e.target.value)); };
+$('clear').onclick = () => { userAct(); pat.forEach((r) => r.fill(0)); current = null; paintGrid(); };
+$('rand').onclick = () => {
+  userAct();
+  // weighted by track role so random still grooves: kick on downbeats, hats busy
+  const dens = [0.3, 0.15, 0.1, 0.6, 0.12, 0.1, 0.15, 0.08];
+  pat.forEach((r, i) => r.forEach((_, s) => (r[s] = Math.random() < dens[i] * (s % 4 === 0 ? 1.8 : 1) ? (Math.random() < 0.2 ? 2 : 1) : 0)));
+  pat[0][0] = 2; pat[1][4] = pat[1][12] = 1; current = null; paintGrid();
+};
+addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); userAct(); playing ? stop() : start(); } });
+
+// Fit hardware to the viewport; phones get a compact layout instead of a tiny scaled one
+function fit() { const narrow = innerWidth < 760, s = Math.min(1.1, (innerWidth - 20) / 960, (innerHeight - 20) / 560); $('unit').classList.toggle('narrow', narrow); $('unit').style.setProperty('--s', s.toFixed(3)); }
+addEventListener('resize', fit);
+
+// Idle: playhead animates without audio (no gesture yet); presets rotate every 8 bars
+buildGrid(); loadPreset('Boom Bap'); fit();
+let pi = 0;
+setInterval(() => { if (performance.now() - lastInput > 15000) { demoVisual = true; if (playing) stop(); pi = (pi + 1) % 4; loadPreset(Object.keys(PRESETS)[pi]); } }, 9000);
+requestAnimationFrame(frame);
+window.__drums = { pattern: () => pat.map((r) => r.join('')), setStep: (t, s, v) => { pat[t][s] = v; paintGrid(); }, swingOffset: (s) => (s % 2 ? swing * stepDur() * 0.66 : 0), load: loadPreset, stopDemo: userAct };
+</script>
+</body>
+</html>

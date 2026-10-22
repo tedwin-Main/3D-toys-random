@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fourier Epicycles</title>
+<meta name="category" content="generative" />
+<meta name="order" content="4" />
+<meta name="capture" content="3600" />
+<meta name="tags" content="discrete Fourier transform, epicycles, Manim-style, draw your own" />
+<meta name="description" content="A Manim-style maths explainer: any closed curve, including one you draw, is broken into a discrete Fourier series and redrawn by a chain of spinning circles. Hard because it needs a correct complex DFT, arc-length resampling and a clean explanatory visual language." />
+<meta name="prompt" content="Make a 3Blue1Brown / Manim-style Fourier series visualiser in one HTML canvas page. Compute the complex DFT of a closed path, sort terms by amplitude and draw the rotating epicycle chain tracing the shape with a glowing trail. Include presets (butterfly curve, heart, figure eight, square showing Gibbs ringing, star), let users draw their own shape, a term-count slider, a sweep mode that adds terms one by one, and a live spectrum chart." />
+<style>
+  :root { --ink: #ece9e1; --muted: #9a978f; --panel: rgba(20, 20, 24, 0.78); --blue: #58c4dd; --yellow: #ffd34e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e0e11; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .title { position: fixed; left: 22px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  .formula { margin-top: 8px; font: italic 19px/1.2 "Latin Modern Math", "Cambria Math", "STIX Two Math", Georgia, serif; color: var(--ink); }
+  .formula sup { font-size: 12px; } .formula .sum { font-style: normal; font-size: 24px; vertical-align: -3px; }
+  .formula small { display: block; margin-top: 6px; font: 12px ui-rounded, system-ui, sans-serif; color: var(--muted); font-style: normal; }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 290px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  .presets, .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns { margin-top: 10px; }
+  button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--blue); }
+  button.on { background: var(--blue); border-color: var(--blue); color: #08222a; }
+  button.draw { border-color: var(--yellow); color: var(--yellow); }
+  button.draw.on { background: var(--yellow); color: #2a2000; }
+  #panel label { display: grid; grid-template-columns: 50px 1fr 36px; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--blue); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  #banner { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 12px 18px; border-radius: 12px; background: rgba(0, 0, 0, 0.5); color: var(--yellow); font-weight: 600; pointer-events: none; opacity: 0; transition: opacity 0.3s; }
+  #banner.show { opacity: 1; }
+  @media (max-width: 600px) {
+    #panel { left: 10px; right: 10px; bottom: 10px; width: auto; }
+    .hint { display: none; }
+    .title h1 { font-size: 17px; } .formula { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title">
+  <h1>Fourier Epicycles</h1>
+  <div class="formula">f(t) = <span class="sum">Σ</span> c<sub>n</sub> e<sup>2πint</sup><small id="caption"></small></div>
+</div>
+<div id="banner">Draw one closed shape, then let go</div>
+<div id="panel">
+  <div class="presets">
+    <button data-p="butterfly" class="on">Butterfly</button>
+    <button data-p="heart">Heart</button>
+    <button data-p="eight">Figure 8</button>
+    <button data-p="square">Square</button>
+    <button data-p="star">Star</button>
+    <button id="draw" class="draw">✎ Draw</button>
+  </div>
+  <label>Terms <input id="terms" type="range" min="0" max="1" step="0.001"><output id="terms-o"></output></label>
+  <label>Speed <input id="speed" type="range" min="0.2" max="3" step="0.05" value="1"><output id="speed-o"></output></label>
+  <div class="btns">
+    <button id="sweep">Sweep terms</button>
+    <button id="circles" class="on">Circles</button>
+    <button id="pause">Pause</button>
+  </div>
+  <div class="hint">Square shows Gibbs ringing at the corners. Sweep adds circles one by one so you can watch the series converge.</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/fourier-epicycles.html
+ * PURPOSE: complex DFT of a closed curve, redrawn by sorted rotating epicycles; presets, freehand drawing, term sweep, spectrum
+ * UI: Render Studio > 2D & Generative > Fourier Epicycles
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = (id) => document.getElementById(id);
+const N = 1024;
+let W, H, DPR, scale;
+let coeffs = [], terms = 120, t = 0, speed = 1, paused = false, showCircles = true;
+let sweep = false, sweepT = 0, recon = [], reconTerms = -1, trail = [];
+let drawing = false, drawPts = [], drawMode = false, preset = 'butterfly';
+
+// Epicycles > presets: parametric curves sampled densely, normalised later
+const PRESETS = {
+  butterfly: (u) => { const a = u * Math.PI * 12, r = Math.exp(Math.cos(a)) - 2 * Math.cos(4 * a) - Math.sin(a / 12) ** 5; return [Math.sin(a) * r, -Math.cos(a) * r]; },
+  heart: (u) => { const a = u * Math.PI * 2; return [16 * Math.sin(a) ** 3, -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a))]; },
+  eight: (u) => { const a = u * Math.PI * 2; return [Math.sin(a) * Math.cos(a), Math.cos(a)]; },
+  square: (u) => { const s = Math.floor(u * 4), f = u * 4 - s; return [[-1 + 2 * f, -1], [1, -1 + 2 * f], [1 - 2 * f, 1], [-1, 1 - 2 * f]][s % 4]; },
+  star: (u) => { const a = u * Math.PI * 2, k = Math.floor(u * 10), f = u * 10 - k; const r0 = k % 2 ? 0.42 : 1, r1 = k % 2 ? 1 : 0.42, a0 = (k / 10) * Math.PI * 2, a1 = ((k + 1) / 10) * Math.PI * 2; void a; const x0 = Math.sin(a0) * r0, y0 = -Math.cos(a0) * r0, x1 = Math.sin(a1) * r1, y1 = -Math.cos(a1) * r1; return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f]; },
+};
+const CAPTIONS = {
+  butterfly: 'Butterfly curve: needs hundreds of circles for the wing detail',
+  heart: 'Heart: smooth curve, converges in a handful of terms',
+  eight: 'Figure eight: only odd harmonics are needed',
+  square: 'Square: corners never converge cleanly (Gibbs ringing)',
+  star: 'Star: sharp tips pull in high frequencies',
+  drawn: 'Your drawing, as a sum of rotating circles',
+};
+
+// Epicycles > signal: resample by arc length so speed along the path is uniform
+function resample(pts) {
+  const len = [0];
+  for (let i = 1; i <= pts.length; i++) {
+    const a = pts[i - 1], b = pts[i % pts.length];
+    len.push(len[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+  }
+  const total = len[len.length - 1], out = [];
+  let j = 0;
+  for (let i = 0; i < N; i++) {
+    const d = (i / N) * total;
+    while (len[j + 1] < d) j++;
+    const a = pts[j], b = pts[(j + 1) % pts.length], f = (d - len[j]) / Math.max(1e-9, len[j + 1] - len[j]);
+    out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+  }
+  return out;
+}
+
+// Epicycles > DFT: c_k = 1/N sum z_n e^(-2 pi i k n / N), sorted by amplitude
+function dft(pts) {
+  const out = [];
+  for (let k = -N / 2; k < N / 2; k++) {
+    let re = 0, im = 0;
+    for (let n = 0; n < N; n++) {
+      const phi = (-2 * Math.PI * k * n) / N, c = Math.cos(phi), s = Math.sin(phi);
+      re += pts[n][0] * c - pts[n][1] * s;
+      im += pts[n][0] * s + pts[n][1] * c;
+    }
+    re /= N; im /= N;
+    out.push({ k, amp: Math.hypot(re, im), phase: Math.atan2(im, re) });
+  }
+  // k=0 is the centre offset; keep it first so the chain starts at the shape's centroid
+  const dc = out.find((c) => c.k === 0);
+  return [dc, ...out.filter((c) => c.k !== 0).sort((a, b) => b.amp - a.amp)];
+}
+
+function normalise(pts) {
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p[0]; my += p[1]; }
+  mx /= pts.length; my /= pts.length;
+  let r = 0;
+  for (const p of pts) r = Math.max(r, Math.abs(p[0] - mx), Math.abs(p[1] - my));
+  return pts.map((p) => [(p[0] - mx) / r, (p[1] - my) / r]);
+}
+
+function load(name, raw) {
+  preset = name;
+  const pts = raw || Array.from({ length: 4000 }, (_, i) => PRESETS[name](i / 4000));
+  coeffs = dft(resample(normalise(pts)));
+  reconTerms = -1; trail = []; t = 0;
+  $('caption').textContent = CAPTIONS[name];
+  document.querySelectorAll('[data-p]').forEach((b) => b.classList.toggle('on', b.dataset.p === name));
+  setTerms(name === 'heart' ? 14 : name === 'eight' ? 9 : name === 'butterfly' ? 220 : 60);
+}
+
+// Panel > Terms slider: log mapping so 1..1024 is usable
+const sliderToTerms = (v) => Math.max(1, Math.round(Math.exp(v * Math.log(N))));
+const termsToSlider = (n) => Math.log(n) / Math.log(N);
+function setTerms(n) {
+  terms = Math.max(1, Math.min(N, n));
+  $('terms').value = termsToSlider(terms);
+  $('terms-o').textContent = terms;
+}
+$('terms').addEventListener('input', (e) => { sweep = false; $('sweep').classList.remove('on'); setTerms(sliderToTerms(+e.target.value)); });
+$('speed').addEventListener('input', (e) => { speed = +e.target.value; $('speed-o').textContent = speed.toFixed(1) + '×'; });
+$('speed-o').textContent = '1.0×';
+
+// Epicycles > reconstruction: full curve for current term count, drawn as a faint guide
+function rebuildRecon() {
+  recon = [];
+  const M = 2400;
+  for (let i = 0; i <= M; i++) {
+    const tt = i / M;
+    let x = 0, y = 0;
+    for (let j = 0; j < terms; j++) {
+      const c = coeffs[j], a = 2 * Math.PI * c.k * tt + c.phase;
+      x += c.amp * Math.cos(a); y += c.amp * Math.sin(a);
+    }
+    recon.push([x, y]);
+  }
+  reconTerms = terms;
+}
+
+function tipAt(tt) {
+  let x = 0, y = 0;
+  for (let j = 0; j < terms; j++) {
+    const c = coeffs[j], a = 2 * Math.PI * c.k * tt + c.phase;
+    x += c.amp * Math.cos(a); y += c.amp * Math.sin(a);
+  }
+  return [x, y];
+}
+
+function resize() {
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  scale = Math.min(W, H) * (W < 600 ? 0.36 : 0.34);
+  trail = [];
+}
+addEventListener('resize', resize);
+resize();
+
+const center = () => [W < 600 ? W / 2 : W * 0.56, W < 600 ? H * 0.4 : H * 0.5];
+
+// Epicycles > frame: chain of vectors, glowing trail, guide curve, spectrum
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const t0 = t;
+  if (!paused && !drawing) t = (t + dt * speed * 0.08) % 1;
+  if (sweep && !paused) {
+    sweepT += dt;
+    // exponential sweep: early terms linger so each new circle is visible
+    const n = Math.min(N, Math.round(Math.exp(sweepT * 0.42) ));
+    if (n !== terms) { setTerms(n); trail = []; }
+    if (sweepT > Math.log(N) / 0.42 + 3) sweepT = 0;
+  }
+  if (reconTerms !== terms) rebuildRecon();
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#0e0e11';
+  ctx.fillRect(0, 0, W, H);
+  const [cx, cy] = center();
+
+  // background grid, Manim-like
+  ctx.strokeStyle = 'rgba(88,196,221,0.06)';
+  ctx.lineWidth = 1;
+  const g = scale / 4;
+  ctx.beginPath();
+  for (let x = cx % g; x < W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = cy % g; y < H; y += g) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+
+  if (drawing || (drawMode && !coeffs.length)) {
+    drawUserStroke();
+  } else if (coeffs.length) {
+    // guide: whole reconstruction at current term count
+    ctx.strokeStyle = 'rgba(255,211,78,0.14)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    recon.forEach(([x, y], i) => (i ? ctx.lineTo(cx + x * scale, cy + y * scale) : ctx.moveTo(cx + x * scale, cy + y * scale)));
+    ctx.stroke();
+
+    // chain
+    let x = cx, y = cy;
+    for (let j = 0; j < terms; j++) {
+      const c = coeffs[j], a = 2 * Math.PI * c.k * t + c.phase;
+      const r = c.amp * scale;
+      const nx = x + r * Math.cos(a), ny = y + r * Math.sin(a);
+      if (showCircles && j > 0 && r > 0.6) {
+        ctx.strokeStyle = `rgba(88,196,221,${Math.max(0.08, 0.45 - j * 0.004)})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (j > 0 && r > 0.3) {
+        ctx.strokeStyle = `rgba(236,233,225,${Math.max(0.25, 0.9 - j * 0.006)})`;
+        ctx.lineWidth = j < 8 ? 1.6 : 1;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+      }
+      x = nx; y = ny;
+    }
+    // sub-step the tip between frames so fast curves stay smooth, not polygonal
+    const span = ((t - t0) + 1) % 1, SUB = 10;
+    for (let k = 1; k <= SUB && span > 0; k++) {
+      const p = tipAt((t0 + (span * k) / SUB) % 1);
+      trail.push([cx + p[0] * scale, cy + p[1] * scale]);
+    }
+    const maxTrail = Math.round(0.7 / (speed * 0.08) * 60 * SUB);
+    if (trail.length > maxTrail) trail.splice(0, trail.length - maxTrail);
+    // trail: drawn in alpha buckets (one path each) so thousands of points stay cheap
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const B = 24, per = Math.ceil(trail.length / B);
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.lineWidth = pass ? 2.2 : 7;
+      for (let b = 0; b < B; b++) {
+        const s0 = b * per, s1 = Math.min(trail.length - 1, s0 + per);
+        if (s1 <= s0) continue;
+        const f = (b + 1) / B;
+        ctx.strokeStyle = pass ? `rgba(255,211,78,${f})` : `rgba(255,190,40,${f * 0.12})`;
+        ctx.beginPath(); ctx.moveTo(trail[s0][0], trail[s0][1]);
+        for (let i = s0 + 1; i <= s1; i++) ctx.lineTo(trail[i][0], trail[i][1]);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,211,78,0.3)';
+    ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.fill();
+    drawSpectrum();
+  }
+  requestAnimationFrame(frame);
+}
+
+// Epicycles > spectrum: top amplitudes on log scale, terms in use highlighted
+function drawSpectrum() {
+  // phone: panel covers the lower half, spectrum would collide
+  if (W < 600) return;
+  const n = 48, w = W < 600 ? Math.min(W - 40, 260) : 300, h = 70;
+  const x0 = W < 600 ? (W - w) / 2 : W - w - 26, y0 = W < 600 ? H * 0.72 : H - h - 30;
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  ctx.fillRect(x0 - 10, y0 - 22, w + 20, h + 36);
+  ctx.fillStyle = '#9a978f';
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.fillText(`|c_n| top ${n}  ·  using ${terms} of ${N}`, x0, y0 - 8);
+  const max = Math.log10(coeffs[1].amp + 1e-9), min = max - 4;
+  const bw = w / n;
+  for (let i = 1; i <= n; i++) {
+    const v = Math.max(0, (Math.log10(coeffs[i].amp + 1e-12) - min) / (max - min));
+    ctx.fillStyle = i < terms ? (i < 8 ? '#ffd34e' : '#58c4dd') : 'rgba(255,255,255,0.12)';
+    ctx.fillRect(x0 + (i - 1) * bw + 1, y0 + h - v * h, bw - 2, v * h);
+  }
+}
+
+// Panel > Draw: freehand capture, closes the loop on release
+function drawUserStroke() {
+  if (drawPts.length < 2) return;
+  ctx.strokeStyle = '#ffd34e'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  drawPts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.stroke();
+}
+cv.addEventListener('pointerdown', (e) => {
+  if (!drawMode) return;
+  drawing = true; drawPts = [[e.clientX, e.clientY]];
+  cv.setPointerCapture(e.pointerId);
+  $('banner').classList.remove('show');
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!drawing) return;
+  const p = drawPts[drawPts.length - 1];
+  if (Math.hypot(e.clientX - p[0], e.clientY - p[1]) > 2) drawPts.push([e.clientX, e.clientY]);
+});
+cv.addEventListener('pointerup', () => {
+  if (!drawing) return;
+  drawing = false;
+  if (drawPts.length < 12) { $('banner').classList.add('show'); return; }
+  drawMode = false; $('draw').classList.remove('on');
+  load('drawn', drawPts);
+  setTerms(200);
+});
+$('draw').addEventListener('click', () => {
+  drawMode = !drawMode;
+  $('draw').classList.toggle('on', drawMode);
+  if (drawMode) { coeffs = []; drawPts = []; trail = []; $('banner').classList.add('show'); $('caption').textContent = 'Draw a closed shape'; document.querySelectorAll('[data-p]').forEach((b) => b.classList.remove('on')); }
+  else load(preset === 'drawn' ? 'butterfly' : preset);
+});
+
+// Panel > presets + toggles
+document.querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', () => { drawMode = false; $('draw').classList.remove('on'); $('banner').classList.remove('show'); load(b.dataset.p); }));
+$('sweep').addEventListener('click', () => { sweep = !sweep; sweepT = 0; $('sweep').classList.toggle('on', sweep); if (sweep) { setTerms(1); trail = []; } });
+$('circles').addEventListener('click', () => { showCircles = !showCircles; $('circles').classList.toggle('on', showCircles); });
+$('pause').addEventListener('click', () => { paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause'; });
+addEventListener('keydown', (e) => { if (e.key === ' ') { e.preventDefault(); $('pause').click(); } });
+
+load('butterfly');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

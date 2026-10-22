@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mandelbulb</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="1" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="raymarching, distance estimator, GLSL, orbit traps" />
+<meta name="description" content="A 3D Mandelbrot fractal raymarched per pixel in one fragment shader: analytic distance estimator, orbit-trap coloring, soft shadows and ambient occlusion. A classic test of shader math with no meshes at all." />
+<meta name="prompt" content="Write a single HTML file with a full-screen WebGL2 fragment shader that raymarches a Mandelbulb fractal. Use a proper distance estimator, orbit-trap coloring, soft shadows, AO and a subtle glow. Drag to orbit, scroll to zoom, a slider for the power, and keep it at 60 fps with adaptive resolution." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.66); --accent: #ffb35c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02030a; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 60px 1fr 40px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #1d0f02; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: auto; bottom: 200px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Mandelbulb</h1><p>raymarched distance-estimated fractal · one fragment shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Power <input id="power" type="range" min="2" max="12" step="0.05" value="8"><output id="power-o"></output></label>
+  <div class="btns" style="margin-bottom:8px">
+    <button data-pal="0" class="on">Ember</button><button data-pal="1">Ice</button><button data-pal="2">Opal</button><button id="breathe" class="on">Breathe</button>
+  </div>
+  <div class="hint">Drag to orbit · scroll / pinch to zoom · power morphs the bulb</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/mandelbulb-fractal.html
+ * PURPOSE: WebGL2 raymarched Mandelbulb with DE, orbit-trap color, soft shadow, AO, adaptive resolution
+ * UI: Render Studio > Shaders > Mandelbulb
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uTime, uPower; uniform vec3 uRo; uniform mat3 uCam; uniform int uPal;
+out vec4 outColor;
+vec4 trap;
+float de(vec3 p){
+  vec3 w = p; float dr = 1.0; float r = length(w);
+  trap = vec4(abs(w), r*r);
+  for(int i = 0; i < 8; i++){
+    if(r > 2.0) break;
+    float th = acos(clamp(w.y / r, -1.0, 1.0)) * uPower;
+    float ph = atan(w.x, w.z) * uPower;
+    float rp = pow(r, uPower - 1.0);
+    dr = uPower * rp * dr + 1.0;
+    w = p + rp * r * vec3(sin(th) * sin(ph), cos(th), sin(th) * cos(ph));
+    r = length(w);
+    trap = min(trap, vec4(abs(w), r*r));
+  }
+  return 0.5 * log(r) * r / dr;
+}
+vec3 nrm(vec3 p, float e){
+  vec2 k = vec2(1, -1);
+  return normalize(k.xyy*de(p+k.xyy*e) + k.yyx*de(p+k.yyx*e) + k.yxy*de(p+k.yxy*e) + k.xxx*de(p+k.xxx*e));
+}
+float shadow(vec3 ro, vec3 rd){
+  float res = 1.0, t = 0.01;
+  for(int i = 0; i < 40; i++){
+    float h = de(ro + rd*t);
+    res = min(res, 10.0*h/t);
+    t += clamp(h, 0.005, 0.12);
+    if(res < 0.02 || t > 2.5) break;
+  }
+  return clamp(res, 0.0, 1.0);
+}
+vec3 pal(float t, int k){
+  t = clamp(t, 0., 1.);
+  if(k == 0) return mix(mix(vec3(0.28,0.05,0.02), vec3(0.95,0.38,0.08), smoothstep(0.,0.55,t)), vec3(1.0,0.82,0.45), smoothstep(0.55,1.,t));
+  if(k == 1) return mix(mix(vec3(0.02,0.08,0.22), vec3(0.15,0.48,0.85), smoothstep(0.,0.55,t)), vec3(0.85,0.95,1.0), smoothstep(0.55,1.,t));
+  return 0.5 + 0.5*cos(6.28318*(vec3(1.0,1.0,0.5)*t + vec3(0.8,0.9,0.3)));
+}
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14), 0., 1.); }
+void main(){
+  vec2 uv = (2.0*gl_FragCoord.xy - uRes) / uRes.y;
+  vec3 rd = normalize(uCam * vec3(uv, 1.9));
+  vec3 ro = uRo;
+  vec3 bgTop = uPal == 1 ? vec3(0.02,0.05,0.10) : uPal == 2 ? vec3(0.05,0.03,0.08) : vec3(0.06,0.03,0.02);
+  vec3 col = mix(vec3(0.004), bgTop, smoothstep(-0.6, 1.0, uv.y));
+  // bounding sphere
+  float b = dot(ro, rd), c = dot(ro, ro) - 1.44, h = b*b - c;
+  float glow = 0.0;
+  if(h > 0.0){
+    h = sqrt(h);
+    float t = max(0.0, -b - h), tmax = -b + h;
+    float px = 1.4 / uRes.y;
+    bool hit = false; int steps = 0;
+    for(int i = 0; i < 160; i++){
+      vec3 p = ro + rd*t;
+      float d = de(p);
+      glow += exp(-d*28.0) * 0.012;
+      if(d < px * t * 0.6){ hit = true; break; }
+      t += d * 0.9;
+      steps = i;
+      if(t > tmax) break;
+    }
+    if(hit){
+      vec3 p = ro + rd*t;
+      vec4 tr = trap;
+      vec3 n = nrm(p, max(0.0004, px*t*0.5));
+      vec3 base = pal(clamp(tr.w*0.6 + tr.y*0.35, 0., 1.) + 0.1, uPal);
+      base = mix(base, pal(1.0 - tr.x, uPal), clamp(pow(tr.x, 3.0)*1.2, 0., 0.4));
+      float occ = clamp(0.05 + 2.2*tr.w, 0., 1.) * (1.0 - float(steps)/220.0);
+      vec3 L = normalize(vec3(0.6, 0.8, -0.35));
+      float dif = clamp(dot(n, L), 0., 1.);
+      float sh = dif > 0.001 ? shadow(p + n*0.002, L) : 0.0;
+      float sky = clamp(0.5 + 0.5*n.y, 0., 1.);
+      float bnc = clamp(0.5 - 0.5*n.y, 0., 1.);
+      float fre = pow(clamp(1.0 + dot(rd, n), 0., 1.), 3.0);
+      vec3 hal = normalize(L - rd);
+      float spe = pow(clamp(dot(n, hal), 0., 1.), 48.0) * dif * sh;
+      vec3 keyC = uPal == 1 ? vec3(1.1,1.2,1.4) : vec3(1.6,1.15,0.8);
+      vec3 lin = dif*sh*keyC*1.5 + sky*occ*vec3(0.18,0.24,0.38)*0.9 + bnc*occ*vec3(0.3,0.15,0.08)*0.5 + fre*occ*vec3(0.6,0.7,1.0)*0.35;
+      col = base*lin + spe*vec3(1.4);
+      col = mix(col, bgTop, 1.0 - exp(-0.02*t*t));
+    }
+  }
+  vec3 gc = uPal == 1 ? vec3(0.3,0.6,1.0) : uPal == 2 ? vec3(0.8,0.4,1.0) : vec3(1.0,0.45,0.15);
+  col += gc * glow * 0.3;
+  col = aces(col * 0.95);
+  col = pow(col, vec3(0.4545));
+  // vignette + grain
+  vec2 q = gl_FragCoord.xy / uRes;
+  col *= 0.35 + 0.65*pow(16.0*q.x*q.y*(1.0-q.x)*(1.0-q.y), 0.18);
+  col += (fract(sin(dot(gl_FragCoord.xy + uTime, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
+  outColor = vec4(col, 1.0);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uTime', 'uPower', 'uRo', 'uCam', 'uPal'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Shader > camera: orbit yaw/pitch/dist, auto-rotate after 3 s idle
+const cam = { yaw: 0.6, pitch: 0.35, dist: 3.0, vyaw: 0, vpitch: 0 };
+let lastInput = -1e9, pal = 0, breathe = true;
+const pointers = new Map();
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, [e.clientX, e.clientY]); lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  const [px, py] = pointers.get(e.pointerId);
+  if (pointers.size === 2) {
+    const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
+    const before = Math.hypot(px - other[0], py - other[1]), after = Math.hypot(e.clientX - other[0], e.clientY - other[1]);
+    cam.dist = Math.min(4.5, Math.max(1.35, cam.dist * (before / after)));
+  } else {
+    cam.vyaw = -(e.clientX - px) * 0.006;
+    cam.vpitch = (e.clientY - py) * 0.006;
+  }
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  lastInput = performance.now();
+});
+const up = (e) => pointers.delete(e.pointerId);
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+cv.addEventListener('wheel', (e) => { e.preventDefault(); cam.dist = Math.min(4.5, Math.max(1.35, cam.dist * Math.exp(e.deltaY * 0.0012))); lastInput = performance.now(); }, { passive: false });
+
+// HUD > controls
+const power = $('power');
+const showPower = () => ($('power-o').textContent = Number(power.value).toFixed(2));
+power.addEventListener('input', () => { breathe = false; $('breathe').classList.remove('on'); showPower(); });
+showPower();
+document.querySelectorAll('[data-pal]').forEach((b) => (b.onclick = () => {
+  pal = Number(b.dataset.pal);
+  document.querySelectorAll('[data-pal]').forEach((x) => x.classList.toggle('on', x === b));
+}));
+$('breathe').onclick = () => { breathe = !breathe; $('breathe').classList.toggle('on', breathe); };
+
+// Shader > adaptive resolution: hold ~55+ fps by scaling render buffer
+let scale = Math.min(devicePixelRatio || 1, 1.25), ftAvg = 16, frames = 0, stable = 0;
+function resize() {
+  cv.width = Math.round(innerWidth * scale);
+  cv.height = Math.round(innerHeight * scale);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now(), t0 = last, fps = 60, fpsN = 0, fpsT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  ftAvg = ftAvg * 0.92 + dt * 1000 * 0.08;
+  if (++frames % 30 === 0) {
+    const maxScale = Math.min(devicePixelRatio || 1, 1.25);
+    // drop fast when slow; creep back up only after ~5 s steady at vsync
+    stable = ftAvg < 17.5 ? stable + 1 : 0;
+    const next = ftAvg > 20 ? scale * 0.85 : stable > 10 ? scale * 1.05 : scale;
+    if (stable > 10) stable = 0;
+    const clamped = Math.min(maxScale, Math.max(0.35, next));
+    if (Math.abs(clamped - scale) > 0.01) { scale = clamped; resize(); }
+  }
+  const idle = now - lastInput > 3000;
+  if (idle) cam.vyaw += (0.12 * dt - cam.vyaw) * 0.05;
+  cam.yaw += cam.vyaw; cam.pitch = Math.min(1.35, Math.max(-1.35, cam.pitch + cam.vpitch));
+  cam.vyaw *= idle ? 1 : 0.88; cam.vpitch *= 0.88;
+  if (breathe) {
+    const p = 8 + 2.2 * Math.sin((now - t0) / 1000 * 0.35);
+    power.value = p; showPower();
+  }
+  const cp = Math.cos(cam.pitch), ro = [Math.sin(cam.yaw) * cp * cam.dist, Math.sin(cam.pitch) * cam.dist, Math.cos(cam.yaw) * cp * cam.dist];
+  // look-at basis (column-major mat3: right, up, forward)
+  const f = ro.map((v) => -v / cam.dist);
+  let r = [-f[2], 0, f[0]];
+  const rl = Math.hypot(...r); r = r.map((v) => v / rl);
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uTime, (now - t0) / 1000);
+  gl.uniform1f(U.uPower, Number(power.value));
+  gl.uniform3fv(U.uRo, ro);
+  gl.uniformMatrix3fv(U.uCam, false, [...r, ...u, ...f]);
+  gl.uniform1i(U.uPal, pal);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${fps} fps<br>${cv.width}×${cv.height}<br>power ${Number(power.value).toFixed(2)}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

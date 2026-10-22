@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Streaming Landing</title>
+<meta name="category" content="apps" />
+<meta name="order" content="9" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="landing page, carousels, generative poster art, responsive" />
+<meta name="description" content="A streaming-service home screen for an invented brand, Nightreel, with no images at all: every poster and the hero backdrop are generated from seeded gradients, shapes and type, so 60 invented titles each get their own art. A rotating hero with a progress bar, a nav that turns solid on scroll, snap-scrolling carousels whose cards grow on hover, a Top 10 row with outlined numerals, and a detail sheet with an animated preview. Tests building a polished, content-heavy layout from nothing." />
+<meta name="prompt" content="Build the home page of a fictional movie streaming service in a single HTML file, with an original brand name and invented titles, no real logos or film names and no image files. Generate the poster art procedurally with gradients and shapes. Include a big rotating hero banner with a play button, several horizontally scrolling rows of posters that enlarge on hover, a Top 10 row with large numbers, a sticky nav that becomes solid on scroll and a detail popup when you click a title. Make it responsive." />
+<style>
+  :root { --ink: #f4f1ee; --muted: #a7a1a0; --bg: #0b0a0c; --red: #ff3b4e; --line: rgba(255, 255, 255, 0.1); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  body { overflow: hidden; }
+  #page { height: 100%; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
+  nav { position: fixed; top: 0; left: 0; right: 0; z-index: 20; height: 64px; display: flex; align-items: center; gap: 26px; padding: 0 4vw; background: linear-gradient(rgba(0, 0, 0, 0.7), transparent); transition: background 0.3s; }
+  nav.solid { background: rgba(11, 10, 12, 0.96); box-shadow: 0 1px 0 var(--line); }
+  .brand { font: 900 24px/1 ui-rounded, system-ui, sans-serif; letter-spacing: -0.04em; color: var(--red); display: flex; align-items: center; gap: 6px; }
+  .brand i { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 65% 35%, var(--bg) 0 38%, transparent 39%), var(--red); }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+  nav a.on { color: var(--ink); font-weight: 600; }
+  nav .sp { flex: 1; }
+  nav .av { width: 32px; height: 32px; border-radius: 7px; background: linear-gradient(135deg, #5b8cff, #b45bff); }
+  .hero { position: relative; height: 82vh; min-height: 460px; overflow: hidden; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(11, 10, 12, 0.92) 0%, rgba(11, 10, 12, 0.4) 45%, transparent 70%), linear-gradient(transparent 60%, var(--bg)); }
+  .hero .info { position: absolute; left: 4vw; bottom: 22%; z-index: 2; max-width: 520px; }
+  .tag { display: inline-flex; gap: 8px; align-items: center; font: 700 12px ui-monospace, Menlo, monospace; letter-spacing: 0.18em; color: var(--muted); }
+  .tag b { color: var(--red); }
+  .hero h2 { margin: 12px 0 10px; font: 900 clamp(40px, 7vw, 86px)/0.92 ui-rounded, system-ui, sans-serif; letter-spacing: -0.04em; text-wrap: balance; }
+  .hero p { margin: 0 0 20px; font-size: 16px; line-height: 1.5; color: #d8d2cf; max-width: 440px; }
+  .meta { display: flex; gap: 12px; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+  .meta .m { color: #46d37a; font-weight: 700; }
+  .meta .r { border: 1px solid var(--muted); padding: 0 5px; border-radius: 3px; font-size: 11px; }
+  .cta { display: flex; gap: 10px; }
+  .cta button { height: 46px; padding: 0 24px; border-radius: 8px; border: 0; font: 700 15px inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+  .cta .play { background: var(--ink); color: #111; }
+  .cta .more { background: rgba(120, 120, 130, 0.45); color: var(--ink); backdrop-filter: blur(8px); }
+  .dots { position: absolute; right: 4vw; bottom: 24%; z-index: 2; display: flex; gap: 6px; }
+  .dots i { width: 28px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); overflow: hidden; position: relative; }
+  .dots i b { position: absolute; inset: 0; width: 0; background: var(--ink); }
+  section.row { position: relative; margin: 0 0 34px; z-index: 3; }
+  #rows { position: relative; z-index: 3; margin-top: -9vh; }
+  section h3 { margin: 0 4vw 10px; font-size: 19px; font-weight: 700; }
+  .track { display: flex; gap: 10px; overflow-x: auto; padding: 18px 4vw 26px; scroll-snap-type: x mandatory; scroll-padding: 4vw; scrollbar-width: none; }
+  .track::-webkit-scrollbar { display: none; }
+  .card { flex: 0 0 auto; width: 180px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden; position: relative; scroll-snap-align: start; cursor: pointer; transition: transform 0.25s cubic-bezier(.2, .8, .2, 1), box-shadow 0.25s; background: #222; }
+  .card canvas { width: 100%; height: 100%; display: block; }
+  .card:hover, .card.pop { transform: scale(1.12); z-index: 5; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7); }
+  .card .new { position: absolute; top: 0; left: 50%; transform: translateX(-50%); background: var(--red); font: 800 9px ui-monospace, Menlo, monospace; padding: 3px 6px; border-radius: 0 0 3px 3px; letter-spacing: 0.1em; }
+  .wide .card { width: 300px; aspect-ratio: 16 / 9; }
+  .wide .card .bar { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 3px; background: rgba(255, 255, 255, 0.25); border-radius: 2px; }
+  .wide .card .bar b { display: block; height: 100%; background: var(--red); border-radius: 2px; }
+  .top10 .item { flex: 0 0 auto; display: flex; align-items: flex-end; scroll-snap-align: start; }
+  .top10 .num { font: 900 190px/0.78 ui-rounded, system-ui, sans-serif; letter-spacing: -0.1em; color: var(--bg); -webkit-text-stroke: 3px #5a5559; margin-right: -26px; }
+  .top10 .card { width: 150px; }
+  #sheet { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; background: rgba(0, 0, 0, 0.7); padding: 20px; }
+  #sheet.open { display: grid; }
+  .sheet { width: min(760px, 100%); border-radius: 12px; overflow: hidden; background: #181619; box-shadow: 0 30px 80px #000; animation: up 0.3s cubic-bezier(.2, .8, .2, 1); }
+  @keyframes up { from { transform: translateY(30px) scale(0.97); opacity: 0; } }
+  .sheet canvas { width: 100%; aspect-ratio: 16 / 8; display: block; }
+  .sheet .body { padding: 18px 24px 26px; }
+  .sheet h4 { margin: 0 0 8px; font-size: 30px; letter-spacing: -0.02em; }
+  .note { position: fixed; right: 12px; bottom: 10px; z-index: 30; font: 10.5px ui-monospace, Menlo, monospace; color: #6d676a; }
+  @media (max-width: 700px) { nav a:not(.on) { display: none; } .card { width: 120px; } .wide .card { width: 220px; } .top10 .num { font-size: 130px; margin-right: -16px; } .top10 .card { width: 100px; } .hero { height: 72vh; } .hero p { font-size: 14px; } .dots { display: none; } .cta button { height: 40px; padding: 0 16px; } }
+</style>
+</head>
+<body>
+<div id="page">
+  <nav id="nav"><div class="brand"><i></i>nightreel</div><a class="on" href="#">Home</a><a href="#">Series</a><a href="#">Films</a><a href="#">New & Popular</a><a href="#">My List</a><div class="sp"></div><div class="av"></div></nav>
+  <div class="hero" id="hero"><canvas id="heroc"></canvas>
+    <div class="info"><div class="tag"><b>N</b>ORIGINAL SERIES</div><h2 id="ht"></h2><div class="meta"><span class="m" id="hm"></span><span id="hy"></span><span class="r">16+</span><span id="hs"></span></div><p id="hd"></p><div class="cta"><button class="play">▶ Play</button><button class="more" id="hmore">ⓘ More info</button></div></div>
+    <div class="dots" id="dots"></div>
+  </div>
+  <div id="rows"></div>
+</div>
+<div id="sheet"><div class="sheet"><canvas id="shc"></canvas><div class="body"><div class="tag" id="stag"></div><h4 id="sht"></h4><div class="meta" id="shm"></div><p id="shd" style="color:#cfc9c6;line-height:1.55;margin:0"></p></div></div></div>
+<div class="note">fictional brand + titles · all art generated</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/streaming-landing.html
+ * PURPOSE: Streaming home page for invented brand: seeded generative posters, rotating hero, snap carousels, Top 10, detail sheet, idle tour
+ * UI: Render Studio > Apps & UI > Streaming Landing
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const $ = (id) => document.getElementById(id);
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+
+// Catalogue: invented titles from word pools, seeded so art and copy stay stable
+const A = ['Salt', 'Paper', 'Hollow', 'Neon', 'Quiet', 'Iron', 'Velvet', 'Glass', 'Last', 'Silver', 'Burning', 'Northern', 'Midnight', 'Wild', 'Distant', 'Copper', 'Little', 'Broken'];
+const B = ['Harbor', 'Lanterns', 'Orchard', 'Signal', 'Kingdom', 'Tides', 'Engine', 'Saints', 'Frontier', 'Atlas', 'Garden', 'Hours', 'Machine', 'Comet', 'Choir', 'Island', 'Weather', 'Archive'];
+const GENRES = ['Sci-fi thriller', 'Coastal mystery', 'Animated adventure', 'Heist drama', 'Space opera', 'Period romance', 'Comedy', 'Survival', 'Documentary', 'Noir'];
+const LOGS = ['A lighthouse keeper finds a signal that predicts storms a week early, and someone wants it silenced.', 'Three estranged siblings inherit a failing orchard and the secret buried beneath it.', 'A courier crosses a frozen continent with a map that redraws itself every night.', 'When the city’s last radio station goes dark, a night DJ broadcasts from a moving train.', 'An archivist discovers the museum’s oldest painting is changing, one brushstroke at a time.', 'A crew of retired engineers plan one final, impossible heist: stealing a bridge.'];
+const titles = Array.from({ length: 60 }, (_, i) => {
+  const r = rng(i * 977 + 3);
+  const name = r() < 0.3 ? `The ${B[(r() * B.length) | 0]}` : `${A[(r() * A.length) | 0]} ${B[(r() * B.length) | 0]}`;
+  return { i, name, genre: GENRES[(r() * GENRES.length) | 0], year: 2019 + ((r() * 8) | 0), match: 80 + ((r() * 19) | 0), seasons: r() < 0.6 ? `${1 + ((r() * 4) | 0)} Seasons` : `${1 + ((r() * 2) | 0)}h ${10 + ((r() * 49) | 0)}m`, log: LOGS[(r() * LOGS.length) | 0], hue: (r() * 360) | 0, style: (r() * 5) | 0, isNew: r() < 0.18, progress: r() };
+});
+
+// Art > poster generator: 5 compositions over a two-tone gradient; mode poster | wide | bare (no title)
+function paintArt(cv, t, w, h, time = 0, mode = 'poster') {
+  const g = cv.getContext('2d'), r = rng(t.i * 31 + 7), H1 = t.hue, H2 = (t.hue + 40 + r() * 120) % 360;
+  const gr = g.createLinearGradient(0, 0, w * 0.3, h);
+  gr.addColorStop(0, `hsl(${H1},55%,${18 + r() * 14}%)`); gr.addColorStop(1, `hsl(${H2},60%,${6 + r() * 8}%)`);
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  const cx = w * (0.3 + r() * 0.4), cy = h * (0.25 + r() * 0.25), u = Math.min(w, h);
+  g.save();
+  switch (t.style) {
+    case 0: { // sun + horizon bands
+      const sg = g.createRadialGradient(cx, cy, 0, cx, cy, u * 0.6); sg.addColorStop(0, `hsla(${H2 + 30},95%,70%,.95)`); sg.addColorStop(0.25, `hsla(${H2 + 20},90%,58%,.6)`); sg.addColorStop(1, 'transparent');
+      g.fillStyle = sg; g.fillRect(0, 0, w, h);
+      for (let k = 0; k < 6; k++) { g.fillStyle = `hsla(${H1},40%,${6 + k * 2}%,.9)`; g.beginPath(); g.moveTo(0, h * 0.6 + k * h * 0.05); for (let x = 0; x <= w; x += w / 12) g.lineTo(x, h * 0.58 + k * h * 0.05 + Math.sin(x / w * 7 + k * 2 + r() + time * 0.0004 * (k + 1)) * h * 0.02); g.lineTo(w, h); g.lineTo(0, h); g.fill(); }
+      break;
+    }
+    case 1: { // figure silhouette in a doorway of light
+      g.fillStyle = `hsla(${H2},80%,65%,.85)`; g.fillRect(cx - u * 0.16, h * 0.18, u * 0.32, h * 0.62);
+      g.fillStyle = `hsl(${H1},40%,6%)`; g.beginPath(); g.arc(cx, h * 0.47, u * 0.06, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.moveTo(cx - u * 0.1, h * 0.8); g.quadraticCurveTo(cx - u * 0.09, h * 0.52, cx, h * 0.52); g.quadraticCurveTo(cx + u * 0.09, h * 0.52, cx + u * 0.1, h * 0.8); g.fill();
+      g.fillStyle = `hsla(${H2},80%,65%,.18)`; g.beginPath(); g.moveTo(cx - u * 0.16, h * 0.8); g.lineTo(cx + u * 0.16, h * 0.8); g.lineTo(w, h); g.lineTo(0, h); g.fill();
+      break;
+    }
+    case 2: { // concentric rings / portal
+      for (let k = 10; k > 0; k--) { g.strokeStyle = `hsla(${H2 + k * 8},85%,${40 + k * 3}%,${0.12 + k * 0.05})`; g.lineWidth = u * 0.025; g.beginPath(); g.arc(cx, cy + h * 0.1, (k * u * 0.06) * (1 + 0.04 * Math.sin(time * 0.002 + k)), 0, Math.PI * 2); g.stroke(); }
+      break;
+    }
+    case 3: { // city skyline with lit windows
+      const sg = g.createRadialGradient(cx, h * 0.55, 0, cx, h * 0.55, u); sg.addColorStop(0, `hsla(${H2},90%,55%,.55)`); sg.addColorStop(1, 'transparent'); g.fillStyle = sg; g.fillRect(0, 0, w, h);
+      let x = 0; while (x < w) { const bw = u * (0.07 + r() * 0.1), bh = h * (0.18 + r() * 0.4); g.fillStyle = `hsl(${H1},30%,${5 + r() * 5}%)`; g.fillRect(x, h * 0.75 - bh, bw, bh + h); g.fillStyle = `hsla(${H2 + 40},90%,75%,.8)`; for (let wy = h * 0.75 - bh + 6; wy < h * 0.72; wy += 7) for (let wx = x + 3; wx < x + bw - 3; wx += 6) if (r() < 0.25) g.fillRect(wx, wy, 2, 3); x += bw + 1; }
+      break;
+    }
+    default: { // big shapes collage
+      for (let k = 0; k < 5; k++) { g.fillStyle = `hsla(${(H2 + k * 50) % 360},80%,${45 + r() * 20}%,${0.35 + r() * 0.4})`; g.beginPath(); if (k % 2) g.arc(w * r(), h * r() * 0.7, u * (0.12 + r() * 0.25), 0, Math.PI * 2); else { g.save(); g.translate(w / 2, h / 2); g.rotate(r() * 2); g.rect(-u * 0.3, -u * 0.06, u * 0.6 + r() * u * 0.3, u * 0.12); g.restore(); } g.fill(); }
+    }
+  }
+  g.restore();
+  // grain: lighter when animating so hero redraws stay cheap
+  g.fillStyle = 'rgba(255,255,255,.035)'; for (let k = 0; k < (w * h) / (time ? 700 : 90); k++) g.fillRect(r() * w, r() * h, 1, 1);
+  if (mode === 'poster') {
+    const sh = g.createLinearGradient(0, h * 0.55, 0, h); sh.addColorStop(0, 'transparent'); sh.addColorStop(1, 'rgba(0,0,0,.75)'); g.fillStyle = sh; g.fillRect(0, h * 0.55, w, h * 0.45);
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    const fs = w * (t.name.length > 13 ? 0.13 : 0.16); g.font = `900 ${fs}px ui-rounded, system-ui, sans-serif`;
+    const words = t.name.toUpperCase().split(' ');
+    words.forEach((wd, k) => g.fillText(wd, w / 2, h * 0.86 - (words.length - 1 - k) * fs * 0.95));
+    g.font = `700 ${w * 0.045}px ui-monospace, Menlo, monospace`; g.fillStyle = 'rgba(255,255,255,.7)'; g.fillText(t.genre.toUpperCase(), w / 2, h * 0.94);
+  } else if (mode === 'wide') {
+    g.fillStyle = '#fff'; g.textAlign = 'left'; g.font = `900 ${h * 0.14}px ui-rounded, system-ui, sans-serif`; g.fillText(t.name.toUpperCase(), w * 0.06, h * 0.82);
+  }
+}
+function artCanvas(t, w, h, mode = 'poster') {
+  const cv = document.createElement('canvas'), dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = w * dpr; cv.height = h * dpr; cv.getContext('2d').scale(dpr, dpr);
+  paintArt(cv, t, w, h, 0, mode);
+  return cv;
+}
+
+// Rows: posters, wide "continue watching", Top 10
+const ROWS = [
+  { name: 'Trending Now', ids: [3, 8, 14, 22, 27, 31, 40, 45, 51, 57] },
+  { name: 'Continue Watching', ids: [5, 12, 19, 33, 38, 49], wide: true },
+  { name: 'Top 10 Series Today', ids: [9, 17, 2, 25, 36, 44, 11, 58, 29, 6], top: true },
+  { name: 'Because You Watched Iron Signal', ids: [1, 7, 13, 20, 24, 30, 37, 42, 48, 55] },
+  { name: 'Award-Winning Originals', ids: [4, 10, 16, 21, 28, 35, 41, 47, 53, 59] },
+];
+const cardSize = () => (innerWidth < 700 ? [120, 180] : [180, 270]);
+function buildRows() {
+  const [cw, chh] = cardSize();
+  $('rows').innerHTML = '';
+  for (const row of ROWS) {
+    const sec = document.createElement('section'); sec.className = 'row' + (row.wide ? ' wide' : '') + (row.top ? ' top10' : '');
+    sec.innerHTML = `<h3>${row.name}</h3><div class="track"></div>`;
+    const tr = sec.querySelector('.track');
+    row.ids.forEach((id, k) => {
+      const t = titles[id], card = document.createElement('div'); card.className = 'card'; card.dataset.id = id;
+      if (row.wide) { const w = innerWidth < 700 ? 220 : 300; card.appendChild(artCanvas(t, w, w * 9 / 16, 'wide')); card.insertAdjacentHTML('beforeend', `<div class="bar"><b style="width:${(t.progress * 80 + 10).toFixed(0)}%"></b></div>`); }
+      else { const w = row.top ? (innerWidth < 700 ? 100 : 150) : cw; card.appendChild(artCanvas(t, w, w * 1.5)); if (t.isNew) card.insertAdjacentHTML('beforeend', '<span class="new">NEW</span>'); }
+      if (row.top) { const it = document.createElement('div'); it.className = 'item'; it.innerHTML = `<span class="num">${k + 1}</span>`; it.appendChild(card); tr.appendChild(it); } else tr.appendChild(card);
+    });
+    $('rows').appendChild(sec);
+  }
+}
+
+// Hero: cycles 4 featured titles every 8 s with a slow Ken Burns drift
+const FEATURED = [22, 3, 40, 14];
+let hi = 0, heroStart = performance.now();
+$('dots').innerHTML = FEATURED.map(() => '<i><b></b></i>').join('');
+function setHero(k) {
+  hi = k; heroStart = performance.now();
+  const t = titles[FEATURED[k]];
+  $('ht').textContent = t.name; $('hm').textContent = `${t.match}% match`; $('hy').textContent = t.year; $('hs').textContent = t.seasons; $('hd').textContent = t.log;
+  $('dots').querySelectorAll('b').forEach((b, j) => (b.style.width = j < k ? '100%' : '0'));
+}
+const heroC = $('heroc');
+function drawHero(now) {
+  const w = heroC.clientWidth, h = heroC.clientHeight, dpr = Math.min(devicePixelRatio || 1, 1.5);
+  if (heroC.width !== Math.round(w * dpr)) { heroC.width = w * dpr; heroC.height = h * dpr; }
+  const g = heroC.getContext('2d'), p = (now - heroStart) / 8000, z = 1 + p * 0.06;
+  g.setTransform(dpr * z, 0, 0, dpr * z, -w * dpr * (z - 1) * 0.3, -h * dpr * (z - 1) * 0.5);
+  paintArt(heroC, titles[FEATURED[hi]], w, h, now, 'bare');
+  $('dots').querySelectorAll('b')[hi].style.width = `${Math.min(1, p) * 100}%`;
+  if (p >= 1) setHero((hi + 1) % FEATURED.length);
+}
+
+// Sheet: detail view with animated art
+let sheetT = null;
+function openSheet(id) { sheetT = titles[id]; $('sheet').classList.add('open'); $('stag').innerHTML = `<b>N</b>${sheetT.genre.toUpperCase()}`; $('sht').textContent = sheetT.name; $('shm').innerHTML = `<span class="m">${sheetT.match}% match</span><span>${sheetT.year}</span><span class="r">13+</span><span>${sheetT.seasons}</span>`; $('shd').textContent = sheetT.log; }
+function closeSheet() { $('sheet').classList.remove('open'); sheetT = null; }
+$('sheet').onclick = (e) => { if (e.target.id === 'sheet') { userAct(); closeSheet(); } };
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+$('rows').onclick = (e) => { const c = e.target.closest('.card'); if (c) { userAct(); openSheet(Number(c.dataset.id)); } };
+$('hmore').onclick = () => { userAct(); openSheet(FEATURED[hi]); };
+$('page').addEventListener('scroll', () => $('nav').classList.toggle('solid', $('page').scrollTop > 40));
+
+function frame(now) {
+  drawHero(now);
+  if (sheetT) { const c = $('shc'), w = c.clientWidth, h = c.clientHeight; if (c.width !== w) { c.width = w; c.height = h; } paintArt(c, sheetT, w, h, now, 'bare'); }
+  requestAnimationFrame(frame);
+}
+
+// Idle tour: pop cards along the trending row, scroll down and back
+let lastInput = -1e9, tourK = 0;
+function userAct() { lastInput = performance.now(); document.querySelectorAll('.card.pop').forEach((c) => c.classList.remove('pop')); }
+['wheel', 'pointerdown', 'keydown', 'touchstart'].forEach((ev) => addEventListener(ev, userAct, { passive: true }));
+setInterval(() => {
+  if (performance.now() - lastInput < 12000) return;
+  const cards = document.querySelectorAll('section.row:first-of-type .card');
+  document.querySelectorAll('.card.pop').forEach((c) => c.classList.remove('pop'));
+  const k = tourK++ % 14;
+  if (k < 6) cards[k + 1]?.classList.add('pop');
+  else if (k === 7) $('page').scrollTo({ top: innerHeight * 0.7 });
+  else if (k === 11) $('page').scrollTo({ top: 0 });
+}, 1100);
+buildRows(); setHero(0);
+let rw = innerWidth; addEventListener('resize', () => { if (Math.abs(innerWidth - rw) > 80) { rw = innerWidth; buildRows(); } });
+// first card pops straight away so the poster shows the hover state
+document.querySelector('section.row .card:nth-child(2)')?.classList.add('pop');
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reaction Diffusion</title>
+<meta name="category" content="generative" />
+<meta name="order" content="7" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="Gray-Scott, GPU simulation, ping-pong FBO, Turing patterns" />
+<meta name="description" content="The Gray-Scott reaction-diffusion model running on the GPU: two chemicals diffuse and react across a half-float grid, 24 simulation steps per frame, and tiny changes to feed and kill rates grow coral, fingerprints, mitosis spots or worms. Paint chemical with the pointer and the pattern grows around it, shaded with an embossed light. Tests GPGPU ping-pong rendering and a numerically stable PDE solver." />
+<meta name="prompt" content="Create a Gray-Scott reaction-diffusion simulation in a single HTML file running on the GPU with WebGL2. Use two ping-pong float textures, a 9-point Laplacian and many simulation steps per frame, with presets for coral, fingerprints, mitosis, worms and maze patterns. Let me paint chemical B with the mouse or a finger, render the result with a colour ramp and an embossed lighting effect, and reseed it automatically when idle." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.66); --accent: #ff7aa8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07050c; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; text-shadow: 0 1px 6px #000a; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 290px; padding: 12px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12px; }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 6px; }
+  #panel button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 8px; padding: 6px 2px; font: inherit; font-weight: 600; cursor: pointer; }
+  #panel button.on { background: var(--accent); color: #2a0614; border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; text-shadow: 0 1px 4px #000a; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Reaction Diffusion</h1><p>Gray-Scott model · GPU ping-pong</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <div class="btns" id="presets"></div>
+  <div class="btns"><button id="pal">Palette</button><button id="seed">Reseed</button><button id="clear">Clear</button></div>
+  <div class="hint">Draw to add chemical · patterns grow from your strokes</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/reaction-diffusion.html
+ * PURPOSE: WebGL2 Gray-Scott RD: half-float ping-pong, 9-point Laplacian, presets, pointer painting, embossed colour render
+ * UI: Render Studio > 2D & Generative > Reaction Diffusion
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false });
+const $ = (id) => document.getElementById(id);
+gl.getExtension('EXT_color_buffer_float');
+
+const VS = `#version 300 es
+in vec2 p; out vec2 vUv; void main(){ vUv = p * .5 + .5; gl_Position = vec4(p, 0., 1.); }`;
+// Sim > step: A' = A + (Da*lapA - A*B^2 + f*(1-A)), B' = B + (Db*lapB + A*B^2 - (k+f)*B)
+const STEP = `#version 300 es
+precision highp float;
+uniform sampler2D uS; uniform vec2 uPx; uniform float uF, uK; uniform vec3 uBrush; uniform float uAspect;
+in vec2 vUv; out vec4 o;
+void main(){
+  vec2 c = texture(uS, vUv).xy;
+  vec2 lap = -c
+    + .2 * (texture(uS, vUv + vec2(uPx.x, 0)).xy + texture(uS, vUv - vec2(uPx.x, 0)).xy + texture(uS, vUv + vec2(0, uPx.y)).xy + texture(uS, vUv - vec2(0, uPx.y)).xy)
+    + .05 * (texture(uS, vUv + uPx).xy + texture(uS, vUv - uPx).xy + texture(uS, vUv + vec2(uPx.x, -uPx.y)).xy + texture(uS, vUv + vec2(-uPx.x, uPx.y)).xy);
+  float a = c.x, b = c.y, r = a * b * b;
+  // spatially varying feed gives each region its own texture
+  float f = uF + (vUv.x - .5) * .004, k = uK + (vUv.y - .5) * .002;
+  a += 1.0 * lap.x - r + f * (1. - a);
+  b += .5 * lap.y + r - (k + f) * b;
+  if (uBrush.z > 0.) { vec2 d = (vUv - uBrush.xy) * vec2(uAspect, 1.); if (dot(d, d) < uBrush.z * uBrush.z) b = .9; }
+  o = vec4(clamp(a, 0., 1.), clamp(b, 0., 1.), 0, 1);
+}`;
+// Sim > display: B mapped through a 3-stop ramp, gradient used as a bump for lighting
+const SHOW = `#version 300 es
+precision highp float;
+uniform sampler2D uS; uniform vec2 uPx; uniform vec3 uC0, uC1, uC2;
+in vec2 vUv; out vec4 o;
+void main(){
+  float b = texture(uS, vUv).y;
+  float bx = texture(uS, vUv + vec2(uPx.x, 0)).y - texture(uS, vUv - vec2(uPx.x, 0)).y;
+  float by = texture(uS, vUv + vec2(0, uPx.y)).y - texture(uS, vUv - vec2(0, uPx.y)).y;
+  vec3 n = normalize(vec3(-bx * 6., -by * 6., .35));
+  float t = smoothstep(.05, .38, b);
+  vec3 col = t < .5 ? mix(uC0, uC1, t * 2.) : mix(uC1, uC2, t * 2. - 1.);
+  float diff = dot(n, normalize(vec3(-.5, .6, .65)));
+  float spec = pow(max(dot(reflect(-normalize(vec3(-.5, .6, .65)), n), vec3(0, 0, 1)), 0.), 24.);
+  col = col * (.55 + .6 * diff) + spec * .35 * t;
+  col *= 1. - .35 * length(vUv - .5);
+  o = vec4(col, 1);
+}`;
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs, names) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'p');
+  gl.linkProgram(p);
+  return { p, u: Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)])) };
+}
+const step = program(STEP, ['uS', 'uPx', 'uF', 'uK', 'uBrush', 'uAspect']);
+const show = program(SHOW, ['uS', 'uPx', 'uC0', 'uC1', 'uC2']);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+// Sim > state: two RGBA16F targets, sim grid at ~half screen res
+let SW = 0, SH = 0, tex = [], cur = 0;
+function target(data) {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, SW, SH, 0, gl.RGBA, gl.FLOAT, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  return { t, f };
+}
+function seed(kind = 'blobs') {
+  const d = new Float32Array(SW * SH * 4);
+  for (let i = 0; i < SW * SH; i++) { d[i * 4] = 1; d[i * 4 + 3] = 1; }
+  const dot = (cx, cy, r) => {
+    for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
+      if (x * x + y * y > r * r) continue;
+      const px = (cx + x + SW) % SW, py = (cy + y + SH) % SH;
+      d[(py * SW + px) * 4 + 1] = 1;
+    }
+  };
+  if (kind === 'blobs') for (let i = 0; i < 26; i++) dot(Math.random() * SW | 0, Math.random() * SH | 0, 3 + Math.random() * 6 | 0);
+  for (const t of tex) { gl.deleteTexture(t.t); gl.deleteFramebuffer(t.f); }
+  tex = [target(d), target(d)];
+  cur = 0;
+}
+function resize() {
+  const s = Math.min(devicePixelRatio || 1, 1.5);
+  cv.width = Math.round(innerWidth * s); cv.height = Math.round(innerHeight * s);
+  SW = Math.round(innerWidth / 2); SH = Math.round(innerHeight / 2);
+  seed();
+}
+addEventListener('resize', resize);
+resize();
+
+// Sim > Panel: presets (feed, kill), palettes, reseed / clear
+const PRESETS = [['Coral', 0.0545, 0.062], ['Mitosis', 0.0367, 0.0649], ['Fingerprint', 0.037, 0.06], ['Worms', 0.078, 0.061], ['Maze', 0.029, 0.057], ['Bubbles', 0.098, 0.0555]];
+const PALETTES = [
+  [[0.03, 0.02, 0.06], [0.85, 0.2, 0.45], [1, 0.85, 0.6]],
+  [[0.01, 0.04, 0.06], [0.1, 0.55, 0.65], [0.85, 1, 0.9]],
+  [[0.04, 0.02, 0.0], [0.9, 0.45, 0.08], [1, 0.95, 0.75]],
+  [[0.02, 0.02, 0.03], [0.45, 0.45, 0.5], [0.95, 0.95, 0.97]],
+];
+let preset = 0, pal = 0, lastInput = -1e9;
+PRESETS.forEach(([n], i) => {
+  const b = document.createElement('button'); b.textContent = n; b.dataset.i = i;
+  b.onclick = () => { setPreset(i); lastInput = performance.now(); };
+  $('presets').appendChild(b);
+});
+function setPreset(i) { preset = i; document.querySelectorAll('#presets button').forEach((b) => b.classList.toggle('on', Number(b.dataset.i) === i)); }
+setPreset(0);
+$('pal').onclick = () => (pal = (pal + 1) % PALETTES.length);
+$('seed').onclick = () => { seed(); lastInput = performance.now(); };
+$('clear').onclick = () => { seed('none'); lastInput = performance.now(); };
+
+// Sim > brush: pointer paints chemical B
+let brush = null;
+const toUv = (e) => [e.clientX / innerWidth, 1 - e.clientY / innerHeight];
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); brush = toUv(e); lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => { if (brush) { brush = toUv(e); lastInput = performance.now(); } });
+cv.addEventListener('pointerup', () => (brush = null));
+cv.addEventListener('pointercancel', () => (brush = null));
+
+// Sim > loop: 24 steps per frame, then one display pass; idle cycles presets every 14 s
+const STEPS = 24;
+let last = performance.now(), fps = 60, fpsN = 0, fpsT = 0, idleT = 0, ghost = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const idle = now - lastInput > 8000;
+  idleT = idle ? idleT + dt : 0;
+  if (idleT > 14) { idleT = 0; setPreset((preset + 1) % PRESETS.length); pal = (pal + 1) % PALETTES.length; seed(); }
+  // idle: a slow invisible brush loops around the centre
+  ghost += dt;
+  const ghostBrush = idle && (ghost % 6) < 1.2 ? [0.5 + Math.cos(ghost * 1.3) * 0.25, 0.5 + Math.sin(ghost * 2.1) * 0.22] : null;
+  const br = brush || ghostBrush;
+  const [, f, k] = PRESETS[preset];
+  gl.useProgram(step.p);
+  gl.viewport(0, 0, SW, SH);
+  gl.uniform2f(step.u.uPx, 1 / SW, 1 / SH);
+  gl.uniform1f(step.u.uF, f); gl.uniform1f(step.u.uK, k);
+  gl.uniform1f(step.u.uAspect, SW / SH);
+  gl.uniform1i(step.u.uS, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  for (let i = 0; i < STEPS; i++) {
+    gl.uniform3f(step.u.uBrush, br ? br[0] : 0, br ? br[1] : 0, br && i === 0 ? 0.012 : 0);
+    gl.bindTexture(gl.TEXTURE_2D, tex[cur].t);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, tex[1 - cur].f);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    cur = 1 - cur;
+  }
+  gl.useProgram(show.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, cv.width, cv.height);
+  gl.bindTexture(gl.TEXTURE_2D, tex[cur].t);
+  gl.uniform1i(show.u.uS, 0);
+  gl.uniform2f(show.u.uPx, 1 / SW, 1 / SH);
+  const P = PALETTES[pal];
+  gl.uniform3fv(show.u.uC0, P[0]); gl.uniform3fv(show.u.uC1, P[1]); gl.uniform3fv(show.u.uC2, P[2]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${PRESETS[preset][0]} · f ${f} k ${k}<br>${SW}×${SH} grid · ${STEPS} steps/frame · ${fps} fps`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

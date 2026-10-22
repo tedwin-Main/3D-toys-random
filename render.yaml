@@ -1,4 +1,5 @@
-# Render Blueprint for the whole toy box (static toys + room relay).
+# Render Blueprint for the whole repo: Render Studio at /, 3D Toy Box at /3d-toys/, room relay at /3d-toys/rooms.
+# One Node server (render-studio/backend/start-server.js) serves both folders.
 # Keep ONE instance: multiplayer rooms live in server memory,
 # so a second replica would split players across servers that cannot see each other.
 # Free web services sleep after 15 min idle; the first visit cold-starts (~30-60 s).
@@ -8,7 +9,8 @@ services:
     runtime: node
     plan: free
     branch: main
-    buildCommand: npm ci
+    # --omit=dev skips Playwright (capture tool is local-only)
+    buildCommand: npm ci --prefix 3d-toys && npm ci --prefix render-studio --omit=dev
     startCommand: npm start
     healthCheckPath: /health
     envVars:

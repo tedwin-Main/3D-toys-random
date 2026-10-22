@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flow Field Art</title>
+<meta name="category" content="generative" />
+<meta name="order" content="1" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="p5.js, perlin flow field, evenly spaced streamlines, PNG export" />
+<meta name="description" content="Gallery-style generative art: thousands of streamlines follow a Perlin noise field without ever touching, at mixed weights and palettes. Hard because collision-aware line packing (the Tyler Hobbs look) needs a spatial hash, not just particles." />
+<meta name="prompt" content="Make a p5.js generative art page: evenly spaced flow-field streamlines that follow Perlin noise and never overlap, with mixed stroke weights, curated palettes on a paper background and subtle grain. Lines draw in progressively. Add new seed, palette, style (streamlines or particle trails) and save-PNG controls." />
+<style>
+  :root { --ink: #f3efe6; --muted: #a59f93; --panel: rgba(18, 14, 10, 0.74); --accent: #e8573a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0a07; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  main canvas { display: block; }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 286px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel h1 { margin: 0 0 2px; font-size: 16px; letter-spacing: -0.01em; }
+  #panel .sub { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  #panel label { display: grid; grid-template-columns: 78px 1fr 34px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btns button:hover { border-color: var(--accent); }
+  .btns button.primary { background: var(--accent); border-color: var(--accent); color: #1d0904; }
+  .swatches { display: flex; gap: 4px; margin: 2px 0 10px; }
+  .swatches span { flex: 1; height: 8px; border-radius: 3px; }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  #stats { position: fixed; right: 18px; top: 16px; padding: 6px 10px; border-radius: 10px; background: var(--panel); font: 11.5px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  #toggle { display: none; }
+  @media (max-width: 600px) {
+    #panel { left: 10px; right: 10px; bottom: 10px; width: auto; }
+    #panel:not(.open) label, #panel:not(.open) .hint, #panel:not(.open) .sub, #panel:not(.open) .swatches { display: none; }
+    #toggle { display: inline-block; }
+    .btns { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
+</head>
+<body>
+<main id="stage"></main>
+<div id="stats"></div>
+<div id="panel">
+  <h1>Flow Field</h1>
+  <p class="sub">Streamlines that never touch · seed <b id="seed-o"></b></p>
+  <div class="swatches" id="swatches"></div>
+  <label>Scale <input id="scale" type="range" min="0.4" max="3" step="0.05" value="1"><output id="scale-o"></output></label>
+  <label>Turbulence <input id="turb" type="range" min="0.5" max="4" step="0.05" value="1.6"><output id="turb-o"></output></label>
+  <label>Spacing <input id="gap" type="range" min="1" max="12" step="0.5" value="3.5"><output id="gap-o"></output></label>
+  <div class="btns">
+    <button id="seed" class="primary">New seed</button>
+    <button id="palette">Palette</button>
+    <button id="style">Lines</button>
+    <button id="save">Save PNG</button>
+    <button id="pause">Pause</button>
+    <button id="toggle">⚙</button>
+  </div>
+  <div class="hint">R new seed · P palette · L style · S save PNG. Sliders regenerate the same seed.</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/flow-field-art.html
+ * PURPOSE: p5 flow-field art: collision-aware evenly spaced streamlines or particle trails, palettes, seed, PNG export
+ * UI: Render Studio > 2D & Generative > Flow Field Art
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const PALETTES = [
+  { name: 'Hobbs', bg: '#efe6d4', ink: ['#1f2a44', '#d1452f', '#e9a93b', '#2f6f8f', '#1c1c1c', '#c9b79c', '#f2d7a6'] },
+  { name: 'Ember', bg: '#140d09', ink: ['#ff8a3d', '#ffb35c', '#f04e23', '#ffd9a0', '#7a2414', '#ffe8c7'] },
+  { name: 'Tide', bg: '#e9efeb', ink: ['#0b3d4f', '#1f7a8c', '#7ac4c4', '#f2b134', '#ed553b', '#173042'] },
+  { name: 'Neon', bg: '#07060f', ink: ['#ff2e88', '#7c4dff', '#00e5ff', '#f8f32b', '#ffffff', '#3d2b8f'] },
+  { name: 'Sumi', bg: '#f4f1ea', ink: ['#111111', '#2b2b2b', '#4a4a4a', '#b8312f', '#8a8a8a'] },
+];
+const $ = (id) => document.getElementById(id);
+const opts = { scale: 1, turb: 1.6, gap: 3.5 };
+let seed = Math.floor(Math.random() * 99999);
+let pal = 0, style = 'lines', paused = false;
+
+// Flow Field > Panel > sliders: regenerate same seed on change
+for (const k of Object.keys(opts)) {
+  const el = $(k), out = $(`${k}-o`);
+  const sync = () => { opts[k] = +el.value; out.textContent = (+el.value).toFixed(k === 'gap' ? 1 : 2); };
+  sync();
+  el.addEventListener('input', sync);
+  el.addEventListener('change', () => restart());
+}
+
+let P, field, starts, hash, cell, lines, particles, frameBudget, unit, finished;
+
+const sketch = (p) => {
+  P = p;
+  p.setup = () => {
+    p.pixelDensity(Math.min(2, window.devicePixelRatio || 1));
+    p.createCanvas(window.innerWidth, window.innerHeight).parent('stage');
+    restart();
+  };
+  p.windowResized = () => { p.resizeCanvas(window.innerWidth, window.innerHeight); restart(); };
+  p.draw = () => {
+    if (paused || finished) return;
+    const t0 = performance.now();
+    // budget per frame so drawing animates instead of freezing the tab
+    while (performance.now() - t0 < frameBudget && !finished) {
+      if (style === 'lines') stepLines(); else stepParticles();
+    }
+    if (finished) grain(0.05);
+    stats();
+  };
+};
+
+// Flow Field > field: noise angle plus a slow second octave for large sweeping drift
+function angleAt(x, y) {
+  const f = 0.0016 * opts.scale / unit;
+  const n = P.noise(x * f, y * f);
+  // low-freq noise, not atan2 swirl: atan2 wraps at +-PI and leaves a hard seam
+  const drift = P.noise(x * f * 0.25 + 91, y * f * 0.25 + 91) * Math.PI * 1.4;
+  return n * Math.PI * 2 * opts.turb + drift;
+}
+
+// Flow Field > generator: reset canvas, seed, start grid and spatial hash
+function restart() {
+  if (!P) return;
+  P.randomSeed(seed); P.noiseSeed(seed); P.noiseDetail(4, 0.45);
+  unit = Math.min(P.width, P.height) / 800;
+  finished = false;
+  frameBudget = 9;
+  const pl = PALETTES[pal];
+  P.background(pl.bg);
+  grain(0.035);
+  $('seed-o').textContent = seed;
+  $('swatches').innerHTML = pl.ink.map((c) => `<span style="background:${c}"></span>`).join('');
+  $('palette').textContent = pl.name;
+  $('style').textContent = style === 'lines' ? 'Lines' : 'Trails';
+  lines = 0;
+  if (style === 'lines') {
+    cell = 24 * unit;
+    hash = new Map();
+    starts = [];
+    const sp = 9 * unit;
+    for (let y = -sp; y < P.height + sp; y += sp)
+      for (let x = -sp; x < P.width + sp; x += sp) starts.push([x + P.random(-sp, sp), y + P.random(-sp, sp)]);
+    P.shuffle(starts, true);
+  } else {
+    particles = Array.from({ length: Math.round(2600 * unit * unit + 900) }, () => spawn());
+    particles.steps = 0;
+  }
+  stats();
+}
+
+// Flow Field > Lines: spatial hash lookup for nearest neighbouring stroke
+function key(cx, cy) { return cx * 73856093 ^ cy * 19349663; }
+function blocked(x, y, r) {
+  const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+    const b = hash.get(key(cx + i, cy + j));
+    if (!b) continue;
+    for (let k = 0; k < b.length; k += 3) {
+      const dx = b[k] - x, dy = b[k + 1] - y, d = b[k + 2] + r + opts.gap * unit;
+      if (dx * dx + dy * dy < d * d) return true;
+    }
+  }
+  return false;
+}
+function insert(x, y, r) {
+  const k = key(Math.floor(x / cell), Math.floor(y / cell));
+  let b = hash.get(k);
+  if (!b) hash.set(k, (b = []));
+  b.push(x, y, r);
+}
+
+// Flow Field > Lines: weight distribution, few bold lines among many fine ones
+function pickWeight() {
+  const r = P.random();
+  return (r < 0.06 ? P.random(9, 15) : r < 0.3 ? P.random(4, 7) : P.random(1.2, 2.6)) * unit;
+}
+
+function trace(x, y, dir, r, out) {
+  const step = 2 * unit;
+  for (let i = 0; i < 520; i++) {
+    const a = angleAt(x, y) + (dir < 0 ? Math.PI : 0);
+    x += Math.cos(a) * step; y += Math.sin(a) * step;
+    if (x < -20 || y < -20 || x > P.width + 20 || y > P.height + 20) break;
+    if (blocked(x, y, r)) break;
+    out.push(x, y);
+  }
+}
+
+function stepLines() {
+  if (!starts.length) { finished = true; return; }
+  const [sx, sy] = starts.pop();
+  const w = pickWeight(), r = w / 2;
+  if (blocked(sx, sy, r)) return;
+  const fwd = [], back = [];
+  trace(sx, sy, 1, r, fwd);
+  trace(sx, sy, -1, r, back);
+  const pts = [];
+  for (let i = back.length - 2; i >= 0; i -= 2) pts.push(back[i], back[i + 1]);
+  pts.push(sx, sy, ...fwd);
+  // reject stubs so the piece reads as long flowing strokes
+  if (pts.length < 2 * Math.max(10, 36 * r / unit)) return;
+  for (let i = 0; i < pts.length; i += 2) insert(pts[i], pts[i + 1], r);
+  const pl = PALETTES[pal];
+  // colour bands follow a low-frequency noise so hues cluster like paint regions
+  const band = P.noise(sx * 0.0012 / unit + 50, sy * 0.0012 / unit + 50);
+  const idx = Math.floor((band * 1.7 + P.random(-0.18, 0.18)) * pl.ink.length) % pl.ink.length;
+  const ctx = P.drawingContext;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = pl.ink[(idx + pl.ink.length) % pl.ink.length];
+  ctx.lineWidth = w;
+  ctx.beginPath();
+  ctx.moveTo(pts[0], pts[1]);
+  for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+  ctx.stroke();
+  lines++;
+}
+
+// Flow Field > Trails: classic particle flow, low alpha accumulation
+function spawn() {
+  const pl = PALETTES[pal];
+  return { x: P.random(P.width), y: P.random(P.height), life: P.random(80, 260), c: P.color(pl.ink[Math.floor(P.random(pl.ink.length))]) };
+}
+function stepParticles() {
+  const ctx = P.drawingContext;
+  ctx.lineWidth = 1.1 * unit;
+  ctx.lineCap = 'round';
+  for (const q of particles) {
+    const a = angleAt(q.x, q.y);
+    const nx = q.x + Math.cos(a) * 1.6 * unit, ny = q.y + Math.sin(a) * 1.6 * unit;
+    q.c.setAlpha(34);
+    ctx.strokeStyle = q.c.toString();
+    ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(nx, ny); ctx.stroke();
+    q.x = nx; q.y = ny;
+    if (--q.life < 0 || nx < 0 || ny < 0 || nx > P.width || ny > P.height) Object.assign(q, spawn());
+  }
+  particles.steps++;
+  lines = particles.steps;
+  if (particles.steps > 900) finished = true;
+  // one sweep per call keeps trails animated frame to frame
+  frameBudget = 0;
+}
+
+// Flow Field > finish: paper grain over the piece
+function grain(a) {
+  const ctx = P.drawingContext;
+  const n = Math.round(P.width * P.height / 40);
+  const dark = P.brightness(PALETTES[pal].bg) < 40;
+  ctx.fillStyle = dark ? `rgba(255,240,220,${a})` : `rgba(40,25,10,${a})`;
+  for (let i = 0; i < n; i++) ctx.fillRect(Math.random() * P.width, Math.random() * P.height, 1, 1);
+}
+
+function stats() {
+  const label = style === 'lines' ? `${lines} streamlines` : `${lines} / 900 steps`;
+  $('stats').textContent = `${label}${finished ? ' · done' : ''}`;
+}
+
+// Flow Field > Panel > buttons + keys
+const actions = {
+  seed() { seed = Math.floor(Math.random() * 99999); restart(); },
+  palette() { pal = (pal + 1) % PALETTES.length; restart(); },
+  style() { style = style === 'lines' ? 'trails' : 'lines'; restart(); },
+  save() { P.saveCanvas(`flow-field-${seed}`, 'png'); },
+  pause() { paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause'; },
+};
+for (const k of Object.keys(actions)) $(k).addEventListener('click', actions[k]);
+$('toggle').addEventListener('click', () => $('panel').classList.toggle('open'));
+addEventListener('keydown', (e) => {
+  const m = { r: 'seed', p: 'palette', l: 'style', s: 'save', ' ': 'pause' }[e.key.toLowerCase()];
+  if (m) { e.preventDefault(); actions[m](); }
+});
+
+new p5(sketch);
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flight Globe</title>
+<meta name="category" content="algorithms" />
+<meta name="order" content="5" />
+<meta name="capture" content="5500" />
+<meta name="tags" content="great-circle arcs, slerp, instanced dots, three.js, geo projection" />
+<meta name="description" content="A dotted 3D globe with glowing flight arcs between 32 real hub cities. The continents are rasterised from Natural Earth land outlines into a mask, then sampled with a Fibonacci sphere so every land dot is evenly spaced. Routes follow true great circles by slerping between unit vectors, rise with distance, and carry travelling light pulses whose speed matches route length. Routes and traffic numbers are synthetic and labelled as such. Orbit, zoom, and click a hub or let it tour itself. Tests spherical maths, geo data handling and a clean 3D look." />
+<meta name="prompt" content="Build an interactive 3D globe in a single HTML file with three.js that shows flight routes between major world cities. Draw the continents as evenly spaced dots generated from real land outline data, add an atmosphere glow, and draw each route as a great-circle arc that rises with distance with animated light pulses travelling along it. Use made-up route volumes and say so on screen, let users orbit, zoom and click a city to highlight its routes, and auto-rotate and tour cities when idle." />
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<style>
+  :root { --ink: #eef2ff; --muted: #8790a6; --panel: rgba(8, 10, 18, 0.72); --line: rgba(255, 255, 255, 0.08); --accent: #6ee7ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(ellipse at 50% 50%, #0b1430, #03050b 70%); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; }
+  canvas { display: block; touch-action: none; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; right: 16px; top: 16px; width: 230px; padding: 14px; border-radius: 14px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--line); font-size: 12px; display: grid; gap: 8px; }
+  #panel h2 { margin: 0; font-size: 15px; }
+  #panel .k { color: var(--muted); font: 11px ui-monospace, Menlo, monospace; }
+  #panel .k b { color: var(--accent); font-weight: 600; }
+  #list { display: grid; gap: 3px; font: 11.5px ui-monospace, Menlo, monospace; max-height: 170px; overflow: auto; }
+  #list div { display: flex; justify-content: space-between; color: #c9d1e6; }
+  #list span { color: var(--muted); }
+  .badge { font: 10px ui-monospace, Menlo, monospace; color: #ffcf6e; letter-spacing: 0.06em; }
+  #labels { position: fixed; inset: 0; pointer-events: none; }
+  #labels div { position: absolute; transform: translate(-50%, -150%); font: 600 11px ui-rounded, system-ui, sans-serif; color: #dfe8ff; text-shadow: 0 1px 4px #000, 0 0 8px #000; white-space: nowrap; transition: opacity 0.2s; }
+  #labels div.hot { color: var(--accent); font-size: 13px; }
+  @media (max-width: 600px) { #panel { top: auto; bottom: 10px; left: 10px; right: 10px; width: auto; } #list { display: none; } .title p { display: none; } }
+</style>
+</head>
+<body>
+<div class="title"><h1>Flight Globe</h1><p>drag to orbit · scroll to zoom · click a city</p></div>
+<div id="labels"></div>
+<div id="panel"><div class="badge">SYNTHETIC ROUTES · ILLUSTRATIVE ONLY</div><h2 id="hub">All routes</h2><div class="k" id="kpi"></div><div id="list"></div></div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/flight-globe.html
+ * PURPOSE: Dotted three.js globe from Natural Earth land mask + Fibonacci sampling, slerped great-circle route tubes with pulse shader, hub focus tour
+ * UI: Render Studio > Algorithms > Flight Globe
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__globe (test hook: focus, routes, landDots)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const R = 1;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.01, 100);
+// fit the globe plus atmosphere inside the narrower of the two fov axes
+const camDist = () => { const half = Math.min(20, THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(20)) * innerWidth / innerHeight))); return Math.max(3.4, 1.3 / Math.sin(THREE.MathUtils.degToRad(half))); };
+camera.position.set(0.6, 0.9, camDist());
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.enablePan = false; controls.minDistance = 1.6; controls.maxDistance = 10;
+controls.autoRotate = true; controls.autoRotateSpeed = 0.5;
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+// Geo: lat/lon to unit vector (y up, lon 0 facing +z)
+const toVec = (lat, lon, r = R) => { const p = THREE.MathUtils.degToRad(lat), l = THREE.MathUtils.degToRad(lon); return new THREE.Vector3(r * Math.cos(p) * Math.sin(l), r * Math.sin(p), r * Math.cos(p) * Math.cos(l)); };
+
+// Globe body + fresnel atmosphere on a backface shell: back-face normals face away, so glow peaks near the limb
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(R * 0.995, 64, 48), new THREE.MeshBasicMaterial({ color: 0x07102a })));
+const atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.18, 64, 48), new THREE.ShaderMaterial({
+  side: THREE.BackSide, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix*vec4(position,1.); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }',
+  fragmentShader: 'varying vec3 vN; varying vec3 vV; void main(){ float f = pow(clamp(-dot(vN, vV)*1.8, 0., 1.), 3.0); gl_FragColor = vec4(0.25,0.6,1.0,1.)*f*1.3; }',
+}));
+scene.add(atmo);
+
+// Land dots: rasterise land into an equirectangular mask, then keep Fibonacci points that land on it
+const MW = 1024, MH = 512;
+let landDots = 0;
+async function buildDots() {
+  let mask = null;
+  try {
+    const topo = await (await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-110m.json')).json();
+    const land = topojson.feature(topo, topo.objects.land);
+    const c = document.createElement('canvas'); c.width = MW; c.height = MH;
+    const cg = c.getContext('2d');
+    // d3 handles antimeridian clipping, which a naive ring fill would smear across the map
+    const proj = d3.geoEquirectangular().scale(MW / (2 * Math.PI)).translate([MW / 2, MH / 2]);
+    cg.fillStyle = '#fff'; cg.beginPath(); d3.geoPath(proj, cg)(land); cg.fill();
+    mask = cg.getImageData(0, 0, MW, MH).data;
+  } catch { /* offline: fall back to a faint full-sphere grid */ }
+  const N = innerWidth < 600 ? 26000 : 42000, pos = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (i / (N - 1)) * 2, r = Math.sqrt(1 - y * y), th = golden * i;
+    const lat = Math.asin(y) * 180 / Math.PI, lon = Math.atan2(Math.sin(th) * r, Math.cos(th) * r) * 180 / Math.PI;
+    const mx = Math.floor(((lon + 180) / 360) * MW) % MW, my = Math.min(MH - 1, Math.floor(((90 - lat) / 180) * MH));
+    if (mask ? mask[(my * MW + mx) * 4] > 128 : i % 6 === 0) pos.push(lat, lon);
+  }
+  landDots = pos.length / 2;
+  const dot = new THREE.CircleGeometry(0.0042, 6), mat = new THREE.MeshBasicMaterial({ color: mask ? 0x7fa8ff : 0x2a3a66 });
+  const inst = new THREE.InstancedMesh(dot, mat, landDots), m = new THREE.Matrix4(), q = new THREE.Quaternion(), z = new THREE.Vector3(0, 0, 1), s = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
+  for (let i = 0; i < landDots; i++) {
+    const p = toVec(pos[i * 2], pos[i * 2 + 1], R * 1.001);
+    q.setFromUnitVectors(z, p.clone().normalize()); m.compose(p, q, s); inst.setMatrixAt(i, m);
+    // tint by latitude for a subtle gradient
+    col.setHSL(0.6 - Math.abs(pos[i * 2]) / 900, 0.7, 0.55 + Math.abs(pos[i * 2]) / 400); inst.setColorAt(i, col);
+  }
+  scene.add(inst);
+}
+
+// Hubs: real city coordinates; every number attached to them below is invented
+const HUBS = [
+  ['London', 51.47, -0.45], ['New York', 40.64, -73.78], ['Dubai', 25.25, 55.36], ['Tokyo', 35.55, 139.78], ['Singapore', 1.36, 103.99], ['Paris', 49.01, 2.55],
+  ['Los Angeles', 33.94, -118.41], ['Sydney', -33.94, 151.18], ['São Paulo', -23.43, -46.47], ['Johannesburg', -26.14, 28.24], ['Mumbai', 19.09, 72.87], ['Hong Kong', 22.31, 113.92],
+  ['Frankfurt', 50.04, 8.56], ['Istanbul', 41.26, 28.74], ['Chicago', 41.97, -87.91], ['Toronto', 43.68, -79.63], ['Mexico City', 19.44, -99.07], ['Cairo', 30.12, 31.41],
+  ['Seoul', 37.46, 126.44], ['Delhi', 28.56, 77.1], ['Bangkok', 13.69, 100.75], ['Madrid', 40.47, -3.56], ['Amsterdam', 52.31, 4.76], ['Doha', 25.27, 51.61],
+  ['Lagos', 6.58, 3.32], ['Nairobi', -1.32, 36.93], ['Auckland', -37.01, 174.79], ['Bogotá', 4.7, -74.15], ['Buenos Aires', -34.82, -58.54], ['Reykjavík', 63.98, -22.63],
+  ['Anchorage', 61.17, -150.0], ['Honolulu', 21.32, -157.92],
+].map(([name, lat, lon]) => ({ name, lat, lon, v: toVec(lat, lon) }));
+// Routes: seeded random pairs, biased to long-haul, with made-up weekly flights
+function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
+const rnd = rng(42), routes = [], seen = new Set();
+while (routes.length < 70) {
+  const a = (rnd() * HUBS.length) | 0, b = (rnd() * HUBS.length) | 0, k = a < b ? `${a}-${b}` : `${b}-${a}`;
+  if (a === b || seen.has(k)) continue;
+  const ang = HUBS[a].v.angleTo(HUBS[b].v); if (ang < 0.25 && rnd() < 0.7) continue;
+  seen.add(k); routes.push({ a, b, ang, weekly: 7 + ((rnd() * 60) | 0) });
+}
+
+// Arcs: slerp between unit vectors, lift by sin(pi t) scaled with distance; tube uv.x runs along the arc
+const arcMat = (seed) => new THREE.ShaderMaterial({
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  uniforms: { uTime: { value: 0 }, uSpeed: { value: 0.3 }, uSeed: { value: seed }, uFocus: { value: 1 }, uCol: { value: new THREE.Color(0x6ee7ff) } },
+  vertexShader: 'varying float vT; void main(){ vT = uv.x; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+  fragmentShader: `uniform float uTime; uniform float uSpeed; uniform float uSeed; uniform float uFocus; uniform vec3 uCol; varying float vT;
+    void main(){
+      float head = fract(uTime*uSpeed + uSeed);
+      float d = head - vT; if (d < 0.) d += 1.;
+      float pulse = exp(-d*14.) * step(d, .5);
+      float base = .16 + .1*sin(vT*3.14159);
+      float a = (base + pulse*2.2) * uFocus;
+      gl_FragColor = vec4(mix(uCol, vec3(1.), pulse*.6) * a, a);
+    }`,
+});
+const arcs = routes.map((r, i) => {
+  const A = HUBS[r.a].v, Bv = HUBS[r.b].v, pts = [], n = 64, lift = 0.06 + r.ang * 0.16;
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion().setFromUnitVectors(A.clone().normalize(), Bv.clone().normalize());
+  for (let k = 0; k <= n; k++) { const t = k / n, q = qa.clone().slerp(qb, t); pts.push(A.clone().applyQuaternion(q).multiplyScalar(R + Math.sin(Math.PI * t) * lift)); }
+  const mat = arcMat(i * 0.137 % 1);
+  // longer routes get slower pulses so planes appear to move at similar ground speed
+  mat.uniforms.uSpeed.value = 0.42 / (0.5 + r.ang);
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 96, 0.0032 + r.weekly / 60 * 0.003, 5, false), mat);
+  scene.add(mesh);
+  return { ...r, mesh, mat };
+});
+// Hub markers: pulsing rings on the surface
+const rings = HUBS.map((h) => {
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.012, 0.018, 24), new THREE.MeshBasicMaterial({ color: 0x6ee7ff, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+  m.position.copy(h.v.clone().multiplyScalar(R * 1.003)); m.lookAt(h.v.clone().multiplyScalar(2)); scene.add(m);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.008, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  dot.position.copy(h.v.clone().multiplyScalar(R * 1.004)); dot.lookAt(h.v.clone().multiplyScalar(2)); scene.add(dot);
+  return m;
+});
+
+// Focus: highlight one hub's routes, dim the rest, fill the side panel
+let focus = -1;
+const $ = (id) => document.getElementById(id);
+function setFocus(i) {
+  focus = i;
+  arcs.forEach((a) => { const on = i < 0 || a.a === i || a.b === i; a.mat.uniforms.uFocus.value = on ? 1 : 0.12; a.mat.uniforms.uCol.value.set(i >= 0 && on ? 0xffc96e : 0x6ee7ff); });
+  const mine = arcs.filter((a) => i < 0 || a.a === i || a.b === i).sort((x, y) => y.weekly - x.weekly);
+  $('hub').textContent = i < 0 ? 'All routes' : HUBS[i].name;
+  const km = (a) => Math.round(a.ang * 6371);
+  $('kpi').innerHTML = `<b>${mine.length}</b> routes · <b>${mine.reduce((s, a) => s + a.weekly, 0)}</b> flights / week`;
+  $('list').innerHTML = mine.slice(0, 12).map((a) => `<div>${i < 0 ? `${HUBS[a.a].name.slice(0, 9)}–${HUBS[a.b].name.slice(0, 9)}` : HUBS[a.a === i ? a.b : a.a].name}<span>${km(a).toLocaleString()} km · ${a.weekly}/wk</span></div>`).join('');
+  labelEls.forEach((el, k) => el.classList.toggle('hot', k === i));
+}
+const labelEls = HUBS.map((h) => { const d = document.createElement('div'); d.textContent = h.name; $('labels').appendChild(d); return d; });
+
+// Picking: click nearest hub in screen space
+let lastInput = -1e9;
+const proj = new THREE.Vector3();
+function screenOf(v) { proj.copy(v).project(camera); return [(proj.x * 0.5 + 0.5) * innerWidth, (-proj.y * 0.5 + 0.5) * innerHeight]; }
+const facing = (v) => v.clone().normalize().dot(camera.position.clone().normalize()) > 0.15;
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { lastInput = performance.now(); downAt = [e.clientX, e.clientY]; controls.autoRotate = false; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  let best = -1, bd = 28;
+  HUBS.forEach((h, i) => { if (!facing(h.v)) return; const [x, y] = screenOf(h.v), d = Math.hypot(x - e.clientX, y - e.clientY); if (d < bd) { bd = d; best = i; } });
+  setFocus(best === focus ? -1 : best);
+});
+controls.addEventListener('start', () => (lastInput = performance.now()));
+
+// Idle tour: rotate, and every 5 s focus a busy hub and turn the globe toward it
+let tourIdx = 0, tourTarget = null;
+const TOUR = [0, 3, 2, 1, 4, 7, 8, 9];
+setInterval(() => {
+  if (performance.now() - lastInput < 12000) return;
+  const i = TOUR[tourIdx++ % TOUR.length]; setFocus(i);
+  tourTarget = HUBS[i].v.clone().normalize().add(new THREE.Vector3(0, 0.35, 0)).normalize().multiplyScalar(camera.position.length());
+}, 5000);
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const t = clock.getElapsedTime(), idle = performance.now() - lastInput > 12000;
+  controls.autoRotate = idle && !tourTarget;
+  if (idle && tourTarget) {
+    // slerp-like move along the sphere keeps the camera distance fixed
+    const len = camera.position.length(), next = camera.position.clone().normalize().lerp(tourTarget.clone().normalize(), 0.03).normalize().multiplyScalar(len);
+    camera.position.copy(next); if (next.distanceTo(tourTarget) < 0.02) tourTarget = null;
+  }
+  controls.update();
+  arcs.forEach((a) => (a.mat.uniforms.uTime.value = t));
+  rings.forEach((m, i) => { const p = (t * 0.8 + i * 0.13) % 1; m.scale.setScalar(1 + p * 1.8); m.material.opacity = (1 - p) * (focus < 0 || focus === i ? 0.9 : 0.25); });
+  // labels: only hubs facing the camera, focused hub always
+  HUBS.forEach((h, i) => { const el = labelEls[i], vis = facing(h.v) && (i === focus || i < 12 || camera.position.length() < 2.6); el.style.opacity = vis ? 1 : 0; if (vis) { const [x, y] = screenOf(h.v); el.style.left = `${x}px`; el.style.top = `${y}px`; } });
+  renderer.render(scene, camera);
+});
+setFocus(-1);
+await buildDots();
+window.__globe = { focus: setFocus, routes: () => routes.length, landDots: () => landDots };
+</script>
+</body>
+</html>

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Space Invaders</title>
+<meta name="category" content="games" />
+<meta name="order" content="6" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="pixel sprites, erodible bunkers, CRT glow, AI autopilot" />
+<meta name="description" content="Space Invaders with the details people forget: two-frame marching aliens that speed up as the swarm thins, the four-note march that speeds up with them, bunkers that erode pixel by pixel from both sides, a mystery saucer, wave progression and a CRT glow pass. An autopilot dodges bullets and picks targets in the attract mode." />
+<meta name="prompt" content="Build Space Invaders in a single HTML canvas file with no image assets. Pixel-art aliens in two animation frames, a swarm that speeds up as it shrinks, the classic four-note march, destructible bunkers that erode per pixel, a mystery UFO, lives, waves and high score. Add a CRT scanline glow, touch controls and an AI attract mode." />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02030a; touch-action: none; user-select: none; }
+  canvas { display: block; position: absolute; inset: 0; margin: auto; image-rendering: pixelated; }
+  #glow { filter: blur(6px) brightness(1.4); opacity: 0.55; mix-blend-mode: screen; pointer-events: none; }
+  #scan { pointer-events: none; position: fixed; inset: 0; background: repeating-linear-gradient(to bottom, rgba(0,0,0,0) 0 2px, rgba(0,0,0,0.22) 2px 3px); }
+  #vig { pointer-events: none; position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.7) 100%); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="glow"></canvas>
+<div id="scan"></div><div id="vig"></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/space-invaders.html
+ * PURPOSE: Space Invaders clone: pixel sprites, speeding swarm + march, per-pixel bunker erosion, UFO, waves, CRT glow, AI attract mode
+ * UI: Render Studio > Games > Space Invaders
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+// Native arcade resolution; CSS scales it up with nearest-neighbour
+const W = 224, H = 256;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const gl = document.getElementById('glow'), gctx = gl.getContext('2d');
+cv.width = gl.width = W; cv.height = gl.height = H;
+function fit() {
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  for (const c of [cv, gl]) { c.style.width = W * s + 'px'; c.style.height = H * s + 'px'; }
+}
+addEventListener('resize', fit); fit();
+
+// Sprites > 1-bit bitmaps, two frames each
+const BMP = {
+  squid: [['00011000', '00111100', '01111110', '11011011', '11111111', '00100100', '01011010', '10100101'], ['00011000', '00111100', '01111110', '11011011', '11111111', '01011010', '10000001', '01000010']],
+  crab: [['00100000100', '00010001000', '00111111100', '01101110110', '11111111111', '10111111101', '10100000101', '00011011000'], ['00100000100', '10010001001', '10111111101', '11101110111', '11111111111', '01111111110', '00100000100', '01000000010']],
+  octo: [['000011110000', '011111111110', '111111111111', '111001100111', '111111111111', '000110011000', '001101101100', '110000000011'], ['000011110000', '011111111110', '111111111111', '111001100111', '111111111111', '001110011100', '011001100110', '001100001100']],
+  ship: [['0000001000000', '0000011100000', '0000011100000', '0111111111110', '1111111111111', '1111111111111', '1111111111111', '1111111111111']],
+  ufo: [['0000011111100000', '0001111111111000', '0011111111111100', '0110110110110110', '1111111111111111', '0011100110011100', '0001000000001000']],
+  boom: [['10001000100', '01000101000', '00100000100', '11000000011', '00100000100', '01000101000', '10001000100', '00000000000']],
+};
+const SPR = {};
+for (const [k, frames] of Object.entries(BMP)) SPR[k] = frames.map((rows) => { const c = document.createElement('canvas'); c.width = rows[0].length; c.height = rows.length; const g = c.getContext('2d'); g.fillStyle = '#fff'; rows.forEach((r, y) => [...r].forEach((b, x) => b === '1' && g.fillRect(x, y, 1, 1))); return c; });
+// tint a white sprite once per colour so the arcade colour bands are cheap
+const tintCache = new Map();
+function tinted(img, col) {
+  const key = img.width + 'x' + img.height + col + SPR_KEYS.get(img);
+  if (tintCache.has(key)) return tintCache.get(key);
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = col; g.fillRect(0, 0, c.width, c.height);
+  tintCache.set(key, c); return c;
+}
+const SPR_KEYS = new Map(); let sk = 0; for (const f of Object.values(SPR)) for (const c of f) SPR_KEYS.set(c, sk++);
+
+// Bunkers > per-pixel mask so bullets carve real holes
+const BUNKER = ['0000111111110000', '0001111111111000', '0011111111111100', '0111111111111110', '1111111111111111', '1111111111111111', '1111111111111111', '1111111111111111', '1111111111111111', '1111110000111111', '1111100000011111', '1111000000001111'];
+const BW = 22, BH = 16, BY = 192;
+let bunkers = [];
+function makeBunkers() {
+  bunkers = [0, 1, 2, 3].map((i) => {
+    const x = 32 + i * 46 - 0, px = new Uint8Array(BW * BH);
+    for (let y = 0; y < BH; y++) for (let xx = 0; xx < BW; xx++) {
+      const r = BUNKER[Math.floor(y * 12 / BH)], b = r[Math.floor(xx * 16 / BW)];
+      px[y * BW + xx] = b === '1' ? 1 : 0;
+    }
+    return { x, y: BY, px };
+  });
+}
+// carve a ragged blast so holes look like the arcade, not neat squares
+function blast(b, cx, cy, r) {
+  for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
+    const X = cx + x, Y = cy + y;
+    if (X < 0 || Y < 0 || X >= BW || Y >= BH) continue;
+    if (x * x + y * y <= r * r && Math.random() < 0.75) b.px[Y * BW + X] = 0;
+  }
+}
+function hitBunker(x, y, dir) {
+  for (const b of bunkers) {
+    const lx = Math.floor(x - b.x), ly = Math.floor(y - b.y);
+    if (lx < 0 || ly < 0 || lx >= BW || ly >= BH) continue;
+    if (b.px[ly * BW + lx]) { blast(b, lx, ly + dir, 2); return true; }
+  }
+  return false;
+}
+
+// State
+const COLS = 11, ROWS = 5, ROW_TYPES = ['squid', 'crab', 'crab', 'octo', 'octo'], ROW_PTS = [30, 20, 20, 10, 10];
+const ROW_COL = ['#ff5ec8', '#59f0ff', '#59f0ff', '#7dff6a', '#7dff6a'];
+let aliens, swarm, player, shots, bombs, ufo, booms, score, hi, lives, wave, state, stateT, attract = true, idle = 0, marchStep = 0, frame2 = 0;
+try { hi = +localStorage.getItem('invaders-hi') || 0; } catch { hi = 0; }
+function newWave() {
+  aliens = [];
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) aliens.push({ r, c, alive: true });
+  // each wave starts one step lower, capped so it never spawns on the bunkers
+  swarm = { x: 18, y: 48 + Math.min(wave - 1, 6) * 8, dir: 1, tick: 0, next: 0 };
+  shots = []; bombs = []; ufo = null; booms = [];
+  makeBunkers();
+}
+function newGame() { score = 0; lives = 3; wave = 1; player = { x: W / 2, cool: 0, dead: 0 }; newWave(); state = 'play'; stateT = 0; }
+const alienPos = (a) => ({ x: swarm.x + a.c * 16, y: swarm.y + a.r * 16 });
+const alienW = (a) => BMP[ROW_TYPES[a.r]][0][0].length;
+
+// Audio > march notes + sfx
+let ac = null;
+function tone(f, d, type = 'square', vol = 0.06, f2 = f) {
+  if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+  o.type = type; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+const MARCH = [98, 87, 78, 73];
+
+// Input > keys + touch (drag to move, tap to fire)
+const keys = new Set();
+let touchX = null, touchFire = false;
+function wake() { idle = 0; if (!ac) { try { ac = new AudioContext(); } catch { /* none */ } } if (attract) { attract = false; newGame(); } else if (state === 'over' && stateT > 1) newGame(); }
+addEventListener('keydown', (e) => { keys.add(e.code); if (['Space', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { e.preventDefault(); wake(); } });
+addEventListener('keyup', (e) => keys.delete(e.code));
+const toGame = (cx) => { const r = cv.getBoundingClientRect(); return (cx - r.left) / r.width * W; };
+addEventListener('pointerdown', (e) => { wake(); touchX = toGame(e.clientX); touchFire = true; });
+addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') touchX = toGame(e.clientX); });
+addEventListener('pointerup', () => { touchX = null; });
+
+// AI > attract pilot: dodge the nearest falling bomb, else line up under the lowest alien in reach
+function aiControl() {
+  let target = player.x;
+  const live = aliens.filter((a) => a.alive);
+  if (ufo) target = ufo.x + 8;
+  else if (live.length) {
+    const cols = new Map(); for (const a of live) { const p = alienPos(a); const cur = cols.get(a.c); if (!cur || p.y > cur.y) cols.set(a.c, { x: p.x + alienW(a) / 2, y: p.y }); }
+    let best = null; for (const v of cols.values()) if (!best || Math.abs(v.x - player.x) < Math.abs(best.x - player.x)) best = v;
+    target = best.x + swarm.dir * 3;
+  }
+  for (const b of bombs) if (b.y > 150 && Math.abs(b.x - player.x) < 10) target = player.x + (b.x < player.x ? 18 : -18);
+  const dx = target - player.x;
+  return { move: Math.abs(dx) < 1 ? 0 : Math.sign(dx), fire: Math.abs(dx) < 4 };
+}
+
+function update(dt) {
+  stateT += dt; frame2 += dt;
+  if (!attract) { idle += dt; if (idle > 40) { attract = true; newGame(); } }
+  if (state === 'over') { if (attract && stateT > 3) newGame(); return; }
+  if (state === 'clear') { if (stateT > 1.6) { wave++; newWave(); state = 'play'; stateT = 0; } return; }
+  // player
+  if (player.dead > 0) {
+    player.dead -= dt;
+    if (player.dead <= 0) { if (lives <= 0) { state = 'over'; stateT = 0; if (score > hi) { hi = score; try { localStorage.setItem('invaders-hi', hi); } catch { /* blocked */ } } } else { player.x = W / 2; bombs = []; } }
+  } else {
+    let move = 0, fire = false;
+    if (attract) { const a = aiControl(); move = a.move; fire = a.fire; }
+    else {
+      if (keys.has('ArrowLeft') || keys.has('KeyA')) move -= 1;
+      if (keys.has('ArrowRight') || keys.has('KeyD')) move += 1;
+      fire = keys.has('Space') || touchFire;
+      if (touchX != null) move = Math.abs(touchX - player.x) < 2 ? 0 : Math.sign(touchX - player.x);
+    }
+    touchFire = false;
+    player.x = Math.max(10, Math.min(W - 10, player.x + move * 70 * dt));
+    player.cool -= dt;
+    // one bullet on screen at a time, like the original
+    if (fire && player.cool <= 0 && shots.length === 0) { shots.push({ x: player.x, y: 214 }); player.cool = 0.25; tone(1200, 0.12, 'square', 0.04, 300); }
+  }
+  // swarm marches in discrete steps; interval shrinks with survivors
+  const live = aliens.filter((a) => a.alive);
+  if (!live.length) { state = 'clear'; stateT = 0; return; }
+  const interval = Math.max(0.016, 0.02 + live.length * 0.0125 - (wave - 1) * 0.02);
+  swarm.tick += dt;
+  if (swarm.tick >= interval) {
+    swarm.tick = 0;
+    let minX = 1e9, maxX = -1e9, maxY = 0;
+    for (const a of live) { const p = alienPos(a); minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x + alienW(a)); maxY = Math.max(maxY, p.y + 8); }
+    swarm.next++;
+    if (swarm.next % Math.max(1, Math.round(live.length / 6)) === 0 || live.length < 6) { tone(MARCH[marchStep++ % 4], 0.09, 'square', 0.07); }
+    if ((swarm.dir > 0 && maxX + 2 > W - 6) || (swarm.dir < 0 && minX - 2 < 6)) { swarm.dir *= -1; swarm.y += 8; }
+    else swarm.x += 2 * swarm.dir;
+    swarm.frame = (swarm.frame || 0) ^ 1;
+    // invaders crush bunkers they march through
+    for (const a of live) { const p = alienPos(a); for (const b of bunkers) for (let y = 0; y < 8; y++) for (let x = 0; x < alienW(a); x++) { const lx = Math.floor(p.x + x - b.x), ly = Math.floor(p.y + y - b.y); if (lx >= 0 && ly >= 0 && lx < BW && ly < BH) b.px[ly * BW + lx] = 0; } }
+    if (maxY >= 214) { lives = 0; player.dead = 1.2; booms.push({ x: player.x - 6, y: 212, t: 1, big: true }); tone(80, 0.8, 'sawtooth', 0.1, 30); }
+  }
+  // bombs from the lowest alien of a random column, faster on later waves
+  const rate = 0.8 + wave * 0.25;
+  if (Math.random() < dt * rate && bombs.length < 3 + wave) {
+    const cols = [...new Set(live.map((a) => a.c))], c = cols[(Math.random() * cols.length) | 0];
+    const low = live.filter((a) => a.c === c).sort((a, b) => b.r - a.r)[0], p = alienPos(low);
+    bombs.push({ x: p.x + alienW(low) / 2, y: p.y + 8, kind: (Math.random() * 3) | 0, t: 0 });
+  }
+  // ufo
+  if (!ufo && Math.random() < dt * 0.06 && live.length > 6) { const d = Math.random() < 0.5 ? 1 : -1; ufo = { x: d > 0 ? -16 : W, dir: d }; }
+  if (ufo) { ufo.x += ufo.dir * 36 * dt; if (frame2 % 0.12 < dt) tone(ufo.x % 2 < 1 ? 520 : 680, 0.1, 'sine', 0.025); if (ufo.x < -20 || ufo.x > W + 4) ufo = null; }
+  // player shots
+  for (const s of shots) {
+    s.y -= 240 * dt;
+    if (hitBunker(s.x, s.y, -1)) { s.dead = true; continue; }
+    for (const a of live) {
+      const p = alienPos(a), w = alienW(a);
+      if (s.x >= p.x && s.x <= p.x + w && s.y >= p.y && s.y <= p.y + 8) { a.alive = false; s.dead = true; score += ROW_PTS[a.r]; booms.push({ x: p.x + w / 2 - 5, y: p.y, t: 0.25, col: ROW_COL[a.r] }); tone(240, 0.18, 'sawtooth', 0.06, 60); break; }
+    }
+    if (ufo && s.x >= ufo.x && s.x <= ufo.x + 16 && s.y >= 30 && s.y <= 38) { const pts = [50, 100, 150, 300][(Math.random() * 4) | 0]; score += pts; booms.push({ x: ufo.x, y: 30, t: 1, txt: pts }); ufo = null; s.dead = true; tone(900, 0.5, 'square', 0.06, 100); }
+    for (const b of bombs) if (Math.abs(b.x - s.x) < 2 && Math.abs(b.y - s.y) < 5) { b.dead = s.dead = true; }
+    if (s.y < 20) { s.dead = true; booms.push({ x: s.x - 5, y: 20, t: 0.2, col: '#ff5e5e' }); }
+  }
+  // bombs
+  for (const b of bombs) {
+    b.y += (70 + wave * 6) * dt; b.t += dt;
+    if (hitBunker(b.x, b.y + 3, 1)) { b.dead = true; continue; }
+    if (player.dead <= 0 && b.y > 214 && b.y < 224 && Math.abs(b.x - player.x) < 7) { b.dead = true; lives--; player.dead = 1.4; booms.push({ x: player.x - 6, y: 212, t: 1.2, big: true }); tone(120, 0.9, 'sawtooth', 0.1, 30); }
+    if (b.y > 232) { b.dead = true; }
+  }
+  shots = shots.filter((s) => !s.dead); bombs = bombs.filter((b) => !b.dead);
+  for (const b of booms) b.t -= dt; booms = booms.filter((b) => b.t > 0);
+}
+
+// Render > arcade colour bands + glow copy
+function draw() {
+  ctx.fillStyle = '#02030a'; ctx.fillRect(0, 0, W, H);
+  // stars
+  ctx.fillStyle = '#1b2240'; for (let i = 0; i < 40; i++) { const x = (i * 97) % W, y = (i * 53 + i * i) % H; if ((frame2 * 2 + i) % 7 > 1) ctx.fillRect(x, y, 1, 1); }
+  ctx.font = '8px ui-monospace, Menlo, monospace'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(`SCORE ${String(score).padStart(5, '0')}`, 8, 6);
+  ctx.textAlign = 'right'; ctx.fillText(`HI ${String(hi).padStart(5, '0')}`, W - 8, 6);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#7dff6a'; ctx.fillText(`WAVE ${wave}`, W / 2, 6);
+  if (ufo) ctx.drawImage(tinted(SPR.ufo[0], '#ff3b3b'), ufo.x | 0, 30);
+  for (const a of aliens) if (a.alive) { const p = alienPos(a); ctx.drawImage(tinted(SPR[ROW_TYPES[a.r]][swarm.frame || 0], ROW_COL[a.r]), p.x | 0, p.y | 0); }
+  // bunkers
+  ctx.fillStyle = '#3cff5a';
+  for (const b of bunkers) for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) if (b.px[y * BW + x]) ctx.fillRect(b.x + x, b.y + y, 1, 1);
+  // player
+  if (player.dead <= 0) ctx.drawImage(tinted(SPR.ship[0], '#3cff5a'), (player.x - 6) | 0, 216);
+  ctx.fillStyle = '#fff'; for (const s of shots) ctx.fillRect(s.x | 0, s.y | 0, 1, 4);
+  // bombs: zigzag, plunger and squiggle shapes
+  ctx.fillStyle = '#ffe06a';
+  for (const b of bombs) { const x = b.x | 0, y = b.y | 0, ph = ((b.t * 12) | 0) % 2; if (b.kind === 0) { for (let i = 0; i < 6; i++) ctx.fillRect(x + ((i + ph) % 2 ? 1 : -1) * (i % 3 === 1 ? 1 : 0), y + i, 1, 1); } else if (b.kind === 1) { ctx.fillRect(x, y, 1, 6); ctx.fillRect(x - 1, y + (ph ? 1 : 4), 3, 1); } else { ctx.fillRect(x, y, 1, 6); ctx.fillRect(x - 1, y + 5, 3, 1); } }
+  for (const b of booms) {
+    if (b.txt) { ctx.fillStyle = '#ff3b3b'; ctx.textAlign = 'left'; ctx.fillText(b.txt, b.x, b.y); continue; }
+    if (b.big) { ctx.globalAlpha = Math.min(1, b.t); ctx.drawImage(tinted(SPR.boom[0], (b.t * 10 | 0) % 2 ? '#3cff5a' : '#fff'), b.x, b.y, 13, 9); ctx.globalAlpha = 1; continue; }
+    ctx.drawImage(tinted(SPR.boom[0], b.col || '#fff'), b.x | 0, b.y | 0);
+  }
+  ctx.fillStyle = '#3cff5a'; ctx.fillRect(0, 232, W, 1);
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.fillText(lives, 8, 238);
+  for (let i = 0; i < lives - 1; i++) ctx.drawImage(tinted(SPR.ship[0], '#3cff5a'), 20 + i * 16, 238);
+  ctx.textAlign = 'center';
+  if (attract) { if ((frame2 * 2 | 0) % 2) { ctx.fillStyle = '#ffe06a'; ctx.fillText('AI DEMO · PRESS SPACE OR TAP', W / 2, 150); } ctx.fillStyle = '#8890b8'; ctx.textAlign = 'right'; ctx.fillText('←→ move · space fire', W - 8, 238); }
+  if (state === 'clear') { ctx.fillStyle = '#fff'; ctx.fillText(`WAVE ${wave} CLEAR`, W / 2, 120); }
+  if (state === 'over') { ctx.fillStyle = '#ff3b3b'; ctx.font = '16px ui-monospace, Menlo, monospace'; ctx.fillText('GAME OVER', W / 2, 110); ctx.font = '8px ui-monospace, Menlo, monospace'; ctx.fillStyle = '#fff'; if (!attract) ctx.fillText('press space / tap', W / 2, 132); }
+  gctx.clearRect(0, 0, W, H); gctx.drawImage(cv, 0, 0);
+}
+
+newGame();
+let last = performance.now();
+function loop(now) { const dt = Math.min(0.05, (now - last) / 1000); last = now; update(dt); draw(); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+window.__inv = { get score() { return score; }, get wave() { return wave; }, get lives() { return lives; }, get alive() { return aliens.filter((a) => a.alive).length; } };
+</script>
+</body>
+</html>

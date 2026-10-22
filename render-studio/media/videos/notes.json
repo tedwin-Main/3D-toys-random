@@ -1,0 +1,7 @@
+{
+  "demo-reel.mp4": {
+    "title": "Live Demo Reel",
+    "about": "Every live demo recorded headless by Playwright on the real GPU, trimmed to 5 s, titled and crossfaded with one ffmpeg filter graph (63 clips).",
+    "prompt": "Write a Playwright script that opens each demo page, records a few seconds of video, then use ffmpeg to trim each clip, burn in its title and chain xfade transitions into one MP4 reel."
+  }
+}

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Life</title>
+<meta name="category" content="generative" />
+<meta name="order" content="8" />
+<meta name="capture" content="3600" />
+<meta name="tags" content="3D cellular automata, multi-state rules, InstancedMesh, Three.js" />
+<meta name="description" content="Conway's Life taken into three dimensions: a 44³ grid of cells where each one counts its 26 (or 6) neighbours and follows survive, birth and decay rules. Rules like 445 grow symmetric crystals from a single seed, while Amoeba and Clouds churn random soup into blobs. Dying cells fade through extra states, and every live cell is one instance of a single mesh. Tests efficient simulation and instanced rendering." />
+<meta name="prompt" content="Build a 3D cellular automaton in a single HTML file with Three.js. Use a cubic grid of about 44 cells per side with multi-state rules written as survive/birth/states/neighbourhood (Moore or von Neumann), with presets like 445 crystal growth, Amoeba, Clouds and Pyroclastic. Render live and decaying cells as one InstancedMesh coloured by state and position, inside a faint bounding box, with orbit controls, auto-rotation, play, step and reseed buttons." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.66); --accent: #5ee0ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05070d; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  canvas { display: block; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 290px; padding: 12px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12px; }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 6px; }
+  #panel button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 8px; padding: 6px 2px; font: inherit; font-weight: 600; cursor: pointer; }
+  #panel button.on { background: var(--accent); color: #03222b; border-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div class="title"><h1>3D Life</h1><p>multi-state cellular automata in a 44³ grid</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <div class="btns" id="rules"></div>
+  <div class="btns"><button id="play" class="on">Play</button><button id="step">Step</button><button id="seed">Reseed</button><button id="spin" class="on">Spin</button></div>
+  <div class="hint">Drag to orbit · scroll to zoom</div>
+</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/life-3d.html
+ * PURPOSE: 3D multi-state cellular automaton (S/B/states/neighbourhood rules) rendered as one InstancedMesh
+ * UI: Render Studio > 2D & Generative > 3D Life
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__life3d (test hook: gen, alive)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const $ = (id) => document.getElementById(id);
+
+// Scene
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#05070d'); scene.fog = new THREE.Fog('#05070d', 70, 140);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(52, 38, 64);
+// portrait needs a wider view; push fog out to match the farther camera
+if (innerWidth < innerHeight) { camera.position.multiplyScalar(1.6); scene.fog.near = 120; scene.fog.far = 230; }
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.9;
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+scene.add(new THREE.HemisphereLight('#bfe6ff', '#1a1030', 1.2));
+const key = new THREE.DirectionalLight('#ffffff', 2.2); key.position.set(40, 60, 30); scene.add(key);
+const rim = new THREE.DirectionalLight('#ff7ad9', 1.1); rim.position.set(-50, -20, -40); scene.add(rim);
+
+// Life > grid + rules: S = survive counts, B = birth counts, C = states, N = Moore(26) or von Neumann(6)
+const G = 44, G2 = G * G, G3 = G * G2;
+const RULES = [
+  { name: 'Crystal', S: rng(0, 6), B: [1, 3], C: 2, N: 'V', r: 1, p: 1 },
+  { name: 'Pyro', S: [4, 5, 6, 7], B: [6, 7, 8], C: 10, N: 'M', r: 2, p: 0.5 },
+  { name: 'Coral', S: [5, 6, 7, 8], B: [6, 7, 9, 12], C: 4, N: 'M', r: 3, p: 0.5 },
+  { name: 'Amoeba', S: rng(9, 26), B: [5, 6, 7, 12, 13, 15], C: 5, N: 'M', r: 3, p: 0.5 },
+  { name: '678', S: [6, 7, 8], B: [6, 7, 8], C: 3, N: 'M', r: 11, p: 0.42 },
+  { name: 'Builder', S: [2, 6, 9], B: [4, 6, 8, 9], C: 10, N: 'M', r: 11, p: 0.42 },
+];
+function rng(a, b) { const o = []; for (let i = a; i <= b; i++) o.push(i); return o; }
+let rule = RULES[0], Sset, Bset, OFFS;
+let cells = new Uint8Array(G3), next = new Uint8Array(G3), counts = new Uint8Array(G3), gen = 0;
+function setRule(i) {
+  rule = RULES[i];
+  Sset = new Uint8Array(27); rule.S.forEach((n) => (Sset[n] = 1));
+  Bset = new Uint8Array(27); rule.B.forEach((n) => (Bset[n] = 1));
+  OFFS = [];
+  for (let z = -1; z <= 1; z++) for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) {
+    if (!x && !y && !z) continue;
+    if (rule.N === 'V' && Math.abs(x) + Math.abs(y) + Math.abs(z) !== 1) continue;
+    OFFS.push([x, y, z]);
+  }
+  document.querySelectorAll('#rules button:not(#cut)').forEach((b, j) => b.classList.toggle('on', j === i));
+  reseed();
+}
+function reseed() {
+  cells.fill(0); gen = 0;
+  // random ball of live cells at the centre; radius + density per rule
+  const c = G >> 1, r = rule.r;
+  for (let z = -r; z <= r; z++) for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * x + y * y + z * z <= r * r + 1 && Math.random() < rule.p) cells[(c + x) + (c + y) * G + (c + z) * G2] = 1;
+  draw();
+}
+
+// Life > generation: scatter neighbour counts from live cells, then apply survive / birth / decay
+function stepLife() {
+  counts.fill(0);
+  for (let z = 1; z < G - 1; z++) for (let y = 1; y < G - 1; y++) {
+    let i = 1 + y * G + z * G2;
+    for (let x = 1; x < G - 1; x++, i++) {
+      if (cells[i] !== 1) continue;
+      for (const [dx, dy, dz] of OFFS) counts[i + dx + dy * G + dz * G2]++;
+    }
+  }
+  for (let i = 0; i < G3; i++) {
+    const s = cells[i];
+    if (s === 0) next[i] = Bset[counts[i]] ? 1 : 0;
+    else if (s === 1) next[i] = Sset[counts[i]] ? 1 : (rule.C > 2 ? 2 : 0);
+    else next[i] = s + 1 >= rule.C ? 0 : s + 1;
+  }
+  // keep the border dead so patterns never wrap
+  for (let z = 0; z < G; z++) for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) if (x === 0 || y === 0 || z === 0 || x === G - 1 || y === G - 1 || z === G - 1) next[x + y * G + z * G2] = 0;
+  [cells, next] = [next, cells];
+  gen++;
+}
+
+// Life > render: one InstancedMesh; colour = hue from radius, darker as cells decay
+const MAX = 60000;
+const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.92, 0.92, 0.92), new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.1 }), MAX);
+mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+scene.add(mesh);
+const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(G, G, G)), new THREE.LineBasicMaterial({ color: '#2b3a55' }));
+scene.add(frame);
+const m4 = new THREE.Matrix4(), col = new THREE.Color();
+let alive = 0;
+function draw() {
+  let n = 0; alive = 0;
+  const h = G / 2 - 0.5;
+  for (let i = 0; i < G3 && n < MAX; i++) {
+    const s = cells[i];
+    if (!s) continue;
+    if (s === 1) alive++;
+    const x = i % G, y = ((i / G) | 0) % G, z = (i / G2) | 0;
+    // cutaway: hide the front-right octant so the interior shows
+    if (cut && x > h && z > h) continue;
+    const dx = x - h, dy = y - h, dz = z - h, r = Math.sqrt(dx * dx + dy * dy + dz * dz) / (G * 0.6);
+    m4.makeTranslation(dx, dy, dz);
+    mesh.setMatrixAt(n, m4);
+    const fade = s === 1 ? 1 : 1 - (s - 1) / rule.C;
+    col.setHSL((0.55 + r * 0.45) % 1, 0.8, 0.16 + 0.4 * fade);
+    mesh.setColorAt(n, col);
+    n++;
+  }
+  mesh.count = n;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+}
+
+// Life > Panel: rule buttons, play / step / reseed / spin
+RULES.forEach((r, i) => { const b = document.createElement('button'); b.textContent = r.name; b.onclick = () => { setRule(i); lastInput = performance.now(); }; $('rules').appendChild(b); });
+const cutBtn = document.createElement('button'); cutBtn.id = 'cut'; cutBtn.className = 'on'; cutBtn.textContent = 'Cutaway'; $('rules').appendChild(cutBtn);
+let playing = true, lastInput = -1e9, cut = true;
+$('cut').onclick = () => { cut = !cut; $('cut').classList.toggle('on', cut); draw(); };
+$('play').onclick = () => { playing = !playing; $('play').classList.toggle('on', playing); };
+$('step').onclick = () => { playing = false; $('play').classList.remove('on'); stepLife(); draw(); };
+$('seed').onclick = () => { reseed(); lastInput = performance.now(); };
+$('spin').onclick = () => { controls.autoRotate = !controls.autoRotate; $('spin').classList.toggle('on', controls.autoRotate); };
+renderer.domElement.addEventListener('pointerdown', () => (lastInput = performance.now()));
+setRule(0);
+window.__life3d = { get gen() { return gen; }, get alive() { return alive; } };
+
+// Life > loop: 10 generations / s; idle cycles rules every 16 s or when everything dies
+let acc = 0, ruleT = 0, last = performance.now(), fps = 60, fpsN = 0, fpsT = 0, ms = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (playing) {
+    acc += dt;
+    if (acc > 0.1) { acc = 0; const t0 = performance.now(); stepLife(); draw(); ms = performance.now() - t0; }
+  }
+  const idle = now - lastInput > 10000;
+  ruleT = idle ? ruleT + dt : 0;
+  if (ruleT > 16 || (idle && playing && gen > 5 && (alive === 0 || alive > 42000))) { ruleT = 0; setRule((RULES.indexOf(rule) + 1) % RULES.length); }
+  controls.update();
+  renderer.render(scene, camera);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `rule ${rule.name} · S${rule.S.length > 4 ? rule.S[0] + '-' + rule.S.at(-1) : rule.S.join(',')}/B${rule.B.join(',')}/${rule.C}/${rule.N}<br>gen ${gen} · ${alive} live · ${mesh.count} drawn<br>${ms.toFixed(1)} ms/gen · ${fps} fps`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

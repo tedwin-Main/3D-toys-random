@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Slingshot Physics</title>
+<meta name="category" content="games" />
+<meta name="order" content="14" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="Matter.js, impact damage, trajectory preview, destructible towers, AI aim" />
+<meta name="description" content="An Angry-Birds-style slingshot game on Matter.js rigid bodies: stretchy elastic bands, an exact trajectory preview that mirrors the physics step, glass, wood and stone blocks whose health drops with impact speed, cracking textures, debris, pigs that pop, a mid-air boost, a following camera and three tower layouts. The attract mode aims by simulating trajectories at each pig." />
+<meta name="prompt" content="Make an Angry Birds style game in a single HTML file using a 2D physics engine. Pull back a slingshot with mouse or touch and see a dotted trajectory preview, launch a bird into towers of glass, wood and stone blocks that crack and break based on impact force, and pop the pigs. Tap mid-flight for a speed boost. Add a camera that follows the bird, particles, score, several levels and an AI that aims and plays when idle." />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd3ff; touch-action: none; user-select: none; font-family: ui-rounded, 'SF Pro Rounded', system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/slingshot-physics.html
+ * PURPOSE: Angry-Birds-style slingshot on Matter.js: impact-based block/pig damage, exact trajectory preview, boost, levels, AI aim attract mode
+ * UI: Render Studio > Games > Slingshot Physics
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const { Engine, Bodies, Body, Composite, Events } = Matter;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const WORLD_W = 2200, GROUND = 900, SLING = { x: 300, y: GROUND - 170 }, MAXPULL = 120, POWER = 0.21;
+let dpr, scale, cam = { x: 0, y: 0, tx: 0 };
+function resize() { dpr = Math.min(devicePixelRatio || 1, 2); cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; scale = Math.min(innerWidth / 1500, innerHeight / 980); }
+addEventListener('resize', resize); resize();
+const viewW = () => innerWidth / scale, viewH = () => innerHeight / scale;
+
+const engine = Engine.create({ positionIterations: 10, velocityIterations: 8 });
+engine.gravity.y = 1;
+const STEP = 1000 / 60, G = engine.gravity.y * engine.gravity.scale * STEP * STEP; // velocity gain per step, matches Matter's integrator
+const MAT = {
+  glass: { hp: 2.2, density: 0.0015, fill: 'rgba(170,225,255,0.55)', edge: '#e8f7ff', pts: 300 },
+  wood: { hp: 5, density: 0.002, fill: '#c98a4a', edge: '#8a5a2a', pts: 500 },
+  stone: { hp: 11, density: 0.004, fill: '#9aa0ab', edge: '#5f6570', pts: 800 },
+};
+let blocks, pigs, bird, birdsLeft, score, level = 0, state, stateT, parts, popups, attract = true, idle = 0, drag = null, settleT, boostUsed, aiPlan = null;
+
+function addBlock(x, y, w, h, mat, angle = 0) {
+  const m = MAT[mat], b = Bodies.rectangle(x, y, w, h, { density: m.density, friction: 0.7, restitution: 0.05, angle, chamfer: { radius: 2 } });
+  b.kind = 'block'; b.mat = mat; b.w = w; b.h = h; b.hp = m.hp; b.max = m.hp; b.seed = Math.random() * 1000;
+  blocks.push(b); Composite.add(engine.world, b); return b;
+}
+function addPig(x, y, r = 22) { const p = Bodies.circle(x, y, r, { density: 0.0018, friction: 0.6, restitution: 0.15 }); p.kind = 'pig'; p.r = r; p.hp = 2.4; p.max = 2.4; p.blink = Math.random() * 4; pigs.push(p); Composite.add(engine.world, p); return p; }
+// Levels > tower builders; y is the bottom edge resting on the ground
+const LEVELS = [
+  (gx) => { // twin towers + bridge
+    for (const ox of [0, 220]) { addBlock(gx + ox - 40, GROUND - 60, 20, 120, 'wood'); addBlock(gx + ox + 40, GROUND - 60, 20, 120, 'wood'); addBlock(gx + ox, GROUND - 130, 120, 20, 'wood'); addPig(gx + ox, GROUND - 25); addBlock(gx + ox - 30, GROUND - 190, 20, 100, 'glass'); addBlock(gx + ox + 30, GROUND - 190, 20, 100, 'glass'); addBlock(gx + ox, GROUND - 250, 100, 20, 'glass'); }
+    addBlock(gx + 110, GROUND - 270, 240, 20, 'wood'); addPig(gx + 110, GROUND - 305, 18); addPig(gx, GROUND - 285, 18);
+  },
+  (gx) => { // pyramid of stone base, wood and glass on top
+    const rows = [['stone', 5], ['wood', 4], ['wood', 3], ['glass', 2]];
+    let y = GROUND;
+    rows.forEach(([mat, n], r) => {
+      for (let i = 0; i < n; i++) { const x = gx + (i - (n - 1) / 2) * 90; addBlock(x - 30, y - 50, 18, 100, mat); addBlock(x + 30, y - 50, 18, 100, mat); addBlock(x, y - 109, 90, 18, mat); if ((r === 0 && i % 2 === 1) || (r === 2 && i === 1)) addPig(x, y - 24, 18); }
+      y -= 118;
+    });
+    addPig(gx, y - 22, 22);
+  },
+  (gx) => { // fortress: stone walls, glass windows, king pig on top
+    addBlock(gx - 140, GROUND - 90, 30, 180, 'stone'); addBlock(gx + 140, GROUND - 90, 30, 180, 'stone');
+    addBlock(gx - 60, GROUND - 60, 20, 120, 'wood'); addBlock(gx + 60, GROUND - 60, 20, 120, 'wood'); addPig(gx, GROUND - 25, 24);
+    addBlock(gx, GROUND - 190, 330, 20, 'stone');
+    addBlock(gx - 80, GROUND - 250, 20, 100, 'glass'); addBlock(gx + 80, GROUND - 250, 20, 100, 'glass'); addBlock(gx, GROUND - 250, 20, 100, 'glass');
+    addBlock(gx, GROUND - 310, 220, 20, 'wood'); addPig(gx - 40, GROUND - 225, 16); addPig(gx + 40, GROUND - 225, 16);
+    addBlock(gx - 50, GROUND - 360, 20, 80, 'wood'); addBlock(gx + 50, GROUND - 360, 20, 80, 'wood'); addBlock(gx, GROUND - 410, 140, 20, 'wood'); addPig(gx, GROUND - 350, 26);
+    addBlock(gx + 300, GROUND - 40, 80, 80, 'stone'); addPig(gx + 300, GROUND - 105, 20);
+  },
+];
+function loadLevel(n) {
+  Composite.clear(engine.world, false);
+  blocks = []; pigs = []; parts = []; popups = [];
+  Composite.add(engine.world, [Bodies.rectangle(WORLD_W / 2, GROUND + 100, WORLD_W * 3, 200, { isStatic: true, friction: 0.9, label: 'ground' }), Bodies.rectangle(WORLD_W + 400, GROUND - 600, 100, 1600, { isStatic: true })]);
+  LEVELS[n % LEVELS.length](1250 + (n % LEVELS.length === 1 ? 50 : 0));
+  birdsLeft = 4; bird = null; state = 'settle'; stateT = 0; settleT = 0;
+}
+function newBird() { birdsLeft--; bird = { body: null, x: SLING.x, y: SLING.y, onSling: true, t: 0, trail: [] }; boostUsed = false; state = 'aim'; stateT = 0; aiPlan = null; }
+function launch(vx, vy) {
+  const b = Bodies.circle(SLING.x, SLING.y, 20, { density: 0.006, friction: 0.5, restitution: 0.35, frictionAir: 0 });
+  b.kind = 'bird'; Composite.add(engine.world, b); Body.setVelocity(b, { x: vx, y: vy });
+  bird.body = b; bird.onSling = false; state = 'fly'; stateT = 0; tone(300, 0.25, 'triangle', 0.08, 900); whoosh();
+}
+
+// Physics > damage = relative normal speed at contact, scaled by the other body's mass
+Events.on(engine, 'collisionStart', (e) => {
+  if (state === 'settle') return;
+  for (const pr of e.pairs) {
+    const a = pr.bodyA, b = pr.bodyB, n = pr.collision.normal;
+    const rv = Math.abs((a.velocity.x - b.velocity.x) * n.x + (a.velocity.y - b.velocity.y) * n.y);
+    if (rv < 1.6) continue;
+    for (const [s, o] of [[a, b], [b, a]]) {
+      if (s.kind !== 'block' && s.kind !== 'pig') continue;
+      const massF = o.isStatic ? 1 : Math.min(2.5, Math.sqrt(o.mass / Math.max(0.5, s.mass)));
+      s.hp -= (rv - 1.2) * massF * 0.55;
+      if (s.kind === 'block' && rv > 3) tone(s.mat === 'glass' ? 1400 : s.mat === 'stone' ? 140 : 260, 0.06, s.mat === 'glass' ? 'triangle' : 'square', 0.025);
+    }
+  }
+});
+function breakBody(b) {
+  Composite.remove(engine.world, b);
+  const n = b.kind === 'pig' ? 18 : 12, col = b.kind === 'pig' ? '#7ed957' : MAT[b.mat].fill;
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, sp = 2 + Math.random() * 6; parts.push({ x: b.position.x + (Math.random() - 0.5) * (b.w || 30), y: b.position.y + (Math.random() - 0.5) * (b.h || 30), vx: Math.cos(a) * sp + b.velocity.x * 0.4, vy: Math.sin(a) * sp - 3, t: 1 + Math.random() * 0.6, r: b.kind === 'pig' ? 6 : 4 + Math.random() * 6, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, col, sq: b.kind !== 'pig' }); }
+  const pts = b.kind === 'pig' ? 5000 : MAT[b.mat].pts;
+  score += pts; popups.push({ x: b.position.x, y: b.position.y - 20, t: 1.2, txt: pts, col: b.kind === 'pig' ? '#4caf2a' : '#fff' });
+  if (b.kind === 'pig') { tone(500, 0.3, 'square', 0.06, 120); setTimeout(() => tone(800, 0.15, 'triangle', 0.05), 80); } else tone(b.mat === 'glass' ? 2000 : 180, 0.2, b.mat === 'glass' ? 'triangle' : 'sawtooth', 0.04, b.mat === 'glass' ? 800 : 60);
+}
+
+// Aim > trajectory using the same per-step integration as Matter
+function trajectory(vx, vy, steps = 90) { const pts = []; let x = SLING.x, y = SLING.y; for (let i = 0; i < steps; i++) { vy += G; x += vx; y += vy; if (i % 3 === 0) pts.push([x, y]); if (y > GROUND) break; } return pts; }
+// AI > scan angles at full and partial power, pick the path passing closest to a pig (prefers lobs into tower tops)
+function planShot() {
+  const live = pigs.filter((p) => p.hp > 0);
+  if (!live.length) return null;
+  const tgt = live[(Math.random() * Math.min(2, live.length)) | 0];
+  let best = null, bd = 1e9;
+  for (let pw = 0.75; pw <= 1.0001; pw += 0.05) for (let a = -1.35; a < 0.15; a += 0.01) {
+    const sp = MAXPULL * POWER * pw, vx = Math.cos(a) * sp, vy = Math.sin(a) * sp;
+    let x = SLING.x, y = SLING.y, vyy = vy, d = 1e9;
+    for (let i = 0; i < 260; i++) { vyy += G; x += vx; y += vyy; const dd = Math.hypot(x - tgt.position.x, y - tgt.position.y); if (dd < d) d = dd; if (y > GROUND || x > tgt.position.x + 60) break; }
+    if (d < bd) { bd = d; best = { a, pw }; }
+  }
+  // human-ish error so the demo doesn't look scripted
+  best.a += (Math.random() - 0.5) * 0.03;
+  const pull = MAXPULL * best.pw;
+  return { dx: -Math.cos(best.a) * pull, dy: -Math.sin(best.a) * pull, t: 0 };
+}
+
+// Input > drag from the bird, tap mid-flight to boost
+const toWorld = (cx, cy) => [cx / scale + cam.x, cy / scale + cam.y];
+function wake() { idle = 0; if (!ac) { try { ac = new AudioContext(); } catch { /* none */ } } if (attract) { attract = false; score = 0; level = 0; loadLevel(level); return true; } return false; }
+cv.addEventListener('pointerdown', (e) => {
+  if (wake()) return;
+  const [x, y] = toWorld(e.clientX, e.clientY);
+  if (state === 'aim' && Math.hypot(x - SLING.x, y - SLING.y) < 110) { drag = { x, y }; cv.setPointerCapture(e.pointerId); tone(180, 0.08, 'triangle', 0.04); }
+  else if (state === 'fly' && !boostUsed && bird.body) boost();
+});
+cv.addEventListener('pointermove', (e) => { if (drag) { [drag.x, drag.y] = toWorld(e.clientX, e.clientY); idle = 0; } });
+cv.addEventListener('pointerup', () => { if (!drag) return; const p = pullVec(drag.x, drag.y); drag = null; if (Math.hypot(p.dx, p.dy) > 25) launch(-p.dx * POWER, -p.dy * POWER); });
+function pullVec(x, y) { let dx = x - SLING.x, dy = y - SLING.y; const d = Math.hypot(dx, dy); if (d > MAXPULL) { dx *= MAXPULL / d; dy *= MAXPULL / d; } return { dx, dy }; }
+function boost() { boostUsed = true; const v = bird.body.velocity, s = Math.hypot(v.x, v.y) || 1; Body.setVelocity(bird.body, { x: v.x / s * Math.max(s * 1.7, 14), y: v.y / s * Math.max(s * 1.7, 14) }); tone(600, 0.2, 'sawtooth', 0.05, 1600); for (let i = 0; i < 12; i++) parts.push({ x: bird.body.position.x, y: bird.body.position.y, vx: (Math.random() - 0.5) * 6, vy: (Math.random() - 0.5) * 6, t: 0.5, r: 5, col: '#ffe06a' }); }
+
+// Audio
+let ac = null;
+function tone(f, d, type = 'square', vol = 0.05, f2 = f) {
+  if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+  o.type = type; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+function whoosh() { if (!ac) return; const b = ac.createBuffer(1, ac.sampleRate * 0.4, ac.sampleRate), ch = b.getChannelData(0); for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.sin(Math.PI * i / ch.length); const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.frequency.value = 900; g.gain.value = 0.15; s.buffer = b; s.connect(f).connect(g).connect(ac.destination); s.start(); }
+
+function update() {
+  stateT += STEP / 1000;
+  Engine.update(engine, STEP);
+  for (const b of [...blocks, ...pigs]) if (b.hp <= 0 && !b.dead) { b.dead = true; breakBody(b); }
+  blocks = blocks.filter((b) => !b.dead); pigs = pigs.filter((p) => !p.dead);
+  for (const b of [...blocks, ...pigs]) if (b.position.y > GROUND + 200) { b.dead = true; Composite.remove(engine.world, b); }
+  if (state === 'settle') { if (stateT > 1.2) newBird(); return; }
+  if (state === 'aim' && attract) {
+    if (!aiPlan) aiPlan = planShot();
+    if (aiPlan) { aiPlan.t += STEP / 1000; const k = Math.min(1, Math.max(0, (aiPlan.t - 0.5) / 0.8)); drag = { x: SLING.x + aiPlan.dx * k, y: SLING.y + aiPlan.dy * k }; if (aiPlan.t > 1.6) { drag = null; launch(-aiPlan.dx * POWER, -aiPlan.dy * POWER); } }
+  }
+  if (state === 'fly') {
+    const b = bird.body;
+    if (stateT % 0.05 < STEP / 1000) bird.trail.push([b.position.x, b.position.y]);
+    if (attract && !boostUsed && stateT > 0.5 && b.velocity.x > 2 && Math.random() < 0.01) boost();
+    const slow = Math.hypot(b.velocity.x, b.velocity.y) < 0.4;
+    settleT = slow ? settleT + STEP / 1000 : 0;
+    if (settleT > 1 || stateT > 9 || b.position.x > WORLD_W + 300 || b.position.x < -200) {
+      Composite.remove(engine.world, b); bird.body = null;
+      state = !pigs.length ? 'win' : birdsLeft > 0 ? 'settle' : 'lose'; stateT = 0;
+      if (state === 'win') { score += birdsLeft * 10000; [523, 659, 784, 1047].forEach((f, k) => setTimeout(() => tone(f, 0.2, 'triangle', 0.07), k * 120)); }
+    }
+  }
+  if (state === 'fly' && !pigs.length && stateT > 1.5) { state = 'win'; stateT = 0; score += birdsLeft * 10000; }
+  if ((state === 'win' || state === 'lose') && stateT > 3) { if (state === 'win') level++; loadLevel(level); }
+}
+
+// Render
+function blockPath(b) { ctx.beginPath(); const v = b.vertices; ctx.moveTo(v[0].x, v[0].y); for (let i = 1; i < v.length; i++) ctx.lineTo(v[i].x, v[i].y); ctx.closePath(); }
+function drawBlock(b) {
+  const m = MAT[b.mat];
+  ctx.save(); ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
+  const w = b.w, h = b.h;
+  ctx.fillStyle = m.fill; ctx.strokeStyle = m.edge; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 3); ctx.fill(); ctx.stroke(); ctx.clip(); // grain + cracks stay inside the block
+  if (b.mat === 'wood') { ctx.strokeStyle = '#a5703a'; ctx.lineWidth = 1.2; const along = w > h; for (let k = 1; k < 4; k++) { ctx.beginPath(); if (along) { ctx.moveTo(-w / 2 + 3, -h / 2 + k * h / 4); ctx.lineTo(w / 2 - 3, -h / 2 + k * h / 4 + Math.sin(b.seed + k) * 2); } else { ctx.moveTo(-w / 2 + k * w / 4, -h / 2 + 3); ctx.lineTo(-w / 2 + k * w / 4 + Math.sin(b.seed + k) * 2, h / 2 - 3); } ctx.stroke(); } }
+  if (b.mat === 'stone') { ctx.fillStyle = '#7f8590'; for (let k = 0; k < 5; k++) { const sx = (Math.sin(b.seed * (k + 1)) * 0.4) * w, sy = (Math.cos(b.seed * (k + 2)) * 0.4) * h; ctx.beginPath(); ctx.arc(sx, sy, 2.5, 0, 7); ctx.fill(); } }
+  if (b.mat === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-w / 2 + 4, h / 2 - 6); ctx.lineTo(-w / 2 + Math.min(w, h) * 0.5, -h / 2 + 4); ctx.stroke(); }
+  // cracks appear below 60% health
+  const dmg = 1 - b.hp / b.max;
+  if (dmg > 0.4) { ctx.strokeStyle = 'rgba(30,20,10,0.65)'; ctx.lineWidth = 1.4; ctx.beginPath(); let x = w > h ? -w * 0.3 : 0, y = w > h ? 0 : -h * 0.3; ctx.moveTo(x, y); const L2 = Math.max(w, h), along = w > h; for (let k = 0; k < 4 + dmg * 4; k++) { if (along) { x += L2 * 0.12; y = Math.sin(b.seed + k * 2.1) * h * 0.35; } else { y += L2 * 0.12; x = Math.sin(b.seed + k * 2.1) * w * 0.35; } ctx.lineTo(x, y); } ctx.stroke(); }
+  ctx.restore();
+}
+function drawPig(p) {
+  const r = p.r, hurt = p.hp < p.max * 0.6, blink = ((performance.now() / 1000 + p.blink) % 4) < 0.12;
+  ctx.save(); ctx.translate(p.position.x, p.position.y); ctx.rotate(p.angle);
+  ctx.fillStyle = '#7ed957'; ctx.strokeStyle = '#3f8a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, r, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#6cc447'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * r * 0.6, -r * 0.85, r * 0.25, 0, 7); ctx.fill(); }
+  ctx.fillStyle = '#9be87a'; ctx.beginPath(); ctx.ellipse(0, r * 0.15, r * 0.42, r * 0.3, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#3f8a2a'; ctx.beginPath(); ctx.arc(-r * 0.14, r * 0.15, r * 0.08, 0, 7); ctx.arc(r * 0.14, r * 0.15, r * 0.08, 0, 7); ctx.fill();
+  for (const s of [-1, 1]) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s * r * 0.42, -r * 0.3, r * 0.2, 0, 7); ctx.fill(); if (!blink) { ctx.fillStyle = '#123'; ctx.beginPath(); ctx.arc(s * r * 0.42 - r * 0.05, -r * 0.3, r * 0.09, 0, 7); ctx.fill(); } }
+  if (hurt) { ctx.strokeStyle = '#3f8a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-r * 0.6, -r * 0.55); ctx.lineTo(-r * 0.2, -r * 0.45); ctx.stroke(); }
+  ctx.restore();
+}
+function drawBird(x, y, a = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+  ctx.fillStyle = '#1a1a1a'; ctx.beginPath(); ctx.moveTo(-18, -4); ctx.lineTo(-30, -10); ctx.lineTo(-27, 0); ctx.lineTo(-31, 7); ctx.lineTo(-18, 5); ctx.fill();
+  ctx.fillStyle = '#e8352c'; ctx.strokeStyle = '#8a1a14'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 20, 0, 7); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f5d9b0'; ctx.beginPath(); ctx.ellipse(4, 9, 11, 8, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(5, -4, 5.5, 0, 7); ctx.arc(13, -4, 5, 0, 7); ctx.fill();
+  ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(7, -3.5, 2.3, 0, 7); ctx.arc(14.5, -3.5, 2.2, 0, 7); ctx.fill();
+  ctx.fillStyle = '#222'; ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(18, -8); ctx.lineTo(17, -5); ctx.lineTo(1, -8); ctx.fill();
+  ctx.fillStyle = '#ffb21e'; ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(28, 4); ctx.lineTo(16, 8); ctx.fill();
+  ctx.restore();
+}
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, innerHeight); sky.addColorStop(0, '#5fb8ff'); sky.addColorStop(1, '#d6f0ff');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  // camera: follow the bird in flight, otherwise frame sling + tower
+  const vw = viewW(), vh = viewH();
+  let tx = state === 'fly' && bird.body ? bird.body.position.x - vw * 0.4 : 0;
+  if (state === 'settle' || state === 'win' || state === 'lose') tx = WORLD_W - vw;
+  cam.tx += (Math.max(0, Math.min(WORLD_W + 100 - vw, tx)) - cam.tx) * 0.06;
+  cam.x = cam.tx; cam.y = GROUND + 120 - vh;
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, -cam.x * scale * dpr, -cam.y * scale * dpr);
+  // parallax hills and clouds
+  for (const [par, col, h, f] of [[0.3, '#9fd98a', 230, 0.004], [0.6, '#7cc96a', 150, 0.007]]) {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(cam.x - 50, GROUND + 10);
+    for (let x = -50; x <= vw + 60; x += 30) { const wx = x + cam.x; ctx.lineTo(wx, GROUND - h * (0.6 + 0.4 * Math.sin((wx - cam.x * par) * f))); }
+    ctx.lineTo(cam.x + vw + 60, GROUND + 10); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (let i = 0; i < 6; i++) { const x = ((i * 520 - cam.x * 0.2 + performance.now() * 0.01) % 3000 + 3000) % 3000 + cam.x * 0.8 - 300, y = 140 + (i % 3) * 70; for (const [dx, dy, r] of [[0, 0, 34], [36, 8, 26], [-34, 10, 24], [10, 16, 28]]) { ctx.beginPath(); ctx.arc(x + dx, y + dy, r, 0, 7); ctx.fill(); } }
+  ctx.fillStyle = '#5cae3e'; ctx.fillRect(cam.x - 50, GROUND, vw + 100, 26); ctx.fillStyle = '#8a5a34'; ctx.fillRect(cam.x - 50, GROUND + 26, vw + 100, 300);
+  // slingshot back arm + band
+  const pull = drag ? pullVec(drag.x, drag.y) : { dx: 0, dy: 0 }, bx = SLING.x + pull.dx, by = SLING.y + pull.dy;
+  ctx.strokeStyle = '#6b3d1e'; ctx.lineWidth = 16; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(SLING.x, GROUND); ctx.lineTo(SLING.x, SLING.y + 60); ctx.lineTo(SLING.x + 22, SLING.y - 10); ctx.stroke();
+  if (state === 'aim') { ctx.strokeStyle = '#4a2410'; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(SLING.x + 22, SLING.y - 8); ctx.lineTo(bx - 10, by); ctx.stroke(); }
+  // trajectory preview while pulling
+  if (drag && Math.hypot(pull.dx, pull.dy) > 25) { ctx.fillStyle = 'rgba(255,255,255,0.9)'; trajectory(-pull.dx * POWER, -pull.dy * POWER).forEach(([x, y], i) => { ctx.beginPath(); ctx.arc(x, y, Math.max(2, 6 - i * 0.12), 0, 7); ctx.fill(); }); }
+  if (bird && bird.trail.length) { ctx.fillStyle = 'rgba(255,255,255,0.75)'; for (const [x, y] of bird.trail) { ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 7); ctx.fill(); } }
+  for (const b of blocks) drawBlock(b);
+  for (const p of pigs) drawPig(p);
+  if (state === 'aim') drawBird(bx, by, Math.atan2(-pull.dy, -pull.dx) * (drag ? 1 : 0));
+  if (bird?.body) drawBird(bird.body.position.x, bird.body.position.y, bird.body.angle);
+  // waiting birds by the sling
+  for (let i = 0; i < birdsLeft; i++) drawBird(SLING.x - 70 - i * 46, GROUND - 20);
+  if (state === 'aim') { ctx.strokeStyle = '#4a2410'; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(SLING.x - 18, SLING.y - 6); ctx.lineTo(bx - 10, by); ctx.stroke(); }
+  ctx.strokeStyle = '#7b4a26'; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(SLING.x, SLING.y + 60); ctx.lineTo(SLING.x - 20, SLING.y - 10); ctx.stroke();
+  for (const p of parts) { ctx.save(); ctx.globalAlpha = Math.min(1, p.t); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.col; if (p.sq) ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 0.6); else { ctx.beginPath(); ctx.arc(0, 0, p.r, 0, 7); ctx.fill(); } ctx.restore(); }
+  for (const p of popups) { ctx.globalAlpha = Math.min(1, p.t * 2); ctx.fillStyle = p.col; ctx.strokeStyle = '#0006'; ctx.lineWidth = 4; ctx.font = '900 30px ui-rounded, system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.strokeText(p.txt, p.x, p.y); ctx.fillText(p.txt, p.x, p.y); }
+  ctx.globalAlpha = 1;
+  // HUD
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.font = '900 30px ui-rounded, system-ui, sans-serif'; ctx.lineWidth = 5; ctx.strokeStyle = '#0005'; ctx.fillStyle = '#fff';
+  ctx.strokeText(score.toLocaleString(), 18, 14); ctx.fillText(score.toLocaleString(), 18, 14);
+  ctx.font = '800 15px ui-rounded, system-ui, sans-serif'; ctx.strokeText(`LEVEL ${level + 1} · ${pigs.length} pig${pigs.length === 1 ? '' : 's'} left`, 18, 52); ctx.fillText(`LEVEL ${level + 1} · ${pigs.length} pig${pigs.length === 1 ? '' : 's'} left`, 18, 52);
+  ctx.textAlign = 'center';
+  if (attract) { const ny = innerWidth < 700 ? 92 : 18; ctx.font = '800 18px ui-rounded, system-ui, sans-serif'; ctx.globalAlpha = 0.65 + Math.sin(performance.now() / 260) * 0.35; ctx.strokeText('AI DEMO · TAP TO PLAY', innerWidth / 2, ny); ctx.fillText('AI DEMO · TAP TO PLAY', innerWidth / 2, ny); ctx.globalAlpha = 1; ctx.font = '600 13px system-ui'; const hint = innerWidth < 700 ? 'drag back · release · tap to boost' : 'drag the bird back · release to fire · tap mid-air to boost'; ctx.strokeText(hint, innerWidth / 2, ny + 26); ctx.fillText(hint, innerWidth / 2, ny + 26); }
+  if (state === 'win' || state === 'lose') { ctx.font = '900 48px ui-rounded, system-ui, sans-serif'; ctx.lineWidth = 8; const t = state === 'win' ? 'LEVEL CLEARED!' : 'PIGS SURVIVED'; ctx.strokeText(t, innerWidth / 2, innerHeight * 0.3); ctx.fillStyle = state === 'win' ? '#ffe06a' : '#fff'; ctx.fillText(t, innerWidth / 2, innerHeight * 0.3); }
+}
+
+loadLevel(level); score = 0;
+let last = performance.now(), accum = 0;
+function loop(now) {
+  const fdt = Math.min(0.1, (now - last) / 1000); last = now; accum += fdt * 1000;
+  // fixed physics step keeps the preview exact
+  let n = 0; while (accum >= STEP && n++ < 4) { update(); accum -= STEP; }
+  if (n >= 4) accum = 0;
+  for (const p of parts) { p.x += p.vx; p.y += p.vy; p.vy += 0.3; p.rot += p.vr || 0; p.t -= fdt; } parts = parts.filter((p) => p.t > 0);
+  for (const p of popups) { p.y -= 0.6; p.t -= fdt; } popups = popups.filter((p) => p.t > 0);
+  if (!attract) { idle += fdt; if (idle > 45) { attract = true; level = 0; score = 0; loadLevel(0); } }
+  draw(); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.__sling = { get pigs() { return pigs.length; }, get score() { return score; }, get level() { return level; }, get state() { return state; } };
+</script>
+</body>
+</html>

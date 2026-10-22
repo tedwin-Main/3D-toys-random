@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Animated SVG Landscape</title>
+<meta name="category" content="generative" />
+<meta name="order" content="2" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="pure SVG, SMIL animation, day/night cycle, lake reflection" />
+<meta name="description" content="A full day cycle drawn and animated in vector only: gradient sky, rising sun and moon, layered ridges with atmospheric haze, drifting clouds, flapping birds, fireflies and a rippling lake reflection. Hard because every colour shift, wing beat and ripple must be expressed declaratively in SVG." />
+<meta name="prompt" content="Create an animated SVG landscape in one HTML file: a sky gradient that cycles dawn, day, dusk and night, a sun and moon on an arc, five layers of mountains with atmospheric perspective, drifting clouds, a flock of flapping birds, stars, fireflies and a lake that reflects everything with animated ripples. Animate with SVG/SMIL only, add pointer parallax, a time-of-day scrubber and a download-SVG button." />
+<style>
+  :root { --ink: #f3efe6; --muted: #b3ab9c; --panel: rgba(14, 12, 20, 0.62); --accent: #ffb35c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d18; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  svg#scene { display: block; width: 100vw; height: 100vh; }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 280px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; }
+  #panel h1 { margin: 0 0 2px; font-size: 16px; letter-spacing: -0.01em; }
+  #panel .sub { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+  #panel label { display: grid; grid-template-columns: 40px 1fr 72px; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: var(--ink); border-radius: 9px; padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btns button:hover { border-color: var(--accent); }
+  .btns button.on { background: var(--accent); border-color: var(--accent); color: #241404; }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  @media (max-width: 600px) {
+    #panel { left: 10px; right: 10px; bottom: 10px; width: auto; }
+    #panel .sub, #panel .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<svg id="scene" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice"></svg>
+<div id="panel">
+  <h1>Animated SVG Landscape</h1>
+  <p class="sub">Vector only · SMIL clock · no canvas</p>
+  <label>Time <input id="time" type="range" min="0" max="1" step="0.001" value="0"><output id="time-o"></output></label>
+  <div class="btns">
+    <button id="play" class="on">Playing</button>
+    <button id="dusk">Golden hour</button>
+    <button id="save">Save SVG</button>
+  </div>
+  <div class="hint">Move the pointer for parallax. Drag Time to scrub the whole day; every layer stays in sync.</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/animated-svg-landscape.html
+ * PURPOSE: generates layered SVG landscape once, then animates day cycle, sun/moon, clouds, birds, ripples purely with SMIL
+ * UI: Render Studio > 2D & Generative > Animated SVG Landscape
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const DUR = 40; // seconds per full day
+const START = 0.36; // open on late afternoon so first frame is warm
+const svg = document.getElementById('scene');
+const NS = 'http://www.w3.org/2000/svg';
+const $ = (id) => document.getElementById(id);
+
+// Generator: seeded noise for ridges, stars, trees
+let s = 7;
+const rand = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+const lattice = Array.from({ length: 512 }, rand);
+const vnoise = (x) => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return lattice[i & 511] * (1 - u) + lattice[(i + 1) & 511] * u; };
+const fbm = (x, oct) => { let a = 0.5, v = 0, t = 0; for (let o = 0; o < oct; o++) { v += vnoise(x) * a; t += a; x *= 2.03; a *= 0.5; } return v / t; };
+
+// Generator: colour keyframes dawn, day, dusk, night, dawn
+const K = '0;0.25;0.5;0.75;1';
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const toHex = (c) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const mix = (a, b, t) => toHex(hex(a).map((v, i) => v + (hex(b)[i] - v) * t));
+const PH = {
+  top:     ['#3a3f78', '#2f74c8', '#2b1d52', '#04061a'],
+  mid:     ['#e7928a', '#86c2ec', '#e0586e', '#0d1536'],
+  horizon: ['#ffd2a1', '#dff1ff', '#ffb055', '#1b2452'],
+  land:    ['#2a2442', '#284636', '#2a1532', '#03050f'],
+  cloud:   ['#ffc3b0', '#ffffff', '#ff9a7a', '#2a3155'],
+};
+const vals = (arr) => [...arr, arr[0]].join(';');
+const phaseVals = (fn) => vals([0, 1, 2, 3].map(fn));
+
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function anim(parent, attr, values, extra = {}) {
+  return el('animate', { attributeName: attr, values, keyTimes: K, dur: `${DUR}s`, repeatCount: 'indefinite', ...extra }, parent);
+}
+
+// Scene > defs: sky, lake, sun glow gradients and ripple filter
+const defs = el('defs', {}, svg);
+const sky = el('linearGradient', { id: 'sky', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+[['0', 'top'], ['0.55', 'mid'], ['0.72', 'horizon']].forEach(([o, k]) => {
+  const st = el('stop', { offset: o, 'stop-color': PH[k][0] }, sky);
+  anim(st, 'stop-color', vals(PH[k]));
+});
+const sunG = el('radialGradient', { id: 'sunglow' }, defs);
+[['0', '#fff7e0', 1], ['0.18', '#ffe0a0', 1], ['0.35', '#ffb35c', 0.35], ['1', '#ff8a3d', 0]].forEach(([o, c, a]) => el('stop', { offset: o, 'stop-color': c, 'stop-opacity': a }, sunG));
+const moonG = el('radialGradient', { id: 'moonglow' }, defs);
+[['0', '#f4f1ff', 1], ['0.2', '#dfe4ff', 0.95], ['0.32', '#9fb0ff', 0.18], ['1', '#9fb0ff', 0]].forEach(([o, c, a]) => el('stop', { offset: o, 'stop-color': c, 'stop-opacity': a }, moonG));
+const cloudG = el('radialGradient', { id: 'cloudpuff', cy: '0.62' }, defs);
+[['0', 0.95], ['0.5', 0.6], ['1', 0]].forEach(([o, a]) => {
+  const st = el('stop', { offset: o, 'stop-color': PH.cloud[0], 'stop-opacity': a }, cloudG);
+  anim(st, 'stop-color', vals(PH.cloud));
+});
+const fogG = el('linearGradient', { id: 'fog', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+[['0', 0], ['0.6', 0.55], ['1', 0]].forEach(([o, a]) => el('stop', { offset: o, 'stop-color': '#fff', 'stop-opacity': a }, fogG));
+const lakeG = el('linearGradient', { id: 'lake', x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+[['0', (i) => mix(PH.horizon[i], PH.land[i], 0.35)], ['1', (i) => mix(PH.top[i], PH.land[i], 0.55)]].forEach(([o, fn]) => {
+  const st = el('stop', { offset: o, 'stop-color': fn(0) }, lakeG);
+  anim(st, 'stop-color', phaseVals(fn));
+});
+const ripple = el('filter', { id: 'ripple', x: 0, y: 0, width: 1, height: 1, 'color-interpolation-filters': 'sRGB' }, defs);
+const turb = el('feTurbulence', { type: 'fractalNoise', baseFrequency: '0.004 0.11', numOctaves: 2, seed: 4, result: 'n' }, ripple);
+el('animate', { attributeName: 'baseFrequency', values: '0.004 0.11;0.0046 0.125;0.004 0.11', dur: '7s', repeatCount: 'indefinite' }, turb);
+el('feDisplacementMap', { in: 'SourceGraphic', in2: 'n', scale: 14, xChannelSelector: 'R', yChannelSelector: 'G' }, ripple);
+el('clipPath', { id: 'lakeclip' }, defs).appendChild(el('rect', { x: -200, y: 640, width: 2000, height: 300 }));
+
+// Scene > world: everything above the waterline, reused for the reflection
+const world = el('g', { id: 'world' }, svg);
+el('rect', { x: -200, y: -100, width: 2000, height: 1100, fill: 'url(#sky)' }, world);
+
+// Scene > stars: fade in at night, a few twinkle on their own clock
+const stars = el('g', { opacity: 0 }, world);
+anim(stars, 'opacity', '0;0;0.04;1;0');
+for (let i = 0; i < 170; i++) {
+  const c = el('circle', { cx: rand() * 1800 - 100, cy: rand() * 520 - 40, r: (rand() ** 3 * 1.6 + 0.4).toFixed(2), fill: '#fff' }, stars);
+  if (i % 6 === 0) el('animate', { attributeName: 'opacity', values: '1;0.2;1', dur: `${(2 + rand() * 3).toFixed(1)}s`, repeatCount: 'indefinite' }, c);
+}
+
+// Scene > sun + moon: one rotating arm, sun east at dawn, overhead at noon, moon opposite
+const parallax = [];
+const skyLayer = el('g', {}, world);
+parallax.push([skyLayer, 4]);
+const arm = el('g', {}, el('g', { transform: 'translate(800 720)' }, skyLayer));
+el('animateTransform', { attributeName: 'transform', type: 'rotate', values: '-14;76;166;256;346', keyTimes: K, dur: `${DUR}s`, repeatCount: 'indefinite' }, arm);
+el('circle', { cx: -700, cy: 0, r: 260, fill: 'url(#sunglow)' }, arm);
+el('circle', { cx: -700, cy: 0, r: 32, fill: '#fff6dc' }, arm);
+el('circle', { cx: 700, cy: 0, r: 120, fill: 'url(#moonglow)' }, arm);
+el('circle', { cx: 700, cy: 0, r: 22, fill: '#eef0ff' }, arm);
+el('circle', { cx: 710, cy: -6, r: 19, fill: '#cfd6f5', opacity: 0.35 }, arm);
+
+// Scene > clouds: soft gradient puffs drifting on independent loops
+const clouds = el('g', {}, skyLayer);
+for (let i = 0; i < 7; i++) {
+  const y = 70 + rand() * 230, sc = 0.6 + rand() * 0.9, w = 260 * sc;
+  const g = el('g', { opacity: (0.5 + rand() * 0.4).toFixed(2) }, clouds);
+  const fill = el('g', {}, g);
+  anim(fill, 'opacity', '0.9;1;0.95;0.3;0.9');
+  // long flat streaks read as high cirrus, catches sunset colour better than puffs
+  for (let j = 0; j < 6; j++) el('ellipse', { cx: (j - 2.5) * w * 0.32 + rand() * 40, cy: (rand() - 0.5) * 18 * sc, rx: w * (0.35 + rand() * 0.3), ry: 14 * sc * (0.6 + rand() * 0.8), fill: 'url(#cloudpuff)' }, fill);
+  const dur = 90 + rand() * 80, x0 = -400 + rand() * 2200;
+  el('animateTransform', { attributeName: 'transform', type: 'translate', values: `${x0} ${y};${x0 + 2200} ${y}`, dur: `${dur}s`, begin: `-${(rand() * dur).toFixed(1)}s`, repeatCount: 'indefinite' }, g);
+}
+
+// Scene > ridges: five layers, far ones jagged and hazy, near ones rolling and dark
+const RIDGES = [
+  { base: 500, amp: 170, freq: 0.006, oct: 5, haze: 0.74, depth: 8 },
+  { base: 540, amp: 150, freq: 0.005, oct: 5, haze: 0.56, depth: 14 },
+  { base: 565, amp: 140, freq: 0.0042, oct: 4, haze: 0.38, depth: 22 },
+  { base: 605, amp: 95, freq: 0.0036, oct: 4, haze: 0.2, depth: 32 },
+  { base: 640, amp: 60, freq: 0.003, oct: 3, haze: 0.06, depth: 44 },
+];
+RIDGES.forEach((r, li) => {
+  const g = el('g', {}, world);
+  parallax.push([g, r.depth]);
+  const off = li * 97.3;
+  const pts = [];
+  for (let x = -160; x <= 1760; x += 6) pts.push([x, r.base - fbm(x * r.freq + off, r.oct) * r.amp * 1.6 + r.amp * 0.35]);
+  const d = `M-160 700 ` + pts.map(([x, y]) => `L${x} ${y.toFixed(1)}`).join(' ') + ' L1760 700 Z';
+  const path = el('path', { d }, g);
+  // haze toward mid-sky, not horizon: far ridges go cool blue/violet like real air
+  const col = (i) => mix(PH.land[i], mix(PH.mid[i], PH.horizon[i], 0.3), r.haze);
+  path.setAttribute('fill', col(0));
+  anim(path, 'fill', phaseVals(col));
+  // pines on the two nearest ridges sell the scale
+  if (li >= 3) {
+    const trees = el('g', { fill: col(0) }, g);
+    anim(trees, 'fill', phaseVals(col));
+    for (let k = 0; k < pts.length; k += li === 4 ? 2 : 3) {
+      if (fbm(pts[k][0] * 0.01 + 40 + li, 2) < 0.48) continue;
+      const [x, y] = pts[k], h = (li === 4 ? 26 : 14) * (0.6 + rand() * 0.8), w = h * 0.36;
+      el('path', { d: `M${x - w} ${y + 4} L${x} ${y - h} L${x + w} ${y + 4} Z` }, trees);
+    }
+  }
+  // mist band between layers, thicker at dawn
+  if (li < 4) {
+    const fog = el('rect', { x: -200, y: r.base + 10, width: 2000, height: 90, fill: 'url(#fog)', opacity: 0.4 }, g);
+    anim(fog, 'opacity', '0.55;0.18;0.3;0.12;0.55');
+  }
+});
+
+// Scene > birds: flapping V paths riding a wavy flight line, gone at night
+const flock = el('g', {}, world);
+anim(flock, 'opacity', '0.9;1;0.9;0;0.9');
+const birdFill = () => '#1c1424';
+for (let i = 0; i < 9; i++) {
+  const g = el('g', {}, flock);
+  const sc = 1.1 + rand() * 0.8;
+  const b = el('path', { fill: birdFill(1), transform: `scale(${sc.toFixed(2)})` }, g);
+  const up = 'M-14 -7 Q-7 -2 0 0 Q7 -2 14 -7 Q7 0 0 3 Q-7 0 -14 -7Z';
+  const mid = 'M-14 0 Q-7 -3 0 0 Q7 -3 14 0 Q7 2 0 3 Q-7 2 -14 0Z';
+  const dn = 'M-13 7 Q-7 1 0 0 Q7 1 13 7 Q7 3 0 3 Q-7 3 -13 7Z';
+  el('animate', { attributeName: 'd', values: `${up};${mid};${dn};${mid};${up}`, dur: `${(0.55 + rand() * 0.3).toFixed(2)}s`, repeatCount: 'indefinite' }, b);
+  const dx = (i % 3) * 34 + rand() * 12, dy = Math.floor(i / 3) * 22 + rand() * 10;
+  el('animateMotion', { path: `M${-200 - dx} ${260 + dy} C 300 ${160 + dy}, 700 ${330 + dy}, 1000 ${220 + dy} S 1600 ${150 + dy}, ${1900 - dx} ${210 + dy}`, dur: '28s', begin: `-${(23 + i * 0.25).toFixed(2)}s`, repeatCount: 'indefinite' }, g);
+}
+
+// Scene > lake: tinted water plus mirrored, rippled copy of the world
+const lake = el('g', {}, svg);
+el('rect', { x: -200, y: 640, width: 2000, height: 300, fill: 'url(#lake)' }, lake);
+const refl = el('g', { 'clip-path': 'url(#lakeclip)', filter: 'url(#ripple)', opacity: 0.62 }, lake);
+el('use', { href: '#world', transform: 'translate(0 1280) scale(1 -1)' }, refl);
+const shore = el('rect', { x: -200, y: 639, width: 2000, height: 2, fill: '#fff', opacity: 0.08 }, lake);
+anim(shore, 'opacity', '0.1;0.12;0.1;0.03;0.1');
+
+// Scene > foreground: dark banks, reeds swaying, fireflies after dark
+const fg = el('g', {}, svg);
+parallax.push([fg, 70]);
+const fgCol = (i) => mix(PH.land[i], '#000000', 0.45);
+const bank = el('path', { d: 'M-200 900 L-200 760 C 0 740, 140 770, 260 800 C 360 828, 420 860, 520 900 Z M1800 900 L1800 730 C 1600 720, 1460 760, 1340 800 C 1250 830, 1180 870, 1100 900 Z', fill: fgCol(0) }, fg);
+anim(bank, 'fill', phaseVals(fgCol));
+const reeds = el('g', { stroke: fgCol(0), 'stroke-linecap': 'round', fill: 'none' }, fg);
+anim(reeds, 'stroke', phaseVals(fgCol));
+for (let i = 0; i < 46; i++) {
+  const left = i < 23, x = left ? 40 + rand() * 360 : 1180 + rand() * 380;
+  const y = left ? 830 - (x - 40) * 0.05 : 830 - (1560 - x) * 0.05;
+  const h = 70 + rand() * 90, lean = (rand() - 0.5) * 30;
+  const g = el('g', { transform: `translate(${x.toFixed(0)} ${(y + 40).toFixed(0)})` }, reeds);
+  const blade = el('path', { d: `M0 0 Q ${(lean * 0.4).toFixed(1)} ${(-h * 0.5).toFixed(1)} ${lean.toFixed(1)} ${(-h).toFixed(1)}`, 'stroke-width': (1.4 + rand() * 1.8).toFixed(1) }, g);
+  el('animateTransform', { attributeName: 'transform', type: 'rotate', values: `-2;${(2 + rand() * 3).toFixed(1)};-2`, dur: `${(3 + rand() * 3).toFixed(1)}s`, repeatCount: 'indefinite' }, blade);
+  if (i % 5 === 0) el('ellipse', { cx: lean.toFixed(1), cy: (-h).toFixed(1), rx: 3, ry: 9, fill: fgCol(1), transform: `rotate(${(lean * 0.6).toFixed(0)} ${lean.toFixed(1)} ${(-h).toFixed(1)})` }, g);
+}
+const flies = el('g', { opacity: 0 }, fg);
+anim(flies, 'opacity', '0;0;0;1;0');
+for (let i = 0; i < 26; i++) {
+  const x = rand() * 1600, y = 660 + rand() * 200;
+  const f = el('circle', { r: 2.2, fill: '#fff3a6' }, flies);
+  el('circle', { r: 9, fill: '#fff3a6', opacity: 0.18 }, flies);
+  const halo = flies.lastChild;
+  const path = `M${x} ${y} q ${40 - rand() * 80} ${-30 - rand() * 30} ${80 - rand() * 160} ${-rand() * 40} t ${80 - rand() * 160} ${30 - rand() * 60} T ${x} ${y}`;
+  const dur = `${(8 + rand() * 8).toFixed(1)}s`, begin = `-${(rand() * 8).toFixed(1)}s`;
+  for (const n of [f, halo]) el('animateMotion', { path, dur, begin, repeatCount: 'indefinite' }, n);
+  el('animate', { attributeName: 'opacity', values: '0.1;1;0.1', dur: `${(1.5 + rand() * 2).toFixed(1)}s`, repeatCount: 'indefinite' }, f);
+}
+
+// Panel > Time slider: scrub SMIL clock, poll it back while playing
+const PHASES = ['Dawn', 'Morning', 'Noon', 'Afternoon', 'Dusk', 'Evening', 'Night', 'Late night'];
+const label = (t) => PHASES[Math.floor(((t + 0.0625) % 1) * 8)];
+svg.setCurrentTime(START * DUR);
+const time = $('time'), timeO = $('time-o');
+setInterval(() => {
+  const t = (svg.getCurrentTime() / DUR) % 1;
+  if (document.activeElement !== time) time.value = t;
+  timeO.textContent = label(t);
+}, 200);
+time.addEventListener('input', () => {
+  const base = Math.floor(svg.getCurrentTime() / DUR) * DUR;
+  svg.setCurrentTime(base + +time.value * DUR);
+  timeO.textContent = label(+time.value);
+});
+
+// Panel > buttons: play/pause, jump to golden hour, download exact SVG
+$('play').addEventListener('click', () => {
+  const on = !svg.animationsPaused();
+  on ? svg.pauseAnimations() : svg.unpauseAnimations();
+  $('play').classList.toggle('on', !on);
+  $('play').textContent = on ? 'Paused' : 'Playing';
+});
+$('dusk').addEventListener('click', () => svg.setCurrentTime(Math.floor(svg.getCurrentTime() / DUR) * DUR + 0.44 * DUR));
+$('save').addEventListener('click', () => {
+  const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'animated-landscape.svg' });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+// Scene > pointer parallax: depth-weighted shift per layer, eased
+let tx = 0, ty = 0, cx = 0, cy = 0;
+addEventListener('pointermove', (e) => { tx = e.clientX / innerWidth - 0.5; ty = e.clientY / innerHeight - 0.5; });
+(function loop() {
+  cx += (tx - cx) * 0.06; cy += (ty - cy) * 0.06;
+  for (const [g, d] of parallax) g.setAttribute('transform', `translate(${(-cx * d).toFixed(2)} ${(-cy * d * 0.35).toFixed(2)})`);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

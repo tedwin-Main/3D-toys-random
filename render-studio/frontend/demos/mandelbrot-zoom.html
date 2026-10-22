@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mandelbrot Deep Zoom</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="9" />
+<meta name="capture" content="9000" />
+<meta name="tags" content="perturbation theory, deep zoom, reference orbit, rebasing, GLSL" />
+<meta name="description" content="An endless dive into Seahorse Valley to a magnification of ten trillion, far past the point where 32-bit GPU floats turn the image into blocks. One reference orbit is computed in 64-bit JavaScript, and every pixel iterates only its tiny float offset from it (perturbation theory) with rebasing to avoid glitches. A toggle shows the naive float version falling apart. Tests numerical insight, not just shader syntax." />
+<meta name="prompt" content="Make a single HTML file Mandelbrot explorer that can zoom far deeper than single-precision floats allow, rendered in a WebGL2 fragment shader. Compute a high-precision reference orbit on the CPU and use perturbation theory on the GPU so each pixel only iterates its small offset, rebasing when the offset gets larger than the orbit to avoid glitches. Auto-dive into Seahorse Valley with smooth colouring and rising iteration counts, let me drag to pan and scroll or pinch to zoom, and add a toggle that shows the naive float version breaking down." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.66); --accent: #ffb35c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; text-shadow: 0 1px 6px #000a; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 280px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #1d0f02; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #zoom { font: 600 22px ui-monospace, Menlo, monospace; margin-bottom: 8px; }
+  #zoom small { font-size: 12px; color: var(--muted); font-weight: 400; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; text-shadow: 0 1px 4px #000a; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 96px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Mandelbrot Deep Zoom</h1><p>perturbation theory · 64-bit reference orbit · float GPU deltas</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <div id="zoom"></div>
+  <div class="btns"><button id="dive" class="on">Auto-dive</button><button id="naive">Naive float</button><button id="home">Reset</button></div>
+  <div class="hint">Drag to pan · scroll / pinch to zoom · naive float breaks near 10⁵×</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/mandelbrot-zoom.html
+ * PURPOSE: Deep Mandelbrot zoom: CPU double reference orbit, GPU float perturbation with rebasing, naive-float comparison
+ * UI: Render Studio > Shaders > Mandelbrot Deep Zoom
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__mandel (test hook: view, zoom, iters, stop, setNaive)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uScale; uniform int uMaxIter; uniform int uRefLen; uniform sampler2D uOrbit;
+uniform int uNaive; uniform vec2 uCenterF; uniform float uHue;
+out vec4 o;
+vec2 orbit(int n){ return texelFetch(uOrbit, ivec2(n & 1023, n >> 10), 0).xy; }
+vec2 mul(vec2 a, vec2 b){ return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+// cyclic gradient: navy, blue, cream, amber, deep red
+vec3 pal(float t){
+  t = fract(t + uHue) * 5.;
+  vec3 c0 = vec3(.0, .02, .1), c1 = vec3(.08, .3, .72), c2 = vec3(.95, .93, .82), c3 = vec3(1., .58, .08), c4 = vec3(.35, .04, .02);
+  float f = fract(t); f = f * f * (3. - 2. * f);
+  if (t < 1.) return mix(c0, c1, f);
+  if (t < 2.) return mix(c1, c2, f);
+  if (t < 3.) return mix(c2, c3, f);
+  if (t < 4.) return mix(c3, c4, f);
+  return mix(c4, c0, f);
+}
+void main(){
+  vec2 dc = (gl_FragCoord.xy - .5 * uRes) / uRes.y * uScale;
+  int i = 0; float r2 = 0.;
+  vec2 z;
+  if (uNaive == 1) {
+    // plain float: c loses its low bits once the view is ~1e-5 wide
+    vec2 c = uCenterF + dc; z = vec2(0);
+    for (i = 0; i < 4000; i++) { if (i >= uMaxIter) break; z = mul(z, z) + c; r2 = dot(z, z); if (r2 > 1e4) break; }
+  } else {
+    vec2 d = vec2(0); int m = 0;
+    for (i = 0; i < 4000; i++) {
+      if (i >= uMaxIter) break;
+      vec2 Z = orbit(m);
+      d = 2. * mul(Z, d) + mul(d, d) + dc;
+      m++;
+      z = orbit(m) + d;
+      r2 = dot(z, z);
+      if (r2 > 1e4) break;
+      // rebase: restart from the orbit's origin when the delta outgrows it (glitch fix)
+      if (r2 < dot(d, d) || m >= uRefLen - 1) { d = z; m = 0; }
+    }
+  }
+  if (i >= uMaxIter) { o = vec4(0, 0, 0, 1); return; }
+  float mu = float(i) + 1. - log2(log(r2) * .5);
+  float t = sqrt(mu) * .09;
+  vec3 col = pal(t);
+  col *= .35 + .65 * smoothstep(0., 20., mu);
+  o = vec4(col, 1.);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uScale', 'uMaxIter', 'uRefLen', 'uOrbit', 'uNaive', 'uCenterF', 'uHue'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Mandelbrot > reference orbit: Z(n+1) = Z(n)^2 + C in JS doubles, uploaded as an RG32F texture
+const orbitTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, orbitTex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+let refLen = 1, orbitKey = '';
+function buildOrbit(cx, cy, maxIter) {
+  const key = `${cx},${cy},${maxIter}`;
+  if (key === orbitKey) return;
+  orbitKey = key;
+  const n = maxIter + 2, rows = Math.ceil(n / 1024), data = new Float32Array(rows * 1024 * 2);
+  let x = 0, y = 0, i = 0;
+  for (; i < n; i++) {
+    data[i * 2] = x; data[i * 2 + 1] = y;
+    if (x * x + y * y > 1e4) { i++; break; }
+    const nx = x * x - y * y + cx; y = 2 * x * y + cy; x = nx;
+  }
+  refLen = i;
+  gl.bindTexture(gl.TEXTURE_2D, orbitTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, 1024, rows, 0, gl.RG, gl.FLOAT, data);
+}
+
+// Mandelbrot > view: center in doubles, scale = view height in complex units
+const SEAHORSE = [-0.743643887037158704752191506114774, 0.131825904205311970493132056385139];
+const HOME = { cx: -0.6, cy: 0, scale: 2.6 };
+const view = { ...HOME };
+let auto = true, naive = false, lastInput = -1e9, diveStart = performance.now();
+const pointers = new Map();
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pointers.set(e.pointerId, [e.clientX, e.clientY]); stopAuto(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!pointers.has(e.pointerId)) return;
+  const [px, py] = pointers.get(e.pointerId);
+  if (pointers.size === 2) {
+    const other = [...pointers.entries()].find(([id]) => id !== e.pointerId)[1];
+    const before = Math.hypot(px - other[0], py - other[1]), after = Math.hypot(e.clientX - other[0], e.clientY - other[1]);
+    view.scale = Math.min(4, view.scale * (before / after));
+  } else {
+    view.cx -= (e.clientX - px) / innerHeight * view.scale;
+    view.cy += (e.clientY - py) / innerHeight * view.scale;
+  }
+  pointers.set(e.pointerId, [e.clientX, e.clientY]);
+});
+const up = (e) => pointers.delete(e.pointerId);
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault(); stopAuto();
+  // zoom toward the cursor
+  const f = Math.exp(e.deltaY * 0.0015);
+  const mx = (e.clientX - innerWidth / 2) / innerHeight * view.scale, my = -(e.clientY - innerHeight / 2) / innerHeight * view.scale;
+  view.cx += mx * (1 - f); view.cy += my * (1 - f);
+  view.scale = Math.min(4, view.scale * f);
+}, { passive: false });
+function stopAuto() { auto = false; $('dive').classList.remove('on'); lastInput = performance.now(); }
+$('dive').onclick = () => { auto = !auto; $('dive').classList.toggle('on', auto); if (auto) startDive(); };
+$('naive').onclick = () => { naive = !naive; $('naive').classList.toggle('on', naive); };
+$('home').onclick = () => { Object.assign(view, HOME); stopAuto(); };
+
+// Mandelbrot > auto-dive: exponential zoom to 1e-13 over ~50 s, then a fast pull back out
+const DEEP = 1e-13, DIVE_S = 50;
+let diveFrom = { ...HOME };
+function startDive() { diveFrom = { ...view }; diveStart = performance.now(); }
+function diveStep(now) {
+  const t = (now - diveStart) / 1000;
+  if (t < DIVE_S) {
+    const k = Math.min(1, t / 6);
+    // glide the center to the target in the first seconds, then zoom straight in
+    const e = k * k * (3 - 2 * k);
+    view.cx = diveFrom.cx + (SEAHORSE[0] - diveFrom.cx) * e;
+    view.cy = diveFrom.cy + (SEAHORSE[1] - diveFrom.cy) * e;
+    view.scale = Math.exp(Math.log(diveFrom.scale) + (Math.log(DEEP) - Math.log(diveFrom.scale)) * Math.pow(t / DIVE_S, 1.08));
+  } else if (t < DIVE_S + 5) {
+    const k = (t - DIVE_S) / 5;
+    view.cx = SEAHORSE[0]; view.cy = SEAHORSE[1];
+    view.scale = Math.exp(Math.log(DEEP) + (Math.log(HOME.scale) - Math.log(DEEP)) * k * k);
+  } else { diveFrom = { cx: SEAHORSE[0], cy: SEAHORSE[1], scale: HOME.scale }; diveStart = now; }
+}
+
+// Mandelbrot > adaptive resolution: deep views cost thousands of iterations per pixel
+let scale = Math.min(devicePixelRatio || 1, 1), ftAvg = 16, frames = 0, stable = 0;
+function resize() {
+  cv.width = Math.round(innerWidth * scale); cv.height = Math.round(innerHeight * scale);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now(), fps = 60, fpsN = 0, fpsT = 0, maxIter = 300;
+window.__mandel = { view, get zoom() { return HOME.scale / view.scale; }, get iters() { return maxIter; }, stop: stopAuto, setNaive: (v) => { naive = v; } };
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  ftAvg = ftAvg * 0.92 + dt * 1000 * 0.08;
+  if (++frames % 20 === 0) {
+    stable = ftAvg < 17.5 ? stable + 1 : 0;
+    const next = ftAvg > 20 ? scale * 0.85 : stable > 8 ? scale * 1.06 : scale;
+    if (stable > 8) stable = 0;
+    const clamped = Math.min(Math.min(devicePixelRatio || 1, 1), Math.max(0.3, next));
+    if (Math.abs(clamped - scale) > 0.01) { scale = clamped; resize(); }
+  }
+  if (!auto && now - lastInput > 20000) { auto = true; $('dive').classList.add('on'); startDive(); }
+  if (auto) diveStep(now);
+  const zoom = HOME.scale / view.scale;
+  // iteration budget grows with depth; quantised so the orbit is rebuilt rarely
+  maxIter = Math.min(4000, Math.round((250 + 140 * Math.max(0, Math.log10(zoom)) ** 1.25) / 50) * 50);
+  buildOrbit(view.cx, view.cy, maxIter);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, orbitTex);
+  gl.uniform1i(U.uOrbit, 0);
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uScale, view.scale);
+  gl.uniform1i(U.uMaxIter, maxIter);
+  gl.uniform1i(U.uRefLen, refLen);
+  gl.uniform1i(U.uNaive, naive ? 1 : 0);
+  gl.uniform2f(U.uCenterF, view.cx, view.cy);
+  gl.uniform1f(U.uHue, Math.log10(zoom) * 0.03);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  const ex = Math.floor(Math.log10(zoom)), mant = zoom / 10 ** ex;
+  $('zoom').innerHTML = `${mant.toFixed(2)}e${ex}× <small>${naive ? 'naive float' : 'perturbation'}</small>`;
+  $('stats').innerHTML = `${fps} fps · ${cv.width}×${cv.height}<br>${maxIter} iter · ref ${refLen}<br>${view.cx.toFixed(15)}<br>${view.cy.toFixed(15)}i`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

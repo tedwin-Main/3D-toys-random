@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Render Studio</title>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@google/model-viewer@4.0.0/dist/model-viewer.min.js"></script>
+<style>
+  :root { --bg: #0f1117; --card: #181b24; --ink: #eef1f7; --muted: #8b93a7; --line: #262a36; --accent: #ffbf2f; --pill: rgba(14, 16, 22, 0.82); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; }
+  code { background: #232736; padding: 1px 6px; border-radius: 6px; font-size: 0.92em; }
+
+  /* Home > header */
+  #home header { padding: 56px 24px 20px; max-width: 1240px; margin: 0 auto; }
+  #home h1 { font-size: clamp(34px, 6vw, 60px); margin: 0; letter-spacing: -0.035em; }
+  #home h1 span { color: var(--accent); }
+  #home header p { color: var(--muted); max-width: 680px; line-height: 1.6; }
+  .count { color: var(--accent); }
+  /* Home > category tabs, grouped rows */
+  #filters { max-width: 1240px; margin: 0 auto; padding: 0 24px 24px; display: grid; gap: 10px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row .g { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); width: 92px; flex: none; }
+  #filters button { border: 1px solid var(--line); background: var(--card); padding: 7px 13px; border-radius: 999px; cursor: pointer; font-size: 13.5px; font-weight: 600; }
+  #filters button:hover { border-color: #3a4052; }
+  #filters button.on { background: var(--accent); border-color: var(--accent); color: #1a1408; }
+  #filters button .n { opacity: 0.6; font-weight: 500; margin-left: 4px; }
+  #filters button.zero { opacity: 0.45; }
+  @media (max-width: 560px) { .row .g { width: 100%; } }
+  #empty { max-width: 1240px; margin: 0 auto 32px; padding: 48px 24px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 18px; }
+  #empty[hidden], .card[hidden], #menu button[hidden] { display: none; }
+  /* Home > grid cards */
+  #grid { max-width: 1240px; margin: 0 auto; padding: 0 24px 64px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 18px; }
+  .card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; color: inherit; text-decoration: none; transition: transform 0.2s, border-color 0.2s; cursor: pointer; }
+  .card:hover, .card:focus-visible { transform: translateY(-3px); border-color: var(--accent); outline: none; }
+  .preview { aspect-ratio: 16 / 10; position: relative; display: grid; place-items: center; font-size: 56px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #2a2f40, #12141b 70%); }
+  .preview > img, .preview > video, .preview > model-viewer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
+  .preview > iframe { position: absolute; inset: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; border: 0; pointer-events: none; }
+  .preview > model-viewer { --poster-color: transparent; pointer-events: none; }
+  .preview .num { position: absolute; left: 12px; top: 10px; z-index: 2; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.5); color: #fff; }
+  .preview .fmt { position: absolute; right: 12px; top: 10px; z-index: 2; font-size: 11px; font-weight: 800; letter-spacing: 0.05em; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: #1a1408; text-transform: uppercase; }
+  .body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .body h2 { margin: 0; font-size: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .body .desc { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; }
+  .tags span { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #232736; color: #b9c0d3; }
+  /* Home > card > Prompt chip: expands prompt inline */
+  .pbtn { align-self: flex-start; border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; color: var(--accent); cursor: pointer; }
+  .pbtn:hover { border-color: var(--accent); }
+  .ptext { display: none; margin: 0; font-size: 12.5px; line-height: 1.55; color: #cfd5e4; background: #10131a; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-family: ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; }
+  .card.showp .ptext { display: block; }
+
+  /* Viewer > full-screen stage + nav pill */
+  #viewer { position: fixed; inset: 0; display: none; background: radial-gradient(circle at 50% 45%, #1d2130, #050608 75%); }
+  body.playing { overflow: hidden; }
+  body.playing #home { display: none; }
+  body.playing #viewer { display: block; }
+  #stage { position: absolute; inset: 0; display: grid; place-items: center; }
+  #stage > model-viewer, #stage > iframe { width: 100%; height: 100%; border: 0; --poster-color: transparent; }
+  #stage > video, #stage > img { max-width: 100%; max-height: 100%; object-fit: contain; outline: none; }
+  #nav { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); transition: opacity 0.4s, transform 0.3s; z-index: 5; max-width: calc(100% - 32px); }
+  #nav.dim { opacity: 0.28; }
+  #nav.dim:hover { opacity: 1; }
+  #nav button, #nav a { border: 0; background: transparent; padding: 7px 10px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; color: inherit; text-decoration: none; }
+  #nav button:hover, #nav a:hover, #nav button.on { background: rgba(255, 255, 255, 0.1); }
+  #nav .sep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(255, 255, 255, 0.12); }
+  #cur { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  #cur .t { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  #cur .i { color: var(--muted); font-weight: 500; font-size: 12px; }
+  #nav.hidden { transform: translate(-50%, -140%); opacity: 0; pointer-events: none; }
+  #tab { position: absolute; top: 0; left: 50%; transform: translate(-50%, -100%); padding: 2px 14px 5px; border: 0; border-radius: 0 0 10px 10px; background: var(--pill); cursor: pointer; font-size: 12px; transition: transform 0.3s; z-index: 5; }
+  #tab.show { transform: translate(-50%, 0); }
+  #menu { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: min(360px, calc(100% - 32px)); max-height: min(70vh, 560px); overflow: auto; padding: 6px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); display: none; z-index: 6; }
+  #menu.open { display: block; }
+  #menu button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 9px; cursor: pointer; font-size: 14px; }
+  #menu button:hover { background: rgba(255, 255, 255, 0.08); }
+  #menu button.on { background: var(--accent); color: #1a1408; font-weight: 700; }
+  #menu .e { width: 24px; text-align: center; }
+  /* Viewer > info panel: explanation + prompt + copy */
+  #info { position: absolute; right: 12px; bottom: 12px; width: min(380px, calc(100% - 24px)); max-height: calc(100% - 90px); overflow: auto; padding: 16px 16px 14px; border-radius: 16px; background: var(--pill); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); z-index: 6; display: none; }
+  #info.open { display: block; }
+  #info h3 { margin: 0 0 6px; font-size: 16px; }
+  #info .lbl { margin: 14px 0 6px; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  #info p { margin: 0; color: #cfd5e4; font-size: 13.5px; line-height: 1.55; }
+  #info pre { margin: 0; font: 12.5px/1.55 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; background: rgba(0, 0, 0, 0.35); border-radius: 10px; padding: 10px 12px; color: #e8ecf5; }
+  #copy { margin-top: 10px; border: 0; background: var(--accent); color: #1a1408; font-weight: 700; font-size: 13px; padding: 7px 12px; border-radius: 9px; cursor: pointer; }
+  @media (max-width: 560px) { #cur .t, #cur .i, .wide { display: none; } }
+</style>
+</head>
+<body>
+<section id="home">
+  <header>
+    <h1>Render <span>Studio</span></h1>
+    <p>One-prompt frontier-model tests and generated media in one place: shaders, 3D scenes, physics, games, motion, Blender renders, Remotion video. <span class="count" id="count"></span>. Each card has a short explanation and the <b>prompt</b> that produced it. Hover to preview, click to open; in the viewer <b>[</b> / <b>]</b> flip, <b>i</b> info, <b>Esc</b> back.</p>
+  </header>
+  <nav id="filters"></nav>
+  <div id="empty" hidden></div>
+  <main id="grid"></main>
+</section>
+<section id="viewer">
+  <div id="stage"></div>
+  <div id="nav">
+    <button id="home-btn" title="All assets (Esc)">⌂ <span class="wide">Studio</span></button>
+    <div class="sep"></div>
+    <button id="prev" title="Previous ([)">‹</button>
+    <button id="cur" title="Pick an asset"><span class="e"></span><span class="t"></span><span class="i"></span> ▾</button>
+    <button id="next" title="Next (])">›</button>
+    <div class="sep"></div>
+    <button id="info-btn" title="Explanation + prompt (i)">ⓘ</button>
+    <a id="raw" title="Open raw file in new tab" target="_blank" rel="noopener">↗</a>
+    <button id="hide" title="Hide bar">✕</button>
+  </div>
+  <button id="tab" title="Show bar">☰ studio</button>
+  <div id="menu"></div>
+  <aside id="info"><h3 id="info-title"></h3><div class="lbl">What it is</div><p id="info-desc"></p><div class="lbl">Prompt</div><pre id="info-prompt"></pre><button id="copy">Copy prompt</button></aside>
+</section>
+
+<script type="module">
+/**
+ * FILE: render-studio/frontend/index.html
+ * PURPOSE: showcase gallery: grouped category tabs, cards with explanation + prompt, full-screen viewer for demos / models / video / images, hash routing
+ * UI: Render Studio home grid, category tabs, viewer nav pill, info panel
+ * USED BY: entry point, http://localhost:5066/
+ * KEY EXPORTS: none (standalone page)
+ */
+const $ = (id) => document.getElementById(id);
+const stage = $('stage'), nav = $('nav'), menu = $('menu'), tab = $('tab'), info = $('info');
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const ICON = { model: '🧊', video: '🎬', image: '🖼️', page: '✨', link: '🧸' };
+const GROUPS = [['live', 'Live demos'], ['rendered', 'Rendered'], ['links', 'Toy Box']];
+const HINT = { models: '.glb / .gltf', 'blender-renders': '.mp4 / .png', 'remotion-videos': '.mp4', videos: '.mp4 / .webm / .mov', images: '.png / .jpg / .webp' };
+const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
+
+let CATS = [], ASSETS = [], list = [], filter = 'all', current = null, sig = '';
+const label = (id) => CATS.find((c) => c.id === id)?.label ?? id;
+const match = (a, f) => f === 'all' ? a.kind !== 'link' : a.category === f;
+const icon = (a) => a.emoji ?? ICON[a.kind];
+
+// Studio > screen load: fetch asset list, rebuild only when files changed
+async function load() {
+  const data = await fetch('/api/assets').then((r) => r.json());
+  const next = JSON.stringify(data.assets.map((a) => [a.id, a.mtime, a.size, a.poster]));
+  if (next === sig) return;
+  sig = next;
+  CATS = data.categories;
+  ASSETS = data.assets;
+  build();
+  route();
+}
+
+function tabBtn(id, text) {
+  const b = document.createElement('button');
+  const n = ASSETS.filter((a) => match(a, id)).length;
+  b.dataset.f = id;
+  b.className = n ? '' : 'zero';
+  b.innerHTML = `${esc(text)}<span class="n">${n}</span>`;
+  b.onclick = () => go(id === 'all' ? '' : `c=${id}`);
+  return b;
+}
+
+function build() {
+  const live = ASSETS.filter((a) => a.kind === 'page').length;
+  $('count').textContent = `${live} live demos, ${ASSETS.filter((a) => !['page', 'link'].includes(a.kind)).length} rendered files`;
+  // Home > Tabs: All + one row per group (live / rendered / links); hash #c=<id> so Back restores tab
+  const rows = GROUPS.map(([g, text]) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="g">${text}</span>`;
+    if (g === 'live') row.append(tabBtn('all', 'All'));
+    row.append(...CATS.filter((c) => c.group === g).map((c) => tabBtn(c.id, c.label)));
+    return row;
+  });
+  $('filters').replaceChildren(...rows);
+  // Home > Grid: cards; live preview mounts on hover only so at most one WebGL context / decoder runs
+  $('grid').replaceChildren(...ASSETS.map(card));
+  // Viewer > Dropdown: every asset, current highlighted
+  menu.replaceChildren(...ASSETS.filter((a) => a.kind !== 'link').map((a) => {
+    const b = document.createElement('button');
+    b.dataset.id = a.id;
+    b.innerHTML = `<span class="e">${icon(a)}</span>${esc(a.title)}`;
+    b.onclick = () => go(`a=${encodeURIComponent(a.id)}`);
+    return b;
+  }));
+}
+
+function card(a) {
+  const el = document.createElement('a');
+  el.className = 'card';
+  el.dataset.id = a.id;
+  if (a.kind === 'link') { el.href = a.url; el.target = '_blank'; el.rel = 'noopener'; }
+  else el.href = `#a=${encodeURIComponent(a.id)}`;
+  const still = a.poster ? `<img src="${a.poster}" alt="" loading="lazy">`
+    : a.kind === 'image' ? `<img src="${a.url}" alt="" loading="lazy">`
+    : a.kind === 'video' ? `<video src="${a.url}#t=0.5" preload="metadata" muted playsinline></video>`
+    : '';
+  const tags = a.kind === 'page' ? a.tags.slice(0, 4)
+    : a.kind === 'link' ? ['3D Toy Box', 'needs :5055']
+    : [label(a.category), fmtSize(a.size), new Date(a.mtime).toLocaleDateString()];
+  el.innerHTML = `<div class="preview"><span class="num"></span><span class="fmt">${a.kind === 'link' ? '↗ toy box' : esc(a.ext)}</span>${icon(a)}${still}</div>
+    <div class="body"><h2 title="${esc(a.title)}">${esc(a.title)}</h2>${a.desc ? `<p class="desc">${esc(a.desc)}</p>` : ''}
+    ${a.prompt ? `<button class="pbtn" type="button">Prompt ▾</button><pre class="ptext">${esc(a.prompt)}</pre>` : ''}
+    <div class="tags">${tags.map((x) => `<span>${esc(x)}</span>`).join('')}</div></div>`;
+  // Home > card > Prompt chip: toggle prompt without opening card
+  el.querySelector('.pbtn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.toggle('showp');
+    e.currentTarget.textContent = el.classList.contains('showp') ? 'Prompt ▴' : 'Prompt ▾';
+  });
+  const prev = el.querySelector('.preview');
+  let timer, live;
+  prev.addEventListener('mouseenter', () => {
+    if (a.kind === 'image' || a.kind === 'link') return;
+    timer = setTimeout(() => {
+      if (a.kind === 'page') live = Object.assign(document.createElement('iframe'), { src: a.url, tabIndex: -1 });
+      else if (a.kind === 'video') live = Object.assign(document.createElement('video'), { src: a.url, muted: true, loop: true, playsInline: true, autoplay: true });
+      else {
+        live = Object.assign(document.createElement('model-viewer'), { src: a.url, autoRotate: true, autoRotateDelay: 0, rotationPerSecond: '40deg' });
+        live.setAttribute('environment-image', 'neutral');
+      }
+      prev.append(live);
+    }, 300);
+  });
+  prev.addEventListener('mouseleave', () => { clearTimeout(timer); live?.remove(); live = null; });
+  return el;
+}
+
+function setFilter(f) {
+  filter = f === 'all' || CATS.some((c) => c.id === f) ? f : 'all';
+  list = ASSETS.filter((a) => match(a, filter) && a.kind !== 'link');
+  $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
+  let n = 0;
+  $('grid').querySelectorAll('.card').forEach((el) => {
+    const a = ASSETS.find((x) => x.id === el.dataset.id);
+    const show = match(a, filter);
+    el.hidden = !show;
+    if (show) el.querySelector('.num').textContent = ++n;
+  });
+  menu.querySelectorAll('button').forEach((b) => (b.hidden = !list.some((a) => a.id === b.dataset.id)));
+  // Home > Empty state: tell user which folder to fill
+  const shown = ASSETS.filter((a) => match(a, filter)).length;
+  $('empty').hidden = shown > 0;
+  $('empty').innerHTML = HINT[filter]
+    ? `No ${esc(label(filter))} yet. Drop ${HINT[filter]} files into <code>media/${esc(filter)}/</code>.`
+    : `Nothing here yet. Add single-file demos to <code>frontend/demos/</code> with <code>&lt;meta name="category" content="${esc(filter)}"&gt;</code>.`;
+}
+
+// Viewer > Stage: swap element by asset kind
+function mount(a) {
+  let el;
+  if (a.kind === 'page') {
+    el = Object.assign(document.createElement('iframe'), { src: a.url, title: a.title });
+    el.allow = 'autoplay; fullscreen; pointer-lock; clipboard-write';
+    el.addEventListener('load', () => hookFrame(el));
+  } else if (a.kind === 'model') {
+    el = document.createElement('model-viewer');
+    for (const [k, v] of Object.entries({ src: a.url, 'camera-controls': '', 'auto-rotate': '', 'shadow-intensity': '1', 'environment-image': 'neutral', autoplay: '', 'touch-action': 'pan-y', alt: a.title })) el.setAttribute(k, v);
+  } else if (a.kind === 'video') {
+    el = Object.assign(document.createElement('video'), { src: a.url, controls: true, autoplay: true, loop: true, playsInline: true });
+  } else {
+    el = Object.assign(document.createElement('img'), { src: a.url, alt: a.title });
+  }
+  stage.replaceChildren(el);
+}
+
+// Viewer > Info panel: explanation + prompt for current asset
+function fillInfo(a) {
+  $('info-title').textContent = a.title;
+  $('info-desc').textContent = a.desc || 'No explanation yet.';
+  $('info-prompt').textContent = a.prompt || 'No prompt recorded.';
+  $('info-btn').classList.toggle('on', info.classList.contains('open'));
+}
+$('info-btn').onclick = () => { info.classList.toggle('open'); $('info-btn').classList.toggle('on', info.classList.contains('open')); };
+// Viewer > Info panel > Copy prompt: clipboard
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('info-prompt').textContent); $('copy').textContent = 'Copied ✓'; }
+  catch { $('copy').textContent = 'Copy failed'; }
+  setTimeout(() => ($('copy').textContent = 'Copy prompt'), 1400);
+};
+
+// Viewer > Routing: #a=<id> opens asset, #c=<id> or empty = home
+function go(h) { location.hash = h; }
+function step(d) {
+  const i = list.findIndex((a) => a.id === current);
+  if (list.length) go(`a=${encodeURIComponent(list[(i + d + list.length) % list.length].id)}`);
+}
+const homeHash = () => (filter === 'all' ? '' : `c=${filter}`);
+function route() {
+  const h = location.hash.slice(1);
+  menu.classList.remove('open');
+  const id = h.startsWith('a=') ? decodeURIComponent(h.slice(2)) : null;
+  if (!id) setFilter(h.startsWith('c=') ? h.slice(2) : 'all');
+  // deep link outside active tab: widen to its own category so prev/next contain it
+  else if (!list.some((a) => a.id === id)) setFilter(ASSETS.find((a) => a.id === id)?.category ?? 'all');
+  const i = list.findIndex((a) => a.id === id);
+  if (i < 0) {
+    current = null;
+    document.body.classList.remove('playing');
+    // empty stage so video audio + WebGL stop
+    stage.replaceChildren();
+    document.title = 'Render Studio';
+    return;
+  }
+  const a = list[i];
+  if (current !== a.id) mount(a);
+  current = a.id;
+  document.body.classList.add('playing');
+  document.title = `${a.title} · Render Studio`;
+  $('raw').href = a.url;
+  $('cur').querySelector('.e').textContent = icon(a);
+  $('cur').querySelector('.t').textContent = a.title;
+  $('cur').querySelector('.i').textContent = `${i + 1}/${list.length}`;
+  menu.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.id === a.id));
+  fillInfo(a);
+  wake();
+}
+addEventListener('hashchange', route);
+// Home > auto refresh: pick up newly dropped files when tab regains focus
+addEventListener('focus', () => { if (!current) load(); });
+
+// Viewer > Nav pill: buttons, hide/show tab
+$('home-btn').onclick = () => go(homeHash());
+$('prev').onclick = () => step(-1);
+$('next').onclick = () => step(1);
+$('cur').onclick = (e) => {
+  e.stopPropagation();
+  menu.classList.toggle('open');
+  menu.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+};
+$('hide').onclick = () => { nav.classList.add('hidden'); tab.classList.add('show'); menu.classList.remove('open'); info.classList.remove('open'); };
+tab.onclick = () => { nav.classList.remove('hidden'); tab.classList.remove('show'); wake(); };
+addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.classList.remove('open'); });
+
+// Viewer > Nav pill > idle dim: fade after 3 s, wake when pointer nears top edge
+let idle;
+function wake() {
+  nav.classList.remove('dim');
+  clearTimeout(idle);
+  idle = setTimeout(() => { if (!menu.classList.contains('open')) nav.classList.add('dim'); }, 3000);
+}
+nav.addEventListener('pointerenter', wake);
+addEventListener('pointermove', (e) => { if (current && e.clientY < 70) wake(); });
+
+// Viewer > Keys: [ / ] flip, i info, Esc home; also hooked inside same-origin demo iframes
+function onKey(e) {
+  if (!current || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.key === '[') step(-1);
+  else if (e.key === ']') step(1);
+  else if (e.key === 'i') $('info-btn').click();
+  else if (e.key === 'Escape') go(homeHash());
+}
+addEventListener('keydown', onKey);
+function hookFrame(f) {
+  try {
+    const w = f.contentWindow;
+    w.addEventListener('keydown', onKey);
+    w.addEventListener('pointermove', (e) => { if (e.clientY < 70) wake(); });
+    w.addEventListener('pointerdown', () => menu.classList.remove('open'));
+  } catch { /* cross-origin frame: shell keys still work */ }
+  // focus demo so keyboard games work without extra click
+  f.focus();
+}
+
+load();
+</script>
+</body>
+</html>

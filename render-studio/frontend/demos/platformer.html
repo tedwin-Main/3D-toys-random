@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Platformer Feel</title>
+<meta name="category" content="games" />
+<meta name="order" content="13" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="coyote time, jump buffer, variable jump, wall jump, camera lookahead" />
+<meta name="description" content="A side-scroller built around game feel: coyote time, jump buffering, variable jump height, faster falling, wall slide and wall jump, moving platforms that carry you, stompable slimes, spikes, checkpoints, coins, squash and stretch, dust particles and a camera with lookahead and vertical deadzone. A sensor bot runs the level in attract mode." />
+<meta name="prompt" content="Make a polished 2D platformer in a single HTML canvas file with great game feel: coyote time, jump buffering, variable jump height, fast fall, wall slide and wall jump, moving platforms, enemies you can stomp, spikes, coins, checkpoints and a goal flag. Smooth camera with lookahead, parallax background, squash and stretch, dust particles, keyboard and touch controls, and a bot that plays the level when idle." />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1f3a; touch-action: none; user-select: none; font-family: ui-rounded, 'SF Pro Rounded', system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #pad { position: fixed; inset: auto 0 0 0; display: none; justify-content: space-between; padding: 18px; pointer-events: none; }
+  #pad div { display: flex; gap: 12px; pointer-events: auto; }
+  #pad button { width: 70px; height: 70px; border-radius: 50%; border: 2px solid #fff6; background: #ffffff1c; color: #fff; font: 800 24px system-ui; touch-action: none; }
+  @media (pointer: coarse) { #pad { display: flex; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="pad"><div><button data-k="ArrowLeft">◀</button><button data-k="ArrowRight">▶</button></div><div><button data-k="Space">⤒</button></div></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/platformer.html
+ * PURPOSE: Game-feel platformer: coyote time, jump buffer, variable jump, wall jump, moving platforms, slimes, spikes, checkpoints, lookahead camera, bot attract mode
+ * UI: Render Studio > Games > Platformer Feel
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const TS = 32, LW = 150, LH = 15;
+let VW, VH, zoom, dpr;
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2); cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  // portrait keeps ~14 tiles across
+  zoom = Math.max(0.6, Math.min(innerHeight / (LH * TS), innerWidth / (14 * TS)));
+  VW = innerWidth / zoom; VH = innerHeight / zoom;
+}
+addEventListener('resize', resize); resize();
+
+// Level > built from feature calls; # ground, ^ spikes, o coin
+const L = Array.from({ length: LH }, () => Array(LW).fill('.'));
+const set = (x, y, c) => { if (x >= 0 && y >= 0 && x < LW && y < LH) L[y][x] = c; };
+const box = (x0, x1, y0, y1, c = '#') => { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) set(x, y, c); };
+const coins = (x0, x1, y) => { for (let x = x0; x <= x1; x++) set(x, y, 'o'); };
+box(0, 22, 12, 14); box(0, 0, 0, 11);
+box(26, 46, 12, 14); box(31, 32, 10, 11); box(33, 34, 8, 11); coins(31, 34, 6);
+coins(38, 40, 8);
+box(49, 58, 12, 14); box(54, 55, 11, 11, '^'); coins(54, 55, 8);
+box(61, 82, 12, 14);
+// floating wall-jump shaft with bonus coins; main path walks underneath
+box(66, 66, 2, 9); box(71, 71, 2, 9); coins(68, 69, 3); coins(68, 69, 6);
+box(78, 79, 11, 11, '^');
+// big gap with a moving platform
+box(93, 112, 12, 14); box(98, 100, 9, 11); coins(96, 100, 6);
+box(102, 104, 11, 11, '^'); box(107, 112, 11, 11);
+box(116, 149, 12, 14); box(120, 121, 11, 11); box(124, 126, 10, 11); box(130, 132, 9, 11); coins(124, 132, 6);
+box(149, 149, 0, 11);
+const SPAWNS = { start: [2, 11], checkpoints: [[27, 11], [75, 11], [94, 11]], goal: [144, 11], slimes: [[14, 11], [41, 11], [70, 11], [110, 10], [136, 11]], movers: [[84, 11, 84, 90]] };
+const solid = (tx, ty) => tx < 0 || tx >= LW ? true : ty < 0 ? false : ty >= LH ? false : L[ty][tx] === '#' || L[ty][tx] === '=';
+const tileAtPx = (x, y) => [Math.floor(x / TS), Math.floor(y / TS)];
+
+// State
+const P = { x: 0, y: 0, vx: 0, vy: 0, w: 22, h: 28, onGround: false, coyote: 0, buffer: 0, wall: 0, wallT: 0, sq: 0, face: 1, ride: null, dead: 0 };
+let slimes, movers, parts, cp, coinCount, deaths, time, won, attract = true, idle = 0, cam = { x: 0, y: 0 }, jumpHeld = false, bot = { stuck: 0, lastX: 0, wait: 0 }, coinMap;
+function resetLevel() {
+  coinMap = new Set(); for (let y = 0; y < LH; y++) for (let x = 0; x < LW; x++) if (L[y][x] === 'o') coinMap.add(y * LW + x);
+  slimes = SPAWNS.slimes.map(([x, y]) => ({ x: x * TS + 16, y: (y + 1) * TS, vx: -50, alive: true, sq: 0, t: Math.random() * 6 }));
+  movers = SPAWNS.movers.map(([x, y, a, b]) => ({ x: x * TS, y: y * TS, w: 3 * TS, h: 14, a: a * TS, b: b * TS, t: 0, vx: 0 }));
+  cp = SPAWNS.start; coinCount = 0; deaths = 0; time = 0; won = 0; parts = [];
+  respawn();
+}
+function respawn() { Object.assign(P, { x: cp[0] * TS + 16, y: (cp[1] + 1) * TS, vx: 0, vy: 0, dead: 0, ride: null, coyote: 0, buffer: 0 }); cam.x = P.x - VW * 0.4; cam.y = P.y - VH * 0.6; }
+
+// Audio
+let ac = null;
+function tone(f, d, type = 'square', vol = 0.05, f2 = f) {
+  if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+  o.type = type; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+
+// Input
+const keys = new Set();
+function wake() { idle = 0; if (!ac) { try { ac = new AudioContext(); } catch { /* none */ } } if (attract) { attract = false; keys.clear(); resetLevel(); } }
+addEventListener('keydown', (e) => { if (/Arrow|Space|Key[WAD]/.test(e.code)) { e.preventDefault(); wake(); if (!keys.has(e.code) && (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW')) P.buffer = 0.12; keys.add(e.code); } });
+addEventListener('keyup', (e) => keys.delete(e.code));
+for (const b of document.querySelectorAll('#pad button')) {
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); wake(); if (b.dataset.k === 'Space') P.buffer = 0.12; keys.add(b.dataset.k); });
+  for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, () => keys.delete(b.dataset.k));
+}
+cv.addEventListener('pointerdown', wake);
+
+function dust(x, y, n, sp = 80) { for (let i = 0; i < n; i++) parts.push({ x, y, vx: (Math.random() - 0.5) * sp * 2, vy: -Math.random() * sp * 0.6, t: 0.4 + Math.random() * 0.3, r: 3 + Math.random() * 4, c: '#e8dcc0' }); }
+function sparkle(x, y, c) { for (let i = 0; i < 10; i++) { const a = Math.random() * 6.28; parts.push({ x, y, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, t: 0.5, r: 2.5, c }); } }
+
+// Bot > sensors: jump at walls, gaps, spikes and slimes; wait for the moving platform
+function botInput() {
+  const tx = Math.floor((P.x + P.face * 0) / TS), feet = Math.floor((P.y + 2) / TS);
+  let right = true, left = false, jump = false;
+  const ahead = (n) => Math.floor((P.x + n * TS) / TS);
+  const wallAhead = solid(ahead(1), feet - 1) || solid(ahead(1), feet - 2);
+  const gapAhead = !solid(ahead(1), feet) && !solid(ahead(1), feet + 1) && !solid(ahead(1), feet + 2);
+  let gapW = 0; if (gapAhead) for (let k = 1; k < 10 && !solid(ahead(k), feet) && !solid(ahead(k), feet + 1); k++) gapW = k;
+  const spikes = [1, 2].some((k) => L[feet - 1]?.[ahead(k)] === '^');
+  const slime = slimes.some((s) => s.alive && s.x > P.x + 20 && s.x - P.x < 100 && Math.abs(s.y - P.y) < 30);
+  if (P.ride) { right = false; const far = Math.floor((P.x + 3 * TS) / TS); if (solid(far, feet) || solid(far, feet + 1)) { right = true; jump = true; } }
+  else if (gapAhead && gapW > 5 && P.onGround) {
+    // wait at the edge until a mover is close enough to land on
+    const m = movers.find((m) => m.x > P.x - TS && m.x - P.x < TS * 1.6 && Math.abs(m.y - P.y) < TS * 1.5);
+    right = !!m || (P.x % TS) < TS * 0.55; jump = !!m;
+  } else if (P.onGround && (wallAhead || (gapAhead && (P.x % TS) > TS * 0.25) || spikes || slime)) jump = true;
+  // airborne over a pit: steer onto the nearest moving platform
+  if (!P.onGround && !P.ride) {
+    const groundAhead = [1, 2, 3].some((k) => { for (let y = Math.max(0, feet); y < LH; y++) if (solid(ahead(k), y)) return true; return false; });
+    const m = movers.find((m) => Math.abs(m.x + m.w / 2 - P.x) < 5 * TS && m.y >= P.y - 4);
+    if (m && !groundAhead) { const t = m.x + m.w / 2; right = P.x < t - 6; left = P.x > t + 6; }
+  }
+  // stuck watchdog
+  if (Math.abs(P.x - bot.lastX) < 0.5) bot.stuck += 1 / 120; else bot.stuck = 0;
+  bot.lastX = P.x;
+  if (bot.stuck > 0.6) jump = true;
+  return { left, right, jump, hold: true };
+}
+
+// Physics > fixed 120 Hz step
+const G_UP = 2000, G_DOWN = 3400, RUN = 260, ACC = 2600, AIR = 0.7, JUMP = 720;
+function collideX(dx) {
+  P.x += dx; P.wall = 0;
+  const top = Math.floor((P.y - P.h + 1) / TS), bot = Math.floor((P.y - 1) / TS);
+  for (let ty = top; ty <= bot; ty++) {
+    if (dx > 0) { const tx = Math.floor((P.x + P.w / 2) / TS); if (solid(tx, ty)) { P.x = tx * TS - P.w / 2 - 0.01; P.vx = 0; P.wall = 1; } }
+    if (dx < 0) { const tx = Math.floor((P.x - P.w / 2) / TS); if (solid(tx, ty)) { P.x = (tx + 1) * TS + P.w / 2 + 0.01; P.vx = 0; P.wall = -1; } }
+  }
+  // touching check for wall slide even with zero dx
+  if (!P.wall) { for (let ty = top; ty <= bot; ty++) { if (solid(Math.floor((P.x + P.w / 2 + 1) / TS), ty)) P.wall = 1; if (solid(Math.floor((P.x - P.w / 2 - 1) / TS), ty)) P.wall = -1; } }
+}
+function collideY(dy) {
+  P.y += dy; const was = P.onGround; P.onGround = false;
+  const l = Math.floor((P.x - P.w / 2 + 1) / TS), r = Math.floor((P.x + P.w / 2 - 1) / TS);
+  for (let tx = l; tx <= r; tx++) {
+    if (dy >= 0) { const ty = Math.floor(P.y / TS); if (solid(tx, ty)) { P.y = ty * TS; if (P.vy > 600) { P.sq = 1; dust(P.x, P.y, 6); tone(120, 0.06, 'triangle', 0.06); } P.vy = 0; P.onGround = true; } }
+    else { const ty = Math.floor((P.y - P.h) / TS); if (solid(tx, ty)) { P.y = (ty + 1) * TS + P.h; P.vy = 0; } }
+  }
+  // moving platforms: one-way from above
+  P.ride = null;
+  for (const m of movers) if (P.vy >= 0 && P.x + P.w / 2 > m.x && P.x - P.w / 2 < m.x + m.w && P.y >= m.y && P.y - dy <= m.y + 1) { P.y = m.y; P.vy = 0; P.onGround = true; P.ride = m; }
+  return was;
+}
+function step(dt) {
+  time += dt;
+  for (const m of movers) { m.t += dt; const nx = m.a + (m.b - m.a) * (0.5 - 0.5 * Math.cos(m.t * 0.9)); m.vx = (nx - m.x) / dt; m.x = nx; }
+  for (const s of slimes) {
+    if (!s.alive) { s.sq += dt; continue; }
+    s.t += dt; s.x += s.vx * dt;
+    const tx = Math.floor((s.x + Math.sign(s.vx) * 14) / TS), ty = Math.floor((s.y - 8) / TS);
+    // turn at walls and ledges
+    if (solid(tx, ty) || !solid(tx, ty + 1)) s.vx *= -1;
+  }
+  if (P.dead > 0) { P.dead -= dt; if (P.dead <= 0) respawn(); return; }
+  if (won) { won += dt; P.vx *= 0.9; if (won > 3 && attract) resetLevel(); return; }
+  const inp = attract ? botInput() : { left: keys.has('ArrowLeft') || keys.has('KeyA'), right: keys.has('ArrowRight') || keys.has('KeyD'), hold: keys.has('Space') || keys.has('ArrowUp') || keys.has('KeyW') };
+  if (attract && inp.jump) P.buffer = 0.12;
+  const dir = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+  if (dir) P.face = dir;
+  const acc = ACC * (P.onGround ? 1 : AIR);
+  if (dir) P.vx += dir * acc * dt; else if (P.onGround) P.vx -= Math.sign(P.vx) * Math.min(Math.abs(P.vx), ACC * 0.9 * dt);
+  P.vx = Math.max(-RUN, Math.min(RUN, P.vx));
+  // timers: coyote keeps a jump alive just after leaving a ledge, buffer remembers an early press
+  P.coyote = P.onGround ? 0.1 : P.coyote - dt; P.buffer -= dt; P.wallT -= dt;
+  const sliding = !P.onGround && P.wall && dir === P.wall && P.vy > 0;
+  if (P.buffer > 0 && P.coyote > 0) { P.vy = -JUMP; P.coyote = 0; P.buffer = 0; P.sq = -1; dust(P.x, P.y, 5); tone(330, 0.12, 'square', 0.04, 660); P.ride = null; }
+  else if (P.buffer > 0 && !P.onGround && P.wall) { P.vy = -JUMP * 0.92; P.vx = -P.wall * 340; P.buffer = 0; P.wallT = 0.16; P.face = -P.wall; P.sq = -1; dust(P.x + P.wall * 10, P.y - 10, 5); tone(400, 0.12, 'square', 0.04, 800); }
+  // variable height: releasing early cuts upward speed
+  if (!inp.hold && P.vy < -200) P.vy *= 0.55;
+  P.vy += (P.vy < 0 ? G_UP : G_DOWN) * dt;
+  P.vy = Math.min(P.vy, sliding ? 150 : 950);
+  if (sliding && Math.random() < 0.3) parts.push({ x: P.x + P.wall * 11, y: P.y - 14, vx: 0, vy: -20, t: 0.3, r: 2.5, c: '#e8dcc0' });
+  if (P.ride) P.x += P.ride.vx * dt;
+  collideX(P.vx * dt);
+  collideY(P.vy * dt);
+  P.sq *= Math.pow(0.0005, dt);
+  // pickups + hazards
+  const [cx, cy] = tileAtPx(P.x, P.y - P.h / 2);
+  for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) {
+    const k = y * LW + x;
+    if (coinMap.has(k) && Math.abs(x * TS + 16 - P.x) < 22 && Math.abs(y * TS + 16 - (P.y - P.h / 2)) < 26) { coinMap.delete(k); coinCount++; sparkle(x * TS + 16, y * TS + 16, '#ffd84a'); tone(988, 0.08, 'square', 0.04); setTimeout(() => tone(1319, 0.14, 'square', 0.04), 70); }
+    if (L[y]?.[x] === '^' && Math.abs(x * TS + 16 - P.x) < 20 && P.y > y * TS + 14) die('spike');
+  }
+  if (P.y > LH * TS + 80) die();
+  for (const s of slimes) {
+    if (!s.alive || P.dead) continue;
+    if (Math.abs(s.x - P.x) < 24 && P.y > s.y - 26 && P.y - P.h < s.y) {
+      if (P.vy > 50 && P.y < s.y - 8) { s.alive = false; s.sq = 0; P.vy = -JUMP * 0.75; sparkle(s.x, s.y - 10, '#7dffb0'); tone(220, 0.15, 'square', 0.06, 880); }
+      else die('slime');
+    }
+  }
+  for (const c of SPAWNS.checkpoints) if (P.x > c[0] * TS && cp[0] < c[0]) { cp = c; sparkle(c[0] * TS + 16, c[1] * TS, '#59f0ff'); tone(660, 0.2, 'triangle', 0.08, 1320); }
+  if (P.x > SPAWNS.goal[0] * TS && !won) { won = 0.001; [523, 659, 784, 1047, 1319].forEach((f, k) => setTimeout(() => tone(f, 0.2, 'triangle', 0.08), k * 100)); for (let k = 0; k < 4; k++) sparkle(P.x, P.y - 40 - k * 20, ['#ffd84a', '#ff6ad5', '#59f0ff', '#7dffb0'][k]); }
+}
+const deathLog = [];
+function die(why = 'fall') { if (P.dead) return; deathLog.push(`${why}@${Math.round(P.x / TS)},${Math.round(P.y / TS)}`); P.dead = 0.9; deaths++; sparkle(P.x, P.y - 14, '#ff6a6a'); tone(200, 0.4, 'sawtooth', 0.06, 50); }
+
+// Render
+function drawBg() {
+  const g = ctx.createLinearGradient(0, 0, 0, innerHeight); g.addColorStop(0, '#3a2f7a'); g.addColorStop(0.55, '#e8708a'); g.addColorStop(1, '#ffc58a');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  ctx.fillStyle = '#fff3d0'; ctx.beginPath(); ctx.arc(innerWidth * 0.7, innerHeight * 0.36, Math.min(innerWidth, innerHeight) * 0.09, 0, 7); ctx.fill();
+  // three parallax ridges
+  const layers = [[0.15, '#8a5a9e', 0.55, 90], [0.3, '#5d3f86', 0.68, 70], [0.5, '#3a2a63', 0.8, 50]];
+  for (const [par, col, base, amp] of layers) {
+    ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(0, innerHeight);
+    for (let x = 0; x <= innerWidth + 20; x += 20) { const wx = (x / zoom + cam.x * par) * 0.01; ctx.lineTo(x, innerHeight * base - (Math.sin(wx) * 0.6 + Math.sin(wx * 2.3 + 1) * 0.3 + Math.sin(wx * 5.1) * 0.1) * amp * zoom); }
+    ctx.lineTo(innerWidth, innerHeight); ctx.fill();
+  }
+}
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawBg();
+  ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -Math.round(cam.x * zoom * dpr), -Math.round(cam.y * zoom * dpr));
+  const x0 = Math.max(0, Math.floor(cam.x / TS)), x1 = Math.min(LW - 1, Math.ceil((cam.x + VW) / TS));
+  for (let y = 0; y < LH; y++) for (let x = x0; x <= x1; x++) {
+    const c = L[y][x], px = x * TS, py = y * TS;
+    if (c === '#') {
+      const top = !solid(x, y - 1) && y > 0;
+      ctx.fillStyle = '#5a3a2e'; ctx.fillRect(px, py, TS + 0.6, TS + 0.6); // overlap hides subpixel seams
+      ctx.fillStyle = '#6e4838'; if ((x * 7 + y * 13) % 5 === 0) ctx.fillRect(px + 8, py + 12, 6, 4); if ((x * 3 + y * 11) % 7 === 0) ctx.fillRect(px + 20, py + 22, 5, 3);
+      if (top) { ctx.fillStyle = '#5fd06a'; ctx.fillRect(px, py, TS, 9); ctx.fillStyle = '#8af08a'; ctx.fillRect(px, py, TS, 3); ctx.fillStyle = '#3fae54'; for (let k = 0; k < 4; k++) ctx.fillRect(px + k * 8 + ((x + k) % 2) * 3, py + 9, 3, 3 + ((x * k) % 3)); }
+    } else if (c === '=') {
+      ctx.fillStyle = '#b07a48'; ctx.fillRect(px, py, TS, 12); ctx.fillStyle = '#d49a60'; ctx.fillRect(px, py, TS, 3); ctx.fillStyle = '#7a5030'; ctx.fillRect(px + TS - 2, py, 2, 12);
+    } else if (c === '^') {
+      ctx.fillStyle = '#d8dce8'; for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.moveTo(px + k * 11, py + TS); ctx.lineTo(px + k * 11 + 5.5, py + 12); ctx.lineTo(px + k * 11 + 11, py + TS); ctx.fill(); }
+    }
+  }
+  // coins spin by squashing width
+  for (const k of coinMap) { const x = (k % LW) * TS + 16, y = ((k / LW) | 0) * TS + 16 + Math.sin(time * 3 + k) * 3; if (x < cam.x - 40 || x > cam.x + VW + 40) continue; const w = Math.abs(Math.cos(time * 4 + k * 0.3)) * 9 + 1.5; ctx.fillStyle = '#ffd84a'; ctx.beginPath(); ctx.ellipse(x, y, w, 10, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#fff4b0'; ctx.fillRect(x - w * 0.3, y - 6, Math.max(1, w * 0.3), 8); }
+  for (const c of SPAWNS.checkpoints) { const x = c[0] * TS + 16, y = (c[1] + 1) * TS, on = cp[0] >= c[0]; ctx.fillStyle = '#ddd'; ctx.fillRect(x - 2, y - 56, 4, 56); ctx.fillStyle = on ? '#59f0ff' : '#666a80'; ctx.beginPath(); ctx.moveTo(x + 2, y - 56); ctx.lineTo(x + 26 + Math.sin(time * 6) * 2, y - 48); ctx.lineTo(x + 2, y - 40); ctx.fill(); }
+  { const x = SPAWNS.goal[0] * TS + 16, y = (SPAWNS.goal[1] + 1) * TS; ctx.fillStyle = '#eee'; ctx.fillRect(x - 3, y - 150, 6, 150); ctx.fillStyle = '#ffd84a'; ctx.beginPath(); ctx.arc(x, y - 152, 7, 0, 7); ctx.fill(); ctx.fillStyle = '#ff4f8b'; ctx.beginPath(); ctx.moveTo(x + 3, y - 145); for (let k = 0; k <= 10; k++) ctx.lineTo(x + 3 + k * 5, y - 145 + Math.sin(time * 6 + k * 0.6) * 3 + (k === 10 ? 0 : 0)); for (let k = 10; k >= 0; k--) ctx.lineTo(x + 3 + k * 5, y - 115 + Math.sin(time * 6 + k * 0.6) * 3); ctx.fill(); }
+  for (const m of movers) { ctx.fillStyle = '#7a8aa8'; ctx.beginPath(); ctx.roundRect(m.x, m.y, m.w, m.h, 5); ctx.fill(); ctx.fillStyle = '#a9b8d6'; ctx.fillRect(m.x + 4, m.y + 2, m.w - 8, 3); }
+  for (const s of slimes) {
+    if (!s.alive && s.sq > 0.6) continue;
+    const bob = s.alive ? Math.abs(Math.sin(s.t * 6)) : 0, sw = s.alive ? 1 + (1 - bob) * 0.15 : 1.6, sh = s.alive ? 1 - (1 - bob) * 0.15 : 0.25;
+    ctx.save(); ctx.translate(s.x, s.y); ctx.scale(sw, sh); ctx.globalAlpha = s.alive ? 1 : 1 - s.sq / 0.6;
+    ctx.fillStyle = '#5ee08a'; ctx.beginPath(); ctx.moveTo(-15, 0); ctx.quadraticCurveTo(-16, -24, 0, -24); ctx.quadraticCurveTo(16, -24, 15, 0); ctx.fill();
+    ctx.fillStyle = '#fff'; const d = Math.sign(s.vx); ctx.fillRect(-7 + d * 2, -16, 5, 6); ctx.fillRect(3 + d * 2, -16, 5, 6); ctx.fillStyle = '#123'; ctx.fillRect(-5 + d * 3, -14, 2.5, 3.5); ctx.fillRect(5 + d * 3, -14, 2.5, 3.5);
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+  // player: blob with squash/stretch from landings and jumps
+  if (!P.dead) {
+    const s = P.sq, sx = 1 + s * 0.25 - (P.vy < -100 ? 0.1 : 0), sy = 1 - s * 0.25 + (P.vy < -100 ? 0.12 : 0);
+    ctx.save(); ctx.translate(P.x, P.y); ctx.scale(sx, sy);
+    ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.roundRect(-P.w / 2 - 1, -P.h, P.w + 2, P.h, [12, 12, 8, 8]); ctx.fill();
+    ctx.fillStyle = '#ff8f3a'; ctx.fillRect(-P.w / 2 - 1, -8, P.w + 2, 8);
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(P.face * 4 - 4, -19, 4, 5, 0, 0, 7); ctx.ellipse(P.face * 4 + 5, -19, 4, 5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#1a1030'; ctx.beginPath(); ctx.arc(P.face * 5.5 - 4, -18.5, 2.2, 0, 7); ctx.arc(P.face * 5.5 + 5, -18.5, 2.2, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  for (const p of parts) { ctx.globalAlpha = Math.min(1, p.t * 2.5); ctx.fillStyle = p.c; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  // HUD
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#0006'; ctx.beginPath(); ctx.roundRect(12, 12, 250, 40, 12); ctx.fill();
+  ctx.font = '800 18px ui-rounded, system-ui, sans-serif'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd84a'; ctx.fillText(`● ${coinCount}`, 26, 32); ctx.fillStyle = '#fff'; ctx.fillText(`⏱ ${time.toFixed(1)}`, 92, 32); ctx.fillStyle = '#ff9a9a'; ctx.fillText(`✖ ${deaths}`, 192, 32);
+  ctx.textAlign = 'center';
+  if (attract) { ctx.fillStyle = `rgba(255,255,255,${0.6 + Math.sin(performance.now() / 260) * 0.4})`; ctx.font = '800 20px ui-rounded, system-ui, sans-serif'; ctx.fillText(innerWidth < 600 ? 'BOT DEMO · TAP TO PLAY' : 'BOT DEMO · PRESS ANY KEY OR TAP', innerWidth / 2, 88); ctx.font = '600 13px system-ui, sans-serif'; ctx.fillStyle = '#fffc'; ctx.fillText(innerWidth < 600 ? 'hold ⤒ to jump higher · jump into walls' : '←→ run · space/↑ jump (hold = higher) · jump into walls to wall-jump', innerWidth / 2, 112); }
+  if (won) { ctx.fillStyle = '#fff'; ctx.font = '900 44px ui-rounded, system-ui, sans-serif'; ctx.fillText('GOAL!', innerWidth / 2, innerHeight * 0.35); ctx.font = '700 18px system-ui'; ctx.fillText(`${coinCount} coins · ${time.toFixed(1)} s · ${deaths} deaths`, innerWidth / 2, innerHeight * 0.35 + 40); if (!attract) ctx.fillText('press R to restart', innerWidth / 2, innerHeight * 0.35 + 68); }
+  ctx.textAlign = 'left';
+}
+addEventListener('keydown', (e) => { if (e.code === 'KeyR' && !attract) resetLevel(); });
+
+resetLevel();
+let last = performance.now(), acc = 0;
+function loop(now) {
+  const fdt = Math.min(0.1, (now - last) / 1000); last = now; acc += fdt;
+  while (acc >= 1 / 120) { step(1 / 120); acc -= 1 / 120; }
+  for (const p of parts) { p.x += p.vx * fdt; p.y += p.vy * fdt; p.vy += 300 * fdt; p.t -= fdt; }
+  parts = parts.filter((p) => p.t > 0);
+  if (!attract) { idle += fdt; if (idle > 40) { attract = true; resetLevel(); } }
+  // camera: lookahead in facing dir, vertical deadzone, clamped to level
+  const tx = P.x - VW * 0.5 + P.face * VW * 0.12, ty = Math.min(LH * TS - VH, P.y - VH * 0.62);
+  cam.x += (Math.max(0, Math.min(LW * TS - VW, tx)) - cam.x) * Math.min(1, fdt * 4);
+  if (Math.abs(ty - cam.y) > 40 || P.onGround) cam.y += (ty - cam.y) * Math.min(1, fdt * 3);
+  draw(); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+window.__plat = { get x() { return Math.round(P.x / TS); }, get deaths() { return deaths; }, get coins() { return coinCount; }, get won() { return !!won; }, deathLog, P, solid, get movers() { return movers; } };
+</script>
+</body>
+</html>

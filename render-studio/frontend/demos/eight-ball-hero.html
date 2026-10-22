@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Magic 8-Ball Hero</title>
+<meta name="category" content="scenes" />
+<meta name="order" content="3" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="hero section, rolling physics, mirror floor, 8Ball Studio" />
+<meta name="description" content="A landing-page hero for 8Ball Studio: a glossy 8-ball rolls toward your cursor with true rolling rotation over a mirror floor, then flips to its answer window when you ask it something. Tests interaction design plus correct rigid-body rotation." />
+<meta name="prompt" content="Design a single-file Three.js landing hero for a studio called 8Ball: a glossy black 8-ball rolls after the cursor across a dark mirror floor with physically correct rolling rotation and soft shadows, over an animated shader backdrop. Typing a question and pressing Enter flips the ball to its blue answer window with a witty creative-agency answer." />
+<style>
+  :root { --ink: #f2f4f1; --muted: #93a39b; --accent: #4fd1a5; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04100c; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  canvas { display: block; }
+  nav { position: fixed; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: 22px 32px; pointer-events: none; }
+  nav .logo { display: flex; gap: 10px; align-items: center; font-weight: 800; letter-spacing: -0.02em; font-size: 18px; }
+  nav .logo i { width: 22px; height: 22px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #555 0, #000 55%); display: grid; place-items: center; font-style: normal; font-size: 10px; }
+  nav .logo i::after { content: '8'; width: 11px; height: 11px; border-radius: 50%; background: #fff; color: #000; display: grid; place-items: center; font-size: 8px; font-weight: 900; }
+  nav .links { display: flex; gap: 26px; font-size: 13.5px; color: var(--muted); }
+  .hero { position: fixed; left: 7vw; top: 50%; transform: translateY(-58%); max-width: 520px; pointer-events: none; }
+  .hero .k { font-size: 12px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
+  .hero h1 { margin: 14px 0 0; font-size: clamp(42px, 6.4vw, 92px); line-height: 0.92; letter-spacing: -0.045em; font-weight: 800; }
+  .hero h1 em { font-style: normal; color: transparent; -webkit-text-stroke: 1.5px var(--ink); }
+  .hero p { margin: 18px 0 0; color: var(--muted); font-size: 16px; line-height: 1.6; max-width: 400px; }
+  form { margin-top: 26px; display: flex; gap: 8px; pointer-events: auto; max-width: 440px; }
+  form input { flex: 1; min-width: 0; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); color: var(--ink); font: inherit; font-size: 15px; outline: none; backdrop-filter: blur(8px); }
+  form input:focus { border-color: var(--accent); }
+  form button { padding: 0 20px; border-radius: 14px; border: 0; background: var(--accent); color: #032016; font: inherit; font-weight: 800; cursor: pointer; }
+  #answer { position: fixed; right: 9vw; bottom: 12vh; font-size: 13px; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; opacity: 0; transition: opacity 0.4s; pointer-events: none; }
+  #answer.show { opacity: 1; }
+  @media (max-width: 760px) {
+    nav .links { display: none; }
+    .hero { left: 20px; right: 20px; top: 92px; transform: none; }
+    .hero h1 { font-size: 46px; }
+    .hero p { font-size: 14px; }
+    #answer { right: 20px; bottom: 24px; }
+  }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<nav><div class="logo"><i></i>8Ball Studio</div><div class="links"><span>Work</span><span>Services</span><span>Studio</span><span>Contact</span></div></nav>
+<section class="hero">
+  <div class="k">Creative studio · est. 2026</div>
+  <h1>Outlook <em>good.</em></h1>
+  <p>Brand, motion and interactive work for teams that like their answers bold. Move your cursor: the ball follows. Ask it anything.</p>
+  <form id="ask"><input id="q" placeholder="Will the launch go well?" autocomplete="off" maxlength="80"><button>Ask</button></form>
+</section>
+<div id="answer"></div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/eight-ball-hero.html
+ * PURPOSE: 8Ball Studio landing hero: cursor-following rolling 8-ball (true rolling rotation), mirror floor, shader backdrop, magic answer flip
+ * UI: Render Studio > 3D Scenes > Magic 8-Ball Hero
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+
+const $ = (id) => document.getElementById(id);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.02).texture;
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 200);
+const BALL_R = 1;
+
+// Hero > backdrop: animated domain-warped gradient on a big curved plane behind the stage
+const backMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uMouse: { value: new THREE.Vector2() } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform float uTime; uniform vec2 uMouse; varying vec2 vUv;
+  float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+  float fbm(vec2 p){ float s = 0.0, a = 0.5; for(int i = 0; i < 5; i++){ s += a*n(p); p *= 2.02; a *= 0.5; } return s; }
+  void main(){
+    vec2 p = vUv * vec2(3.0, 1.6);
+    float t = uTime * 0.05;
+    vec2 q = vec2(fbm(p + t), fbm(p + vec2(5.2, 1.3) - t));
+    float f = fbm(p + 2.5*q + uMouse*0.3);
+    vec3 c = mix(vec3(0.005, 0.03, 0.025), vec3(0.02, 0.22, 0.16), smoothstep(0.35, 0.85, f));
+    c = mix(c, vec3(0.25, 0.85, 0.65), smoothstep(0.72, 0.95, f) * 0.35);
+    c *= smoothstep(1.1, 0.25, length((vUv - vec2(0.62, 0.55)) * vec2(1.6, 1.0)));
+    // bottom melts into floor color so the seam disappears
+    c = mix(vec3(0.0, 0.015, 0.01), c, smoothstep(0.2, 0.45, vUv.y));
+    gl_FragColor = vec4(c, 1.0);
+  }`,
+});
+const back = new THREE.Mesh(new THREE.PlaneGeometry(90, 40), backMat);
+back.position.set(0, 12, -22);
+back.scale.set(1, 1.3, 1);
+scene.add(back);
+
+// Hero > mirror floor: Reflector under a translucent dark layer = glossy lacquer look
+const mirror = new Reflector(new THREE.PlaneGeometry(120, 120), { textureWidth: innerWidth * 0.5, textureHeight: innerHeight * 0.5, color: 0x8a9a94 });
+mirror.rotation.x = -Math.PI / 2;
+scene.add(mirror);
+const lacquer = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshStandardMaterial({ color: 0x020806, transparent: true, opacity: 0.78, roughness: 0.6 }));
+lacquer.rotation.x = -Math.PI / 2; lacquer.position.y = 0.002;
+lacquer.receiveShadow = true;
+scene.add(lacquer);
+const fade = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
+  vertexShader: 'varying vec3 vW; void main(){ vW = (modelMatrix * vec4(position, 1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(vW, 1.0); }',
+  fragmentShader: 'varying vec3 vW; void main(){ float d = length(vW.xz - vec2(2.0, -2.0)); gl_FragColor = vec4(0.0, 0.015, 0.01, smoothstep(6.0, 22.0, d)); }',
+}));
+fade.rotation.x = -Math.PI / 2; fade.position.y = 0.004;
+scene.add(fade);
+const shadowCatcher = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.6 }));
+shadowCatcher.rotation.x = -Math.PI / 2; shadowCatcher.position.y = 0.006; shadowCatcher.receiveShadow = true;
+scene.add(shadowCatcher);
+
+// Ball > texture: equirect canvas, "8" disc faces +z (u=0.25), answer window faces -z (u=0.75)
+const tc = document.createElement('canvas');
+tc.width = 2048; tc.height = 1024;
+const tg = tc.getContext('2d');
+const ballTex = new THREE.CanvasTexture(tc);
+ballTex.colorSpace = THREE.SRGBColorSpace; ballTex.anisotropy = 8;
+function paintBall(answer) {
+  tg.fillStyle = '#060606'; tg.fillRect(0, 0, 2048, 1024);
+  // white disc + 8, drawn with horizontal stretch compensation near equator (fine for 30° disc)
+  tg.fillStyle = '#f7f5ef'; tg.beginPath(); tg.ellipse(512, 512, 175, 175, 0, 0, Math.PI * 2); tg.fill();
+  tg.fillStyle = '#0a0a0a'; tg.font = '900 250px "Helvetica Neue", Arial, sans-serif'; tg.textAlign = 'center'; tg.textBaseline = 'middle';
+  tg.fillText('8', 512, 528);
+  // answer window: dark glass disc, blue d20 triangle, text
+  const win = tg.createRadialGradient(1536, 512, 10, 1536, 512, 200);
+  win.addColorStop(0, '#0c1630'); win.addColorStop(1, '#020309');
+  tg.fillStyle = win; tg.beginPath(); tg.arc(1536, 512, 200, 0, Math.PI * 2); tg.fill();
+  tg.strokeStyle = '#1b1b1b'; tg.lineWidth = 14; tg.stroke();
+  tg.fillStyle = '#1e46d8'; tg.beginPath(); tg.moveTo(1536, 370); tg.lineTo(1676, 600); tg.lineTo(1396, 600); tg.closePath(); tg.fill();
+  tg.fillStyle = '#e8f0ff'; tg.font = '800 30px "Helvetica Neue", Arial, sans-serif';
+  const words = (answer || 'ASK AGAIN').toUpperCase().split(' ');
+  const lines = []; let cur = '';
+  for (const w of words) { if ((cur + ' ' + w).trim().length > 9) { lines.push(cur.trim()); cur = w; } else cur += ' ' + w; }
+  lines.push(cur.trim());
+  lines.slice(0, 4).forEach((l, i, a) => tg.fillText(l, 1536, 530 + (i - (a.length - 1) / 2) * 34));
+  ballTex.needsUpdate = true;
+}
+paintBall();
+const ball = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 96, 64), new THREE.MeshPhysicalMaterial({ map: ballTex, roughness: 0.08, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 }));
+ball.castShadow = true;
+ball.position.set(2.6, BALL_R, 0);
+scene.add(ball);
+
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(-3, 8, 4);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.radius = 8;
+Object.assign(key.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 30 });
+scene.add(key, key.target);
+const rimL = new THREE.PointLight(0x4fd1a5, 30, 20);
+rimL.position.set(6, 3, -4);
+scene.add(rimL);
+
+const idle = { cx: 2.4, ax: 3.2, cz: -0.8, az: 1.6 };
+function frameCamera() {
+  const narrow = innerWidth / innerHeight < 0.9;
+  camera.aspect = innerWidth / innerHeight;
+  camera.fov = narrow ? 48 : 32;
+  camera.position.set(narrow ? 0 : -1.5, narrow ? 9 : 4.2, narrow ? 15 : 13);
+  camera.lookAt(narrow ? 0 : 1.2, narrow ? 3.2 : 1.0, 0);
+  idle.cx = narrow ? -0.3 : 2.4; idle.ax = narrow ? 0.7 : 3.2; idle.cz = narrow ? 2.5 : -0.8; idle.az = narrow ? 1.0 : 1.6;
+  camera.updateProjectionMatrix();
+}
+frameCamera();
+
+// Ball > pointer target: ray onto floor plane, clamped to stage
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -BALL_R);
+const target = new THREE.Vector3(2.6, BALL_R, 0);
+let lastMove = -1e9;
+addEventListener('pointermove', (e) => {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  ray.ray.intersectPlane(floorPlane, target);
+  target.x = THREE.MathUtils.clamp(target.x, -5, 8); target.z = THREE.MathUtils.clamp(target.z, -6, 4);
+  backMat.uniforms.uMouse.value.copy(ndc);
+  lastMove = performance.now();
+});
+
+// Ball > answer flip: slerp so window (-z local) faces camera, then hold
+const ANSWERS = ['Ship it', 'Outlook good', 'Ask after coffee', 'Needs more motion', 'Yes, in dark mode', 'Signs point to v2', 'Kern it first', 'Absolutely', 'Reply hazy, iterate', 'Not before Friday', 'The client will love it', 'Make the logo bigger', 'Without a doubt', 'Ask the intern', 'It is decidedly so', 'Cannot predict scope', 'Go bold'];
+let mode = 'roll', holdUntil = 0;
+const qAnswer = new THREE.Quaternion();
+$('ask').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const a = ANSWERS[(Math.random() * ANSWERS.length) | 0];
+  paintBall(a);
+  // orientation where local -z points at camera
+  const m = new THREE.Matrix4().lookAt(camera.position, ball.position, new THREE.Vector3(0, 1, 0));
+  qAnswer.setFromRotationMatrix(m);
+  mode = 'shake'; holdUntil = performance.now() + 650;
+  $('answer').textContent = `“${$('q').value || 'Will it work?'}” · ${a}`;
+  $('answer').classList.add('show');
+});
+
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); frameCamera(); });
+
+const vel = new THREE.Vector3(), clock = new THREE.Clock(), up = new THREE.Vector3(0, 1, 0), omega = new THREE.Vector3(), dq = new THREE.Quaternion();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.033, clock.getDelta()), t = clock.elapsedTime, now = performance.now();
+  backMat.uniforms.uTime.value = t;
+  if (mode === 'roll') {
+    // idle: lazy figure-eight so the hero never sits dead
+    if (now - lastMove > 3000) target.set(idle.cx + Math.sin(t * 0.5) * idle.ax, BALL_R, idle.cz + Math.sin(t) * idle.az);
+    const acc = target.clone().sub(ball.position).multiplyScalar(14).sub(vel.clone().multiplyScalar(4.2));
+    acc.y = 0;
+    vel.addScaledVector(acc, dt);
+    ball.position.addScaledVector(vel, dt);
+    // rolling without slipping: omega = (up x v) / r
+    omega.crossVectors(up, vel).divideScalar(BALL_R);
+    const ang = omega.length() * dt;
+    if (ang > 1e-6) { dq.setFromAxisAngle(omega.normalize(), ang); ball.quaternion.premultiply(dq); }
+  } else if (mode === 'shake') {
+    vel.multiplyScalar(0.8);
+    ball.position.x += Math.sin(now * 0.08) * 0.03;
+    ball.quaternion.slerp(qAnswer, 1 - Math.pow(0.0005, dt));
+    if (now > holdUntil) { mode = 'hold'; holdUntil = now + 4200; }
+  } else {
+    ball.quaternion.slerp(qAnswer, 1 - Math.pow(0.0005, dt));
+    if (now > holdUntil) { mode = 'roll'; $('answer').classList.remove('show'); }
+  }
+  ball.position.y = BALL_R;
+  key.target.position.copy(ball.position);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

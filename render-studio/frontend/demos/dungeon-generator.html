@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Dungeon Generator</title>
+<meta name="category" content="generators" />
+<meta name="order" content="1" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="BSP + cellular automata, seeded RNG, shadowcasting FOV, fog of war, auto-explore AI, PNG export" />
+<meta name="description" content="A seeded roguelike dungeon generator: binary space partitioning carves rooms, cellular automata grows caves, corridors stitch the tree together with extra loops, then doors, torches, water, chests and stairs are placed. A hero explores it with recursive shadowcasting field of view, soft fog of war and torch lighting, and descends level after level. Hard because generation, connectivity, FOV and pathfinding all have to agree." />
+<meta name="prompt" content="Build a procedural dungeon generator in one HTML file. Use a seeded RNG, BSP for rooms, cellular automata for some cave rooms, L-shaped corridors joining the BSP tree plus a few loops, and place doors, wall torches, water, chests and up/down stairs. Render pixel-art tiles, then let a hero explore with recursive shadowcasting FOV, fog of war, flickering torch light, click-to-path and an auto-explore AI that takes the stairs to the next level. Include seed input, reveal map, zoom and PNG export." />
+<style>
+  :root { --ink: #efe6d6; --muted: #a59a8a; --line: rgba(239, 230, 214, 0.14); --panel: rgba(16, 12, 20, 0.82); --accent: #ffb454; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07060a; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+  #panel { position: fixed; left: 16px; top: 16px; width: 270px; padding: 14px 14px 12px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  h1 { margin: 0 0 2px; font-size: 17px; letter-spacing: 0.2px; }
+  .sub { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+  .row { display: flex; gap: 6px; margin-bottom: 8px; }
+  input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); color: var(--ink); font: 600 13px ui-monospace, "SF Mono", monospace; }
+  button { height: 32px; padding: 0 11px; border-radius: 9px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--ink); font: 650 12.5px ui-rounded, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
+  button:hover { background: rgba(255, 255, 255, 0.12); }
+  button.on { background: rgba(255, 180, 84, 0.2); border-color: rgba(255, 180, 84, 0.6); color: #ffd9a3; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0 8px; }
+  .stat { padding: 6px 8px; border-radius: 9px; background: rgba(0, 0, 0, 0.3); }
+  .stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  .hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin: 0; }
+  kbd { font: 600 10.5px ui-monospace, monospace; padding: 1px 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); color: var(--ink); }
+  @media (max-width: 600px) {
+    #panel { left: 8px; right: 8px; top: auto; bottom: calc(8px + env(safe-area-inset-bottom)); width: auto; padding: 10px; }
+    .sub, .hint { display: none; }
+    .stats { margin: 6px 0; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="panel">
+  <h1>Dungeon Generator</h1>
+  <p class="sub">BSP rooms · CA caves · shadowcast FOV</p>
+  <div class="row"><input id="seed" spellcheck="false" aria-label="Seed" /><button id="gen">New</button></div>
+  <div class="grid">
+    <button id="auto" class="on">Auto</button><button id="reveal">Reveal</button><button id="zoom">Zoom</button><button id="png">PNG</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="sDepth">1</b><span>Depth</span></div>
+    <div class="stat"><b id="sRooms">0</b><span>Rooms</span></div>
+    <div class="stat"><b id="sExp">0%</b><span>Seen</span></div>
+    <div class="stat"><b id="sGold">0</b><span>Gold</span></div>
+  </div>
+  <p class="hint"><kbd>WASD</kbd>/<kbd>←↑→↓</kbd> walk · click to path · <kbd>Space</kbd> auto · <kbd>R</kbd> new · <kbd>F</kbd> reveal · <kbd>Z</kbd> zoom</p>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/dungeon-generator.html
+ * PURPOSE: seeded roguelike dungeon generator (BSP rooms, CA caves, corridors, props) with shadowcasting FOV, fog of war, torch lighting, auto-explore hero, PNG export
+ * UI: Render Studio > Generators > Dungeon Generator
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = (id) => document.getElementById(id);
+const MW = 72, MH = 44, BT = 16;
+const T_ROCK = 0, T_FLOOR = 1, T_CORR = 2, T_DOOR = 3, T_WATER = 4, T_DOWN = 5, T_UP = 6, T_CAVE = 7;
+const walkable = (t) => t !== T_ROCK;
+
+// Generator > seeded RNG (string hash into mulberry32)
+function hashStr(s) { let h = 1779033703 ^ s.length; for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return h >>> 0; }
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+let rnd = Math.random;
+const ri = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+
+// Generator > state of current level
+let map, rooms, torches, chests, start, stairs, seen, vis, light, torchLight, depth = 1, baseSeed = '', gold = 0;
+const idx = (x, y) => y * MW + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < MW && y < MH;
+
+// Generator > BSP split, rooms or caves per leaf, corridors up the tree
+function generate(seedStr) {
+  rnd = mulberry(hashStr(seedStr));
+  map = new Uint8Array(MW * MH);
+  rooms = []; torches = []; chests = [];
+  const root = split({ x: 1, y: 1, w: MW - 2, h: MH - 2 }, 0);
+  connect(root);
+  // a few extra corridors between near rooms so the layout has loops
+  for (let k = 0; k < 4; k++) {
+    const a = rooms[ri(0, rooms.length - 1)];
+    const near = rooms.filter((r) => r !== a).sort((p, q) => dist2(a, p) - dist2(a, q))[ri(0, 1)];
+    if (near) corridor(pick(a), pick(near));
+  }
+  placeDoors();
+  placeWater();
+  // stairs: up in first room, down in the room farthest by walking distance
+  start = pick(rooms[0]);
+  map[idx(start.x, start.y)] = T_UP;
+  const d = bfs(start.x, start.y);
+  let far = start, fd = -1;
+  for (const r of rooms) { const c = pick(r); const v = d[idx(c.x, c.y)]; if (v > fd && map[idx(c.x, c.y)] !== T_WATER) { fd = v; far = c; } }
+  stairs = far;
+  map[idx(far.x, far.y)] = T_DOWN;
+  for (const r of rooms) if (rnd() < 0.42 && r !== rooms[0]) { const c = pick(r); if (map[idx(c.x, c.y)] === T_FLOOR || map[idx(c.x, c.y)] === T_CAVE) chests.push({ x: c.x, y: c.y, open: false, t: 0 }); }
+  // torches on walls whose south neighbour is room floor, spaced out
+  for (let y = 1; y < MH - 1; y++) for (let x = 1; x < MW - 1; x++) {
+    if (map[idx(x, y)] === T_ROCK && map[idx(x, y + 1)] === T_FLOOR && rnd() < 0.09 && !torches.some((t) => Math.abs(t.x - x) + Math.abs(t.y - y) < 6)) torches.push({ x, y, ph: rnd() * 10 });
+  }
+  seen = new Uint8Array(MW * MH); vis = new Uint8Array(MW * MH); light = new Float32Array(MW * MH);
+  torchLight = new Float32Array(MW * MH);
+  for (const t of torches) fov(t.x, t.y + 1, 6, (x, y, dd) => { const i = idx(x, y); torchLight[i] = Math.max(torchLight[i], Math.max(0, 1 - dd / 6.5)); });
+  baked = bakeMap();
+}
+function split(n, depth) {
+  const canH = n.h >= 16, canV = n.w >= 20;
+  if (depth < 5 && (canH || canV) && !(depth > 2 && rnd() < 0.18)) {
+    const vert = canV && (!canH || n.w / n.h > 1.25 || (n.h / n.w <= 1.25 && rnd() < 0.5));
+    if (vert) { const s = ri(9, n.w - 9); n.a = split({ x: n.x, y: n.y, w: s, h: n.h }, depth + 1); n.b = split({ x: n.x + s, y: n.y, w: n.w - s, h: n.h }, depth + 1); }
+    else { const s = ri(7, n.h - 7); n.a = split({ x: n.x, y: n.y, w: n.w, h: s }, depth + 1); n.b = split({ x: n.x, y: n.y + s, w: n.w, h: n.h - s }, depth + 1); }
+    return n;
+  }
+  n.room = n.w >= 13 && n.h >= 10 && rnd() < 0.33 ? cave(n) : rect(n);
+  rooms.push(n.room);
+  return n;
+}
+function rect(n) {
+  const w = ri(4, Math.min(12, n.w - 3)), h = ri(3, Math.min(8, n.h - 3));
+  const x = n.x + ri(1, n.w - w - 2), y = n.y + ri(1, n.h - h - 2);
+  const cells = [];
+  for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) { map[idx(i, j)] = T_FLOOR; cells.push({ x: i, y: j }); }
+  return { x, y, w, h, cells, cave: false };
+}
+// cellular automata cave: random fill, 5 smoothing passes, keep largest region
+function cave(n) {
+  const w = n.w - 2, h = n.h - 2, ox = n.x + 1, oy = n.y + 1;
+  let g = Array.from({ length: h }, (_, y) => Array.from({ length: w }, (_, x) => (x === 0 || y === 0 || x === w - 1 || y === h - 1 ? 1 : rnd() < 0.44 ? 1 : 0)));
+  for (let it = 0; it < 5; it++) {
+    g = g.map((row, y) => row.map((v, x) => {
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) return 1;
+      let c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && g[y + dy][x + dx]) c++;
+      return c >= 5 || (it < 2 && c <= 1) ? 1 : 0;
+    }));
+  }
+  const lab = Array.from({ length: h }, () => Array(w).fill(-1));
+  let best = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (g[y][x] || lab[y][x] >= 0) continue;
+    const q = [[x, y]], reg = [];
+    lab[y][x] = 1;
+    while (q.length) { const [cx, cy] = q.pop(); reg.push([cx, cy]); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = cx + dx, ny = cy + dy; if (nx >= 0 && ny >= 0 && nx < w && ny < h && !g[ny][nx] && lab[ny][nx] < 0) { lab[ny][nx] = 1; q.push([nx, ny]); } } }
+    if (reg.length > best.length) best = reg;
+  }
+  if (best.length < 20) return rect(n);
+  const cells = best.map(([x, y]) => ({ x: ox + x, y: oy + y }));
+  cells.forEach((c) => (map[idx(c.x, c.y)] = T_CAVE));
+  return { x: ox, y: oy, w, h, cells, cave: true };
+}
+const roomsOf = (n) => (n.room ? [n.room] : [...roomsOf(n.a), ...roomsOf(n.b)]);
+const center = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+const dist2 = (a, b) => { const p = center(a), q = center(b); return (p.x - q.x) ** 2 + (p.y - q.y) ** 2; };
+const pick = (r) => r.cells[Math.floor(rnd() * r.cells.length)];
+function connect(n) {
+  if (n.room) return;
+  connect(n.a); connect(n.b);
+  let best = null, bd = Infinity;
+  for (const a of roomsOf(n.a)) for (const b of roomsOf(n.b)) { const d = dist2(a, b); if (d < bd) { bd = d; best = [a, b]; } }
+  corridor(pick(best[0]), pick(best[1]));
+}
+function corridor(p, q) {
+  let { x, y } = p;
+  const horizFirst = rnd() < 0.5;
+  const carve = () => { if (map[idx(x, y)] === T_ROCK) map[idx(x, y)] = T_CORR; };
+  const stepX = () => { while (x !== q.x) { x += Math.sign(q.x - x); carve(); } };
+  const stepY = () => { while (y !== q.y) { y += Math.sign(q.y - y); carve(); } };
+  if (horizFirst) { stepX(); stepY(); } else { stepY(); stepX(); }
+}
+// door where a corridor tile meets a rect room edge and is flanked by rock
+function placeDoors() {
+  for (const r of rooms) {
+    if (r.cave) continue;
+    const ring = [];
+    for (let i = r.x; i < r.x + r.w; i++) ring.push([i, r.y - 1], [i, r.y + r.h]);
+    for (let j = r.y; j < r.y + r.h; j++) ring.push([r.x - 1, j], [r.x + r.w, j]);
+    for (const [x, y] of ring) {
+      if (!inb(x, y) || map[idx(x, y)] !== T_CORR) continue;
+      const rockLR = map[idx(x - 1, y)] === T_ROCK && map[idx(x + 1, y)] === T_ROCK;
+      const rockUD = map[idx(x, y - 1)] === T_ROCK && map[idx(x, y + 1)] === T_ROCK;
+      if ((rockLR || rockUD) && rnd() < 0.7) map[idx(x, y)] = T_DOOR;
+    }
+  }
+}
+// shallow pools grown by BFS inside caves (walkable, see-through)
+function placeWater() {
+  for (const r of rooms) {
+    if (!r.cave) continue;
+    for (let k = 0; k < ri(1, 2); k++) {
+      const s = pick(r), q = [s], size = ri(10, 26);
+      let n = 0;
+      while (q.length && n < size) {
+        const c = q.splice(Math.floor(rnd() * q.length), 1)[0];
+        if (map[idx(c.x, c.y)] !== T_CAVE) continue;
+        map[idx(c.x, c.y)] = T_WATER; n++;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) q.push({ x: c.x + dx, y: c.y + dy });
+      }
+    }
+  }
+}
+function bfs(sx, sy, known) {
+  const d = new Int32Array(MW * MH).fill(-1), q = [idx(sx, sy)];
+  d[q[0]] = 0;
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h], x = i % MW, y = (i / MW) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy, j = idx(nx, ny);
+      if (inb(nx, ny) && d[j] < 0 && walkable(map[j]) && (!known || seen[j])) { d[j] = d[i] + 1; q.push(j); }
+    }
+  }
+  return d;
+}
+
+// FOV > recursive shadowcasting over 8 octants
+const OCT = [[1, 0, 0, 1], [0, 1, 1, 0], [0, -1, 1, 0], [-1, 0, 0, 1], [-1, 0, 0, -1], [0, -1, -1, 0], [0, 1, -1, 0], [1, 0, 0, -1]];
+const opaque = (x, y) => !inb(x, y) || map[idx(x, y)] === T_ROCK;
+function fov(ox, oy, radius, cb) {
+  cb(ox, oy, 0);
+  for (const [xx, xy, yx, yy] of OCT) cast(ox, oy, 1, 1, 0, radius, xx, xy, yx, yy, cb);
+}
+function cast(ox, oy, row, start, end, radius, xx, xy, yx, yy, cb) {
+  if (start < end) return;
+  let newStart = 0;
+  for (let j = row; j <= radius; j++) {
+    let blocked = false;
+    for (let dx = -j, dy = -j; dx <= 0; dx++) {
+      const X = ox + dx * xx + dy * xy, Y = oy + dx * yx + dy * yy;
+      const lS = (dx - 0.5) / (dy + 0.5), rS = (dx + 0.5) / (dy - 0.5);
+      if (start < rS) continue;
+      if (end > lS) break;
+      const dd = Math.hypot(dx, dy);
+      if (dd <= radius && inb(X, Y)) cb(X, Y, dd);
+      if (blocked) {
+        if (opaque(X, Y)) { newStart = rS; continue; }
+        blocked = false; start = newStart;
+      } else if (opaque(X, Y) && j < radius) {
+        blocked = true;
+        cast(ox, oy, j + 1, start, lS, radius, xx, xy, yx, yy, cb);
+        newStart = rS;
+      }
+    }
+    if (blocked) break;
+  }
+}
+
+// Render > tile art baked once per level at 16 px (pixel art from per-tile hashes)
+let baked = null;
+const th = (x, y, k = 0) => { let h = (x * 374761393 + y * 668265263 + k * 2147483647) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function nearFloor(x, y) { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (inb(x + dx, y + dy) && walkable(map[idx(x + dx, y + dy)])) return true; return false; }
+function bakeMap() {
+  const c = document.createElement('canvas');
+  c.width = MW * BT; c.height = MH * BT;
+  const g = c.getContext('2d');
+  const px = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(x, y, w, h); };
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    const t = map[idx(x, y)], X = x * BT, Y = y * BT, r = th(x, y);
+    if (t === T_ROCK) {
+      if (!nearFloor(x, y)) { px(X, Y, BT, BT, '#0b0910'); continue; }
+      const front = inb(x, y + 1) && walkable(map[idx(x, y + 1)]);
+      px(X, Y, BT, BT, '#2a2333');
+      if (front) {
+        // brick face with mortar, offset every other course
+        px(X, Y + 5, BT, 11, '#6e5a73');
+        for (let row = 0; row < 3; row++) {
+          px(X, Y + 5 + row * 4 + 3, BT, 1, '#3a2f40');
+          const off = (row + y) % 2 ? 0 : 4;
+          for (let k = off; k < BT; k += 8) px(X + k, Y + 5 + row * 4, 1, 3, '#3a2f40');
+        }
+        px(X, Y + 5, BT, 1, '#9783a0');
+      } else {
+        px(X + 2, Y + 2, 2, 2, '#2e2638'); if (r > 0.5) px(X + 9, Y + 10, 3, 2, '#2e2638');
+      }
+      continue;
+    }
+    const cave = t === T_CAVE || t === T_WATER;
+    const base = t === T_CORR ? '#3a3340' : cave ? '#3d3d31' : '#4d4456';
+    px(X, Y, BT, BT, base);
+    // stone slabs for rooms, pebbles/moss for caves
+    if (t === T_FLOOR || t === T_UP || t === T_DOWN) {
+      px(X, Y, BT, 1, '#5d5367'); px(X, Y, 1, BT, '#5d5367'); px(X + BT - 1, Y, 1, BT, '#352d3b'); px(X, Y + BT - 1, BT, 1, '#352d3b');
+      if (r > 0.72) { px(X + 4, Y + 6, 5, 1, '#2c2531'); px(X + 8, Y + 7, 1, 3, '#2c2531'); }
+    } else if (cave) {
+      for (let k = 0; k < 4; k++) px(X + Math.floor(th(x, y, k + 1) * 14), Y + Math.floor(th(x, y, k + 9) * 14), 2, 2, th(x, y, k + 20) > 0.6 ? '#3f4a2c' : '#29281f');
+    } else if (t === T_CORR) {
+      if (r > 0.6) px(X + 5, Y + 9, 2, 2, '#241f28');
+    }
+    if (t === T_WATER) {
+      px(X, Y, BT, BT, '#173b57');
+      px(X + 2, Y + 4 + Math.floor(r * 6), 6, 1, '#2b6286');
+    }
+    if (t === T_DOOR) {
+      px(X + 2, Y + 1, 12, 14, '#6b4220'); px(X + 2, Y + 1, 12, 1, '#94612f');
+      px(X + 7, Y + 1, 1, 14, '#4a2d15'); px(X + 10, Y + 8, 2, 2, '#e3b25a');
+    }
+    if (t === T_DOWN || t === T_UP) {
+      for (let k = 0; k < 4; k++) px(X + 2 + (t === T_DOWN ? k : 3 - k) * 0, Y + 2 + k * 3, 12 - k * 2, 2, t === T_DOWN ? ['#9d8fa6', '#776a80', '#544a5c', '#2e2734'][k] : ['#2e2734', '#544a5c', '#776a80', '#b0a3b8'][k]);
+    }
+    if (t !== T_WATER && t !== T_DOOR && th(x, y, 77) > 0.965) { px(X + 5, Y + 7, 6, 2, '#d8d0c0'); px(X + 4, Y + 6, 2, 2, '#d8d0c0'); px(X + 10, Y + 8, 2, 2, '#d8d0c0'); }
+  }
+  return c;
+}
+
+// Hero > state, movement, auto-explore
+const hero = { x: 0, y: 0, rx: 0, ry: 0, path: [], stepT: 0, dir: 1 };
+let auto = true, reveal = false, zoomed = false, popups = [], fade = 1, intro = 0;
+function newLevel(seedStr) {
+  generate(seedStr);
+  hero.x = hero.rx = start.x; hero.y = hero.ry = start.y; hero.path = [];
+  computeFov();
+  fade = 1; intro = 0;
+  $('sDepth').textContent = depth;
+  $('sRooms').textContent = `${rooms.length}${rooms.some((r) => r.cave) ? '' : ''}`;
+}
+function computeFov() {
+  vis.fill(0);
+  fov(hero.x, hero.y, 9, (x, y, d) => { const i = idx(x, y); vis[i] = 1; seen[i] = 1; light[i] = Math.max(0, 1 - d / 9.5); });
+}
+function tryStep(dx, dy) {
+  const nx = hero.x + dx, ny = hero.y + dy;
+  if (!inb(nx, ny) || !walkable(map[idx(nx, ny)])) return false;
+  hero.x = nx; hero.y = ny;
+  if (dx) hero.dir = dx;
+  computeFov();
+  const ch = chests.find((c) => !c.open && c.x === nx && c.y === ny);
+  if (ch) { ch.open = true; const g = 10 + Math.floor(Math.random() * 40); gold += g; $('sGold').textContent = gold; popups.push({ x: nx, y: ny, text: `+${g} gold`, t: 0 }); }
+  if (map[idx(nx, ny)] === T_DOWN) { depth++; popups.push({ x: nx, y: ny, text: `Depth ${depth}`, t: 0 }); setTimeout(() => newLevel(`${baseSeed}/${depth}`), 350); }
+  return true;
+}
+function pathTo(tx, ty) {
+  const d = bfs(hero.x, hero.y, true);
+  if (d[idx(tx, ty)] < 0) return [];
+  const p = [];
+  let x = tx, y = ty;
+  while (x !== hero.x || y !== hero.y) {
+    p.unshift([x, y]);
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (inb(nx, ny) && d[idx(nx, ny)] === d[idx(x, y)] - 1) { x = nx; y = ny; break; } }
+  }
+  return p;
+}
+// nearest seen chest, else nearest known floor tile bordering unexplored space, else the stairs
+function exploreTarget() {
+  const d = bfs(hero.x, hero.y, true);
+  let best = null, bd = Infinity;
+  // loot first: nearest seen, unopened chest
+  for (const c of chests) { const v = d[idx(c.x, c.y)]; if (!c.open && v > 0 && v < bd) { best = [c.x, c.y]; bd = v; } }
+  if (best) return best;
+  for (let i = 0; i < MW * MH; i++) {
+    if (d[i] <= 0 || d[i] >= bd) continue;
+    const x = i % MW, y = (i / MW) | 0;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (inb(x + dx, y + dy) && !seen[idx(x + dx, y + dy)]) { best = [x, y]; bd = d[i]; break; }
+  }
+  if (best) return best;
+  return d[idx(stairs.x, stairs.y)] > 0 ? [stairs.x, stairs.y] : null;
+}
+
+// Input > keys, click-to-path, panel buttons
+const KEYDIR = { ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Enter') { e.target.blur(); fresh(e.target.value.trim() || randomSeed()); } return; }
+  const dir = KEYDIR[e.code];
+  if (dir) { e.preventDefault(); setAuto(false); hero.path = []; tryStep(...dir); return; }
+  if (e.code === 'Space') { e.preventDefault(); setAuto(!auto); }
+  else if (e.code === 'KeyR') fresh(randomSeed());
+  else if (e.code === 'KeyF') toggleReveal();
+  else if (e.code === 'KeyZ') toggleZoom();
+});
+cv.addEventListener('pointerdown', (e) => {
+  const tx = Math.floor((e.clientX - view.ox) / view.T), ty = Math.floor((e.clientY - view.oy) / view.T);
+  if (!inb(tx, ty)) return;
+  const p = pathTo(tx, ty);
+  if (p.length) { setAuto(false); hero.path = p; }
+});
+const randomSeed = () => Math.random().toString(36).slice(2, 8);
+function fresh(seed) { baseSeed = seed; depth = 1; $('seed').value = seed; newLevel(`${seed}/1`); }
+function setAuto(v) { auto = v; $('auto').classList.toggle('on', v); }
+function toggleReveal() { reveal = !reveal; $('reveal').classList.toggle('on', reveal); }
+function toggleZoom() { zoomed = !zoomed; $('zoom').classList.toggle('on', zoomed); }
+$('gen').onclick = () => fresh(randomSeed());
+$('auto').onclick = () => setAuto(!auto);
+$('reveal').onclick = toggleReveal;
+$('zoom').onclick = toggleZoom;
+// Generators > PNG: full revealed map with props, at 16 px tiles
+$('png').onclick = () => {
+  const c = document.createElement('canvas');
+  c.width = MW * BT; c.height = MH * BT;
+  const g = c.getContext('2d');
+  g.drawImage(baked, 0, 0);
+  for (const ch of chests) drawChest(g, ch.x * BT, ch.y * BT, BT, ch.open);
+  for (const t of torches) drawTorch(g, t.x * BT, t.y * BT, BT, 0);
+  const a = document.createElement('a');
+  a.download = `dungeon-${baseSeed}-d${depth}.png`;
+  a.href = c.toDataURL('image/png');
+  a.click();
+};
+
+// Render > props
+function drawChest(g, X, Y, T, open) {
+  const u = T / 16;
+  g.fillStyle = '#5a3416'; g.fillRect(X + 3 * u, Y + 6 * u, 10 * u, 7 * u);
+  g.fillStyle = open ? '#2a170a' : '#8a5426'; g.fillRect(X + 3 * u, Y + (open ? 4 : 5) * u, 10 * u, 3 * u);
+  g.fillStyle = '#e3b25a'; g.fillRect(X + 3 * u, Y + 8 * u, 10 * u, 1 * u); g.fillRect(X + 7 * u, Y + 7 * u, 2 * u, 3 * u);
+  if (open) { g.fillStyle = '#ffd36e'; g.fillRect(X + 5 * u, Y + 6 * u, 6 * u, 1 * u); }
+}
+function drawTorch(g, X, Y, T, t, ph = 0) {
+  const u = T / 16, f = Math.sin(t * 13 + ph) * 0.5 + Math.sin(t * 7.3 + ph * 2) * 0.5;
+  g.fillStyle = '#4a3020'; g.fillRect(X + 7 * u, Y + 8 * u, 2 * u, 6 * u);
+  g.fillStyle = '#ff8a1e'; g.fillRect(X + 6 * u, Y + (4 - f) * u, 4 * u, (5 + f) * u);
+  g.fillStyle = '#ffe08a'; g.fillRect(X + 7 * u, Y + (5.5 - f * 0.5) * u, 2 * u, 3 * u);
+}
+
+// Render > layout + camera
+const view = { T: 16, ox: 0, oy: 0, cx: 0, cy: 0 };
+let W, H, DPR, mobile;
+const fogC = document.createElement('canvas'); fogC.width = MW; fogC.height = MH;
+const fogX = fogC.getContext('2d'), fogImg = fogX.createImageData(MW, MH);
+function resize() {
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  mobile = W < 600;
+  if (mobile && !zoomed) toggleZoom();
+}
+addEventListener('resize', resize);
+function frame(t) {
+  // camera: fit whole map (overview) or follow the hero (zoom)
+  const padL = mobile ? 8 : 300, padB = mobile ? 150 : 16;
+  const fitT = Math.min((W - padL - 16) / MW, (H - padB - 16) / MH);
+  const T = zoomed ? (mobile ? 22 : 30) : fitT;
+  view.T += (T - view.T) * 0.15;
+  hero.rx += (hero.x - hero.rx) * 0.35; hero.ry += (hero.y - hero.ry) * 0.35;
+  if (zoomed) {
+    const tx = W / 2 - (hero.rx + 0.5) * view.T, ty = (H - padB) / 2 - (hero.ry + 0.5) * view.T;
+    view.cx += (tx - view.cx) * 0.18; view.cy += (ty - view.cy) * 0.18;
+  } else {
+    const tx = padL + (W - padL - MW * view.T) / 2, ty = (H - padB - MH * view.T) / 2;
+    view.cx += (tx - view.cx) * 0.2; view.cy += (ty - view.cy) * 0.2;
+  }
+  view.ox = view.cx; view.oy = view.cy;
+  const Tv = view.T;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#07060a'; ctx.fillRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(baked, view.ox, view.oy, MW * Tv, MH * Tv);
+  // animated water glints on visible water
+  for (let i = 0; i < MW * MH; i++) {
+    if (map[i] !== T_WATER || !(vis[i] || reveal)) continue;
+    const x = i % MW, y = (i / MW) | 0, s = Math.sin(t * 2 + x * 0.9 + y * 1.3);
+    if (s > 0.4) { ctx.fillStyle = `rgba(140,200,255,${(s - 0.4) * 0.5})`; ctx.fillRect(view.ox + (x + 0.2) * Tv, view.oy + (y + 0.45 + s * 0.1) * Tv, Tv * 0.5, Tv * 0.08); }
+  }
+  for (const c of chests) if (seen[idx(c.x, c.y)] || reveal || intro < 3.5) drawChest(ctx, view.ox + c.x * Tv, view.oy + c.y * Tv, Tv, c.open);
+  for (const tc of torches) if (seen[idx(tc.x, tc.y)] || reveal || intro < 3.5) drawTorch(ctx, view.ox + tc.x * Tv, view.oy + tc.y * Tv, Tv, t, tc.ph);
+  // hero: cloaked adventurer with a lantern
+  const hx = view.ox + (hero.rx + 0.5) * Tv, hy = view.oy + (hero.ry + 0.5) * Tv, u = Tv / 16, bob = Math.sin(t * 8) * 0.6 * u;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.beginPath(); ctx.ellipse(hx, hy + 6 * u, 5 * u, 2 * u, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = '#b8323a'; ctx.fillRect(hx - 4 * u, hy - 2 * u + bob, 8 * u, 8 * u);
+  ctx.fillStyle = '#e9d2a6'; ctx.fillRect(hx - 3 * u, hy - 7 * u + bob, 6 * u, 5 * u);
+  ctx.fillStyle = '#1b1420'; ctx.fillRect(hx + (hero.dir > 0 ? 0 : -2) * u, hy - 5 * u + bob, 2 * u, 1.2 * u);
+  ctx.fillStyle = '#6e4b2a'; ctx.fillRect(hx - 4 * u, hy - 8.5 * u + bob, 8 * u, 2 * u);
+  ctx.fillStyle = '#ffd36e'; ctx.fillRect(hx + hero.dir * 5 * u - u, hy + bob, 2.5 * u, 3 * u);
+
+  // fog of war: 1 px per tile, upscaled with smoothing for soft light falloff
+  const D = fogImg.data, fl = 0.92 + Math.sin(t * 11) * 0.04 + Math.sin(t * 6.1) * 0.04;
+  // intro: diagonal sweep shows the whole generated layout, then fog of war closes in
+  const sweep = intro / 1.4, close = Math.min(1, Math.max(0, (intro - 2.6) / 0.9));
+  for (let i = 0; i < MW * MH; i++) {
+    const k = i * 4;
+    let a, r = 6, g = 4, b = 12;
+    if (reveal) a = vis[i] ? Math.max(0, 0.55 - light[i]) * 255 : 70;
+    else if (vis[i]) a = (1 - Math.min(1, Math.max(light[i] * fl * 1.35, torchLight[i] * fl))) * 150;
+    else if (seen[i]) { a = 150; r = 10; g = 14; b = 40; }
+    else { const x = i % MW, y = (i / MW) | 0; a = (x + y) / (MW + MH) < sweep ? 95 + close * 160 : 255; r = 10; g = 14; b = 40; }
+    D[k] = r; D[k + 1] = g; D[k + 2] = b; D[k + 3] = a;
+  }
+  fogX.putImageData(fogImg, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(fogC, view.ox, view.oy, MW * Tv, MH * Tv);
+  // warm additive glow from visible torches and the hero's lantern
+  ctx.globalCompositeOperation = 'lighter';
+  const glow = (x, y, rad, a) => { const gr = ctx.createRadialGradient(x, y, 0, x, y, rad); gr.addColorStop(0, `rgba(255,150,60,${a})`); gr.addColorStop(1, 'rgba(255,120,40,0)'); ctx.fillStyle = gr; ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2); };
+  for (const tc of torches) if (vis[idx(tc.x, tc.y)] || reveal) glow(view.ox + (tc.x + 0.5) * Tv, view.oy + (tc.y + 0.4) * Tv, Tv * 3.2, 0.16 + Math.sin(t * 9 + tc.ph) * 0.03);
+  glow(hx, hy, Tv * 5, 0.1 * fl);
+  ctx.globalCompositeOperation = 'source-over';
+  // popups
+  ctx.font = `800 ${Math.max(12, Tv * 0.7)}px ui-rounded, system-ui, sans-serif`; ctx.textAlign = 'center';
+  for (const p of popups) {
+    ctx.globalAlpha = Math.max(0, 1 - p.t / 1.4);
+    ctx.fillStyle = '#000'; ctx.fillText(p.text, view.ox + (p.x + 0.5) * Tv + 1, view.oy + (p.y - 0.4 - p.t) * Tv + 1);
+    ctx.fillStyle = '#ffd36e'; ctx.fillText(p.text, view.ox + (p.x + 0.5) * Tv, view.oy + (p.y - 0.4 - p.t) * Tv);
+  }
+  ctx.globalAlpha = 1;
+  if (fade > 0) { ctx.fillStyle = `rgba(7,6,10,${fade})`; ctx.fillRect(0, 0, W, H); }
+}
+
+// Loop > hero stepping (paths / auto-explore at fixed cadence) + render
+let last = performance.now(), expT = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  fade = Math.max(0, fade - dt * 2.5);
+  intro += dt;
+  hero.stepT -= dt;
+  if (hero.stepT <= 0) {
+    if (!hero.path.length && auto) { const tg = exploreTarget(); if (tg) hero.path = pathTo(...tg); }
+    if (hero.path.length) {
+      const [x, y] = hero.path.shift();
+      if (!tryStep(x - hero.x, y - hero.y)) hero.path = [];
+      hero.stepT = auto ? (zoomed ? 0.075 : 0.045) : 0.09;
+    }
+  }
+  for (const p of popups) p.t += dt;
+  popups = popups.filter((p) => p.t < 1.4);
+  expT -= dt;
+  if (expT <= 0) {
+    expT = 0.25;
+    let tot = 0, s = 0;
+    for (let i = 0; i < MW * MH; i++) if (walkable(map[i])) { tot++; if (seen[i]) s++; }
+    $('sExp').textContent = `${Math.round((s / tot) * 100)}%`;
+  }
+  frame(now / 1000);
+  requestAnimationFrame(loop);
+}
+resize();
+fresh('crypt7');
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

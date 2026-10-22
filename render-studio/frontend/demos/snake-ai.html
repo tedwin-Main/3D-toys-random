@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Snake AI</title>
+<meta name="category" content="games" />
+<meta name="order" content="4" />
+<meta name="capture" content="5000" />
+<meta name="tags" content="Hamiltonian cycle, shortcut AI, never dies, swipe controls" />
+<meta name="description" content="Neon Snake with an autopilot that can fill the whole board: it follows a Hamiltonian cycle and only takes shortcuts that provably cannot trap it. Press any arrow to take over. Hard because naive greedy AIs box themselves in; this one never does." />
+<meta name="prompt" content="Build a neon Snake game in one HTML file with an AI autopilot that never dies: route the snake along a Hamiltonian cycle and take safe shortcuts toward the food when they cannot cut off the tail. Show the cycle faintly, smooth interpolated movement, score and fill percentage, speed control, and let arrow keys or swipes take over manual play." />
+<style>
+  :root { --ink: #e9f7f2; --muted: #7d9a92; --accent: #3dffb0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #060a0d; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { position: fixed; left: 18px; top: 16px; pointer-events: none; }
+  #hud h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  #hud p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+  #stats { position: fixed; right: 18px; top: 16px; text-align: right; font: 600 13px ui-monospace, Menlo, monospace; color: var(--muted); pointer-events: none; }
+  #stats b { color: var(--accent); font-size: 22px; display: block; }
+  #bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 14px; background: rgba(10, 20, 22, 0.75); backdrop-filter: blur(10px); border: 1px solid rgba(61, 255, 176, 0.15); font-size: 12.5px; color: var(--muted); }
+  #bar button { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 10px; font: inherit; font-weight: 700; cursor: pointer; }
+  #bar button.on { background: var(--accent); color: #032016; border-color: var(--accent); }
+  #bar input { width: 90px; accent-color: var(--accent); }
+  @media (max-width: 600px) { #bar .hide-m { display: none; } #stats { top: 60px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><h1>Snake AI</h1><p>Hamiltonian cycle + safe shortcuts · arrows / swipe to take over</p></div>
+<div id="stats"><b id="score">0</b><span id="fill">0% filled</span><br /><span id="mode">AUTOPILOT</span></div>
+<div id="bar">
+  <button id="ai" class="on">AI</button>
+  <button id="cycle" class="hide-m">Cycle</button>
+  <label class="hide-m">Speed</label><input id="speed" type="range" min="4" max="60" value="22" />
+  <button id="restart">Restart</button>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/snake-ai.html
+ * PURPOSE: neon Snake with Hamiltonian-cycle autopilot taking provably safe shortcuts; manual takeover via keys/swipe
+ * UI: Render Studio > Games > Snake AI
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const COLS = 24, ROWS = 16, N = COLS * ROWS; // ROWS even so the zigzag cycle closes
+const $ = (id) => document.getElementById(id);
+let dpr = 1, cell = 20, ox = 0, oy = 0;
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  const mobile = innerWidth < 600;
+  const availW = innerWidth - 32, availH = innerHeight - (mobile ? 190 : 150);
+  cell = Math.floor(Math.min(availW / COLS, availH / ROWS));
+  ox = Math.round((innerWidth - cell * COLS) / 2); oy = Math.round((innerHeight - cell * ROWS) / 2 + (mobile ? 20 : 4));
+}
+addEventListener('resize', resize); resize();
+
+// AI > Hamiltonian cycle: row 0 left-to-right, zigzag rows 1..ROWS-1 over columns 1..COLS-1, return up column 0
+const tour = new Int32Array(N), order = [];
+(function buildCycle() {
+  for (let x = 0; x < COLS; x++) order.push([x, 0]);
+  for (let y = 1; y < ROWS; y++) {
+    if (y % 2) for (let x = COLS - 1; x >= 1; x--) order.push([x, y]);
+    else for (let x = 1; x < COLS; x++) order.push([x, y]);
+  }
+  for (let y = ROWS - 1; y >= 1; y--) order.push([0, y]);
+  order.forEach(([x, y], i) => { tour[y * COLS + x] = i; });
+})();
+const dist = (a, b) => (tour[b] - tour[a] + N) % N; // steps forward along the cycle from a to b
+
+let snake, dir, food, grow, alive, ai = true, score, tick = 0, acc = 0, showCycle = false, deadT = 0, idle = 0, particles = [], pendingDir = null;
+function reset() {
+  const start = 2;
+  snake = [order[start + 2][1] * COLS + order[start + 2][0], order[start + 1][1] * COLS + order[start + 1][0], order[start][1] * COLS + order[start][0]];
+  dir = [1, 0]; grow = 0; alive = true; score = 0; deadT = 0; particles = [];
+  placeFood();
+}
+function placeFood() {
+  const occ = new Set(snake);
+  if (occ.size >= N) { food = -1; return; }
+  let f; do { f = Math.floor(Math.random() * N); } while (occ.has(f));
+  food = f;
+}
+const nbrs = (c) => { const x = c % COLS, y = (c / COLS) | 0, out = []; if (x > 0) out.push(c - 1); if (x < COLS - 1) out.push(c + 1); if (y > 0) out.push(c - COLS); if (y < ROWS - 1) out.push(c + COLS); return out; };
+
+// AI > move choice: farthest forward jump along the cycle that stays before the tail and not past the food
+function aiMove() {
+  const head = snake[0], tail = snake[snake.length - 1];
+  const dFood = food < 0 ? 0 : dist(head, food);
+  const dTail = dist(head, tail);
+  // shortcuts only while the snake is short enough that skipping cells can't strand the tail
+  const cutOk = snake.length + grow < N * 0.55;
+  let best = order[(tour[head] + 1) % N], bestD = 1;
+  best = best[1] * COLS + best[0];
+  if (cutOk) {
+    for (const n of nbrs(head)) {
+      const d = dist(head, n);
+      // keep a buffer of grow+3 cells behind the tail for pending growth
+      if (d < dTail - grow - 3 && d <= dFood && d > bestD && !snake.includes(n)) { best = n; bestD = d; }
+    }
+  }
+  return best;
+}
+
+function step() {
+  if (!alive) return;
+  const head = snake[0];
+  let next;
+  if (ai) next = aiMove();
+  else {
+    if (pendingDir) { dir = pendingDir; pendingDir = null; }
+    const x = head % COLS + dir[0], y = ((head / COLS) | 0) + dir[1];
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return die();
+    next = y * COLS + x;
+  }
+  const nx = next % COLS - head % COLS, ny = ((next / COLS) | 0) - ((head / COLS) | 0);
+  dir = [nx, ny];
+  // moving into the tail cell is legal when it moves away this tick
+  const body = grow > 0 ? snake : snake.slice(0, -1);
+  if (body.includes(next)) return die();
+  snake.unshift(next);
+  if (next === food) {
+    score++; grow += 2; burst(next, '#ff4f7b');
+    placeFood();
+  }
+  if (grow > 0) grow--; else snake.pop();
+  if (food < 0) { burst(snake[0], '#3dffb0'); alive = false; deadT = 0; }
+}
+function die() { alive = false; deadT = 0; burst(snake[0], '#ff4f7b'); }
+function burst(c, color) {
+  const x = ox + (c % COLS + 0.5) * cell, y = oy + (((c / COLS) | 0) + 0.5) * cell;
+  for (let i = 0; i < 24; i++) { const a = Math.random() * 6.28, s = 40 + Math.random() * 160; particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.7, color }); }
+}
+
+// Snake > input: arrows / WASD / swipe take over from the AI
+function setDir(d) {
+  if (ai) { ai = false; $('ai').classList.remove('on'); }
+  idle = 0;
+  if (!alive) { reset(); return; }
+  const cur = pendingDir || dir;
+  if (d[0] === -cur[0] && d[1] === -cur[1]) return;
+  pendingDir = d;
+}
+const KEYS = { ArrowUp: [0, -1], KeyW: [0, -1], ArrowDown: [0, 1], KeyS: [0, 1], ArrowLeft: [-1, 0], KeyA: [-1, 0], ArrowRight: [1, 0], KeyD: [1, 0] };
+addEventListener('keydown', (e) => { if (KEYS[e.code]) { e.preventDefault(); setDir(KEYS[e.code]); } });
+let touch0 = null;
+cv.addEventListener('pointerdown', (e) => { touch0 = [e.clientX, e.clientY]; });
+cv.addEventListener('pointerup', (e) => {
+  if (!touch0) return;
+  const dx = e.clientX - touch0[0], dy = e.clientY - touch0[1]; touch0 = null;
+  if (Math.hypot(dx, dy) < 24) { if (!alive) { reset(); } return; }
+  setDir(Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)]);
+});
+$('ai').onclick = () => { ai = !ai; $('ai').classList.toggle('on', ai); if (!alive) reset(); };
+$('cycle').onclick = () => { showCycle = !showCycle; $('cycle').classList.toggle('on', showCycle); };
+$('restart').onclick = () => reset();
+
+// Snake > draw: grid glow, optional cycle path, smooth interpolated body, food pulse
+const cx = (c) => ox + (c % COLS + 0.5) * cell, cy = (c) => oy + (((c / COLS) | 0) + 0.5) * cell;
+let t = 0;
+function draw(alpha) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#060a0d'; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  const g = ctx.createRadialGradient(innerWidth / 2, innerHeight / 2, 0, innerWidth / 2, innerHeight / 2, innerWidth * 0.7);
+  g.addColorStop(0, 'rgba(30,90,80,0.25)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, innerWidth, innerHeight);
+  ctx.fillStyle = '#0b1418'; ctx.beginPath(); ctx.roundRect(ox - 6, oy - 6, cell * COLS + 12, cell * ROWS + 12, 14); ctx.fill();
+  ctx.strokeStyle = 'rgba(61,255,176,0.25)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.035)';
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if ((x + y) % 2) ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell);
+  if (showCycle) {
+    ctx.strokeStyle = 'rgba(120,180,255,0.25)'; ctx.lineWidth = 1.5; ctx.beginPath();
+    order.forEach(([x, y], i) => { const px = ox + (x + 0.5) * cell, py = oy + (y + 0.5) * cell; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    ctx.closePath(); ctx.stroke();
+  }
+  if (food >= 0) {
+    const r = cell * (0.32 + Math.sin(t * 6) * 0.04);
+    ctx.shadowColor = '#ff4f7b'; ctx.shadowBlur = 18;
+    ctx.fillStyle = '#ff4f7b'; ctx.beginPath(); ctx.arc(cx(food), cy(food), r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(cx(food) - r * 0.35, cy(food) - r * 0.35, r * 0.25, 0, Math.PI * 2); ctx.fill();
+  }
+  // body points: head slides toward its cell, tail slides away, so motion is continuous between ticks
+  const pts = snake.map((c) => [cx(c), cy(c)]);
+  if (alive && snake.length > 1) {
+    const h = pts[0], h1 = pts[1];
+    pts[0] = [h1[0] + (h[0] - h1[0]) * alpha, h1[1] + (h[1] - h1[1]) * alpha];
+  }
+  const n = pts.length;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.shadowColor = '#3dffb0'; ctx.shadowBlur = 14;
+  for (let i = n - 1; i > 0; i--) {
+    const k = i / n;
+    ctx.strokeStyle = `hsl(${155 - k * 60}, 100%, ${62 - k * 22}%)`;
+    ctx.lineWidth = cell * (0.72 - k * 0.22);
+    ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i - 1][0], pts[i - 1][1]); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  const [hx, hy] = pts[0];
+  ctx.fillStyle = alive ? '#7dffd0' : '#ff4f7b'; ctx.beginPath(); ctx.arc(hx, hy, cell * 0.42, 0, Math.PI * 2); ctx.fill();
+  const [dx, dy] = dir, px = -dy, py = dx;
+  for (const s of [-1, 1]) {
+    const ex = hx + dx * cell * 0.15 + px * s * cell * 0.18, ey = hy + dy * cell * 0.15 + py * s * cell * 0.18;
+    ctx.fillStyle = '#04120d'; ctx.beginPath(); ctx.arc(ex, ey, cell * 0.1, 0, Math.PI * 2); ctx.fill();
+  }
+  for (const p of particles) { ctx.globalAlpha = Math.max(0, p.life / 0.7); ctx.fillStyle = p.color; ctx.fillRect(p.x - 2, p.y - 2, 4, 4); }
+  ctx.globalAlpha = 1;
+  if (!alive) {
+    ctx.fillStyle = 'rgba(6,10,13,0.6)'; ctx.fillRect(ox, oy, cell * COLS, cell * ROWS);
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = '800 34px ui-rounded, system-ui, sans-serif';
+    ctx.fillText(food < 0 ? 'BOARD FILLED!' : 'GAME OVER', innerWidth / 2, oy + cell * ROWS / 2 - 6);
+    ctx.font = '600 15px system-ui, sans-serif'; ctx.fillStyle = '#9fc';
+    ctx.fillText(ai ? 'restarting…' : 'tap or press an arrow to restart', innerWidth / 2, oy + cell * ROWS / 2 + 24);
+  }
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; t += dt;
+  const rate = ai ? +$('speed').value : Math.min(14, 6 + score * 0.15);
+  acc += dt * rate;
+  while (acc >= 1) { acc -= 1; step(); }
+  particles.forEach((p) => { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; });
+  particles = particles.filter((p) => p.life > 0);
+  if (!alive) { deadT += dt; if (ai && deadT > 2) reset(); }
+  // idle humans hand control back to the AI
+  if (!ai) { idle += dt; if (idle > 12) { ai = true; $('ai').classList.add('on'); if (!alive) reset(); } }
+  draw(alive ? acc : 1);
+  $('score').textContent = score;
+  $('fill').textContent = `${Math.round((snake.length / N) * 100)}% filled · len ${snake.length}`;
+  $('mode').textContent = ai ? 'AUTOPILOT' : 'MANUAL';
+  requestAnimationFrame(frame);
+}
+reset();
+requestAnimationFrame(frame);
+window.__snake = { get len() { return snake.length; }, get alive() { return alive; }, get score() { return score; } };
+</script>
+</body>
+</html>

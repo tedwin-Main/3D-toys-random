@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chronograph Watch</title>
+<meta name="category" content="apps" />
+<meta name="order" content="6" />
+<meta name="capture" content="3600" />
+<meta name="tags" content="canvas 2D, time maths, complications, spring easing" />
+<meta name="description" content="A chronograph watch face drawn live on canvas with the real time: a sunburst dial, applied indices, sword hands with lume, a sweeping or ticking seconds hand with spring overshoot, a date window, a moon-phase disc computed from the synodic month, a 24-hour second-timezone subdial and a working stopwatch with start, stop, lap and reset pushers. Three dial colours and a time-warp slider show every hand moving together. Tests angle maths, layered 2D rendering and fine motion." />
+<meta name="prompt" content="Draw a realistic analog chronograph watch in a single HTML file with canvas, showing the current time. Include a textured dial with indices and numerals, proper hour, minute and seconds hands, a choice between a smooth sweep and a ticking second hand with a little spring bounce, a date window, a moon phase complication, a second time zone subdial and a working stopwatch with start/stop, lap and reset. Add dial colour options and make it scale to any screen." />
+<style>
+  :root { --ink: #eef0f4; --muted: #8d94a3; --panel: rgba(16, 18, 24, 0.72); --line: rgba(255, 255, 255, 0.08); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(ellipse at 50% 40%, #2a2d35, #0c0d10 70%); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; right: 18px; top: 18px; width: 220px; padding: 14px; border-radius: 14px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--line); display: grid; gap: 10px; font-size: 12px; }
+  #panel .row { display: flex; gap: 6px; }
+  #panel button { flex: 1; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--ink); font: 600 12px inherit; cursor: pointer; }
+  #panel button.on { background: #d9b26a; color: #1a1408; border-color: transparent; }
+  #panel label { color: var(--muted); display: grid; gap: 4px; }
+  #panel input[type=range] { width: 100%; accent-color: #d9b26a; }
+  #sw { font: 600 15px ui-monospace, Menlo, monospace; text-align: center; color: #d9b26a; }
+  #laps { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); max-height: 60px; overflow: auto; }
+  @media (max-width: 600px) { #panel { top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; grid-template-columns: 1fr 1fr; } #panel label, #sw, #laps { grid-column: 1 / -1; } #laps { display: none; } .title p { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Chronograph</h1><p>live time · press the pushers</p></div>
+<div id="panel">
+  <div class="row"><button data-dial="0" class="on">Navy</button><button data-dial="1">Silver</button><button data-dial="2">Green</button></div>
+  <div class="row"><button id="sweep" class="on">Sweep</button><button id="tick">Tick</button></div>
+  <div class="row"><button id="ss">Start</button><button id="lap">Lap</button><button id="rst">Reset</button></div>
+  <div id="sw">00:00.00</div>
+  <label>Time warp <span id="wv">1×</span><input id="warp" type="range" min="0" max="4" step="1" value="0"></label>
+  <div id="laps"></div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/analog-clock.html
+ * PURPOSE: Chronograph watch on canvas: live time, sweep/tick seconds with spring, date window, moon phase, GMT subdial, working stopwatch, time warp
+ * UI: Render Studio > Apps & UI > Chronograph Watch
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__clock (test hook: stopwatch, toggle, lap, reset, setWarp)
+ */
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let W = 0, H = 0;
+function resize() { const dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); }
+addEventListener('resize', resize); resize();
+
+const DIALS = [
+  { name: 'Navy', a: '#1d3b6e', b: '#0a1730', ink: '#e9edf5', accent: '#d9b26a', sub: '#0e2347' },
+  { name: 'Silver', a: '#eef0f2', b: '#b9bec6', ink: '#1d2230', accent: '#c0392b', sub: '#d3d7dd' },
+  { name: 'Green', a: '#1f5a43', b: '#0a2419', ink: '#eef3ea', accent: '#e8c27a', sub: '#103a2a' },
+];
+let dial = 0, sweep = true, warp = 1;
+
+// Time > virtual clock: real time plus warp offset, so warp keeps hands continuous
+let virt = Date.now(), lastReal = performance.now();
+function now() { const r = performance.now(); virt += (r - lastReal) * warp; lastReal = r; return virt; }
+
+// Stopwatch: runs on real time, independent of warp
+const sw = { run: false, start: 0, acc: 0, laps: [] };
+const swMs = () => sw.acc + (sw.run ? performance.now() - sw.start : 0);
+const fmtSw = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}.${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
+function swToggle() { if (sw.run) { sw.acc += performance.now() - sw.start; sw.run = false; } else { sw.start = performance.now(); sw.run = true; } pushT.top = 1; syncUI(); }
+function swLap() { if (sw.run) { sw.laps.unshift(swMs()); sw.laps.length = Math.min(sw.laps.length, 20); } pushT.bot = 1; syncUI(); }
+function swReset() { if (!sw.run) { sw.acc = 0; sw.laps = []; } pushT.bot = 1; syncUI(); }
+
+// Moon: age in days since a known new moon (2000-01-06 18:14 UTC) mod synodic month
+const SYNODIC = 29.530588853;
+const moonAge = (t) => ((((t - Date.UTC(2000, 0, 6, 18, 14)) / 86400000) % SYNODIC) + SYNODIC) % SYNODIC;
+
+// Draw > helpers
+const TAU = Math.PI * 2;
+function hand(len, tail, w0, w1, color, lume) {
+  g.beginPath();
+  g.moveTo(-w0, tail); g.lineTo(-w1, -len * 0.82); g.lineTo(0, -len); g.lineTo(w1, -len * 0.82); g.lineTo(w0, tail); g.closePath();
+  g.fillStyle = color; g.fill();
+  if (lume) { g.beginPath(); g.moveTo(-w1 * 0.55, -len * 0.3); g.lineTo(-w1 * 0.45, -len * 0.8); g.lineTo(0, -len * 0.93); g.lineTo(w1 * 0.45, -len * 0.8); g.lineTo(w1 * 0.55, -len * 0.3); g.closePath(); g.fillStyle = '#e8f3dc'; g.fill(); }
+}
+function withShadow(dx, fn) { g.save(); g.shadowColor = 'rgba(0,0,0,.45)'; g.shadowBlur = dx * 2; g.shadowOffsetX = dx; g.shadowOffsetY = dx * 1.4; fn(); g.restore(); }
+function subdial(x, y, r, d) {
+  const gr = g.createRadialGradient(x, y - r * 0.3, 0, x, y, r);
+  gr.addColorStop(0, d.sub); gr.addColorStop(1, d.b);
+  g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
+  // concentric "azurage" rings
+  g.strokeStyle = 'rgba(255,255,255,.05)'; g.lineWidth = 1;
+  for (let k = 3; k < r; k += 2.4) { g.beginPath(); g.arc(x, y, k, 0, TAU); g.stroke(); }
+  g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.5; g.beginPath(); g.arc(x, y, r, 0, TAU); g.stroke();
+}
+function ticks(x, y, r, n, major, color, len) {
+  g.strokeStyle = color;
+  for (let i = 0; i < n; i++) { const a = (i / n) * TAU, l = i % major ? len : len * 2; g.lineWidth = i % major ? 1 : 1.6; g.beginPath(); g.moveTo(x + Math.sin(a) * r, y - Math.cos(a) * r); g.lineTo(x + Math.sin(a) * (r - l), y - Math.cos(a) * (r - l)); g.stroke(); }
+}
+
+// Pushers: crown-side buttons animate in on press
+const pushT = { top: 0, bot: 0 };
+let lastSec = -1, springT = 1;
+
+function frame() {
+  const t = now(), d = DIALS[dial], date = new Date(t);
+  const R = Math.min(W, H * (innerWidth < 600 ? 0.8 : 1)) * 0.36, cx = W / 2 - (innerWidth < 600 ? 0 : R * 0.12), cy = innerWidth < 600 ? H * 0.4 : H / 2;
+  const ms = date.getMilliseconds(), s = date.getSeconds(), m = date.getMinutes(), h = date.getHours();
+  // seconds: sweep is continuous; tick jumps with a damped spring overshoot
+  if (s !== lastSec) { lastSec = s; springT = 0; }
+  springT = Math.min(1, springT + 1 / 18);
+  const spring = 1 + Math.exp(-springT * 7) * Math.cos(springT * 22) * -1;
+  const secA = sweep || warp > 1 ? ((s + ms / 1000) / 60) * TAU : ((s - 1 + Math.min(1.08, spring)) / 60) * TAU;
+  const minA = ((m + s / 60 + ms / 60000) / 60) * TAU, hrA = (((h % 12) + m / 60 + s / 3600) / 12) * TAU;
+  g.clearRect(0, 0, W, H);
+
+  // Case > lugs, pushers, crown
+  g.save(); g.translate(cx, cy);
+  const steel = (a, b) => { const gr = g.createLinearGradient(-R, -R, R, R); gr.addColorStop(0, a); gr.addColorStop(0.5, b); gr.addColorStop(1, a); return gr; };
+  g.fillStyle = steel('#6f747c', '#e4e7ea');
+  for (const sy of [-1, 1]) for (const sx of [-1, 1]) { g.beginPath(); g.roundRect(sx * R * 0.62 - R * 0.13, sy * R * 1.02 - R * 0.16, R * 0.26, R * 0.32, R * 0.06); g.fill(); }
+  // strap stubs
+  g.fillStyle = '#2b1c14';
+  for (const sy of [-1, 1]) { g.beginPath(); g.roundRect(-R * 0.62, sy > 0 ? R * 1.05 : -R * 1.5, R * 1.24, R * 0.45, R * 0.05); g.fill(); }
+  for (const [a, key] of [[-Math.PI / 5, 'top'], [Math.PI / 5, 'bot']]) {
+    const p = pushT[key]; pushT[key] = Math.max(0, p - 0.08);
+    g.save(); g.rotate(Math.PI / 2 + a); g.fillStyle = steel('#80858c', '#f1f3f5');
+    g.fillRect(-R * 0.07, -R * 1.2 + p * R * 0.05, R * 0.14, R * 0.16); g.restore();
+  }
+  g.save(); g.rotate(Math.PI / 2); g.fillStyle = steel('#80858c', '#f1f3f5'); g.beginPath(); g.roundRect(-R * 0.1, -R * 1.2, R * 0.2, R * 0.16, 3); g.fill();
+  g.strokeStyle = 'rgba(0,0,0,.25)'; for (let k = -4; k <= 4; k++) { g.beginPath(); g.moveTo(k * R * 0.02, -R * 1.2); g.lineTo(k * R * 0.02, -R * 1.05); g.stroke(); } g.restore();
+  // case + bezel
+  withShadow(R * 0.04, () => { g.fillStyle = steel('#7b8088', '#f4f5f7'); g.beginPath(); g.arc(0, 0, R * 1.08, 0, TAU); g.fill(); });
+  g.fillStyle = steel('#c9cdd2', '#5f646b'); g.beginPath(); g.arc(0, 0, R * 1.0, 0, TAU); g.fill();
+  // Dial > sunburst: radial gradient plus fine rays
+  const dg = g.createRadialGradient(-R * 0.25, -R * 0.35, R * 0.05, 0, 0, R * 0.97);
+  dg.addColorStop(0, d.a); dg.addColorStop(1, d.b);
+  g.fillStyle = dg; g.beginPath(); g.arc(0, 0, R * 0.96, 0, TAU); g.fill();
+  g.save(); g.clip();
+  for (let i = 0; i < 180; i++) { const a = (i / 180) * TAU; g.strokeStyle = `rgba(255,255,255,${0.025 + 0.025 * Math.sin(a * 2 + 1)})`; g.lineWidth = 1; g.beginPath(); g.moveTo(0, 0); g.lineTo(Math.sin(a) * R, -Math.cos(a) * R); g.stroke(); }
+  g.restore();
+  // minute track + indices
+  ticks(0, 0, R * 0.93, 60, 5, d.ink, R * 0.025);
+  g.fillStyle = d.ink;
+  for (let i = 0; i < 12; i++) {
+    if (i === 3 || i === 6 || i === 9) continue;
+    g.save(); g.rotate((i / 12) * TAU);
+    withShadow(R * 0.008, () => { g.fillStyle = steel('#c8ccd2', '#ffffff'); g.fillRect(-R * (i ? 0.018 : 0.03), -R * 0.86, R * (i ? 0.036 : 0.06), R * 0.13); });
+    g.fillStyle = '#e8f3dc'; g.fillRect(-R * 0.008, -R * 0.84, R * 0.016, R * 0.09);
+    g.restore();
+  }
+  g.fillStyle = d.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = `600 ${R * 0.06}px ui-rounded, system-ui, sans-serif`; g.fillText('MERIDIAN', 0, -R * 0.55);
+  g.font = `${R * 0.035}px ui-rounded, system-ui, sans-serif`; g.globalAlpha = 0.7; g.fillText('CHRONOGRAPH · AUTOMATIC', 0, -R * 0.47); g.globalAlpha = 1;
+
+  // Subdial 9 o'clock: running stopwatch minutes (30 min register)
+  const sr = R * 0.2, swT = swMs();
+  subdial(-R * 0.48, 0, sr, d); ticks(-R * 0.48, 0, sr * 0.92, 30, 5, d.ink, sr * 0.07);
+  g.save(); g.translate(-R * 0.48, 0); g.rotate(((swT / 60000) % 30) / 30 * TAU); hand(sr * 0.85, sr * 0.15, sr * 0.04, sr * 0.025, d.accent); g.restore();
+  // Subdial 3 o'clock: 24 h second time zone (UTC)
+  subdial(R * 0.48, 0, sr, d); ticks(R * 0.48, 0, sr * 0.92, 24, 6, d.ink, sr * 0.07);
+  g.font = `600 ${sr * 0.22}px ui-rounded, system-ui, sans-serif`; g.fillStyle = d.ink; g.fillText('UTC', R * 0.48, sr * 0.45);
+  const utcH = date.getUTCHours() + date.getUTCMinutes() / 60;
+  g.save(); g.translate(R * 0.48, 0); g.rotate((utcH / 24) * TAU); hand(sr * 0.85, sr * 0.15, sr * 0.04, sr * 0.025, d.ink); g.restore();
+  // Subdial 6 o'clock: moon phase disc behind an aperture
+  const my = R * 0.5, mr = sr * 1.05, age = moonAge(t);
+  subdial(0, my, mr, d);
+  g.save(); g.beginPath(); g.arc(0, my + mr * 0.25, mr * 0.85, Math.PI, 0); g.closePath(); g.clip();
+  g.fillStyle = '#0b1638'; g.fillRect(-mr, my - mr, mr * 2, mr * 2);
+  g.fillStyle = 'rgba(255,255,255,.8)'; for (let k = 0; k < 14; k++) g.fillRect(-mr * 0.8 + ((k * 37) % 16) / 16 * mr * 1.6, my - mr * 0.5 + ((k * 23) % 9) / 9 * mr * 0.7, 1.2, 1.2);
+  // disc carries two moons half a turn apart, rotated by age
+  g.translate(0, my + mr * 0.25 + mr * 0.85);
+  g.rotate((age / SYNODIC) * TAU - Math.PI / 2);
+  for (const k of [0, 1]) { const a = k * Math.PI; const x = Math.cos(a) * mr * 0.85, y = Math.sin(a) * mr * 0.85; const mg = g.createRadialGradient(x - mr * 0.1, y - mr * 0.1, 0, x, y, mr * 0.4); mg.addColorStop(0, '#fff7d8'); mg.addColorStop(1, '#d9b26a'); g.fillStyle = mg; g.beginPath(); g.arc(x, y, mr * 0.38, 0, TAU); g.fill(); }
+  g.restore();
+  g.fillStyle = d.ink; g.font = `600 ${sr * 0.2}px ui-rounded, system-ui, sans-serif`; g.fillText(`${Math.round(age)}d`, 0, my + mr * 0.55);
+  // Date window at 4:30
+  g.save(); g.rotate(0.75 * Math.PI); g.translate(0, -R * 0.72); g.rotate(-0.75 * Math.PI);
+  g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,.4)'; g.lineWidth = 2; g.beginPath(); g.roundRect(-R * 0.06, -R * 0.045, R * 0.12, R * 0.09, 3); g.fill(); g.stroke();
+  g.fillStyle = '#111'; g.font = `700 ${R * 0.06}px ui-rounded, system-ui, sans-serif`; g.fillText(date.getDate(), 0, R * 0.004); g.restore();
+
+  // Hands: hour, minute, central chrono seconds (stopwatch), small running seconds via the main hand
+  withShadow(R * 0.012, () => { g.save(); g.rotate(hrA); hand(R * 0.52, R * 0.1, R * 0.035, R * 0.028, steel('#d6d9dd', '#ffffff'), true); g.restore(); });
+  withShadow(R * 0.016, () => { g.save(); g.rotate(minA); hand(R * 0.78, R * 0.12, R * 0.025, R * 0.02, steel('#d6d9dd', '#ffffff'), true); g.restore(); });
+  withShadow(R * 0.02, () => {
+    g.save(); g.rotate(sw.run || swT > 0 ? ((swT / 1000) % 60) / 60 * TAU : secA);
+    g.fillStyle = d.accent; g.fillRect(-R * 0.006, -R * 0.88, R * 0.012, R * 1.08);
+    g.beginPath(); g.arc(0, R * 0.16, R * 0.025, 0, TAU); g.fill();
+    g.restore();
+  });
+  g.fillStyle = d.accent; g.beginPath(); g.arc(0, 0, R * 0.028, 0, TAU); g.fill();
+  g.fillStyle = '#333'; g.beginPath(); g.arc(0, 0, R * 0.01, 0, TAU); g.fill();
+  // crystal glare
+  g.save(); g.beginPath(); g.arc(0, 0, R * 0.96, 0, TAU); g.clip();
+  const gl = g.createLinearGradient(-R, -R, R * 0.2, R * 0.2); gl.addColorStop(0, 'rgba(255,255,255,.13)'); gl.addColorStop(0.45, 'rgba(255,255,255,.03)'); gl.addColorStop(0.46, 'rgba(255,255,255,0)');
+  g.fillStyle = gl; g.fillRect(-R, -R, R * 2, R * 2); g.restore();
+  g.restore();
+  document.getElementById('sw').textContent = fmtSw(swT);
+  requestAnimationFrame(frame);
+}
+
+// UI > panel wiring
+const $ = (id) => document.getElementById(id);
+function syncUI() {
+  $('ss').textContent = sw.run ? 'Stop' : 'Start';
+  $('ss').classList.toggle('on', sw.run);
+  $('laps').innerHTML = sw.laps.map((l, i) => `Lap ${sw.laps.length - i}  ${fmtSw(l)}`).join('<br>');
+  document.querySelectorAll('[data-dial]').forEach((b) => b.classList.toggle('on', Number(b.dataset.dial) === dial));
+  $('sweep').classList.toggle('on', sweep); $('tick').classList.toggle('on', !sweep);
+}
+let lastInput = -1e9;
+const act = () => (lastInput = performance.now());
+document.querySelectorAll('[data-dial]').forEach((b) => (b.onclick = () => { act(); dial = Number(b.dataset.dial); syncUI(); }));
+$('sweep').onclick = () => { act(); sweep = true; syncUI(); };
+$('tick').onclick = () => { act(); sweep = false; syncUI(); };
+$('ss').onclick = () => { act(); swToggle(); };
+$('lap').onclick = () => { act(); sw.run ? swLap() : swReset(); };
+$('rst').onclick = () => { act(); if (sw.run) swToggle(); swReset(); };
+const WARPS = [1, 60, 600, 3600, 86400];
+$('warp').oninput = (e) => { act(); warp = WARPS[e.target.value]; $('wv').textContent = `${warp}×`; if (warp === 1) virt = Date.now(); };
+// canvas taps on the right side hit the pushers
+cv.addEventListener('pointerdown', (e) => { act(); if (e.clientX > W / 2) (e.clientY < H / 2 ? swToggle : sw.run ? swLap : swReset)(); });
+
+// Idle demo: run the stopwatch, take laps, rotate dials
+let demoStep = 0;
+setInterval(() => {
+  if (performance.now() - lastInput < 15000) return;
+  const k = demoStep++ % 8;
+  if (k === 0) { swReset(); swToggle(); } else if (k === 2 || k === 4) swLap(); else if (k === 6) { swToggle(); dial = (dial + 1) % DIALS.length; syncUI(); }
+}, 1500);
+swToggle();
+syncUI();
+requestAnimationFrame(frame);
+window.__clock = { stopwatch: () => swMs(), toggle: swToggle, lap: swLap, reset: swReset, setWarp: (w) => (warp = w) };
+</script>
+</body>
+</html>

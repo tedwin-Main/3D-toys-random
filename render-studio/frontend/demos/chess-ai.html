@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Chess vs AI</title>
+<meta name="category" content="games" />
+<meta name="order" content="10" />
+<meta name="capture" content="5000" />
+<meta name="tags" content="full rules, alpha-beta, quiescence, Web Worker, SAN notation" />
+<meta name="description" content="A complete chess game with its own engine and no libraries: every rule (castling through check, en passant, promotion with a picker, fifty-move, threefold repetition, insufficient material), SAN move list, and an alpha-beta engine with iterative deepening, quiescence search, check extensions, MVV-LVA and killer ordering, running in a Web Worker so the board never stutters. Attract mode is engine vs engine." />
+<meta name="prompt" content="Build a chess game in one HTML file with no chess libraries. Implement all the rules including castling, en passant, promotion, check, checkmate, stalemate, threefold repetition and the fifty-move rule, with a SAN move list. Write an alpha-beta engine with iterative deepening, quiescence and piece-square tables that runs in a Web Worker. Click or drag to move, show legal moves, last move, an eval bar and engine stats, and let two AIs play each other when idle." />
+<style>
+  :root { --bg: #14161c; --panel: #1c1f27; --line: #2c303b; --ink: #ecebe6; --mute: #9aa0ad; --light: #eadfc8; --dark: #a77c58; --accent: #f2c14e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: radial-gradient(ellipse at 30% 20%, #232733, var(--bg) 70%); color: var(--ink); font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, sans-serif; overflow: hidden; user-select: none; }
+  main { height: 100%; display: flex; align-items: center; justify-content: center; gap: 22px; padding: 16px; }
+  .wrap { display: flex; gap: 10px; align-items: stretch; }
+  #evalbar { width: 14px; border-radius: 7px; background: #2b2b30; overflow: hidden; position: relative; box-shadow: inset 0 0 0 1px #0006; }
+  #evalfill { position: absolute; left: 0; right: 0; bottom: 0; background: #f4f1e8; transition: height 0.5s cubic-bezier(.2,.8,.2,1); height: 50%; }
+  #board { --s: min(82vh, 58vw); width: var(--s); height: var(--s); position: relative; border-radius: 8px; overflow: hidden; box-shadow: 0 24px 60px -20px #000c, 0 0 0 6px #2a2118, 0 0 0 7px #4a3a2a; touch-action: none; }
+  .sq { position: absolute; width: 12.5%; height: 12.5%; }
+  .sq.l { background: var(--light); } .sq.d { background: var(--dark); }
+  .sq.last { box-shadow: inset 0 0 0 999px rgba(242, 193, 78, 0.38); }
+  .sq.sel { box-shadow: inset 0 0 0 999px rgba(90, 170, 255, 0.4); }
+  .sq.chk { background: radial-gradient(circle, #ff3b3b 0%, #ff3b3bcc 30%, transparent 75%), var(--c); }
+  .sq .co { position: absolute; font: 700 calc(var(--s) * 0.022)/1 ui-sans-serif, system-ui; opacity: 0.75; }
+  .sq.l .co { color: var(--dark); } .sq.d .co { color: var(--light); }
+  .co.f { right: 4%; bottom: 4%; } .co.r { left: 4%; top: 4%; }
+  .dot { position: absolute; width: 12.5%; height: 12.5%; pointer-events: none; display: grid; place-items: center; }
+  .dot::after { content: ''; width: 30%; height: 30%; border-radius: 50%; background: rgba(20, 20, 30, 0.28); }
+  .dot.cap::after { width: 86%; height: 86%; background: none; border: calc(var(--s) * 0.008) solid rgba(20, 20, 30, 0.3); }
+  .pc { position: absolute; width: 12.5%; height: 12.5%; display: grid; place-items: center; font-size: calc(var(--s) * 0.098); line-height: 1; transition: transform 0.22s cubic-bezier(.3,.7,.2,1); cursor: grab; z-index: 2; font-family: 'Apple Symbols', 'Segoe UI Symbol', 'DejaVu Sans', serif; }
+  .pc.w { color: #fbf8f0; -webkit-text-stroke: calc(var(--s) * 0.0028) #2a2622; text-shadow: 0 3px 4px #0006; }
+  .pc.b { color: #24222a; -webkit-text-stroke: calc(var(--s) * 0.0016) #0b0a0e; text-shadow: 0 3px 4px #0006, 0 0 1px #fff3; }
+  .pc.drag { transition: none; z-index: 5; cursor: grabbing; filter: drop-shadow(0 10px 10px #0008); }
+  aside { width: 300px; height: min(82vh, 640px); display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  h1 { margin: 0; font-size: 18px; letter-spacing: 0.2px; }
+  .sub { color: var(--mute); font-size: 12px; margin-top: 2px; }
+  #status { font-weight: 650; font-size: 15px; min-height: 21px; }
+  #stats { color: var(--mute); font: 12px ui-monospace, Menlo, monospace; margin-top: 4px; min-height: 16px; }
+  .btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button { background: #2a2e39; color: var(--ink); border: 1px solid #3a3f4c; border-radius: 9px; padding: 9px 8px; font: 600 13px ui-sans-serif, system-ui; cursor: pointer; transition: background 0.15s, transform 0.1s; }
+  button:hover { background: #343947; } button:active { transform: scale(0.97); }
+  button.on { background: var(--accent); color: #1a1508; border-color: var(--accent); }
+  #moves { flex: 1; overflow: auto; font: 13px ui-monospace, Menlo, monospace; display: grid; grid-template-columns: 34px 1fr 1fr; align-content: start; row-gap: 2px; }
+  #moves .n { color: var(--mute); } #moves span { padding: 1px 6px; border-radius: 5px; } #moves span.cur { background: #f2c14e33; color: var(--accent); }
+  #caps { font-size: 20px; line-height: 1; min-height: 22px; letter-spacing: -2px; font-family: 'Apple Symbols', 'Segoe UI Symbol', serif; color: var(--mute); }
+  #promo { position: absolute; inset: 0; display: none; place-items: center; background: #0008; z-index: 10; }
+  #promo div { display: flex; gap: 8px; background: var(--panel); padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
+  #promo button { font-size: calc(var(--s) * 0.08); width: calc(var(--s) * 0.13); height: calc(var(--s) * 0.13); padding: 0; font-family: 'Apple Symbols', 'Segoe UI Symbol', serif; }
+  #banner { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.9); background: #14161cee; border: 1px solid var(--line); padding: 14px 22px; border-radius: 14px; font-weight: 750; font-size: calc(var(--s) * 0.04); z-index: 8; opacity: 0; transition: 0.3s; pointer-events: none; text-align: center; }
+  #banner.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #banner small { display: block; font-size: 0.5em; color: var(--mute); font-weight: 500; margin-top: 4px; }
+  @media (max-width: 760px) {
+    main { flex-direction: column; justify-content: flex-start; gap: 10px; padding: 12px; }
+    #board { --s: min(calc(100vw - 48px), 58vh); }
+    aside { width: 100%; height: auto; flex: 1; min-height: 0; gap: 8px; }
+    .card { padding: 9px 12px; }
+    .btns { grid-template-columns: repeat(4, 1fr); } button { padding: 8px 4px; font-size: 12px; }
+    #moves { display: none; } .sub { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="wrap"><div id="evalbar"><div id="evalfill"></div></div>
+    <div id="board"><div id="promo"><div></div></div><div id="banner"></div></div>
+  </div>
+  <aside>
+    <div class="card"><h1>Chess vs AI</h1><div class="sub">Alpha-beta engine in a Web Worker · click or drag to move</div></div>
+    <div class="card"><div id="status"></div><div id="stats"></div><div id="caps"></div></div>
+    <div class="btns">
+      <button id="bw">Play White</button><button id="bb">Play Black</button>
+      <button id="ba">AI vs AI</button><button id="bu">Undo</button>
+    </div>
+    <div class="card" id="moves"></div>
+  </aside>
+</main>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/chess-ai.html
+ * PURPOSE: Full-rules chess with SAN list, eval bar and an alpha-beta engine (iterative deepening, quiescence, PST) in a Web Worker; AI vs AI attract mode
+ * UI: Render Studio > Games > Chess vs AI
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page); window.__chess test hooks
+ */
+// Engine: shared by main thread (rules) and worker (search); serialised with toString
+function Engine() {
+  const OFF = 7, P = 1, N = 2, B = 3, R = 4, Q = 5, K = 6, MATE = 100000;
+  const VAL = [0, 100, 320, 330, 500, 900, 0];
+  const N_OFF = [-21, -19, -12, -8, 8, 12, 19, 21], K_OFF = [-11, -10, -9, -1, 1, 9, 10, 11], B_OFF = [-11, -9, 9, 11], R_OFF = [-10, -1, 1, 10];
+  const PST = {
+    1: [0, 0, 0, 0, 0, 0, 0, 0, 50, 50, 50, 50, 50, 50, 50, 50, 10, 10, 20, 30, 30, 20, 10, 10, 5, 5, 10, 25, 25, 10, 5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5, -5, -10, 0, 0, -10, -5, 5, 5, 10, 10, -20, -20, 10, 10, 5, 0, 0, 0, 0, 0, 0, 0, 0],
+    2: [-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0, 0, 0, 0, -20, -40, -30, 0, 10, 15, 15, 10, 0, -30, -30, 5, 15, 20, 20, 15, 5, -30, -30, 0, 15, 20, 20, 15, 0, -30, -30, 5, 10, 15, 15, 10, 5, -30, -40, -20, 0, 5, 5, 0, -20, -40, -50, -40, -30, -30, -30, -30, -40, -50],
+    3: [-20, -10, -10, -10, -10, -10, -10, -20, -10, 0, 0, 0, 0, 0, 0, -10, -10, 0, 5, 10, 10, 5, 0, -10, -10, 5, 5, 10, 10, 5, 5, -10, -10, 0, 10, 10, 10, 10, 0, -10, -10, 10, 10, 10, 10, 10, 10, -10, -10, 5, 0, 0, 0, 0, 5, -10, -20, -10, -10, -10, -10, -10, -10, -20],
+    4: [0, 0, 0, 0, 0, 0, 0, 0, 5, 10, 10, 10, 10, 10, 10, 5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, 0, 0, 0, 5, 5, 0, 0, 0],
+    5: [-20, -10, -10, -5, -5, -10, -10, -20, -10, 0, 0, 0, 0, 0, 0, -10, -10, 0, 5, 5, 5, 5, 0, -10, -5, 0, 5, 5, 5, 5, 0, -5, 0, 0, 5, 5, 5, 5, 0, -5, -10, 5, 5, 5, 5, 5, 0, -10, -10, 0, 5, 0, 0, 0, 0, -10, -20, -10, -10, -5, -5, -10, -10, -20],
+    6: [-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20, -20, -20, -20, -10, 20, 20, 0, 0, 0, 0, 20, 20, 20, 30, 10, 0, 0, 10, 30, 20],
+    7: [-50, -40, -30, -20, -20, -30, -40, -50, -30, -20, -10, 0, 0, -10, -20, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 30, 40, 40, 30, -10, -30, -30, -10, 20, 30, 30, 20, -10, -30, -30, -30, 0, 0, 0, 0, -30, -30, -50, -30, -30, -30, -30, -30, -30, -50],
+  };
+  // castling-rights mask per square: moving from/to a king or rook home clears its rights
+  const CR = new Uint8Array(120).fill(15); CR[95] = 12; CR[98] = 14; CR[91] = 13; CR[25] = 3; CR[28] = 11; CR[21] = 7;
+  const b = new Int8Array(120);
+  let side = 1, castle = 15, ep = 0, half = 0, full = 1;
+  const kpos = { 1: 95, '-1': 25 }, stack = [];
+  const row = (i) => ((i - 21) / 10) | 0, col = (i) => (i - 21) % 10;
+  const sqName = (i) => 'abcdefgh'[col(i)] + (8 - row(i));
+  const fromName = (s) => 21 + (8 - +s[1]) * 10 + 'abcdefgh'.indexOf(s[0]);
+
+  function load(fen) {
+    b.fill(OFF);
+    const [pos, s, c, e, h, f] = fen.split(' ');
+    pos.split('/').forEach((rw, r) => { let fi = 0; for (const ch of rw) { if (/\d/.test(ch)) { for (let k = 0; k < +ch; k++) b[21 + r * 10 + fi++] = 0; } else { const t = ' pnbrqk'.indexOf(ch.toLowerCase()), v = ch === ch.toUpperCase() ? t : -t; if (t === 6) kpos[v > 0 ? 1 : -1] = 21 + r * 10 + fi; b[21 + r * 10 + fi++] = v; } } });
+    side = s === 'w' ? 1 : -1;
+    castle = (c.includes('K') ? 1 : 0) | (c.includes('Q') ? 2 : 0) | (c.includes('k') ? 4 : 0) | (c.includes('q') ? 8 : 0);
+    ep = e && e !== '-' ? fromName(e) : 0; half = +h || 0; full = +f || 1; stack.length = 0;
+  }
+  function fen(short) {
+    let out = '';
+    for (let r = 0; r < 8; r++) { let e = 0; for (let f = 0; f < 8; f++) { const v = b[21 + r * 10 + f]; if (!v) { e++; continue; } if (e) { out += e; e = 0; } const ch = ' pnbrqk'[Math.abs(v)]; out += v > 0 ? ch.toUpperCase() : ch; } if (e) out += e; if (r < 7) out += '/'; }
+    const c = (castle & 1 ? 'K' : '') + (castle & 2 ? 'Q' : '') + (castle & 4 ? 'k' : '') + (castle & 8 ? 'q' : '') || '-';
+    const base = `${out} ${side > 0 ? 'w' : 'b'} ${c} ${ep ? sqName(ep) : '-'}`;
+    return short ? base : `${base} ${half} ${full}`;
+  }
+  function attacked(sq, by) {
+    if (by > 0) { if (b[sq + 9] === P || b[sq + 11] === P) return true; } else if (b[sq - 9] === -P || b[sq - 11] === -P) return true;
+    for (const o of N_OFF) if (b[sq + o] === N * by) return true;
+    for (const o of K_OFF) if (b[sq + o] === K * by) return true;
+    for (const o of B_OFF) for (let t = sq + o; ; t += o) { const v = b[t]; if (v === 0) continue; if (v === B * by || v === Q * by) return true; break; }
+    for (const o of R_OFF) for (let t = sq + o; ; t += o) { const v = b[t]; if (v === 0) continue; if (v === R * by || v === Q * by) return true; break; }
+    return false;
+  }
+  function gen(caps) {
+    const ms = [], s = side;
+    for (let i = 21; i < 99; i++) {
+      const p = b[i]; if (p === OFF || !p || (p > 0) !== (s > 0)) continue;
+      const t = p * s;
+      if (t === P) {
+        const dir = s > 0 ? -10 : 10, startR = s > 0 ? 6 : 1, promR = s > 0 ? 0 : 7, one = i + dir;
+        if (b[one] === 0) {
+          if (row(one) === promR) { for (const pr of caps ? [Q] : [Q, R, B, N]) ms.push({ f: i, t: one, pr, c: 0 }); }
+          else if (!caps) { ms.push({ f: i, t: one, c: 0 }); if (row(i) === startR && b[one + dir] === 0) ms.push({ f: i, t: one + dir, fl: 4, c: 0 }); }
+        }
+        for (const d of [dir - 1, dir + 1]) {
+          const to = i + d, q = b[to];
+          if (q !== OFF && q && (q > 0) !== (s > 0)) { if (row(to) === promR) for (const pr of caps ? [Q] : [Q, R, B, N]) ms.push({ f: i, t: to, pr, c: q }); else ms.push({ f: i, t: to, c: q }); }
+          else if (ep && to === ep) ms.push({ f: i, t: to, fl: 1, c: -P * s });
+        }
+      } else if (t === N || t === K) {
+        for (const o of t === N ? N_OFF : K_OFF) { const to = i + o, q = b[to]; if (q === OFF) continue; if (!q) { if (!caps) ms.push({ f: i, t: to, c: 0 }); } else if ((q > 0) !== (s > 0)) ms.push({ f: i, t: to, c: q }); }
+        if (t === K && !caps) {
+          const home = s > 0 ? 95 : 25, ks = s > 0 ? 1 : 4, qs = s > 0 ? 2 : 8;
+          if (i === home && castle & ks && !b[home + 1] && !b[home + 2] && b[home + 3] === R * s && !attacked(home, -s) && !attacked(home + 1, -s) && !attacked(home + 2, -s)) ms.push({ f: i, t: home + 2, fl: 2, c: 0 });
+          if (i === home && castle & qs && !b[home - 1] && !b[home - 2] && !b[home - 3] && b[home - 4] === R * s && !attacked(home, -s) && !attacked(home - 1, -s) && !attacked(home - 2, -s)) ms.push({ f: i, t: home - 2, fl: 2, c: 0 });
+        }
+      } else {
+        for (const o of t === B ? B_OFF : t === R ? R_OFF : K_OFF) for (let to = i + o; ; to += o) { const q = b[to]; if (q === OFF) break; if (!q) { if (!caps) ms.push({ f: i, t: to, c: 0 }); continue; } if ((q > 0) !== (s > 0)) ms.push({ f: i, t: to, c: q }); break; }
+      }
+    }
+    return ms;
+  }
+  function make(m) {
+    const p = b[m.f];
+    stack.push({ m, p, castle, ep, half, full, cap: m.fl === 1 ? b[m.t - (side > 0 ? -10 : 10)] : b[m.t] });
+    b[m.t] = m.pr ? m.pr * side : p; b[m.f] = 0;
+    if (m.fl === 1) b[m.t + (side > 0 ? 10 : -10)] = 0;
+    if (m.fl === 2) { if (m.t > m.f) { b[m.f + 1] = b[m.f + 3]; b[m.f + 3] = 0; } else { b[m.f - 1] = b[m.f - 4]; b[m.f - 4] = 0; } }
+    if (p * side === K) kpos[side] = m.t;
+    castle &= CR[m.f] & CR[m.t];
+    ep = m.fl === 4 ? (m.f + m.t) / 2 : 0;
+    half = p * side === P || m.c ? 0 : half + 1;
+    if (side < 0) full++;
+    side = -side;
+  }
+  function unmake() {
+    const u = stack.pop(), m = u.m;
+    side = -side;
+    b[m.f] = u.p; b[m.t] = m.fl === 1 ? 0 : u.cap;
+    if (m.fl === 1) b[m.t + (side > 0 ? 10 : -10)] = u.cap;
+    if (m.fl === 2) { if (m.t > m.f) { b[m.f + 3] = b[m.f + 1]; b[m.f + 1] = 0; } else { b[m.f - 4] = b[m.f - 1]; b[m.f - 1] = 0; } }
+    if (u.p * side === K) kpos[side] = m.f;
+    castle = u.castle; ep = u.ep; half = u.half; full = u.full;
+  }
+  const inCheck = () => attacked(kpos[side], -side);
+  function legal() { return gen(false).filter((m) => { make(m); const ok = !attacked(kpos[-side], side); unmake(); return ok; }); }
+  function san(m, list = legal()) {
+    const pc = Math.abs(b[m.f]);
+    let s;
+    if (m.fl === 2) s = m.t > m.f ? 'O-O' : 'O-O-O';
+    else if (pc === P) s = (m.c ? 'abcdefgh'[col(m.f)] + 'x' : '') + sqName(m.t) + (m.pr ? '=' + 'NBRQ'[m.pr - 2] : '');
+    else {
+      s = ' PNBRQK'[pc];
+      const others = list.filter((o) => o !== m && o.t === m.t && Math.abs(b[o.f]) === pc);
+      if (others.length) s += others.every((o) => col(o.f) !== col(m.f)) ? 'abcdefgh'[col(m.f)] : others.every((o) => row(o.f) !== row(m.f)) ? 8 - row(m.f) : sqName(m.f);
+      s += (m.c ? 'x' : '') + sqName(m.t);
+    }
+    make(m); const chk = inCheck(), mate = chk && legal().length === 0; unmake();
+    return s + (mate ? '#' : chk ? '+' : '');
+  }
+
+  // Search > evaluation: material + piece-square tables, king table swaps in the endgame
+  let jitter = new Int8Array(7 * 64);
+  function setSeed(seed) { let x = seed | 0 || 1; for (let i = 0; i < jitter.length; i++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; jitter[i] = (x % 9); } }
+  function evaluate() {
+    let sc = 0, nonPawn = 0;
+    for (let i = 21; i < 99; i++) { const v = b[i]; if (v && v !== OFF) { const t = Math.abs(v); if (t > 1 && t < 6) nonPawn += VAL[t]; } }
+    const endgame = nonPawn <= 2600;
+    for (let i = 21; i < 99; i++) {
+      const v = b[i]; if (!v || v === OFF) continue;
+      const t = Math.abs(v), r = row(i), f = col(i), idx = v > 0 ? r * 8 + f : (7 - r) * 8 + f, tab = t === K && endgame ? 7 : t;
+      sc += (v > 0 ? 1 : -1) * (VAL[t] + PST[tab][idx] + jitter[tab * 64 + idx]);
+    }
+    return sc * side;
+  }
+  let nodes = 0, deadline = 0, stop = false, killers = [];
+  function order(ms, ply, first) {
+    for (const m of ms) {
+      if (first && m.f === first.f && m.t === first.t && m.pr === first.pr) m.o = 1e6;
+      else if (m.c) m.o = 10 * VAL[Math.abs(m.c)] - VAL[Math.abs(b[m.f])] + 1000;
+      else if (m.pr) m.o = 900;
+      else { const k = killers[ply]; m.o = k && k.some((x) => x.f === m.f && x.t === m.t) ? 500 : 0; }
+    }
+    ms.sort((a, c) => c.o - a.o);
+  }
+  function quiesce(alpha, beta, qd) {
+    nodes++;
+    const stand = evaluate();
+    if (stand >= beta) return stand;
+    if (stand > alpha) alpha = stand;
+    if (qd > 8) return stand;
+    const ms = gen(true); order(ms, 60);
+    for (const m of ms) {
+      make(m);
+      if (attacked(kpos[-side], side)) { unmake(); continue; }
+      const sc = -quiesce(-beta, -alpha, qd + 1);
+      unmake();
+      if (sc >= beta) return sc;
+      if (sc > alpha) alpha = sc;
+    }
+    return alpha;
+  }
+  let rootBest = null;
+  function search(depth, alpha, beta, ply, first) {
+    if ((++nodes & 2047) === 0 && Date.now() > deadline) stop = true;
+    if (stop) return 0;
+    const chk = inCheck();
+    if (chk) depth++; // check extension finds short mates
+    if (depth <= 0) return quiesce(alpha, beta, 0);
+    if (ply && half >= 100) return 0;
+    const ms = gen(false); order(ms, ply, first);
+    let best = -MATE * 2, legalN = 0;
+    for (const m of ms) {
+      make(m);
+      if (attacked(kpos[-side], side)) { unmake(); continue; }
+      legalN++;
+      const sc = -search(depth - 1, -beta, -alpha, ply + 1);
+      unmake();
+      if (stop) return 0;
+      if (sc > best) { best = sc; if (!ply) rootBest = m; }
+      if (sc > alpha) alpha = sc;
+      if (alpha >= beta) { if (!m.c) { const k = killers[ply] || (killers[ply] = []); k.unshift(m); k.length = Math.min(k.length, 2); } break; }
+    }
+    if (!legalN) return chk ? -MATE + ply : 0;
+    return best;
+  }
+  function think(ms, maxDepth) {
+    nodes = 0; stop = false; deadline = Date.now() + ms; killers = [];
+    let best = null, bestScore = 0, depth = 0;
+    const t0 = Date.now();
+    for (let d = 1; d <= maxDepth; d++) {
+      rootBest = null;
+      const sc = search(d, -MATE * 2, MATE * 2, 0, best);
+      if (stop) break;
+      best = rootBest; bestScore = sc; depth = d;
+      if (Math.abs(sc) > MATE - 100) break;
+      // next depth would likely overrun; stop early
+      if (Date.now() - t0 > ms * 0.45) break;
+    }
+    if (!best) best = legal()[0];
+    return { move: best && { f: best.f, t: best.t, pr: best.pr, fl: best.fl }, score: bestScore, depth, nodes, ms: Date.now() - t0 };
+  }
+  return { load, fen, legal, make, unmake, san, inCheck, think, setSeed, sqName, row, col, get side() { return side; }, get half() { return half; }, board: b, MATE };
+}
+
+// Worker: same engine, search only
+const worker = new Worker(URL.createObjectURL(new Blob([`${Engine.toString()}\nconst E = Engine();\nonmessage = (e) => { const { id, fen, ms, depth, seed } = e.data; E.load(fen); E.setSeed(seed); postMessage({ id, ...E.think(ms, depth) }); };`], { type: 'text/javascript' })));
+
+// Game state
+const E = Engine();
+const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+const GLYPH = { 1: '♟', 2: '♞', 3: '♝', 4: '♜', 5: '♛', 6: '♚' };
+const VS = '︎'; // text presentation, stops iOS drawing emoji pawns
+let mode = 'aivai', human = 1, flipped = false, history = [], reps = new Map(), over = null, thinking = 0, reqId = 0, seed = 1, lastEval = 0, sel = null, legalNow = [], idle = 0;
+const boardEl = document.getElementById('board'), statusEl = document.getElementById('status'), statsEl = document.getElementById('stats'), movesEl = document.getElementById('moves'), capsEl = document.getElementById('caps');
+const banner = document.getElementById('banner'), promo = document.getElementById('promo');
+
+// Board > static squares + coordinate labels
+const sqEls = new Map();
+for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
+  const d = document.createElement('div'); const i = 21 + r * 10 + f;
+  d.className = 'sq ' + ((r + f) % 2 ? 'd' : 'l'); d.style.setProperty('--c', (r + f) % 2 ? 'var(--dark)' : 'var(--light)');
+  boardEl.appendChild(d); sqEls.set(i, d);
+}
+function placeSquares() {
+  for (const [i, d] of sqEls) {
+    const [x, y] = screenXY(i); d.style.left = x * 12.5 + '%'; d.style.top = y * 12.5 + '%';
+    d.innerHTML = '';
+    if (y === 7) d.insertAdjacentHTML('beforeend', `<span class="co f">${'abcdefgh'[E.col(i)]}</span>`);
+    if (x === 0) d.insertAdjacentHTML('beforeend', `<span class="co r">${8 - E.row(i)}</span>`);
+  }
+}
+const screenXY = (i) => { const r = E.row(i), f = E.col(i); return flipped ? [7 - f, 7 - r] : [f, r]; };
+const xyToSq = (x, y) => (flipped ? 21 + (7 - y) * 10 + (7 - x) : 21 + y * 10 + x);
+
+// Board > pieces keyed by id so moves animate instead of re-rendering
+let pieces = [];
+function syncPieces(m) {
+  // move the existing element for the mover so CSS can tween it
+  const want = [];
+  for (let i = 21; i < 99; i++) { const v = E.board[i]; if (v && v !== 7) want.push({ i, v }); }
+  const pool = pieces.slice(); const next = [];
+  if (m) { const el = pool.find((p) => p.i === m.f); if (el) { el.i = m.t; } if (m.fl === 2) { const rf = m.t > m.f ? m.f + 3 : m.f - 4, rt = m.t > m.f ? m.f + 1 : m.f - 1, rk = pool.find((p) => p.i === rf); if (rk) rk.i = rt; } }
+  for (const w of want) {
+    let k = pool.findIndex((p) => p.i === w.i && p.v === w.v && !p.used);
+    if (k < 0) k = pool.findIndex((p) => p.i === w.i && !p.used);
+    if (k >= 0) { const p = pool[k]; p.used = true; p.v = w.v; next.push(p); }
+    else { const el = document.createElement('div'); boardEl.appendChild(el); next.push({ el, i: w.i, v: w.v, used: true }); }
+  }
+  for (const p of pool) if (!p.used) p.el.remove();
+  for (const p of next) { p.used = false; p.el.className = 'pc ' + (p.v > 0 ? 'w' : 'b'); p.el.textContent = GLYPH[Math.abs(p.v)] + VS; const [x, y] = screenXY(p.i); p.el.style.transform = `translate(${x * 100}%, ${y * 100}%)`; p.el.dataset.sq = p.i; }
+  pieces = next;
+}
+function highlight() {
+  const last = history.at(-1)?.m;
+  for (const [i, d] of sqEls) { d.classList.toggle('last', !!last && (i === last.f || i === last.t)); d.classList.toggle('sel', sel === i); d.classList.toggle('chk', false); }
+  if (E.inCheck()) { for (let i = 21; i < 99; i++) if (E.board[i] === 6 * E.side) sqEls.get(i).classList.add('chk'); }
+  boardEl.querySelectorAll('.dot').forEach((d) => d.remove());
+  if (sel) for (const m of legalNow) if (m.f === sel && (!m.pr || m.pr === 5)) { const d = document.createElement('div'); d.className = 'dot' + (m.c ? ' cap' : ''); const [x, y] = screenXY(m.t); d.style.left = x * 12.5 + '%'; d.style.top = y * 12.5 + '%'; boardEl.appendChild(d); }
+}
+function renderMoves() {
+  let h = '';
+  history.forEach((x, k) => { if (k % 2 === 0) h += `<span class="n">${k / 2 + 1}.</span>`; h += `<span class="${k === history.length - 1 ? 'cur' : ''}">${x.san}</span>`; });
+  movesEl.innerHTML = h; movesEl.scrollTop = 1e6;
+  // captured material
+  const count = { 1: 8, 2: 2, 3: 2, 4: 2, 5: 1 }, have = { 1: {}, '-1': {} };
+  for (let i = 21; i < 99; i++) { const v = E.board[i]; if (v && v !== 7) { const s = v > 0 ? 1 : -1; have[s][Math.abs(v)] = (have[s][Math.abs(v)] || 0) + 1; } }
+  let caps = '';
+  for (const s of [1, -1]) { for (const t of [5, 4, 3, 2, 1]) caps += GLYPH[t].repeat(Math.max(0, count[t] - (have[s][t] || 0))) ; caps += '  '; }
+  capsEl.textContent = caps;
+}
+function setStatus() {
+  if (over) { statusEl.textContent = over; return; }
+  const who = E.side > 0 ? 'White' : 'Black';
+  const aiTurn = mode === 'aivai' || E.side !== human;
+  statusEl.textContent = `${who} to move${aiTurn ? ' · engine thinking…' : ' · your move'}${E.inCheck() ? ' · check!' : ''}`;
+}
+function setEval(sc) {
+  // score arrives side-to-move relative; bar shows White's share
+  const w = sc * (thinkingSide || 1), pct = Math.abs(w) > E.MATE - 200 ? (w > 0 ? 100 : 0) : 50 + 50 * Math.tanh(w / 600);
+  document.getElementById('evalfill').style.height = pct + '%';
+  lastEval = w;
+}
+let thinkingSide = 1;
+
+// Rules > end-of-game checks run after every move
+function checkOver() {
+  legalNow = E.legal();
+  const key = E.fen(true); reps.set(key, (reps.get(key) || 0) + 1);
+  if (!legalNow.length) over = E.inCheck() ? `Checkmate · ${E.side > 0 ? 'Black' : 'White'} wins` : 'Stalemate · draw';
+  else if (E.half >= 100) over = 'Draw · fifty-move rule';
+  else if (reps.get(key) >= 3) over = 'Draw · threefold repetition';
+  else {
+    const pcs = []; for (let i = 21; i < 99; i++) { const v = E.board[i]; if (v && v !== 7 && Math.abs(v) !== 6) pcs.push(Math.abs(v)); }
+    if (!pcs.length || (pcs.length === 1 && (pcs[0] === 2 || pcs[0] === 3))) over = 'Draw · insufficient material';
+  }
+  // attract games capped so the loop keeps showing openings
+  if (!over && mode === 'aivai' && history.length >= 160) over = 'Draw · demo move cap';
+  if (over) { banner.innerHTML = `${over}<small>${mode === 'aivai' ? 'new game soon' : 'press Play to go again'}</small>`; banner.classList.add('show'); if (mode === 'aivai') setTimeout(() => { if (mode === 'aivai') newGame('aivai'); }, 4000); }
+}
+function doMove(m) {
+  const s = E.san(m, legalNow);
+  history.push({ m, san: s });
+  E.make(m); sel = null;
+  syncPieces(m); checkOver(); highlight(); renderMoves(); setStatus();
+  tick(m);
+  setTimeout(maybeAI, 260);
+}
+function maybeAI() {
+  if (over) return;
+  if (mode === 'human' && E.side === human) return;
+  const id = ++reqId; thinkingSide = E.side;
+  const ms = mode === 'aivai' ? 450 : 1100;
+  worker.onmessage = (e) => {
+    if (e.data.id !== reqId || over) return;
+    const r = e.data;
+    const m = legalNow.find((x) => x.f === r.move.f && x.t === r.move.t && (x.pr || 0) === (r.move.pr || 0));
+    const sc = Math.abs(r.score) > E.MATE - 200 ? `mate in ${Math.ceil((E.MATE - Math.abs(r.score)) / 2)}` : (r.score * thinkingSide / 100).toFixed(2);
+    statsEl.textContent = `depth ${r.depth} · ${(r.nodes / 1000).toFixed(0)}k nodes · ${Math.round(r.nodes / Math.max(1, r.ms))}k nps · eval ${sc}`;
+    setEval(r.score);
+    if (m) doMove(m);
+  };
+  worker.postMessage({ id, fen: E.fen(), ms, depth: 64, seed });
+}
+function newGame(m, side = 1) {
+  mode = m; human = side; flipped = side < 0; history = []; reps = new Map(); over = null; sel = null; reqId++;
+  seed = (Math.random() * 1e9) | 0;
+  E.load(START); banner.classList.remove('show');
+  for (const p of pieces) p.el.remove(); pieces = [];
+  placeSquares(); syncPieces(); checkOver(); highlight(); renderMoves(); setStatus(); setEval(0); statsEl.textContent = '';
+  document.getElementById('bw').classList.toggle('on', m === 'human' && side > 0);
+  document.getElementById('bb').classList.toggle('on', m === 'human' && side < 0);
+  document.getElementById('ba').classList.toggle('on', m === 'aivai');
+  setTimeout(maybeAI, 500);
+}
+
+// Board > click / drag input
+let drag = null;
+function sqFromEvent(e) { const r = boardEl.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / r.width * 8), y = Math.floor((e.clientY - r.top) / r.height * 8); return x < 0 || y < 0 || x > 7 || y > 7 ? null : xyToSq(x, y); }
+function tryMove(from, to) {
+  const ms = legalNow.filter((m) => m.f === from && m.t === to);
+  if (!ms.length) return false;
+  if (ms.length > 1) { askPromo(ms); return true; }
+  doMove(ms[0]); return true;
+}
+function askPromo(ms) {
+  const box = promo.firstElementChild; box.innerHTML = '';
+  for (const t of [5, 4, 3, 2]) { const btn = document.createElement('button'); btn.textContent = GLYPH[t] + VS; btn.onclick = () => { promo.style.display = 'none'; doMove(ms.find((m) => m.pr === t)); }; box.appendChild(btn); }
+  promo.style.display = 'grid';
+}
+boardEl.addEventListener('pointerdown', (e) => {
+  idle = 0;
+  if (mode !== 'human' || over || E.side !== human) return;
+  const sq = sqFromEvent(e); if (sq == null) return;
+  if (sel && sel !== sq && tryMove(sel, sq)) return;
+  const v = E.board[sq];
+  if (v && v !== 7 && (v > 0) === (E.side > 0)) {
+    sel = sq; highlight();
+    const p = pieces.find((x) => x.i === sq);
+    if (p) { drag = { p, sq }; p.el.classList.add('drag'); boardEl.setPointerCapture(e.pointerId); moveDrag(e); }
+  } else { sel = null; highlight(); }
+});
+function moveDrag(e) { if (!drag) return; const r = boardEl.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * 8 - 0.5, y = (e.clientY - r.top) / r.height * 8 - 0.5; drag.p.el.style.transform = `translate(${x * 100}%, ${y * 100}%)`; }
+boardEl.addEventListener('pointermove', moveDrag);
+boardEl.addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  const d = drag; drag = null; d.p.el.classList.remove('drag');
+  const sq = sqFromEvent(e);
+  if (sq != null && sq !== d.sq && tryMove(d.sq, sq)) return;
+  syncPieces(); highlight();
+});
+
+// Panel > buttons
+document.getElementById('bw').onclick = () => newGame('human', 1);
+document.getElementById('bb').onclick = () => newGame('human', -1);
+document.getElementById('ba').onclick = () => newGame('aivai');
+document.getElementById('bu').onclick = () => {
+  if (mode !== 'human' || history.length < 1) return;
+  reqId++; over = null; banner.classList.remove('show');
+  // undo back to the human's turn
+  const n = E.side === human ? 2 : 1;
+  for (let k = 0; k < n && history.length; k++) { const key = E.fen(true); reps.set(key, reps.get(key) - 1); E.unmake(); history.pop(); }
+  for (const p of pieces) p.el.remove(); pieces = []; syncPieces(); legalNow = E.legal(); sel = null; highlight(); renderMoves(); setStatus();
+};
+// human games fall back to the demo after 90 s idle
+setInterval(() => { if (mode === 'human') { idle += 1; if (idle > 90) newGame('aivai'); } }, 1000);
+
+// Audio: wooden tick, louder thunk on capture
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) { try { ac = new AudioContext(); } catch { /* none */ } } }, { once: true });
+function tick(m) {
+  if (!ac) return;
+  const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+  o.type = 'triangle'; o.frequency.setValueAtTime(m.c ? 180 : 320, t); o.frequency.exponentialRampToValueAtTime(80, t + 0.08);
+  g.gain.setValueAtTime(m.c ? 0.25 : 0.15, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.13);
+}
+
+newGame('aivai');
+// Test hooks: perft-style checks from Playwright
+window.__chess = {
+  E, legalFrom: (fen) => { const x = Engine(); x.load(fen); return x.legal().map((m) => x.san(m)); },
+  get history() { return history.map((h) => h.san); }, get over() { return over; },
+  perft(fen, d) { const x = Engine(); x.load(fen); const go = (n) => { if (!n) return 1; let c = 0; for (const m of x.legal()) { x.make(m); c += go(n - 1); x.unmake(); } return c; }; return go(d); },
+};
+</script>
+</body>
+</html>

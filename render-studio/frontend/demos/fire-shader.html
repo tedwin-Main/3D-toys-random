@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fire Shader</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="7" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="procedural fire, domain warping, blackbody, sparks, GLSL" />
+<meta name="description" content="A campfire made entirely in a fragment shader: domain-warped FBM rising through a tapering flame mask, temperature mapped to a blackbody colour ramp, flickering ground light, glowing logs, sparks that drift and fade, and smoke curling off the top. Drag sideways to blow wind into it. Tests whether noise and colour alone can sell real fire." />
+<meta name="prompt" content="Write a single HTML file with a WebGL2 fragment shader of a realistic campfire at night. Build the flames from domain-warped fractal noise flowing upward inside a tapering mask, map temperature to a blackbody colour ramp from deep red to white-yellow, add glowing logs, a flickering light pool on the ground, rising sparks and faint smoke. Dragging left or right should bend the flames like wind, with modes for campfire, torch and blue gas flame." />
+<style>
+  :root { --ink: #fff3e6; --muted: #b59c86; --panel: rgba(16, 8, 4, 0.62); --accent: #ff8a2a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #050203; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: ew-resize; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 60px 1fr 36px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #2a0e00; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Fire Shader</h1><p>domain-warped noise · blackbody ramp · one shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Heat <input id="heat" type="range" min="0.4" max="1.6" step="0.01" value="1"><output id="heat-o"></output></label>
+  <div class="btns"><button data-mode="0" class="on">Campfire</button><button data-mode="1">Torch</button><button data-mode="2">Gas</button></div>
+  <div class="hint">Drag left / right to blow wind</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/fire-shader.html
+ * PURPOSE: WebGL2 procedural campfire: warped FBM flames, blackbody colour, logs, ground glow, sparks, smoke, wind drag
+ * UI: Render Studio > Shaders > Fire Shader
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uTime; uniform float uWind; uniform float uHeat; uniform int uMode;
+out vec4 o;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p){ float s = 0., a = .5; for (int i = 0; i < 5; i++) { s += a * noise(p); p = p * 2.02 + 17.1; a *= .5; } return s; }
+vec3 blackbody(float t){
+  if (uMode == 2) return vec3(pow(t, 3.) * .9, pow(t, 1.8) * 1.1, t * 1.7) * 1.2;
+  return vec3(t * 1.6, pow(t, 2.4) * 1.05, pow(t, 5.) * .7);
+}
+float flameT(vec2 uv, float base, float w0, float hgt){
+  float y = uv.y - base;
+  if (y < -.05) return 0.;
+  vec2 q = uv;
+  // wind bends flames more the higher they rise
+  q.x -= uWind * pow(max(y, 0.), 1.4) * .9;
+  float t = uTime;
+  vec2 w = vec2(fbm(vec2(q.x * 3.2, y * 2.4 - t * 1.6)), fbm(vec2(q.x * 3.2 + 5.2, y * 2.4 - t * 1.9 + 1.3)));
+  float n = fbm(vec2(q.x * 5.5, y * 4. - t * 3.4) + w * 1.6);
+  float hy = y / hgt;
+  float width = w0 * pow(max(1. - hy, 0.), .85) + .006;
+  float body = 1. - smoothstep(0., width, abs(q.x) + (n - .5) * .22 * (.25 + hy));
+  float temp = body * (1. - hy * .95) + (n - .55) * 1.1 * body;
+  // fade in at the base so flames grow out of the logs, no hard edge
+  return clamp(temp * uHeat * smoothstep(-.05, .03, y), 0., 1.4);
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / min(uRes.x, uRes.y * 1.15);
+  float t = uTime;
+  float flick = .85 + .15 * noise(vec2(t * 7., 1.)) + .05 * sin(t * 23.);
+  vec3 col = mix(vec3(.0015, .001, .003), vec3(.004, .002, .004), uv.y + .5);
+  float base = uMode == 1 ? -.02 : -.2;
+  float ground = -.26;
+  // Shader > ground: dirt plane lit by a flickering light pool
+  if (uv.y < ground) {
+    vec2 g = vec2(uv.x, (uv.y - ground) * 4.);
+    float pool = exp(-dot(g, g) * 3.) * flick;
+    vec3 dirt = vec3(.025, .015, .01) * (.7 + .6 * fbm(uv * vec2(18., 60.)));
+    vec3 light = uMode == 2 ? vec3(.2, .45, 1.) : vec3(1., .45, .15);
+    col = dirt * .15 + dirt * light * pool * 6. * uHeat;
+  }
+  // Shader > logs / torch handle
+  if (uMode != 1) {
+    for (int k = 0; k < 2; k++) {
+      float a = k == 0 ? .3 : k == 1 ? -.3 : 0.;
+      vec2 p = uv - vec2(k == 2 ? 0. : 0., ground + .03 + (k == 2 ? .035 : 0.));
+      p = mat2(cos(a), sin(a), -sin(a), cos(a)) * p;
+      float r = k == 2 ? .024 : .028;
+      float d = length(vec2(max(abs(p.x) - (k == 2 ? .11 : .16), 0.), p.y)) - r;
+      if (d < 0.) {
+        float ember = pow(fbm(p * vec2(40., 90.) + t * .4), 3.) * 6. * smoothstep(-.02, .01, p.y + .5 * r) * smoothstep(.12, 0., abs(p.x));
+        vec3 bark = vec3(.012, .007, .004) * (.6 + .5 * noise(p * vec2(60., 8.)));
+        col = bark + blackbody(min(ember, 1.)) * ember * .5 * uHeat;
+      }
+    }
+  } else {
+    float d = max(abs(uv.x + (uv.y + .1) * .03) - .022 + (uv.y + .1) * .03, uv.y + .1);
+    if (d < 0. && uv.y > -.6) col = vec3(.09, .05, .03) * (.6 + .5 * noise(uv * vec2(80., 10.))) + vec3(.2, .08, .02) * smoothstep(-.3, -.1, uv.y) * flick;
+  }
+  // Shader > flames: up to three tongues layered additively
+  float temp = 0.;
+  if (uMode == 1) temp = flameT(uv, base, .06, .42);
+  else {
+    temp = flameT(uv, base, .17, .62);
+    temp = max(temp, flameT(uv - vec2(-.08, 0.), base + .02, .09, .38) * .9);
+    temp = max(temp, flameT(uv - vec2(.09, 0.), base + .01, .08, .34) * .9);
+  }
+  if (uMode == 2) temp = flameT(uv * vec2(1., .8), base, .1, .4) * (1.2 - smoothstep(-.2, .1, uv.y) * .5);
+  col += blackbody(temp) * temp;
+  // halo glow around the flame
+  vec2 hc = uv - vec2(uWind * .08, base + .14);
+  col += (uMode == 2 ? vec3(.1, .2, .6) : vec3(1., .35, .08)) * exp(-dot(hc, hc) * 12.) * .06 * flick * uHeat;
+  // Shader > smoke: faint grey FBM above the tips
+  float sy = uv.y - (base + .35);
+  if (sy > 0. && uMode != 2) {
+    vec2 sq = vec2(uv.x - uWind * sy * 1.2 - sin(sy * 4. + t * .5) * .05, sy);
+    float sm = fbm(sq * 3. - vec2(0., t * .35)) * exp(-abs(sq.x) * 5.) * smoothstep(0., .1, sy) * exp(-sy * 2.2);
+    col += vec3(.16, .15, .15) * sm * .35;
+  }
+  // Shader > sparks: one per grid cell, cells scroll upward
+  for (int l = 0; l < 2; l++) {
+    float sc = 22. + float(l) * 14.;
+    vec2 sp = uv * sc;
+    sp.y -= t * (6. + float(l) * 3.);
+    sp.x -= uWind * (uv.y - base) * sc * .7;
+    vec2 id = floor(sp), f = fract(sp) - .5;
+    float r = hash(id + float(l) * 31.);
+    if (r > .9) {
+      vec2 off = vec2(sin(t * 3. + r * 40.) * .3, hash(id + 2.) - .5);
+      float d = length(f - off);
+      float life = smoothstep(base + .05, base + .2, uv.y) * smoothstep(.55, .05, uv.y - base) * smoothstep(.45, .1, abs(uv.x - uWind * (uv.y - base) * .7));
+      col += blackbody(.9) * smoothstep(.09, 0., d) * life * 1.4 * uHeat;
+    }
+  }
+  col = 1. - exp(-col * .95);
+  o = vec4(pow(col, vec3(1. / 2.2)), 1.);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uTime', 'uWind', 'uHeat', 'uMode'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Fire > wind: drag sets target, springs back on release; idle gusts
+let wind = 0, windTarget = 0, drag = null, lastInput = -1e9, mode = 0;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = e.clientX; lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => { if (drag === null) return; windTarget = Math.max(-1, Math.min(1, (e.clientX - drag) / (innerWidth * 0.3))); lastInput = performance.now(); });
+const release = () => { drag = null; windTarget = 0; };
+cv.addEventListener('pointerup', release);
+cv.addEventListener('pointercancel', release);
+
+// Fire > Panel: heat slider, mode buttons
+const heat = $('heat');
+const showHeat = () => ($('heat-o').textContent = Number(heat.value).toFixed(2));
+heat.oninput = showHeat; showHeat();
+function setMode(n) { mode = n; document.querySelectorAll('[data-mode]').forEach((b) => b.classList.toggle('on', Number(b.dataset.mode) === n)); }
+document.querySelectorAll('[data-mode]').forEach((b) => (b.onclick = () => { lastInput = performance.now(); setMode(Number(b.dataset.mode)); }));
+
+function resize() {
+  const s = Math.min(devicePixelRatio || 1, 1.5);
+  cv.width = Math.round(innerWidth * s); cv.height = Math.round(innerHeight * s);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+// Fire > attract: soft gusts, then cycle modes every 10 s when idle
+let last = performance.now(), t0 = last, fps = 60, fpsN = 0, fpsT = 0, modeT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const idle = now - lastInput > 4000;
+  const t = (now - t0) / 1000;
+  if (idle && drag === null) windTarget = Math.sin(t * 0.37) * 0.25 + Math.sin(t * 1.3) * 0.08;
+  wind += (windTarget - wind) * Math.min(1, dt * 3);
+  modeT = idle ? modeT + dt : 0;
+  if (modeT > 10) { modeT = 0; setMode((mode + 1) % 3); }
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uTime, t);
+  gl.uniform1f(U.uWind, wind);
+  gl.uniform1f(U.uHeat, Number(heat.value));
+  gl.uniform1i(U.uMode, mode);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${fps} fps<br>wind ${wind.toFixed(2)}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

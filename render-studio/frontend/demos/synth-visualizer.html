@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Synth Visualizer</title>
+<meta name="category" content="audio" />
+<meta name="order" content="1" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="Tone.js, generative music, FFT, Three.js shaders, bloom" />
+<meta name="description" content="A generative lo-fi track composed live in the browser with Tone.js (pads, bass, arpeggio, drums) driving an audio-reactive Three.js scene: a noise-displaced core that swells with the bass, a 96-band spectrum ring, an oscilloscope halo and kick-synced particles. Hard because sound design, sequencing and real-time FFT visuals must all stay in sync." />
+<meta name="prompt" content="Create a single-page generative music visualizer: use Tone.js to compose an endless lo-fi track (chord pads with chorus and reverb, a filtered bass, a ping-pong arpeggio, kick/snare/hat patterns with swing) and feed its FFT and waveform into a Three.js scene with bloom: a shader-displaced sphere reacting to bass, a circular spectrum of instanced bars, an oscilloscope ring and particles that pulse on every kick. Click to start, with layer mutes, mood (minor/major) and tempo controls." />
+<style>
+  :root { --ink: #eef0ff; --muted: #9aa0c0; --panel: rgba(10, 10, 22, 0.66); --accent: #8b7bff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #04040a; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  canvas { display: block; }
+  .title { position: fixed; left: 22px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #start { position: fixed; left: 50%; bottom: 5vh; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  #start button { border: 0; border-radius: 999px; padding: 15px 28px; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; color: #0b0820; background: linear-gradient(90deg, #8b7bff, #4cc9f0); box-shadow: 0 10px 40px -8px rgba(139,123,255,0.8); }
+  #start small { color: var(--muted); font-size: 12.5px; }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 300px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.08); font-size: 12.5px; display: none; }
+  #panel.show { display: block; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .row + .row { margin-top: 6px; }
+  #panel button { border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.05); color: var(--ink); border-radius: 9px; padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  #panel button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #panel label { display: grid; grid-template-columns: 50px 1fr 46px; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  #hud { position: fixed; right: 18px; top: 18px; text-align: right; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); pointer-events: none; }
+  #hud b { display: block; font: 700 26px ui-rounded, system-ui, sans-serif; color: var(--ink); letter-spacing: -0.02em; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; bottom: 10px; } #start { bottom: 9vh; } .title p { max-width: 60vw; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+</head>
+<body>
+<div class="title"><h1>Synth Visualizer</h1><p>Tone.js composes · FFT drives Three.js</p></div>
+<div id="hud"><b id="chord">Am7</b><span id="bpm">92 BPM · preview</span></div>
+<div id="start"><button id="go">▶ Start the music</button><small>Generative lo-fi, composed live. Headphones recommended.</small></div>
+<div id="panel">
+  <div class="row"><button data-l="pad" class="on">Pads</button><button data-l="bass" class="on">Bass</button><button data-l="arp" class="on">Arp</button><button data-l="drums" class="on">Drums</button></div>
+  <div class="row"><button id="mood">Minor</button><button id="stop">Stop</button></div>
+  <label>Tempo <input id="tempo" type="range" min="70" max="130" step="1" value="92"><output id="tempo-o">92</output></label>
+  <label>Volume <input id="vol" type="range" min="-30" max="0" step="1" value="-6"><output id="vol-o">-6 dB</output></label>
+</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/synth-visualizer.html
+ * PURPOSE: Tone.js generative track (pads, bass, arp, drums) feeding FFT/waveform into a Three.js bloom visualizer
+ * UI: Render Studio > Audio > Synth Visualizer
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const $ = (id) => document.getElementById(id);
+const BANDS = 96;
+
+// Visual > renderer, camera, bloom
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(1.5, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x04040a, 0.035);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.45, 0.32);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// Visual > core: icosphere displaced by 3D simplex noise, amplitude follows bass
+const NOISE = `
+vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x,289.0);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g; vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx; vec3 x2=x0-i2+2.0*C.xxx; vec3 x3=x0-1.0+3.0*C.xxx;
+  i=mod(i,289.0);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=1.0/7.0; vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z); vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y); vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}`;
+const coreU = { uTime: { value: 0 }, uBass: { value: 0 }, uMid: { value: 0 }, uHigh: { value: 0 }, uKick: { value: 0 } };
+const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 64), new THREE.ShaderMaterial({
+  uniforms: coreU,
+  vertexShader: `${NOISE}
+    uniform float uTime, uBass, uMid, uKick; varying vec3 vN; varying vec3 vView; varying float vD;
+    void main(){
+      float n = snoise(position * 1.4 + vec3(0.0, uTime * 0.35, 0.0));
+      float n2 = snoise(position * 3.0 + uTime * 0.8) * 0.12;
+      float d = (n + n2) * (0.08 + uBass * 0.34) + uKick * 0.08;
+      vD = d;
+      vec3 p = position + normal * d;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      vN = normalize(normalMatrix * normal); vView = -mv.xyz;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform float uMid, uHigh, uKick, uTime; varying vec3 vN; varying vec3 vView; varying float vD;
+    void main(){
+      float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vView))), 2.2);
+      vec3 deep = vec3(0.05, 0.03, 0.16);
+      vec3 violet = vec3(0.55, 0.42, 1.0), cyan = vec3(0.3, 0.85, 1.0), pink = vec3(1.0, 0.35, 0.7);
+      vec3 rim = mix(violet, cyan, 0.5 + 0.5 * sin(uTime * 0.4 + vD * 6.0));
+      // interior stays dark so bloom only catches the rim and the noise crests
+      vec3 col = deep + rim * fres * (0.55 + uMid * 0.9) + pink * smoothstep(0.18, 0.55, vD) * (0.35 + uHigh * 0.6);
+      col += uKick * 0.12 * rim;
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+}));
+scene.add(core);
+
+// Visual > spectrum ring: instanced bars, mirrored so low end sits at the bottom of the circle
+const barGeo = new THREE.BoxGeometry(0.07, 1, 0.07);
+barGeo.translate(0, 0.5, 0);
+const bars = new THREE.InstancedMesh(barGeo, new THREE.MeshBasicMaterial({ toneMapped: false }), BANDS);
+const ringR = 2.6, dummy = new THREE.Object3D(), tmpC = new THREE.Color();
+for (let i = 0; i < BANDS; i++) bars.setColorAt(i, tmpC.setHSL(0.72 - (Math.abs(i - BANDS / 2) / (BANDS / 2)) * 0.25, 0.85, 0.5));
+scene.add(bars);
+
+// Visual > oscilloscope halo: line loop bent by waveform samples
+const WAVE_N = 256;
+const haloGeo = new THREE.BufferGeometry();
+haloGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(WAVE_N * 3), 3));
+const halo = new THREE.LineLoop(haloGeo, new THREE.LineBasicMaterial({ color: 0x4cc9f0, transparent: true, opacity: 0.85 }));
+scene.add(halo);
+
+// Visual > particles: shell of points that pulse on kicks
+const P = 2600, pPos = new Float32Array(P * 3);
+for (let i = 0; i < P; i++) {
+  const r = 7 + Math.random() * 18, th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1);
+  pPos.set([r * Math.sin(ph) * Math.cos(th), r * Math.cos(ph) * 0.6, r * Math.sin(ph) * Math.sin(th)], i * 3);
+}
+const pGeo = new THREE.BufferGeometry();
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+// round sprite: default square points read as pixels once bloomed
+const dot = document.createElement('canvas'); dot.width = dot.height = 32;
+const dg = dot.getContext('2d'), grd = dg.createRadialGradient(16, 16, 0, 16, 16, 16);
+grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.4, 'rgba(255,255,255,0.5)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+dg.fillStyle = grd; dg.fillRect(0, 0, 32, 32);
+const pMat = new THREE.PointsMaterial({ color: 0xb9b0ff, size: 0.12, map: new THREE.CanvasTexture(dot), transparent: true, opacity: 0.75, depthWrite: false });
+const points = new THREE.Points(pGeo, pMat);
+scene.add(points);
+
+// Visual > floor grid for depth, synthwave style
+const grid = new THREE.GridHelper(80, 80, 0x3a2f8a, 0x1a1640);
+grid.position.y = -3.2;
+grid.material.transparent = true; grid.material.opacity = 0.55;
+scene.add(grid);
+
+// Audio > instruments, effects, analysers (built on first click: autoplay policy)
+let audio = null;
+const layers = { pad: true, bass: true, arp: true, drums: true };
+let mood = 'minor', step = 0, kickPulse = 0, chordName = 'Am7';
+const PROG = {
+  minor: [['Am7', ['A3', 'C4', 'E4', 'G4'], 'A1'], ['Fmaj7', ['F3', 'A3', 'C4', 'E4'], 'F1'], ['Cmaj7', ['C4', 'E4', 'G4', 'B4'], 'C2'], ['G6', ['G3', 'B3', 'D4', 'E4'], 'G1']],
+  major: [['Cmaj9', ['C4', 'E4', 'G4', 'D5'], 'C2'], ['Am9', ['A3', 'C4', 'E4', 'B4'], 'A1'], ['Fmaj9', ['F3', 'A3', 'E4', 'G4'], 'F1'], ['G13', ['G3', 'B3', 'F4', 'E5'], 'G1']],
+};
+async function buildAudio() {
+  await Tone.start();
+  const master = new Tone.Volume(-6).toDestination();
+  const reverb = new Tone.Reverb({ decay: 6, wet: 0.35 }).connect(master);
+  await reverb.generate();
+  const fft = new Tone.FFT(1024), wave = new Tone.Waveform(WAVE_N);
+  master.connect(fft); master.connect(wave);
+  const padFilter = new Tone.Filter(1200, 'lowpass').connect(reverb);
+  const chorus = new Tone.Chorus(1.5, 3, 0.6).start().connect(padFilter);
+  const pad = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'fatsawtooth', count: 3, spread: 28 }, envelope: { attack: 0.9, decay: 0.6, sustain: 0.6, release: 2.8 }, volume: -16 }).connect(chorus);
+  const bass = new Tone.MonoSynth({ oscillator: { type: 'square' }, filter: { Q: 2, type: 'lowpass' }, filterEnvelope: { attack: 0.01, decay: 0.25, sustain: 0.2, baseFrequency: 70, octaves: 2.4 }, envelope: { attack: 0.01, decay: 0.3, sustain: 0.5, release: 0.3 }, volume: -10 }).connect(master);
+  const delay = new Tone.PingPongDelay('8n.', 0.35).connect(reverb);
+  delay.wet.value = 0.4;
+  const arp = new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.005, decay: 0.18, sustain: 0.1, release: 0.6 }, volume: -12 }).connect(delay);
+  const kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 6, envelope: { attack: 0.001, decay: 0.42, sustain: 0 }, volume: -4 }).connect(master);
+  const snare = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.001, decay: 0.2, sustain: 0 }, volume: -14 }).connect(new Tone.Filter(1600, 'highpass').connect(reverb));
+  const hat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.045, sustain: 0 }, volume: -24 }).connect(new Tone.Filter(7500, 'highpass').connect(master));
+  Tone.Transport.bpm.value = +$('tempo').value;
+  Tone.Transport.swing = 0.18;
+  Tone.Transport.swingSubdivision = '16n';
+
+  // Audio > sequencer: one 16th-note clock drives every part
+  Tone.Transport.scheduleRepeat((time) => {
+    const s = step % 16, bar = Math.floor(step / 16) % 4;
+    const [name, notes, root] = PROG[mood][bar];
+    if (s === 0) {
+      if (layers.pad) pad.triggerAttackRelease(notes, '1m', time, 0.6);
+      Tone.Draw.schedule(() => { chordName = name; $('chord').textContent = name; }, time);
+    }
+    if (layers.bass && [0, 3, 6, 8, 11, 14].includes(s)) {
+      const n = s === 14 ? Tone.Frequency(root).transpose(7).toNote() : root;
+      bass.triggerAttackRelease(n, '16n', time, s === 0 ? 1 : 0.7);
+    }
+    // arp: chord tones over two octaves, probabilistic so phrases vary bar to bar
+    if (layers.arp && s % 2 === 0 && Math.random() < 0.72) {
+      const pool = notes.concat(notes.map((n) => Tone.Frequency(n).transpose(12).toNote()));
+      arp.triggerAttackRelease(pool[Math.floor(Math.random() * pool.length)], '16n', time, 0.4 + Math.random() * 0.4);
+    }
+    if (layers.drums) {
+      if (s === 0 || s === 10 || (s === 7 && Math.random() < 0.3)) { kick.triggerAttackRelease('C1', '8n', time); Tone.Draw.schedule(() => (kickPulse = 1), time); }
+      if (s === 4 || s === 12) snare.triggerAttackRelease('16n', time, 0.8);
+      if (s % 2 === 0 || Math.random() < 0.25) hat.triggerAttackRelease('32n', time, s % 4 === 2 ? 0.9 : 0.4 + Math.random() * 0.3);
+    }
+    step++;
+  }, '16n');
+  Tone.Transport.start('+0.05');
+  return { fft, wave, master };
+}
+
+// Visual > analysis: real FFT when playing, synthetic preview spectrum before the first click
+const spectrum = new Float32Array(BANDS), waveform = new Float32Array(WAVE_N);
+let bass = 0, mid = 0, high = 0, lastBeat = 0;
+function analyse(t) {
+  if (audio) {
+    const f = audio.fft.getValue(), w = audio.wave.getValue();
+    for (let i = 0; i < BANDS; i++) {
+      // log-spaced bins so bass doesn't occupy one bar
+      // 1024 bins at ~23 Hz each; above ~9 kHz this mix is silent, so stop at bin 380
+      const bin = Math.floor(Math.pow(i / BANDS, 2) * 380) + 1;
+      // tilt toward highs: real mixes roll off fast and the top of the ring would sit flat
+      const v = Math.max(0, Math.min(1, ((f[bin] + 112) / 72) * (0.7 + (i / BANDS) * 1.1)));
+      spectrum[i] += (v - spectrum[i]) * 0.35;
+    }
+    let peak = 0.05;
+    for (let i = 0; i < WAVE_N; i++) peak = Math.max(peak, Math.abs(w[i]));
+    // normalise so the halo stays readable at any master volume
+    for (let i = 0; i < WAVE_N; i++) waveform[i] = (w[i] / peak) * 0.45;
+  } else {
+    const beat = (t * 92) / 60;
+    if (Math.floor(beat) !== lastBeat) { lastBeat = Math.floor(beat); if (lastBeat % 2 === 0) kickPulse = 1; }
+    for (let i = 0; i < BANDS; i++) {
+      const x = i / BANDS;
+      const v = 0.75 * Math.exp(-x * 3.2) * (0.55 + 0.45 * kickPulse) + 0.25 * (0.5 + 0.5 * Math.sin(t * 2.1 + i * 0.37)) * (1 - x * 0.6) + 0.08 * Math.sin(t * 7 + i);
+      spectrum[i] += (Math.max(0, v) - spectrum[i]) * 0.3;
+    }
+    for (let i = 0; i < WAVE_N; i++) waveform[i] = Math.sin(i * 0.25 + t * 6) * 0.25 * (0.4 + kickPulse) + Math.sin(i * 0.07 - t * 2) * 0.15;
+  }
+  const avg = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += spectrum[i]; return s / (b - a); };
+  bass += (avg(0, 10) - bass) * 0.25; mid += (avg(10, 45) - mid) * 0.2; high += (avg(45, BANDS) - high) * 0.2;
+}
+
+// Visual > frame loop
+const clock = new THREE.Clock();
+function frame() {
+  const t = clock.getElapsedTime();
+  analyse(t);
+  kickPulse *= 0.9;
+  Object.assign(coreU.uTime, { value: t }); coreU.uBass.value = bass; coreU.uMid.value = mid; coreU.uHigh.value = high; coreU.uKick.value = kickPulse;
+  core.rotation.y = t * 0.12; core.rotation.x = Math.sin(t * 0.2) * 0.2;
+  core.scale.setScalar(1 + kickPulse * 0.06);
+  for (let i = 0; i < BANDS; i++) {
+    const a = (i / BANDS) * Math.PI * 2 - Math.PI / 2;
+    // mirror: band index folds so the ring is symmetric left/right
+    const k = i < BANDS / 2 ? i : BANDS - 1 - i;
+    const h = 0.08 + spectrum[k * 2 % BANDS] * 2.4;
+    dummy.position.set(Math.cos(a) * ringR, Math.sin(a) * ringR, 0);
+    dummy.rotation.set(0, 0, a - Math.PI / 2);
+    dummy.scale.set(1, h, 1);
+    dummy.updateMatrix();
+    bars.setMatrixAt(i, dummy.matrix);
+  }
+  bars.instanceMatrix.needsUpdate = true;
+  bars.rotation.z = t * 0.05;
+  const hp = haloGeo.attributes.position.array;
+  for (let i = 0; i < WAVE_N; i++) {
+    const a = (i / WAVE_N) * Math.PI * 2, r = 4.1 + waveform[i] * 1.2;
+    hp[i * 3] = Math.cos(a) * r; hp[i * 3 + 1] = Math.sin(a) * r; hp[i * 3 + 2] = 0;
+  }
+  haloGeo.attributes.position.needsUpdate = true;
+  halo.material.opacity = 0.35 + mid * 0.8;
+  points.rotation.y = t * 0.02;
+  pMat.size = 0.11 + kickPulse * 0.1;
+  grid.position.z = (t * 2) % 1;
+  const ca = t * 0.08;
+  camera.position.set(Math.sin(ca) * 2.2, 0.8 + Math.sin(t * 0.13) * 0.6, 10.5 + Math.cos(ca) * 1.2);
+  camera.lookAt(0, 0.2, 0);
+  bloom.strength = 0.5 + bass * 0.45;
+  composer.render();
+  requestAnimationFrame(frame);
+}
+frame();
+
+// Panel > start: builds the audio graph on the user gesture
+$('go').addEventListener('click', async () => {
+  $('go').textContent = 'Starting…';
+  audio = await buildAudio();
+  $('start').style.display = 'none';
+  $('panel').classList.add('show');
+  $('bpm').textContent = `${Tone.Transport.bpm.value.toFixed(0)} BPM · live`;
+});
+// Panel > layer mutes, mood, transport
+document.querySelectorAll('[data-l]').forEach((b) => b.addEventListener('click', () => { layers[b.dataset.l] = !layers[b.dataset.l]; b.classList.toggle('on', layers[b.dataset.l]); }));
+$('mood').addEventListener('click', () => { mood = mood === 'minor' ? 'major' : 'minor'; $('mood').textContent = mood === 'minor' ? 'Minor' : 'Major'; });
+$('stop').addEventListener('click', () => {
+  const run = Tone.Transport.state !== 'started';
+  run ? Tone.Transport.start() : Tone.Transport.pause();
+  $('stop').textContent = run ? 'Stop' : 'Play';
+});
+$('tempo').addEventListener('input', (e) => { $('tempo-o').textContent = e.target.value; if (audio) { Tone.Transport.bpm.rampTo(+e.target.value, 0.5); $('bpm').textContent = `${e.target.value} BPM · live`; } });
+$('vol').addEventListener('input', (e) => { $('vol-o').textContent = `${e.target.value} dB`; if (audio) audio.master.volume.rampTo(+e.target.value, 0.1); });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

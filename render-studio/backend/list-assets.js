@@ -1,0 +1,132 @@
+/**
+ * FILE: render-studio/backend/list-assets.js
+ * PURPOSE: build gallery list: live html demos, rendered media files, every toy from sibling 3d-toys folder
+ * UI: Render Studio home grid, category tabs, viewer
+ * USED BY: backend/start-server.js (GET /api/assets), backend/capture-demos.js
+ * KEY EXPORTS: CATEGORIES, listAssets, listDemos
+ */
+import { readdir, readFile, stat, open } from 'node:fs/promises';
+import { extname, join, basename } from 'node:path';
+import { TOYS } from '../../3d-toys/components/toy-list.js';
+
+const MODEL = ['.glb', '.gltf'];
+const VIDEO = ['.mp4', '.webm', '.mov'];
+const IMAGE = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'];
+
+// Studio > Tabs: order = tab order; group splits tab rows (live / rendered / toy box)
+export const CATEGORIES = [
+  { id: 'shaders', label: 'Shaders', group: 'live' },
+  { id: 'scenes', label: '3D Scenes', group: 'live' },
+  { id: 'physics', label: 'Physics', group: 'live' },
+  { id: 'generative', label: '2D & Generative', group: 'live' },
+  { id: 'motion', label: 'Motion', group: 'live' },
+  { id: 'audio', label: 'Audio', group: 'live' },
+  { id: 'games', label: 'Games', group: 'live' },
+  { id: 'generators', label: 'Generators', group: 'live' },
+  { id: 'apps', label: 'Apps & UI', group: 'live' },
+  { id: 'algorithms', label: 'Algorithms', group: 'live' },
+  { id: 'models', label: '3D Models', group: 'rendered', exts: MODEL },
+  { id: 'blender-renders', label: 'Blender', group: 'rendered', exts: [...VIDEO, ...IMAGE] },
+  { id: 'remotion-videos', label: 'Remotion', group: 'rendered', exts: VIDEO },
+  { id: 'videos', label: 'Videos', group: 'rendered', exts: VIDEO },
+  { id: 'images', label: 'Images', group: 'rendered', exts: IMAGE },
+  { id: 'toy-box', label: '3D Toy Box', group: 'links' },
+];
+
+// Studio > Toy Box tab: toy list lives in sibling 3d-toys folder (single source); toys served same-origin under /3d-toys/
+// prompts for toys that started as frontier-model tests; others show description only
+const TOY_PROMPTS = {
+  'pelican-on-bicycle': 'Build a single-file Three.js scene of a pelican riding a bicycle over rolling hills. Legs must actually drive the pedals via IK, the pouch should wobble, and WASD steers. Add a bell and fish to collect.',
+  'rubiks-cube': 'Make a playable Rubik\'s cube in one HTML file with Three.js: 2x2 to 5x5, drag faces to turn, U/D/L/R/F/B keys, scramble, timer, undo, and an animated rewind solve.',
+  'voxel-sandbox': 'Create a Minecraft-style voxel sandbox in a single HTML file: pixel-textured blocks, place and break with the mouse, TNT that chain-reacts, undo, save/load, and glowing blocks at night with bloom.',
+  'infinite-terrain-flyover': 'Write a Three.js arcade flight game over infinite low-poly terrain generated in chunks: lakes, snowy peaks, golden rings to fly through, contrails, crash on impact, and time-of-day skies.',
+  'black-hole-lensing': 'Write a full-screen WebGL shader that raymarches light around a Schwarzschild black hole: bent rays, thin turbulent accretion disk with Doppler beaming, photon ring, starfield, bloom.',
+  'lava-lamp': 'Make a lava lamp in one HTML file: raymarched metaball wax inside a glass bottle, blobs heat at the bulb, rise, cool and sink. Five color presets and tap-the-glass interaction.',
+  'solar-system-orrery': 'Build a Three.js solar system orrery that places planets at their real positions for today\'s date, with procedural textures, Saturn\'s rings, a comet, click-to-fly camera and a time scrubber.',
+  'aquarium-boids': 'Create a desk aquarium in Three.js: schools of fish using boids, caustics on the sand, sprinkle food to feed them, tap the glass to scare them, and a pufferfish that inflates when poked.',
+  'tiny-planet-world': 'Make a walkable tiny planet in Three.js: spherical gravity, a little explorer, procedural villages that light up at night, boats, birds, and click to plant trees. Include a full day/night cycle.',
+  'marble-run': 'Build a perpetual marble run with Rapier physics in one HTML file: screw lift, banked helix, vortex funnel, and a xylophone staircase that plays notes as marbles hit it. Add a ride-along camera.',
+};
+
+const kindOf = (ext) => (MODEL.includes(ext) ? 'model' : VIDEO.includes(ext) ? 'video' : 'image');
+// my-chair_v2.glb becomes "My Chair V2"
+const titleOf = (file) => basename(file, extname(file)).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+const meta = (html, name) => html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`, 'i'))?.[1] ?? '';
+
+// Studio > Live tabs: frontend/demos/*.html, metadata from head tags
+export async function listDemos(demosRoot) {
+  const files = await readdir(demosRoot).catch(() => []);
+  const names = new Set(files);
+  const out = [];
+  for (const f of files.filter((x) => x.endsWith('.html'))) {
+    const fh = await open(join(demosRoot, f));
+    const { buffer, bytesRead } = await fh.read(Buffer.alloc(8192), 0, 8192, 0);
+    const st = await fh.stat();
+    await fh.close();
+    const html = buffer.subarray(0, bytesRead).toString('utf8');
+    const base = basename(f, '.html');
+    out.push({
+      id: `demos/${f}`,
+      name: base,
+      category: meta(html, 'category') || 'generative',
+      kind: 'page',
+      ext: 'html',
+      url: `demos/${f}`,
+      poster: names.has(`${base}.png`) ? `demos/${base}.png?v=${Math.round(st.mtimeMs)}` : null,
+      title: html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? titleOf(f),
+      desc: meta(html, 'description'),
+      prompt: meta(html, 'prompt'),
+      tags: meta(html, 'tags').split(',').map((t) => t.trim()).filter(Boolean),
+      order: Number(meta(html, 'order')) || 99,
+      capture: Number(meta(html, 'capture')) || 0,
+      mtime: st.mtimeMs,
+    });
+  }
+  return out.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title));
+}
+
+// Studio > Rendered tabs: every file in media/<category>, newest first
+async function listMedia(mediaRoot) {
+  const out = [];
+  for (const cat of CATEGORIES.filter((c) => c.exts)) {
+    const dir = join(mediaRoot, cat.id);
+    const files = (await readdir(dir).catch(() => [])).filter((f) => !f.startsWith('.') && f !== 'notes.json');
+    const names = new Set(files);
+    // Studio > Card + viewer info: notes.json maps filename to { about, prompt }
+    const notes = JSON.parse(await readFile(join(dir, 'notes.json'), 'utf8').catch(() => '{}'));
+    // same-basename image next to model or video = its poster, not its own card
+    const posterFor = (f) => ['.png', '.jpg', '.jpeg', '.webp'].map((e) => basename(f, extname(f)) + e).find((p) => names.has(p) && p !== f);
+    const posters = new Set(files.filter((f) => !IMAGE.includes(extname(f).toLowerCase())).map(posterFor).filter(Boolean));
+    for (const f of files) {
+      const ext = extname(f).toLowerCase();
+      if (!cat.exts.includes(ext) || posters.has(f)) continue;
+      const st = await stat(join(dir, f)).catch(() => null);
+      if (!st?.isFile()) continue;
+      const poster = kindOf(ext) === 'image' ? null : posterFor(f);
+      out.push({
+        id: `${cat.id}/${f}`,
+        category: cat.id,
+        kind: kindOf(ext),
+        ext: ext.slice(1),
+        url: `media/${cat.id}/${encodeURIComponent(f)}`,
+        poster: poster ? `media/${cat.id}/${encodeURIComponent(poster)}` : null,
+        title: notes[f]?.title ?? titleOf(f),
+        desc: notes[f]?.about ?? '',
+        prompt: notes[f]?.prompt ?? '',
+        size: st.size,
+        mtime: st.mtimeMs,
+      });
+    }
+  }
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+// Studio > screen load: live demos, then rendered media, then 3d-toys toys
+export async function listAssets(root) {
+  // toy posters come from `npm run capture -- --toys`; missing ones fall back to the emoji
+  const shots = new Set(await readdir(join(root, 'media', 'toy-posters')).catch(() => []));
+  const toys = TOYS.map((t) => ({ id: `toy-box/${t.dir}`, category: 'toy-box', kind: 'page', ext: '3d-toys', url: `3d-toys/${t.dir}/`, title: t.title, emoji: t.emoji,
+    desc: t.desc, prompt: TOY_PROMPTS[t.dir] ?? '', tags: [...(t.players === 'multi' ? ['Multiplayer'] : []), ...(t.tags ?? [])],
+    poster: shots.has(`${t.dir}.png`) ? `media/toy-posters/${t.dir}.png` : null }));
+  return [...(await listDemos(join(root, 'frontend', 'demos'))), ...(await listMedia(join(root, 'media'))), ...toys];
+}

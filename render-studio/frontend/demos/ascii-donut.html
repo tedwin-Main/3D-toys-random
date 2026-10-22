@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ASCII Donut</title>
+<meta name="category" content="generative" />
+<meta name="order" content="5" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="ASCII art, z-buffer, rotation matrices, luminance ramp" />
+<meta name="description" content="The famous spinning ASCII donut, rebuilt and extended: a torus sampled point by point, rotated on two axes, projected with a z-buffer and shaded by surface normal into a 12-step character ramp, printed as plain text. Switch to a cube or a trefoil knot, drag to spin it, and change the phosphor colour. Tests 3D math and projection with nothing but characters." />
+<meta name="prompt" content="Recreate the classic spinning ASCII donut in a single HTML file. Sample points on a torus, rotate them around two axes, project them into a character grid with a z-buffer, and pick each character from a luminance ramp using the dot product of the surface normal with a light direction. Render into a pre element sized to fill the window, let me drag to spin it, and add a cube and a trefoil knot plus green, amber and white phosphor themes." />
+<style>
+  :root { --fg: #6dff8f; --glow: rgba(80, 255, 130, 0.55); --bg: #020703; --muted: #4f8a5c; }
+  body[data-theme="amber"] { --fg: #ffb547; --glow: rgba(255, 170, 60, 0.55); --bg: #080400; --muted: #9a7340; }
+  body[data-theme="white"] { --fg: #e9eef5; --glow: rgba(200, 220, 255, 0.4); --bg: #05060a; --muted: #7d8494; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); font-family: ui-monospace, Menlo, Consolas, monospace; touch-action: none; }
+  pre { position: fixed; inset: 0; margin: 0; display: grid; place-items: center; line-height: 1; letter-spacing: 0; text-shadow: 0 0 6px var(--glow); cursor: grab; user-select: none; }
+  pre:active { cursor: grabbing; }
+  body::after { content: ''; position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px), radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55)); }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; z-index: 2; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  .title h1 { margin: 0; font-size: 20px; color: var(--fg); }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; z-index: 2; padding: 10px; border-radius: 14px; background: rgba(0, 0, 0, 0.55); border: 1px solid color-mix(in srgb, var(--fg) 25%, transparent); display: grid; grid-template-columns: repeat(3, auto); gap: 6px; font-family: ui-rounded, system-ui, sans-serif; }
+  #panel button { border: 1px solid color-mix(in srgb, var(--fg) 30%, transparent); background: transparent; color: var(--fg); border-radius: 8px; padding: 6px 10px; font: 600 12px ui-monospace, Menlo, monospace; cursor: pointer; }
+  #panel button.on { background: var(--fg); color: var(--bg); }
+  #stats { position: fixed; right: 18px; top: 18px; z-index: 2; font-size: 12px; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #stats { top: 66px; right: auto; left: 20px; text-align: left; } #panel { left: 10px; right: 10px; grid-template-columns: repeat(3, 1fr); } }
+</style>
+</head>
+<body data-theme="green">
+<pre id="screen"></pre>
+<div class="title"><h1>ASCII Donut</h1><p>z-buffered 3D in plain text</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <button data-shape="donut" class="on">Donut</button><button data-shape="cube">Cube</button><button data-shape="knot">Knot</button>
+  <button data-theme="green" class="on">Green</button><button data-theme="amber">Amber</button><button data-theme="white">White</button>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/ascii-donut.html
+ * PURPOSE: ASCII 3D renderer: sampled torus/cube/knot, 2-axis rotation, z-buffer, normal-shaded char ramp, phosphor themes
+ * UI: Render Studio > 2D & Generative > ASCII Donut
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const screen = document.getElementById('screen');
+const RAMP = '.,-~:;=!*#$@';
+let cols = 80, rows = 40, shape = 'donut';
+
+// Donut > grid size: square-ish cells, char count fits the window
+function resize() {
+  const fs = Math.max(9, Math.min(16, Math.floor(Math.min(innerWidth / 90, innerHeight / 46) * 1.15)));
+  screen.style.fontSize = fs + 'px';
+  const cw = fs * 0.6, ch = fs;
+  cols = Math.floor(innerWidth / cw); rows = Math.floor(innerHeight / ch);
+}
+addEventListener('resize', resize);
+resize();
+
+// Donut > surface samples: point + normal lists per shape, built once
+function torusPts() {
+  const pts = [];
+  for (let t = 0; t < 6.283; t += 0.035) for (let p = 0; p < 6.283; p += 0.012) {
+    const ct = Math.cos(t), st = Math.sin(t), cp = Math.cos(p), sp = Math.sin(p), R = 2, r = 1;
+    pts.push([(R + r * ct) * cp, r * st, -(R + r * ct) * sp, ct * cp, st, -ct * sp]);
+  }
+  return pts;
+}
+function cubePts() {
+  const pts = [], s = 1.55, step = 0.035;
+  for (let a = -s; a <= s; a += step) for (let b = -s; b <= s; b += step) {
+    pts.push([s, a, b, 1, 0, 0], [-s, a, b, -1, 0, 0], [a, s, b, 0, 1, 0], [a, -s, b, 0, -1, 0], [a, b, s, 0, 0, 1], [a, b, -s, 0, 0, -1]);
+  }
+  return pts;
+}
+function knotPts() {
+  // trefoil centreline with a tube swept around it (frame from finite differences)
+  const pts = [], c = (u) => [Math.sin(u) + 2 * Math.sin(2 * u), Math.cos(u) - 2 * Math.cos(2 * u), -Math.sin(3 * u)];
+  for (let u = 0; u < 6.283; u += 0.008) {
+    const p0 = c(u), p1 = c(u + 0.001);
+    let T = p1.map((v, i) => v - p0[i]); const tl = Math.hypot(...T); T = T.map((v) => v / tl);
+    let N = [T[1], -T[0], 0.3]; const d = N[0] * T[0] + N[1] * T[1] + N[2] * T[2]; N = N.map((v, i) => v - d * T[i]);
+    const nl = Math.hypot(...N); N = N.map((v) => v / nl);
+    const B = [T[1] * N[2] - T[2] * N[1], T[2] * N[0] - T[0] * N[2], T[0] * N[1] - T[1] * N[0]];
+    for (let a = 0; a < 6.283; a += 0.12) {
+      const ca = Math.cos(a), sa = Math.sin(a), nx = N[0] * ca + B[0] * sa, ny = N[1] * ca + B[1] * sa, nz = N[2] * ca + B[2] * sa;
+      pts.push([(p0[0] + nx * 0.55) * 0.75, (p0[1] + ny * 0.55) * 0.75, (p0[2] + nz * 0.55) * 0.75, nx, ny, nz]);
+    }
+  }
+  return pts;
+}
+const SHAPES = { donut: torusPts(), cube: cubePts(), knot: knotPts() };
+
+// Donut > input: drag adds spin velocity, idle spin otherwise
+let A = 1, B = 0.5, vA = 0, vB = 0, drag = null, lastInput = -1e9;
+screen.addEventListener('pointerdown', (e) => { screen.setPointerCapture(e.pointerId); drag = [e.clientX, e.clientY]; lastInput = performance.now(); });
+screen.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  vB = (e.clientX - drag[0]) * 0.01; vA = (e.clientY - drag[1]) * 0.01;
+  drag = [e.clientX, e.clientY]; lastInput = performance.now();
+});
+screen.addEventListener('pointerup', () => (drag = null));
+screen.addEventListener('pointercancel', () => (drag = null));
+document.querySelectorAll('[data-shape]').forEach((b) => (b.onclick = () => {
+  shape = b.dataset.shape; lastInput = performance.now();
+  document.querySelectorAll('[data-shape]').forEach((x) => x.classList.toggle('on', x === b));
+}));
+document.querySelectorAll('#panel [data-theme]').forEach((b) => (b.onclick = () => {
+  document.body.dataset.theme = b.dataset.theme;
+  document.querySelectorAll('#panel [data-theme]').forEach((x) => x.classList.toggle('on', x === b));
+}));
+
+// Donut > render: rotate X by A then Z by B, perspective project, keep nearest per cell
+const L = [0, 0.7071, -0.7071];
+let last = performance.now(), fps = 60, fpsN = 0, fpsT = 0, shapeT = 0;
+const ORDER = ['donut', 'cube', 'knot'];
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const idle = now - lastInput > 2500;
+  if (idle) { vA += (0.9 * dt - vA) * 0.05; vB += (0.45 * dt - vB) * 0.05; }
+  A += vA; B += vB;
+  if (!idle) { vA *= 0.92; vB *= 0.92; }
+  shapeT = idle ? shapeT + dt : 0;
+  if (shapeT > 8) { shapeT = 0; document.querySelector(`[data-shape="${ORDER[(ORDER.indexOf(shape) + 1) % 3]}"]`).click(); lastInput = -1e9; }
+
+  const n = cols * rows, out = new Array(n).fill(' '), zb = new Float32Array(n);
+  const cA = Math.cos(A), sA = Math.sin(A), cB = Math.cos(B), sB = Math.sin(B);
+  // vertical cells are ~1.65x taller than wide, so squash y
+  const K2 = 5.5, K1 = Math.min(cols * 0.6, rows * 1.65 * 0.6) * K2 / 4.8;
+  for (const [x, y, z, nx, ny, nz] of SHAPES[shape]) {
+    const y1 = y * cA - z * sA, z1 = y * sA + z * cA;
+    const x2 = x * cB - y1 * sB, y2 = x * sB + y1 * cB;
+    const ny1 = ny * cA - nz * sA, nz1 = ny * sA + nz * cA;
+    const nx2 = nx * cB - ny1 * sB, ny2 = nx * sB + ny1 * cB;
+    const ooz = 1 / (z1 + K2);
+    const xp = Math.floor(cols / 2 + K1 * ooz * x2), yp = Math.floor(rows / 2 - K1 * ooz * y2 / 1.65);
+    if (xp < 0 || xp >= cols || yp < 0 || yp >= rows) continue;
+    const idx = xp + yp * cols;
+    if (ooz <= zb[idx]) continue;
+    zb[idx] = ooz;
+    const lum = nx2 * L[0] + ny2 * L[1] + nz1 * L[2];
+    out[idx] = lum > 0 ? RAMP[Math.min(11, Math.floor(lum * 12))] : '.';
+  }
+  let s = '';
+  for (let r = 0; r < rows; r++) s += out.slice(r * cols, r * cols + cols).join('') + '\n';
+  screen.textContent = s;
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  document.getElementById('stats').textContent = `${fps} fps · ${cols}×${rows} chars · ${SHAPES[shape].length} samples`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ragdoll Stairs</title>
+<meta name="category" content="physics" />
+<meta name="order" content="2" />
+<meta name="capture" content="3800" />
+<meta name="tags" content="Rapier, ragdolls, joints with limits, contact sounds" />
+<meta name="description" content="Crash-test dummies built from 10 rigid bodies and joint limits tumble down a concrete staircase in Rapier physics. Fire cannonballs at them, slow time down, hear every thud. Tests articulated bodies, joint setup and a physics engine running in the browser." />
+<meta name="prompt" content="Make a single-file Three.js + Rapier (WASM) scene where crash-test-dummy ragdolls (10 bodies each: pelvis, chest, head, upper/lower arms and legs, with ball joints and limited knee/elbow hinges) keep falling down a long concrete staircase. Click to fire cannonballs, add slow motion, and play thud sounds from contact forces." />
+<style>
+  :root { --ink: #fbf6ec; --muted: #b3a894; --panel: rgba(24, 20, 14, 0.66); --accent: #f2c230; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1610; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  canvas { display: block; cursor: crosshair; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 280px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 12.5px; }
+  .btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.06); color: var(--ink); border-radius: 9px; padding: 7px 4px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #2a1f02; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 14px; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } .btns { grid-template-columns: repeat(4, 1fr); } .hint { display: none; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div class="title"><h1>Ragdoll Stairs</h1><p>Rapier physics · 11-body dummies · joint limits</p></div>
+<div id="stats"></div>
+<div id="loading">loading physics…</div>
+<div id="panel">
+  <div class="btns">
+    <button id="spawn">Drop dummy</button>
+    <button id="auto" class="on">Auto drop</button>
+    <button id="slow">Slow-mo</button>
+    <button id="reset">Clear</button>
+  </div>
+  <div class="hint">Click anywhere to fire a cannonball. Drag to orbit, scroll to zoom.</div>
+</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/ragdoll-stairs.html
+ * PURPOSE: Three.js + Rapier ragdolls (spherical + limited revolute joints) falling down stairs, cannonballs, slow-mo, contact-force thuds
+ * UI: Render Studio > Physics > Ragdoll Stairs
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import RAPIER from 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js';
+
+await RAPIER.init();
+document.getElementById('loading').remove();
+const $ = (id) => document.getElementById(id);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x3a2f24);
+scene.fog = new THREE.Fog(0x3a2f24, 24, 60);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+function frameCamera() {
+  const narrow = innerWidth / innerHeight < 0.9;
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  camera.position.set(narrow ? 13 : 11, narrow ? 10 : 7.5, narrow ? 16 : 12.5);
+  controls.target.set(0, 2.2, 3.6);
+}
+frameCamera();
+
+scene.add(new THREE.HemisphereLight(0xfff3e0, 0x3a2e22, 0.9));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.6);
+sun.position.set(8, 14, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12, near: 1, far: 50 });
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+const events = new RAPIER.EventQueue(true);
+
+// Stairs > fixed blocks: concrete steps with orange safety nosing
+const STEPS = 14, RISE = 0.34, RUN = 0.62, WIDTH = 5;
+const concrete = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 0.92 });
+const nosing = new THREE.MeshStandardMaterial({ color: 0xf28a1e, roughness: 0.6 });
+function fixedBox(hx, hy, hz, x, y, z, mat) {
+  world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z).setFriction(0.9));
+  const m = new THREE.Mesh(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2), mat);
+  m.position.set(x, y, z); m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  return m;
+}
+const topY = STEPS * RISE;
+fixedBox(WIDTH / 2, topY / 2, 2, 0, topY / 2, -2, concrete); // top landing
+for (let i = 0; i < STEPS; i++) {
+  const h = (STEPS - i) * RISE - RISE;
+  if (h <= 0) continue;
+  fixedBox(WIDTH / 2, h / 2, RUN / 2, 0, h / 2, i * RUN + RUN / 2, concrete);
+  const n = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 0.03, 0.08), nosing);
+  n.position.set(0, h + 0.015, i * RUN + 0.04);
+  scene.add(n);
+}
+fixedBox(14, 0.25, 14, 0, -0.25, 6, new THREE.MeshStandardMaterial({ color: 0x6e675d, roughness: 0.95 }));
+// Stairs > stepped parapets keep dummies on the stairs: far side concrete, near side glass so the camera sees through
+const glassMat = new THREE.MeshPhysicalMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.1, roughness: 0.05, metalness: 0, depthWrite: false });
+const parapet = new THREE.MeshStandardMaterial({ color: 0x847c70, roughness: 0.9 });
+const PH = 0.9;
+for (let i = -3; i < STEPS; i++) {
+  const h = i < 0 ? topY : Math.max(0, (STEPS - i) * RISE - RISE);
+  const z = i < 0 ? i * RUN + RUN / 2 - 0.3 : i * RUN + RUN / 2;
+  for (const sx of [-1, 1]) {
+    const x = sx * (WIDTH / 2 + 0.08), hy = (h + PH) / 2;
+    world.createCollider(RAPIER.ColliderDesc.cuboid(0.08, hy, RUN / 2).setTranslation(x, hy, z).setFriction(0.6));
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, hy * 2, RUN), sx < 0 ? parapet : glassMat);
+    m.position.set(x, hy, z);
+    if (sx < 0) { m.castShadow = m.receiveShadow = true; }
+    scene.add(m);
+  }
+}
+
+// Ragdoll > look: crash-test dummy yellow, dark joints, target decal on head
+const decalCanvas = document.createElement('canvas');
+decalCanvas.width = 128; decalCanvas.height = 64;
+const dg = decalCanvas.getContext('2d');
+dg.fillStyle = '#f2c230'; dg.fillRect(0, 0, 128, 64);
+for (const [x, y] of [[0, 0], [64, 32]]) { dg.fillStyle = '#111'; dg.fillRect(x + 16, y, 16, 32); dg.fillRect(x + 48 - 32 + 32, y, 16, 32); }
+const headTex = new THREE.CanvasTexture(decalCanvas);
+headTex.colorSpace = THREE.SRGBColorSpace;
+const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.55 });
+const dark = new THREE.MeshStandardMaterial({ color: 0x2b2b2e, roughness: 0.6 });
+const headMat = new THREE.MeshStandardMaterial({ map: headTex, roughness: 0.5 });
+
+const ragdolls = [];
+const dummyPalette = [0xf2c230, 0xf28a1e, 0x4fb3e8, 0xe85a4f, 0x7ac74f];
+function q3(q) { return new THREE.Quaternion(q.x, q.y, q.z, q.w); }
+// Ragdoll > build: standing pose parts (local), then rotate whole body by q and place at p
+function spawnRagdoll(p, q, push) {
+  const color = dummyPalette[ragdolls.length % dummyPalette.length];
+  const mat = color === 0xf2c230 ? yellow : new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
+  const P = {
+    pelvis: { shape: ['box', 0.17, 0.1, 0.11], pos: [0, 1.0, 0] },
+    chest: { shape: ['box', 0.2, 0.19, 0.12], pos: [0, 1.33, 0] },
+    head: { shape: ['ball', 0.13], pos: [0, 1.7, 0], mat: headMat },
+    uarmL: { shape: ['cap', 0.12, 0.055], pos: [-0.29, 1.34, 0] },
+    larmL: { shape: ['cap', 0.11, 0.05], pos: [-0.29, 1.05, 0] },
+    uarmR: { shape: ['cap', 0.12, 0.055], pos: [0.29, 1.34, 0] },
+    larmR: { shape: ['cap', 0.11, 0.05], pos: [0.29, 1.05, 0] },
+    thighL: { shape: ['cap', 0.16, 0.075], pos: [-0.1, 0.7, 0] },
+    shinL: { shape: ['cap', 0.16, 0.062], pos: [-0.1, 0.3, 0] },
+    thighR: { shape: ['cap', 0.16, 0.075], pos: [0.1, 0.7, 0] },
+    shinR: { shape: ['cap', 0.16, 0.062], pos: [0.1, 0.3, 0] },
+  };
+  const rd = { parts: [], joints: [] };
+  const Q = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+  for (const [name, d] of Object.entries(P)) {
+    const local = new THREE.Vector3(...d.pos).sub(new THREE.Vector3(0, 1, 0)).applyQuaternion(Q).add(p);
+    const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(local.x, local.y, local.z).setRotation(q).setLinearDamping(0.05).setAngularDamping(0.6).setCcdEnabled(true));
+    let cd, geo;
+    const [kind, a, b, c] = d.shape;
+    if (kind === 'box') { cd = RAPIER.ColliderDesc.cuboid(a, b, c); geo = new THREE.BoxGeometry(a * 2, b * 2, c * 2); }
+    else if (kind === 'ball') { cd = RAPIER.ColliderDesc.ball(a); geo = new THREE.SphereGeometry(a, 24, 16); }
+    else { cd = RAPIER.ColliderDesc.capsule(a, b); geo = new THREE.CapsuleGeometry(b, a * 2, 6, 14); }
+    // real-ish densities (kg/m3) so contact forces land in a sane range for the thud threshold
+    cd.setDensity(name === 'head' ? 1200 : 1000).setFriction(0.7).setRestitution(0.05).setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(900);
+    world.createCollider(cd, body);
+    const mesh = new THREE.Mesh(geo, d.mat ?? (name.startsWith('l') || name.startsWith('shin') ? mat : name === 'pelvis' ? dark : mat));
+    mesh.castShadow = true;
+    scene.add(mesh);
+    // joint caps: dark spheres at elbows/knees for the dummy look
+    if (kind === 'cap' && (name.startsWith('larm') || name.startsWith('shin'))) {
+      const capM = new THREE.Mesh(new THREE.SphereGeometry(b * 1.15, 14, 10), dark);
+      capM.position.y = a; mesh.add(capM);
+    }
+    body.setLinvel(push, true);
+    rd.parts.push({ name, body, mesh, pose: new THREE.Vector3(...d.pos) });
+  }
+  const B = Object.fromEntries(rd.parts.map((x) => [x.name, x]));
+  const anchor = (part, world_) => { const v = new THREE.Vector3(...world_).sub(part.pose); return { x: v.x, y: v.y, z: v.z }; };
+  const ball = (a, b, at) => world.createImpulseJoint(RAPIER.JointData.spherical(anchor(B[a], at), anchor(B[b], at)), B[a].body, B[b].body, true);
+  const hinge = (a, b, at, axis, lo, hi) => {
+    const jd = RAPIER.JointData.revolute(anchor(B[a], at), anchor(B[b], at), axis);
+    jd.limitsEnabled = true; jd.limits = [lo, hi];
+    return world.createImpulseJoint(jd, B[a].body, B[b].body, true);
+  };
+  const js = [
+    ball('pelvis', 'chest', [0, 1.13, 0]),
+    ball('chest', 'head', [0, 1.55, 0]),
+    ball('chest', 'uarmL', [-0.27, 1.48, 0]), ball('chest', 'uarmR', [0.27, 1.48, 0]),
+    hinge('uarmL', 'larmL', [-0.29, 1.19, 0], { x: 1, y: 0, z: 0 }, -2.4, 0.05), hinge('uarmR', 'larmR', [0.29, 1.19, 0], { x: 1, y: 0, z: 0 }, -2.4, 0.05),
+    ball('pelvis', 'thighL', [-0.1, 0.9, 0]), ball('pelvis', 'thighR', [0.1, 0.9, 0]),
+    hinge('thighL', 'shinL', [-0.1, 0.5, 0], { x: 1, y: 0, z: 0 }, -0.05, 2.5), hinge('thighR', 'shinR', [0.1, 0.5, 0], { x: 1, y: 0, z: 0 }, -0.05, 2.5),
+  ];
+  for (const j of js) j.setContactsEnabled(false);
+  rd.joints = js;
+  ragdolls.push(rd);
+  if (ragdolls.length > 12) removeRagdoll(ragdolls[0]);
+}
+function removeRagdoll(rd) {
+  for (const p of rd.parts) { world.removeRigidBody(p.body); scene.remove(p.mesh); }
+  ragdolls.splice(ragdolls.indexOf(rd), 1);
+}
+function dropAtTop() {
+  const x = (Math.random() - 0.5) * 3;
+  const e = new THREE.Euler(Math.random() * 0.6 - 0.3, Math.random() * Math.PI * 2, Math.random() * 0.6 - 0.3);
+  const q = new THREE.Quaternion().setFromEuler(e);
+  spawnRagdoll(new THREE.Vector3(x, topY + 1.4, -1.6), q, { x: (Math.random() - 0.5) * 1.5, y: 0, z: 2.5 + Math.random() * 2 });
+}
+
+// Cannon > click fires heavy ball from camera toward pointer
+const balls = [];
+const ballMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, metalness: 0.7, roughness: 0.25 });
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; unlockAudio(); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const dir = ray.ray.direction.clone();
+  const start = camera.position.clone().addScaledVector(dir, 2);
+  const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(start.x, start.y, start.z).setCcdEnabled(true).setLinvel(dir.x * 30, dir.y * 30, dir.z * 30));
+  world.createCollider(RAPIER.ColliderDesc.ball(0.28).setDensity(7800).setRestitution(0.2).setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(4000), body);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 16), ballMat);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  balls.push({ body, mesh });
+  if (balls.length > 20) { const b = balls.shift(); world.removeRigidBody(b.body); scene.remove(b.mesh); }
+  boom();
+});
+
+// Audio > thuds from contact force events, cannon boom
+let actx = null;
+function unlockAudio() { if (!actx) actx = new AudioContext(); actx.resume(); }
+let thudBudget = 0;
+function thud(f) {
+  if (!actx || thudBudget <= 0) return;
+  thudBudget--;
+  const now = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
+  const s = Math.min(1, f / 30000);
+  o.type = 'sine';
+  o.frequency.setValueAtTime(90 + Math.random() * 60 + s * 40, now);
+  o.frequency.exponentialRampToValueAtTime(45, now + 0.12);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(0.08 + s * 0.3, now + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+  o.connect(g).connect(actx.destination); o.start(now); o.stop(now + 0.2);
+}
+function boom() {
+  if (!actx) return;
+  const now = actx.currentTime, n = actx.createBufferSource(), buf = actx.createBuffer(1, actx.sampleRate * 0.4, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+  n.buffer = buf;
+  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 600;
+  const g = actx.createGain(); g.gain.value = 0.35;
+  n.connect(f).connect(g).connect(actx.destination); n.start(now);
+}
+
+// HUD > buttons
+let auto = true, slow = false, autoTimer = 0, impacts = 0;
+$('spawn').onclick = dropAtTop;
+$('auto').onclick = () => { auto = !auto; $('auto').classList.toggle('on', auto); };
+$('slow').onclick = () => { slow = !slow; $('slow').classList.toggle('on', slow); };
+$('reset').onclick = () => { while (ragdolls.length) removeRagdoll(ragdolls[0]); while (balls.length) { const b = balls.shift(); world.removeRigidBody(b.body); scene.remove(b.mesh); } impacts = 0; };
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); frameCamera(); });
+
+// opening shot: a few dummies already mid-fall
+for (let i = 0; i < 3; i++) { dropAtTop(); for (let k = 0; k < 40 + i * 25; k++) world.step(); }
+
+const clock = new THREE.Clock();
+let acc = 0;
+const STEP = 1 / 60;
+world.timestep = STEP;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta());
+  acc += dt * (slow ? 0.2 : 1);
+  thudBudget = 3;
+  while (acc >= STEP) {
+    world.step(events);
+    events.drainContactForceEvents((ev) => { impacts++; thud(ev.totalForceMagnitude()); });
+    acc -= STEP;
+  }
+  if (auto && (autoTimer += dt) > 2.2) { autoTimer = 0; dropAtTop(); }
+  for (const rd of [...ragdolls]) {
+    for (const p of rd.parts) {
+      const t = p.body.translation(), r = p.body.rotation();
+      p.mesh.position.set(t.x, t.y, t.z); p.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    }
+    if (rd.parts[0].body.translation().y < -5) removeRagdoll(rd);
+  }
+  for (const b of balls) { const t = b.body.translation(), r = b.body.rotation(); b.mesh.position.set(t.x, t.y, t.z); b.mesh.quaternion.set(r.x, r.y, r.z, r.w); }
+  controls.update();
+  renderer.render(scene, camera);
+  $('stats').innerHTML = `${ragdolls.length} dummies · ${ragdolls.length * 11} bodies<br>${impacts} impacts${slow ? '<br>SLOW-MO ×0.2' : ''}`;
+});
+</script>
+</body>
+</html>

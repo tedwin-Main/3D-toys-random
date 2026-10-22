@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>2048 + Expectimax</title>
+<meta name="category" content="games" />
+<meta name="order" content="11" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="tile animation, merge rules, swipe, expectimax AI, undo" />
+<meta name="description" content="2048 with the details that usually break: a tile merges once per move, slides and merges animate from their true source cells, new tiles pop in after the slide, score popups, undo, best score and swipe. The attract mode runs an expectimax AI (snake-shaped weight grid, monotonicity and empty-cell heuristics) that regularly builds 2048." />
+<meta name="prompt" content="Make 2048 in a single HTML file with smooth CSS animations for sliding, merging and spawning tiles, keyboard and swipe input, score with +N popups, best score in localStorage, undo, and win/lose overlays. Make sure a tile can only merge once per move. Add an AI button that plays using expectimax and runs automatically when idle." />
+<style>
+  :root { --bg: #0f1117; --board: #1d2130; --cell: #272c3e; --ink: #eef0f7; --mute: #8d93a8; --gap: 12px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: radial-gradient(ellipse at 50% 0%, #1f2440, var(--bg) 65%); color: var(--ink); font-family: ui-rounded, 'SF Pro Rounded', system-ui, -apple-system, sans-serif; overflow: hidden; user-select: none; touch-action: none; }
+  main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 16px; }
+  header { width: var(--size); display: flex; align-items: center; gap: 10px; }
+  h1 { margin: 0; font-size: calc(var(--size) * 0.12); font-weight: 900; letter-spacing: -2px; background: linear-gradient(135deg, #ffd36a, #ff7a59 60%, #ff4f8b); -webkit-background-clip: text; background-clip: text; color: transparent; flex: 1; }
+  .box { background: var(--board); border-radius: 10px; padding: 6px 12px; text-align: center; min-width: 74px; position: relative; }
+  .box small { display: block; font-size: 10px; letter-spacing: 1px; color: var(--mute); font-weight: 700; }
+  .box b { font-size: 19px; }
+  .pop { position: absolute; left: 0; right: 0; top: -6px; font-weight: 800; color: #7dffb0; animation: up 0.8s ease-out forwards; pointer-events: none; }
+  @keyframes up { to { transform: translateY(-36px); opacity: 0; } }
+  .bar { width: var(--size); display: flex; gap: 8px; }
+  .bar button { flex: 1; }
+  button { background: var(--board); color: var(--ink); border: 1px solid #333a52; border-radius: 10px; padding: 10px; font: 700 14px ui-rounded, system-ui, sans-serif; cursor: pointer; }
+  button.on { background: linear-gradient(135deg, #ffd36a, #ff7a59); color: #23140a; border-color: transparent; }
+  #board { --size: min(88vw, 62vh, 520px); width: var(--size); height: var(--size); background: var(--board); border-radius: 16px; position: relative; padding: var(--gap); box-shadow: 0 30px 70px -25px #000c; }
+  main { --size: min(88vw, 62vh, 520px); }
+  .cell, .tile { position: absolute; width: calc((var(--size) - var(--gap) * 5) / 4); height: calc((var(--size) - var(--gap) * 5) / 4); border-radius: 10px; }
+  .cell { background: var(--cell); }
+  .tile { left: 0; top: 0; display: grid; place-items: center; font-weight: 900; transition: transform 0.12s ease-in-out; z-index: 2; }
+  .tile .in { width: 100%; height: 100%; border-radius: 10px; display: grid; place-items: center; }
+  .tile.new .in { animation: appear 0.18s 0.1s ease-out backwards; }
+  .tile.merged .in { animation: pop 0.2s 0.1s ease-out; }
+  .tile.merged { z-index: 3; }
+  @keyframes appear { from { transform: scale(0); } }
+  @keyframes pop { 50% { transform: scale(1.18); } }
+  #over { position: absolute; inset: 0; border-radius: 16px; background: #0f1117cc; display: none; place-items: center; text-align: center; z-index: 10; backdrop-filter: blur(3px); }
+  #over.show { display: grid; animation: fade 0.4s; }
+  @keyframes fade { from { opacity: 0; } }
+  #over h2 { margin: 0 0 12px; font-size: calc(var(--size) * 0.1); }
+  .hint { color: var(--mute); font-size: 12px; text-align: center; }
+  #aiinfo { font: 12px ui-monospace, Menlo, monospace; color: var(--mute); min-height: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1>2048</h1><div class="box"><small>SCORE</small><b id="score">0</b></div><div class="box"><small>BEST</small><b id="best">0</b></div></header>
+  <div id="board"><div id="over"><div><h2 id="overtxt"></h2><button id="again">Try again</button></div></div></div>
+  <div class="bar"><button id="bnew">New</button><button id="bundo">Undo</button><button id="bai">AI</button></div>
+  <div id="aiinfo"></div>
+  <div class="hint">arrows / WASD / swipe · AI plays when idle</div>
+</main>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/game-2048.html
+ * PURPOSE: 2048 with animated slides/merges/spawns, once-per-move merging, undo, best score, swipe, expectimax AI attract mode
+ * UI: Render Studio > Games > 2048 + Expectimax
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page); window.__g2048 test hooks
+ */
+const boardEl = document.getElementById('board'), scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
+const COLORS = { 2: ['#eae4da', '#4b4237'], 4: ['#ede0c8', '#4b4237'], 8: ['#f6a96b', '#fff'], 16: ['#f68a58', '#fff'], 32: ['#f6684f', '#fff'], 64: ['#f24a2f', '#fff'], 128: ['#edd073', '#fff'], 256: ['#edcc62', '#fff'], 512: ['#edc850', '#fff'], 1024: ['#7ad7ff', '#0d2236'], 2048: ['#ffd23f', '#3a2600'], 4096: ['#c77dff', '#fff'], 8192: ['#7dffb0', '#08301a'] };
+let grid, score = 0, best = 0, tiles = new Map(), nextId = 1, undoStack = [], ai = true, idle = 0, won = false, overShown = false;
+try { best = +localStorage.getItem('2048-best') || 0; } catch { best = 0; }
+bestEl.textContent = best;
+for (let i = 0; i < 16; i++) { const c = document.createElement('div'); c.className = 'cell'; boardEl.appendChild(c); place(c, i % 4, (i / 4) | 0, true); }
+function place(el, x, y, cell) { const s = `calc(var(--gap) + ${x} * ((var(--size) - var(--gap) * 5) / 4 + var(--gap)))`, t = `calc(var(--gap) + ${y} * ((var(--size) - var(--gap) * 5) / 4 + var(--gap)))`; if (cell) { el.style.left = s; el.style.top = t; } else el.style.transform = `translate(${s}, ${t})`; }
+
+// Rules > grid holds {id, v}; slide returns moved flag plus animation plan
+function emptyCells(g) { const e = []; for (let i = 0; i < 16; i++) if (!g[i]) e.push(i); return e; }
+function spawn(g) { const e = emptyCells(g); if (!e.length) return null; const i = e[(Math.random() * e.length) | 0]; g[i] = { id: nextId++, v: Math.random() < 0.9 ? 2 : 4, fresh: true }; return i; }
+const LINES = { left: (k) => [0, 1, 2, 3].map((j) => k * 4 + j), right: (k) => [3, 2, 1, 0].map((j) => k * 4 + j), up: (k) => [0, 1, 2, 3].map((j) => j * 4 + k), down: (k) => [3, 2, 1, 0].map((j) => j * 4 + k) };
+function slide(g, dir) {
+  const out = Array(16).fill(null), anim = []; let gained = 0, moved = false;
+  for (let k = 0; k < 4; k++) {
+    const idx = LINES[dir](k), row = idx.map((i) => g[i]).filter(Boolean);
+    let w = 0;
+    for (let r = 0; r < row.length; r++) {
+      const a = row[r], b = row[r + 1];
+      // merge only pairs from the original line, so 2 2 4 becomes 4 4 not 8
+      if (b && a.v === b.v) { const nv = a.v * 2; out[idx[w]] = { id: nextId++, v: nv, merged: true }; anim.push({ id: a.id, to: idx[w], die: true }, { id: b.id, to: idx[w], die: true }); gained += nv; r++; }
+      else { out[idx[w]] = { id: a.id, v: a.v }; anim.push({ id: a.id, to: idx[w] }); }
+      w++;
+    }
+  }
+  for (let i = 0; i < 16; i++) if ((g[i]?.v || 0) !== (out[i]?.v || 0)) moved = true;
+  return { out, anim, gained, moved };
+}
+const canMove = (g) => ['left', 'right', 'up', 'down'].some((d) => slide(g, d).moved);
+
+// Render > keyed DOM tiles; old tiles slide to merge cell then disappear
+function tileEl(t, i) {
+  let el = tiles.get(t.id);
+  if (!el) { el = document.createElement('div'); el.innerHTML = '<div class="in"></div>'; boardEl.appendChild(el); tiles.set(t.id, el); place(el, i % 4, (i / 4) | 0); }
+  el.className = 'tile' + (t.fresh ? ' new' : '') + (t.merged ? ' merged' : '');
+  const [bg, fg] = COLORS[t.v] || ['#22252f', '#fff'], inn = el.firstChild;
+  inn.style.background = bg; inn.style.color = fg; inn.textContent = t.v;
+  inn.style.fontSize = `calc(var(--size) * ${t.v < 100 ? 0.1 : t.v < 1000 ? 0.085 : 0.066})`;
+  inn.style.boxShadow = t.v >= 128 ? `0 0 ${Math.min(40, Math.log2(t.v) * 3)}px ${bg}99` : 'none';
+  return el;
+}
+function render(anim) {
+  if (anim) for (const a of anim) { const el = tiles.get(a.id); if (!el) continue; place(el, a.to % 4, (a.to / 4) | 0); if (a.die) { tiles.delete(a.id); el.style.zIndex = 1; setTimeout(() => el.remove(), 130); } }
+  grid.forEach((t, i) => { if (!t) return; if (!tiles.has(t.id) || t.merged || t.fresh) { const el = tileEl(t, i); if (t.merged || t.fresh) setTimeout(() => place(el, i % 4, (i / 4) | 0), 0); } else place(tiles.get(t.id), i % 4, (i / 4) | 0); delete t.fresh; delete t.merged; });
+  scoreEl.textContent = score;
+  if (score > best) { best = score; bestEl.textContent = best; try { localStorage.setItem('2048-best', best); } catch { /* blocked */ } }
+}
+function move(dir) {
+  if (overShown) return false;
+  const r = slide(grid, dir);
+  if (!r.moved) return false;
+  undoStack.push({ g: grid.map((t) => t && { ...t }), score }); if (undoStack.length > 30) undoStack.shift();
+  grid = r.out; score += r.gained;
+  if (r.gained) { const p = document.createElement('div'); p.className = 'pop'; p.textContent = '+' + r.gained; scoreEl.parentElement.appendChild(p); setTimeout(() => p.remove(), 800); }
+  spawn(grid);
+  render(r.anim);
+  if (!won && grid.some((t) => t && t.v === 2048)) { won = true; if (!ai) showOver('You made 2048!'); }
+  if (!canMove(grid)) showOver('Game over');
+  return true;
+}
+function showOver(txt) { overShown = true; document.getElementById('overtxt').textContent = txt; document.getElementById('over').classList.add('show'); if (ai) setTimeout(newGame, 2600); }
+function newGame() {
+  for (const el of tiles.values()) el.remove(); tiles.clear();
+  grid = Array(16).fill(null); score = 0; undoStack = []; won = false; overShown = false;
+  document.getElementById('over').classList.remove('show');
+  spawn(grid); spawn(grid); render();
+}
+
+// AI > expectimax: max over moves, average over spawn cells (2 at 0.9, 4 at 0.1)
+const WEIGHT = [15, 14, 13, 12, 8, 9, 10, 11, 7, 6, 5, 4, 0, 1, 2, 3].map((k) => 4 ** (k / 3)); // snake from top-left
+function heur(v) {
+  let s = 0, empty = 0;
+  for (let i = 0; i < 16; i++) { if (!v[i]) { empty++; continue; } s += v[i] * WEIGHT[i]; }
+  // smoothness: penalise big neighbour gaps
+  let rough = 0;
+  for (let i = 0; i < 16; i++) { if (!v[i]) continue; const l = Math.log2(v[i]); if (i % 4 < 3 && v[i + 1]) rough += Math.abs(l - Math.log2(v[i + 1])); if (i < 12 && v[i + 4]) rough += Math.abs(l - Math.log2(v[i + 4])); }
+  return s + empty * 40 * Math.max(...v) ** 0.5 - rough * 15;
+}
+function slideV(v, dir) {
+  const out = Array(16).fill(0); let moved = false;
+  for (let k = 0; k < 4; k++) { const idx = LINES[dir](k), row = idx.map((i) => v[i]).filter(Boolean); let w = 0; for (let r = 0; r < row.length; r++) { if (row[r + 1] === row[r]) { out[idx[w++]] = row[r] * 2; r++; } else out[idx[w++]] = row[r]; } }
+  for (let i = 0; i < 16; i++) if (out[i] !== v[i]) { moved = true; break; }
+  return moved ? out : null;
+}
+let evals = 0;
+function chance(v, depth) {
+  const e = []; for (let i = 0; i < 16; i++) if (!v[i]) e.push(i);
+  if (!e.length) return maxNode(v, depth);
+  // sample cells when the board is open so depth stays affordable
+  const cells = e.length > 6 ? e.sort(() => Math.random() - 0.5).slice(0, 6) : e;
+  let s = 0;
+  for (const i of cells) for (const [val, p] of [[2, 0.9], [4, 0.1]]) { v[i] = val; s += p * maxNode(v, depth); v[i] = 0; }
+  return s / cells.length;
+}
+function maxNode(v, depth) {
+  evals++;
+  if (depth === 0) return heur(v);
+  let best = -Infinity;
+  for (const d of ['up', 'left', 'right', 'down']) { const n = slideV(v, d); if (n) best = Math.max(best, chance(n, depth - 1)); }
+  return best === -Infinity ? -1e6 : best;
+}
+function aiMove() {
+  const v = grid.map((t) => (t ? t.v : 0)), empties = v.filter((x) => !x).length;
+  const depth = empties > 7 ? 2 : empties > 3 ? 2 : 3;
+  let best = null, bs = -Infinity; evals = 0;
+  for (const d of ['up', 'left', 'right', 'down']) { const n = slideV(v, d); if (!n) continue; const s = chance(n, depth - 1); if (s > bs) { bs = s; best = d; } }
+  document.getElementById('aiinfo').textContent = best ? `expectimax depth ${depth} · ${evals} nodes · ${best}` : '';
+  return best;
+}
+
+// Input
+const KEYS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', KeyA: 'left', KeyD: 'right', KeyW: 'up', KeyS: 'down' };
+function human(dir) { idle = 0; if (ai) setAI(false); move(dir); }
+addEventListener('keydown', (e) => { const d = KEYS[e.code]; if (d) { e.preventDefault(); human(d); } });
+let t0 = null;
+boardEl.addEventListener('pointerdown', (e) => { t0 = { x: e.clientX, y: e.clientY }; });
+addEventListener('pointerup', (e) => { if (!t0) return; const dx = e.clientX - t0.x, dy = e.clientY - t0.y; t0 = null; if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return; human(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up')); });
+function setAI(on) { ai = on; document.getElementById('bai').classList.toggle('on', on); if (!on) document.getElementById('aiinfo').textContent = ''; }
+document.getElementById('bai').onclick = () => { idle = 0; setAI(!ai); if (ai && overShown) newGame(); };
+document.getElementById('bnew').onclick = () => { idle = 0; newGame(); };
+document.getElementById('again').onclick = () => { idle = 0; newGame(); };
+document.getElementById('bundo').onclick = () => { idle = 0; setAI(false); const u = undoStack.pop(); if (!u) return; for (const el of tiles.values()) el.remove(); tiles.clear(); grid = u.g; score = u.score; overShown = false; document.getElementById('over').classList.remove('show'); render(); };
+setInterval(() => { if (ai && !overShown) { const d = aiMove(); if (d) move(d); } }, 140);
+setInterval(() => { if (!ai) { idle++; if (idle > 40) { setAI(true); newGame(); } } }, 1000);
+
+newGame(); setAI(true);
+window.__g2048 = { get score() { return score; }, get max() { return Math.max(...grid.map((t) => (t ? t.v : 0))); }, setGrid(vals) { for (const el of tiles.values()) el.remove(); tiles.clear(); grid = vals.map((v) => (v ? { id: nextId++, v } : null)); render(); }, move, get grid() { return grid.map((t) => (t ? t.v : 0)); }, setAI };
+</script>
+</body>
+</html>

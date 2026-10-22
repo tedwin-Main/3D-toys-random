@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volumetric Clouds</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="5" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="raymarching, FBM noise, Beer-Lambert, Henyey-Greenstein, sky" />
+<meta name="description" content="A flight above a cloud layer, raymarched per pixel: 3D FBM noise shaped into cumulus, Beer-Lambert absorption with a light march toward the sun, Henyey-Greenstein forward scattering for silver linings, the powder effect, and an atmospheric sky that changes with time of day. Tests volume rendering and lighting math in a single fragment shader." />
+<meta name="prompt" content="Write a single HTML file with a WebGL2 fragment shader that renders realistic volumetric clouds. Raymarch a cloud layer shaped with 3D FBM noise, light it with Beer-Lambert absorption, a short march toward the sun, Henyey-Greenstein scattering and the powder effect for bright edges. Add a sky gradient with a sun disc, a time-of-day slider from dawn to dusk, wind, drag to look around, and adaptive resolution to stay smooth." />
+<style>
+  :root { --ink: #f4f6ff; --muted: #c6cde0; --panel: rgba(12, 16, 30, 0.5); --accent: #ffc27a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #6d8fb8; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; text-shadow: 0 1px 6px #0006; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.12); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 60px 1fr 44px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.08); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #2a1602; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; text-shadow: 0 1px 4px #0006; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Volumetric Clouds</h1><p>raymarched FBM · single fragment shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Time <input id="tod" type="range" min="0" max="1" step="0.001" value="0.13"><output id="tod-o"></output></label>
+  <label>Cover <input id="cover" type="range" min="0.2" max="0.8" step="0.01" value="0.56"><output id="cover-o"></output></label>
+  <div class="btns"><button id="cycle" class="on">Day cycle</button><button id="wind" class="on">Wind</button><button id="fly" class="on">Fly</button></div>
+  <div class="hint">Drag to look around · sliders change sun and cloud cover</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/volumetric-clouds.html
+ * PURPOSE: WebGL2 raymarched cloud layer: FBM density, sun light march, HG phase, powder, time-of-day sky, adaptive res
+ * UI: Render Studio > Shaders > Volumetric Clouds
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uTime; uniform vec3 uSun; uniform float uCover; uniform vec3 uWind; uniform vec3 uRo; uniform mat3 uCam;
+out vec4 o;
+const float BOT = 1.2, TOP = 3.4;   // cloud slab, km
+float hash(vec3 p){ p = fract(p * .3183099 + .1); p *= 17.; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 x){
+  vec3 i = floor(x), f = fract(x); f = f * f * (3. - 2. * f);
+  return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p, int oct){ float a = .5, s = 0.; for (int i = 0; i < 5; i++) { if (i >= oct) break; s += a * noise(p); p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= .5; } return s; }
+float density(vec3 p, int oct){
+  float h = (p.y - BOT) / (TOP - BOT);
+  if (h < 0. || h > 1.) return 0.;
+  // rounded bottoms, wispy tops
+  float shape = smoothstep(0., .12, h) * smoothstep(1., .45, h);
+  vec3 q = p * .42 + uWind;
+  float base = fbm(q * vec3(1., 1.6, 1.), 2);
+  float d = base * shape - (1. - uCover) * .62;
+  if (d <= 0.) return 0.;
+  d -= fbm(q * 3.6 + uWind * .5, oct) * .3 * (1. - h * .4);
+  return clamp(d * 4.5, 0., 1.);
+}
+vec3 skyCol(vec3 rd){
+  float sunUp = uSun.y;
+  vec3 zen = mix(vec3(.03, .05, .13), vec3(.07, .2, .55), smoothstep(-.1, .4, sunUp));
+  vec3 hor = mix(vec3(.95, .5, .28), vec3(.6, .74, .92), smoothstep(0., .5, sunUp));
+  vec3 c = mix(hor, zen, pow(max(rd.y, 0.), .55));
+  float s = max(dot(rd, uSun), 0.);
+  c += vec3(1., .7, .4) * pow(s, 8.) * .35 * (1. - smoothstep(.2, .7, sunUp) * .6);
+  c += vec3(1., .92, .8) * smoothstep(.99985, .99993, s) * 6.;
+  if (rd.y < 0.) c = mix(c, vec3(.1, .17, .26) * (.3 + .7 * smoothstep(-.1, .4, sunUp)), smoothstep(0., -.08, rd.y));
+  return c;
+}
+float hg(float c, float g){ float g2 = g * g; return (1. - g2) / (4. * 3.14159 * pow(1. + g2 - 2. * g * c, 1.5)); }
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  vec3 rd = normalize(uCam * vec3(uv, 1.25));
+  vec3 sky = skyCol(rd);
+  // slab entry/exit along the ray
+  float t0 = (BOT - uRo.y) / rd.y, t1 = (TOP - uRo.y) / rd.y;
+  if (t0 > t1) { float tt = t0; t0 = t1; t1 = tt; }
+  t0 = max(t0, 0.);
+  vec3 col = sky;
+  if (t1 > 0. && t0 < 60.) {
+    t1 = min(t1, t0 + 18.);
+    const int STEPS = 56;
+    float dt = (t1 - t0) / float(STEPS);
+    // per-pixel jitter hides banding between steps
+    float t = t0 + dt * fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float T = 1.;
+    vec3 L = vec3(0);
+    float mu = dot(rd, uSun);
+    float phase = mix(hg(mu, .65), hg(mu, -.2), .3) * 4. + .25;
+    vec3 sunC = mix(vec3(1., .55, .3), vec3(1., .97, .92), smoothstep(0., .45, uSun.y)) * 5. * smoothstep(-.12, .05, uSun.y);
+    vec3 ambC = mix(vec3(.25, .25, .35), vec3(.55, .65, .85), smoothstep(-.1, .4, uSun.y)) * .42;
+    for (int i = 0; i < STEPS; i++) {
+      vec3 p = uRo + rd * t;
+      float d = density(p, 4);
+      if (d > .005) {
+        // short march toward the sun
+        float ld = 0.;
+        for (int j = 1; j <= 5; j++) ld += density(p + uSun * float(j) * .22, 2);
+        float beer = max(exp(-ld * 2.2), exp(-ld * .3) * .25);
+        float powder = 1. - exp(-d * 4.);
+        float h = (p.y - BOT) / (TOP - BOT);
+        vec3 lit = sunC * beer * phase * mix(1., powder, .6) + ambC * (.45 + .55 * h);
+        float a = 1. - exp(-d * dt * 7.);
+        L += T * a * lit;
+        T *= 1. - a;
+        if (T < .02) break;
+      }
+      t += dt;
+    }
+    float fog = 1. - exp(-t0 * .045);
+    col = mix(sky * T + L, sky, fog);
+  }
+  col = 1. - exp(-col * 1.35);
+  o = vec4(pow(col, vec3(1. / 2.2)), 1.);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uTime', 'uSun', 'uCover', 'uWind', 'uRo', 'uCam'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Clouds > look: drag yaw/pitch, eases back to a gentle pan when idle
+const cam = { yaw: 0.4, pitch: -0.13, vyaw: 0, vpitch: 0 };
+let lastInput = -1e9, drag = null;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = [e.clientX, e.clientY]; lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.vyaw = -(e.clientX - drag[0]) * 0.004; cam.vpitch = -(e.clientY - drag[1]) * 0.004;
+  drag = [e.clientX, e.clientY]; lastInput = performance.now();
+});
+cv.addEventListener('pointerup', () => (drag = null));
+cv.addEventListener('pointercancel', () => (drag = null));
+
+// Clouds > Panel: sliders and toggles
+const tod = $('tod'), cover = $('cover');
+const flags = { cycle: true, wind: true, fly: true };
+const todLabel = (v) => { const h = 5 + v * 15; return `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`; };
+const showVals = () => { $('tod-o').textContent = todLabel(Number(tod.value)); $('cover-o').textContent = Number(cover.value).toFixed(2); };
+tod.addEventListener('input', () => { flags.cycle = false; $('cycle').classList.remove('on'); showVals(); });
+cover.addEventListener('input', showVals);
+showVals();
+for (const k of Object.keys(flags)) $(k).onclick = () => { flags[k] = !flags[k]; $(k).classList.toggle('on', flags[k]); };
+
+// Clouds > adaptive resolution: hold ~55+ fps by scaling render buffer
+let scale = Math.min(devicePixelRatio || 1, 1), ftAvg = 16, frames = 0, stable = 0;
+function resize() {
+  cv.width = Math.round(innerWidth * scale);
+  cv.height = Math.round(innerHeight * scale);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now(), t0 = last, fps = 60, fpsN = 0, fpsT = 0, wind = [0, 0, 0], flyZ = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  ftAvg = ftAvg * 0.92 + dt * 1000 * 0.08;
+  if (++frames % 30 === 0) {
+    stable = ftAvg < 17.5 ? stable + 1 : 0;
+    const next = ftAvg > 20 ? scale * 0.85 : stable > 10 ? scale * 1.05 : scale;
+    if (stable > 10) stable = 0;
+    const clamped = Math.min(Math.min(devicePixelRatio || 1, 1), Math.max(0.3, next));
+    if (Math.abs(clamped - scale) > 0.01) { scale = clamped; resize(); }
+  }
+  const idle = now - lastInput > 3000;
+  if (idle) cam.vyaw += (0.02 * dt - cam.vyaw) * 0.05;
+  cam.yaw += cam.vyaw; cam.pitch = Math.min(0.6, Math.max(-0.9, cam.pitch + cam.vpitch));
+  cam.vyaw *= idle ? 1 : 0.88; cam.vpitch *= 0.88;
+  if (flags.cycle) { tod.value = (Number(tod.value) + dt * 0.012) % 1; showVals(); }
+  if (flags.wind) { wind[0] += dt * 0.05; wind[2] += dt * 0.02; }
+  if (flags.fly) flyZ += dt * 0.6;
+
+  const td = Number(tod.value), ang = -0.15 + td * (Math.PI + 0.3);
+  const sun = [Math.cos(ang) * 0.85, Math.sin(ang), -1];
+  const sl = Math.hypot(...sun);
+  const ro = [Math.sin(cam.yaw) * flyZ * 0.3, 3.95, -flyZ];
+  // look-at basis (column-major mat3: right, up, forward)
+  const cp = Math.cos(cam.pitch);
+  const f = [Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), -Math.cos(cam.yaw) * cp];
+  let r = [-f[2], 0, f[0]];
+  const rl = Math.hypot(...r); r = r.map((v) => v / rl);
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uTime, (now - t0) / 1000);
+  gl.uniform3fv(U.uSun, sun.map((v) => v / sl));
+  gl.uniform1f(U.uCover, Number(cover.value));
+  gl.uniform3fv(U.uWind, wind);
+  gl.uniform3fv(U.uRo, ro);
+  gl.uniformMatrix3fv(U.uCam, false, [...r, ...u, ...f]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${fps} fps<br>${cv.width}×${cv.height}<br>${todLabel(td)}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Matrix Rain</title>
+<meta name="category" content="generative" />
+<meta name="order" content="9" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="digital rain, glyph atlas, parallax layers, canvas" />
+<meta name="description" content="Digital rain in three parallax layers: half-width katakana and digits fall in columns with white-hot heads and fading green tails, glyphs mutate as they age, the far layer is blurred for depth, and the pointer sends a ripple through the streams. Every few seconds the rain spells out a word as it passes. Drawn from a pre-rendered glyph atlas so thousands of characters stay at 60 fps." />
+<meta name="prompt" content="Make the Matrix digital rain effect in a single HTML file with canvas. Use half-width katakana, digits and symbols falling in columns with a bright white head and a fading green trail, glyphs that randomly change, three depth layers at different sizes and speeds with the back layer blurred, and a ripple that brightens the streams near the pointer. Have the rain occasionally reveal a word in the middle of the screen, and add colour themes and a speed control." />
+<style>
+  :root { --ink: #d9ffe2; --muted: #5f9a6d; --panel: rgba(0, 10, 3, 0.7); --accent: #39ff6a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #back { filter: blur(1.6px); opacity: 0.55; }
+  #mid { opacity: 0.85; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; z-index: 2; text-shadow: 0 0 8px #000, 0 0 2px #000; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; z-index: 2; width: 270px; padding: 12px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(10px); border: 1px solid rgba(80, 255, 120, 0.15); font-size: 12px; }
+  #panel label { display: grid; grid-template-columns: 50px 1fr 36px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+  #panel button { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); color: var(--ink); border-radius: 8px; padding: 6px 2px; font: inherit; font-weight: 600; cursor: pointer; }
+  #panel button.on { background: var(--accent); color: #001a06; border-color: var(--accent); }
+  #stats { position: fixed; right: 18px; top: 18px; z-index: 2; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; text-shadow: 0 0 6px #000; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="back"></canvas><canvas id="mid"></canvas><canvas id="front"></canvas>
+<div class="title"><h1>Matrix Rain</h1><p>glyph atlas · three parallax layers</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Speed <input id="speed" type="range" min="0.2" max="2.5" step="0.01" value="1"><output id="speed-o"></output></label>
+  <div class="btns"><button data-theme="0" class="on">Green</button><button data-theme="1">Cyan</button><button data-theme="2">Amber</button><button data-theme="3">Red</button></div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/matrix-rain.html
+ * PURPOSE: Digital rain: 3 parallax canvases, atlas-blitted glyphs, white heads + fading tails, mutation, pointer ripple, word reveal
+ * UI: Render Studio > 2D & Generative > Matrix Rain
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const $ = (id) => document.getElementById(id);
+const GLYPHS = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝ012345789Z:・."=*+-<>¦|ｸﾘ';
+const WORDS = ['RENDER STUDIO', 'ONE PROMPT', 'NO ENGINE', 'WAKE THE GPU'];
+const THEMES = [['#39ff6a', '#d9ffe2'], ['#3ae6ff', '#e0fbff'], ['#ffb12e', '#fff1d6'], ['#ff3b4e', '#ffe0e3']];
+let theme = 0;
+
+// Rain > glyph atlas: each glyph drawn once in tail colour and head colour, blitted with drawImage
+function buildAtlas(size, tail, head) {
+  // roomy cells so the glow never gets clipped into a visible square
+  const cell = Math.ceil(size * 1.7), c = document.createElement('canvas');
+  c.width = cell * GLYPHS.length; c.height = cell * 2;
+  const g = c.getContext('2d');
+  g.font = `${size}px "MS Gothic", "Hiragino Sans", "Noto Sans JP", ui-monospace, monospace`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  [...GLYPHS].forEach((ch, i) => {
+    g.save(); g.translate(i * cell + cell / 2, cell / 2); g.scale(-1, 1); // mirrored, like the film
+    g.fillStyle = tail; g.shadowColor = tail; g.shadowBlur = size * 0.25; g.fillText(ch, 0, 0); g.restore();
+    g.save(); g.translate(i * cell + cell / 2, cell * 1.5); g.scale(-1, 1);
+    g.fillStyle = head; g.shadowColor = tail; g.shadowBlur = size * 0.3; g.fillText(ch, 0, 0); g.restore();
+  });
+  return { c, cell };
+}
+function buildLetterAtlas(size, color) {
+  const cell = Math.ceil(size * 2), c = document.createElement('canvas');
+  c.width = cell * 27; c.height = cell;
+  const g = c.getContext('2d');
+  g.font = `bold ${size}px ui-monospace, Menlo, monospace`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = color; g.shadowColor = THEMES[theme][0]; g.shadowBlur = size * 0.45;
+  for (let i = 0; i < 26; i++) g.fillText(String.fromCharCode(65 + i), i * cell + cell / 2, cell / 2);
+  return { c, cell };
+}
+
+// Rain > layers: font size, speed and density per depth
+const LAYERS = [
+  { el: $('back'), size: 11, speed: 0.55, density: 0.75 },
+  { el: $('mid'), size: 15, speed: 0.8, density: 0.6 },
+  { el: $('front'), size: 20, speed: 1.1, density: 0.45 },
+];
+let W = 0, H = 0, dpr = 1;
+function setup() {
+  dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  const mobile = W < 600;
+  for (const L of LAYERS) {
+    L.el.width = W * dpr; L.el.height = H * dpr;
+    L.g = L.el.getContext('2d'); L.g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const size = mobile ? Math.round(L.size * 0.8) : L.size;
+    L.atlas = buildAtlas(size, THEMES[theme][0], THEMES[theme][1]);
+    L.step = size * 1.05; L.colW = size * 0.95;
+    L.cols = Math.ceil(W / L.colW); L.rows = Math.ceil(H / L.step) + 1;
+    L.grid = Array.from({ length: L.cols }, () => Array.from({ length: L.rows }, () => (Math.random() * GLYPHS.length) | 0));
+    L.drops = Array.from({ length: L.cols }, () => newDrop(L, true));
+  }
+  const F = LAYERS[2];
+  F.letters = buildLetterAtlas(F.atlas.cell / 1.7, THEMES[theme][1]);
+  F.lit = new Map();
+}
+function newDrop(L, initial) {
+  return { y: initial ? Math.random() * L.rows * 1.5 - L.rows * 0.5 : -Math.random() * L.rows * 0.6, v: (8 + Math.random() * 12) * L.speed, len: 8 + Math.random() * 26, on: Math.random() < L.density };
+}
+addEventListener('resize', setup);
+setup();
+
+// Rain > Panel: speed + theme
+const speed = $('speed');
+const showSpeed = () => ($('speed-o').textContent = Number(speed.value).toFixed(2));
+speed.oninput = showSpeed; showSpeed();
+document.querySelectorAll('[data-theme]').forEach((b) => (b.onclick = () => {
+  theme = Number(b.dataset.theme);
+  document.querySelectorAll('[data-theme]').forEach((x) => x.classList.toggle('on', x === b));
+  document.documentElement.style.setProperty('--accent', THEMES[theme][0]);
+  setup();
+}));
+
+// Rain > pointer ripple: expanding ring that boosts glyph brightness
+const ripples = [];
+let lastInput = -1e9;
+addEventListener('pointerdown', (e) => { if (e.target.closest('#panel')) return; ripples.push({ x: e.clientX, y: e.clientY, t: 0 }); lastInput = performance.now(); });
+addEventListener('pointermove', (e) => { if (e.buttons && !e.target.closest('#panel') && Math.random() < 0.3) ripples.push({ x: e.clientX, y: e.clientY, t: 0 }); });
+
+// Rain > word reveal: letters latch onto front-layer cells as heads pass, then fade
+let word = null, wordT = 0, wordIdx = 0;
+function placeWord() {
+  const F = LAYERS[2], text = WORDS[wordIdx++ % WORDS.length];
+  const maxCols = F.cols - 4, scale = text.length > maxCols ? maxCols / text.length : 1;
+  const c0 = Math.floor(F.cols / 2 - (text.length * scale) / 2), r = Math.floor(F.rows * 0.45);
+  word = [...text].map((ch, i) => ({ ch, col: c0 + Math.floor(i * scale), row: r })).filter((l) => l.ch !== ' ');
+  F.lit.clear();
+  // every letter column needs a live stream or the word never completes
+  for (const l of word) F.drops[l.col].on = true;
+}
+
+let last = performance.now(), fps = 60, fpsN = 0, fpsT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const sp = Number(speed.value);
+  wordT += dt;
+  if (!word && wordT > 2) placeWord();
+  if (word && wordT > 11) { word = null; wordT = 0; }
+  for (const r of ripples) r.t += dt;
+  while (ripples.length && ripples[0].t > 1.6) ripples.shift();
+  if (now - lastInput > 5000 && Math.random() < dt * 0.4) ripples.push({ x: Math.random() * W, y: Math.random() * H * 0.8, t: 0 });
+
+  for (let li = 0; li < LAYERS.length; li++) {
+    const L = LAYERS[li], g = L.g, A = L.atlas, cell = A.cell;
+    g.clearRect(0, 0, W, H);
+    for (let c = 0; c < L.cols; c++) {
+      const d = L.drops[c];
+      d.y += d.v * dt * sp;
+      if (d.y - d.len > L.rows) { L.drops[c] = newDrop(L, false); if (li === 2 && word && word.some((l) => l.col === c)) L.drops[c].on = true; }
+      if (!d.on) continue;
+      const head = Math.floor(d.y), x = c * L.colW + L.colW / 2;
+      // mutate a few glyphs in this column
+      if (Math.random() < 0.35) L.grid[c][(Math.random() * L.rows) | 0] = (Math.random() * GLYPHS.length) | 0;
+      for (let k = 0; k < d.len; k++) {
+        const row = head - k;
+        if (row < 0 || row >= L.rows) continue;
+        const y = row * L.step;
+        let a = Math.pow(1 - k / d.len, 1.6);
+        for (const r of ripples) {
+          const dist = Math.hypot(x - r.x, y - r.y), ring = Math.abs(dist - r.t * 520);
+          if (ring < 50) a = Math.min(1, a + (1 - ring / 50) * (1 - r.t / 1.6) * 0.9);
+        }
+        if (a < 0.03) continue;
+        g.globalAlpha = a;
+        const gi = L.grid[c][row];
+        g.drawImage(A.c, gi * cell, k === 0 ? cell : 0, cell, cell, x - cell / 2, y - cell / 2, cell, cell);
+      }
+      if (li === 2 && word) for (const l of word) if (l.col === c && head >= l.row && head - d.len < l.row) L.lit.set(c, l);
+    }
+    if (li === 2 && word) {
+      const LA = L.letters, fade = Math.min(1, (11 - wordT) / 1.5);
+      for (const l of L.lit.values()) {
+        g.globalAlpha = Math.max(0, fade);
+        g.drawImage(LA.c, (l.ch.charCodeAt(0) - 65) * LA.cell, 0, LA.cell, LA.cell, l.col * L.colW + L.colW / 2 - LA.cell / 2, l.row * L.step - LA.cell / 2, LA.cell, LA.cell);
+      }
+    }
+    g.globalAlpha = 1;
+  }
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').textContent = `${fps} fps · ${LAYERS.reduce((s, L) => s + L.cols, 0)} streams`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

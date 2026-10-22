@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rain on Glass</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="8" />
+<meta name="capture" content="3500" />
+<meta name="tags" content="refraction, procedural drops, bokeh, condensation, GLSL" />
+<meta name="description" content="A rainy window at night over blurred city lights. Raindrops slide down in stuttering runs, leave cleared trails and beads behind them, and static drops pop in and fade; each drop refracts a sharp view of the bokeh behind the fogged glass. Wipe the condensation with a finger. Tests procedural normals, refraction and depth-of-field in one fragment shader with no textures." />
+<meta name="prompt" content="Write a single HTML file with a WebGL2 fragment shader of rain running down a window at night. Behind the glass, render a blurry procedural city of bokeh lights; the glass is fogged, and drops slide down in jerky runs leaving clear trails and little beads, while small static drops appear and evaporate. Each drop should refract a sharp view through it, and dragging should wipe the condensation away so it slowly fogs back. Add sliders for rain amount and fog." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.6); --accent: #7cc4ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05060c; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 50px 1fr 36px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .hint { margin-top: 4px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Rain on Glass</h1><p>procedural drops · refraction · bokeh · one shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Rain <input id="rain" type="range" min="0" max="1" step="0.01" value="0.75"><output id="rain-o"></output></label>
+  <label>Fog <input id="fog" type="range" min="0" max="1" step="0.01" value="0.8"><output id="fog-o"></output></label>
+  <div class="hint">Drag to wipe the glass · it fogs back slowly</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/rain-on-glass.html
+ * PURPOSE: WebGL2 rainy window: sliding + static drops, trail clearing, refraction of procedural bokeh city, wipe-to-clear
+ * UI: Render Studio > Shaders > Rain on Glass
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform float uTime; uniform float uRain; uniform float uFog; uniform sampler2D uWipe;
+out vec4 o;
+vec3 h3(float p){ vec3 q = fract(vec3(p) * vec3(.1031, .11369, .13787)); q += dot(q, q.yzx + 19.19); return fract(vec3((q.x + q.y) * q.z, (q.x + q.z) * q.y, (q.y + q.z) * q.x)); }
+float h1(float p){ return h3(p).x; }
+
+// Shader > sliding drops: one per grid cell, stick-then-rush motion, trail + beads above
+vec2 slide(vec2 uv, float t, float seed){
+  vec2 g = vec2(7., 1.3);
+  vec2 p = uv * g;
+  float colId = floor(p.x);
+  p.y += h1(colId + seed) * 3.;
+  vec2 id = floor(p);
+  vec3 n = h3(id.x * 37.1 + id.y * 911.7 + seed * 13.);
+  vec2 st = fract(p) - vec2(.5, 0.);
+  float ph = fract(t * (.12 + n.y * .1) + n.z);
+  // eased fall with hesitations: water sticks, then lets go
+  float fall = ph + .045 * sin(ph * 6.2832 * 3.);
+  float yy = .92 - fall * .84;
+  float x = (n.x - .5) * .55 + sin(st.y * 9. + n.z * 6.) * .06 * (n.y - .5);
+  float dx = (st.x - x) / g.x, dy = (st.y - yy) / g.y;
+  float d = length(vec2(dx, dy * (dy < 0. ? .8 : 1.25)));
+  float drop = smoothstep(.0125, .006, d);
+  float above = st.y - yy;
+  float r = smoothstep(.75, 0., above);
+  float trail = smoothstep(.006 * r + .001, .0015 * r, abs(dx)) * step(0., above) * r;
+  // beads left behind along the trail
+  float by = fract(uv.y * 26. + n.z * 5.) - .5;
+  float bead = smoothstep(.22, .05, length(vec2(dx * 26. * 1.3, by / 1.))) * step(.02, above) * r * smoothstep(.0, .2, n.y);
+  return vec2(drop + bead * .7, trail);
+}
+// Shader > static drops: dense grid, each fades in then evaporates
+float statics(vec2 uv, float t){
+  vec2 p = uv * 36.;
+  vec2 id = floor(p);
+  vec3 n = h3(id.x * 107.45 + id.y * 3543.65);
+  vec2 f = fract(p) - .5 - (n.xy - .5) * .7;
+  float life = fract(t * .18 + n.z);
+  float fade = smoothstep(0., .03, life) * smoothstep(1., .3, life);
+  return smoothstep(.28, .0, length(f)) * step(.55, fract(n.z * 7.)) * fade;
+}
+vec2 drops(vec2 uv, float t){
+  float s = statics(uv, t) * smoothstep(0., .4, uRain);
+  vec2 a = slide(uv, t, 0.) * smoothstep(.1, .6, uRain);
+  vec2 b = slide(uv * 1.7 + vec2(.3, 0.), t, 7.) * smoothstep(.4, .9, uRain);
+  float h = smoothstep(.25, 1., s + a.x + b.x);
+  return vec2(h, max(a.y, b.y));
+}
+// Shader > city behind the glass: bokeh discs whose size and softness grow with blur
+vec3 city(vec2 uv, float blur){
+  vec3 c = mix(vec3(.012, .013, .03), vec3(.05, .025, .045), smoothstep(.5, -.4, uv.y));
+  c += vec3(.12, .05, .03) * exp(-pow(uv.y + .25, 2.) * 10.) * .8;
+  for (int L = 0; L < 3; L++) {
+    float sc = 6. + float(L) * 5.;
+    vec2 q = uv * sc + vec2(float(L) * 13.1, uTime * .02 * float(L));
+    vec2 id0 = floor(q);
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 id = id0 + vec2(i, j);
+      vec3 n = h3(id.x * 71.3 + id.y * 13.7 + float(L) * 5.1);
+      float wy = (id.y + .5) / sc;
+      if (n.z < .62 + smoothstep(-.4, .4, wy) * .32) continue;
+      vec2 cen = id + .5 + (n.xy - .5) * .8;
+      float d = length(q - cen);
+      float rad = .05 + blur * (.32 + n.x * .25);
+      float soft = .015 + blur * .2;
+      float k = fract(n.z * 17.);
+      vec3 lc = k < .4 ? vec3(1., .62, .25) : k < .65 ? vec3(1., .9, .75) : k < .82 ? vec3(1., .25, .18) : vec3(.3, .8, 1.);
+      float a = smoothstep(rad, rad - soft, d) * (.35 + .65 * n.y);
+      // energy spreads as the disc grows
+      c += lc * a * mix(1.6, .35, blur) * (1. - .2 * smoothstep(rad - soft * 1.5, rad, d) * blur);
+    }
+  }
+  return c;
+}
+void main(){
+  vec2 uv = (gl_FragCoord.xy - .5 * uRes) / uRes.y;
+  vec2 suv = gl_FragCoord.xy / uRes;
+  float t = uTime;
+  vec2 c = drops(uv, t);
+  vec2 e = vec2(.0015, 0.);
+  float cx = drops(uv + e, t).x, cy = drops(uv + e.yx, t).x;
+  vec2 nrm = vec2(cx - c.x, cy - c.x);
+  float wipe = texture(uWipe, vec2(suv.x, 1. - suv.y)).r;
+  float clear = clamp(max(c.y, wipe), 0., 1.);
+  float inDrop = smoothstep(.1, .25, c.x);
+  float blur = mix(uFog * (1. - clear * .85), .02, inDrop);
+  vec3 col = city(uv - nrm * 1.2, blur);
+  // condensation scatters light: lift and desaturate fogged glass
+  float fogA = uFog * (1. - clear) * (1. - inDrop) * .45;
+  col = mix(col, mix(col, vec3(dot(col, vec3(.33))), .5) * .85 + vec3(.02, .024, .035), fogA);
+  // drop rims catch a little light from above
+  col += vec3(.5, .6, .8) * max(nrm.y, 0.) * 6. * inDrop;
+  col *= 1. - .25 * length(suv - .5);
+  col = 1. - exp(-col * 1.4);
+  o = vec4(pow(col, vec3(1. / 2.2)), 1.);
+}`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p');
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['uRes', 'uTime', 'uRain', 'uFog', 'uWipe'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+// Rain > wipe mask: small 2D canvas painted by the pointer, fades back to fog
+const WM = 256, wipeCv = document.createElement('canvas');
+wipeCv.width = wipeCv.height = WM;
+const wg = wipeCv.getContext('2d');
+wg.fillStyle = '#000'; wg.fillRect(0, 0, WM, WM);
+const wipeTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, wipeTex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+let lastPt = null, lastInput = -1e9;
+function wipeTo(x, y) {
+  const px = (x / innerWidth) * WM, py = (y / innerHeight) * WM;
+  wg.strokeStyle = '#fff'; wg.lineCap = 'round'; wg.lineWidth = WM * 0.07;
+  wg.shadowColor = '#fff'; wg.shadowBlur = 8;
+  wg.beginPath();
+  wg.moveTo(...(lastPt || [px, py])); wg.lineTo(px, py); wg.stroke();
+  lastPt = [px, py];
+}
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); lastPt = null; wipeTo(e.clientX, e.clientY); lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => { if (lastPt) { wipeTo(e.clientX, e.clientY); lastInput = performance.now(); } });
+cv.addEventListener('pointerup', () => (lastPt = null));
+cv.addEventListener('pointercancel', () => (lastPt = null));
+
+// Rain > Panel: rain + fog sliders
+const rain = $('rain'), fog = $('fog');
+const showVals = () => { $('rain-o').textContent = Number(rain.value).toFixed(2); $('fog-o').textContent = Number(fog.value).toFixed(2); };
+rain.oninput = fog.oninput = showVals; showVals();
+
+function resize() {
+  const s = Math.min(devicePixelRatio || 1, 1.25);
+  cv.width = Math.round(innerWidth * s); cv.height = Math.round(innerHeight * s);
+  gl.viewport(0, 0, cv.width, cv.height);
+}
+addEventListener('resize', resize);
+resize();
+
+// Rain > attract: an invisible finger draws a slow wave across the glass every 12 s
+let last = performance.now(), t0 = last, fps = 60, fpsN = 0, fpsT = 0, ghostT = 0, ghostOn = false, fadeAcc = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const t = (now - t0) / 1000;
+  if (now - lastInput > 6000) {
+    ghostT += dt;
+    const k = (ghostT % 12) / 3.2;
+    if (k < 1) {
+      const x = innerWidth * (0.18 + 0.64 * k), y = innerHeight * (0.42 + Math.sin(k * Math.PI * 2) * 0.12);
+      if (!ghostOn) { lastPt = null; ghostOn = true; }
+      wipeTo(x, y);
+    } else if (ghostOn) { ghostOn = false; lastPt = null; }
+  }
+  // fog creeps back: tiny black veil each 1/30 s
+  fadeAcc += dt;
+  while (fadeAcc > 1 / 30) { wg.shadowBlur = 0; wg.fillStyle = 'rgba(0,0,0,0.012)'; wg.fillRect(0, 0, WM, WM); fadeAcc -= 1 / 30; }
+  gl.bindTexture(gl.TEXTURE_2D, wipeTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, wipeCv);
+  gl.uniform1i(U.uWipe, 0);
+  gl.uniform2f(U.uRes, cv.width, cv.height);
+  gl.uniform1f(U.uTime, t);
+  gl.uniform1f(U.uRain, Number(rain.value));
+  gl.uniform1f(U.uFog, Number(fog.value));
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${fps} fps`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

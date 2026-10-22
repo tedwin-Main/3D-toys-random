@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Double Pendulum Chaos</title>
+<meta name="category" content="physics" />
+<meta name="order" content="12" />
+<meta name="capture" content="5500" />
+<meta name="tags" content="RK4, Lagrangian mechanics, sensitive dependence, energy drift" />
+<meta name="description" content="Double pendulums integrated with fourth-order Runge-Kutta from the exact Lagrangian equations of motion. Pendulums that start a billionth of a radian apart move as one, then fan out into rainbow chaos; an inset plots the log of their separation (the straight climb is the Lyapunov exponent) and the energy drift shows how well RK4 conserves it. Drag a bob to set a new start." />
+<meta name="prompt" content="Simulate a double pendulum in a single HTML canvas page using RK4 on the full nonlinear equations of motion. Launch many pendulums whose starting angles differ by tiny amounts so they move together and then diverge chaotically, with fading rainbow trails. Plot the log separation over time and show total energy drift. Let the user drag the bob to set the start angles and switch between 2 and 100 pendulums." />
+<style>
+  :root { --ink: #e9ecf5; --mute: #8b92a8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07080d; color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; touch-action: none; user-select: none; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #ui { position: fixed; left: 16px; top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  h1 { margin: 0; font-size: 17px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button { background: #ffffff10; color: var(--ink); border: 1px solid #ffffff1c; border-radius: 9px; padding: 6px 10px; font: 650 12px ui-sans-serif, system-ui; cursor: pointer; }
+  button.on { background: #ffffff2e; }
+  #read { font: 12px ui-monospace, Menlo, monospace; color: var(--mute); line-height: 1.5; }
+</style>
+</head>
+<body>
+<canvas id="trail"></canvas>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>Double Pendulum Chaos</h1>
+  <div class="row"><button data-n="2">2 twins</button><button data-n="12">12</button><button data-n="100">100 spread</button><button id="reset">Reset</button></div>
+  <div id="read"></div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/double-pendulum.html
+ * PURPOSE: RK4 double pendulums from near-identical starts diverging chaotically; log-separation plot, energy drift readout, drag to set angles
+ * UI: Render Studio > Physics > Double Pendulum Chaos
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const trail = document.getElementById('trail'), tctx = trail.getContext('2d');
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let dpr, W, H, ox, oy, L;
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  for (const c of [trail, cv]) { c.width = W * dpr; c.height = H * dpr; }
+  tctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  L = Math.min(W, H) * 0.21; ox = W / 2; oy = H * (W < 600 ? 0.42 : 0.4);
+  tctx.fillStyle = '#07080d'; tctx.fillRect(0, 0, W, H);
+}
+addEventListener('resize', resize); resize();
+
+// Physics > state [θ1, θ2, ω1, ω2]; equal masses and lengths, g in rad units
+const G = 9.81, M1 = 1, M2 = 1, L1 = 1, L2 = 1;
+function deriv(s) {
+  const [a1, a2, w1, w2] = s, d = a1 - a2, den = 2 * M1 + M2 - M2 * Math.cos(2 * d);
+  const dw1 = (-G * (2 * M1 + M2) * Math.sin(a1) - M2 * G * Math.sin(a1 - 2 * a2) - 2 * Math.sin(d) * M2 * (w2 * w2 * L2 + w1 * w1 * L1 * Math.cos(d))) / (L1 * den);
+  const dw2 = (2 * Math.sin(d) * (w1 * w1 * L1 * (M1 + M2) + G * (M1 + M2) * Math.cos(a1) + w2 * w2 * L2 * M2 * Math.cos(d))) / (L2 * den);
+  return [w1, w2, dw1, dw2];
+}
+function rk4(s, h) {
+  const k1 = deriv(s), add = (a, b, f) => a.map((v, i) => v + b[i] * f);
+  const k2 = deriv(add(s, k1, h / 2)), k3 = deriv(add(s, k2, h / 2)), k4 = deriv(add(s, k3, h));
+  return s.map((v, i) => v + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+}
+function energy([a1, a2, w1, w2]) {
+  const y1 = -L1 * Math.cos(a1), y2 = y1 - L2 * Math.cos(a2);
+  const v1sq = (L1 * w1) ** 2, v2sq = v1sq + (L2 * w2) ** 2 + 2 * L1 * L2 * w1 * w2 * Math.cos(a1 - a2);
+  return 0.5 * M1 * v1sq + 0.5 * M2 * v2sq + M1 * G * y1 + M2 * G * y2;
+}
+
+// State
+let N = 100, pends = [], base = [2.4, 2.9], t = 0, sepLog = [], E0 = 0, idle = 0, drag = null;
+const EPS = 1e-9;
+function reset(a = base) {
+  base = a; t = 0; sepLog = [];
+  pends = Array.from({ length: N }, (_, k) => ({ s: [a[0] + k * (N > 2 ? 2e-7 : EPS), a[1], 0, 0], hue: N === 1 ? 200 : (k / N) * 300 + 180, prev: null }));
+  E0 = energy(pends[0].s);
+  tctx.fillStyle = '#07080d'; tctx.fillRect(0, 0, W, H);
+  document.querySelectorAll('[data-n]').forEach((b) => b.classList.toggle('on', +b.dataset.n === N));
+}
+document.querySelectorAll('[data-n]').forEach((b) => (b.onclick = () => { N = +b.dataset.n; idle = 0; reset(); }));
+document.getElementById('reset').onclick = () => { idle = 0; reset([2 + Math.random(), 2.4 + Math.random()]); };
+reset();
+
+const pos = (s) => { const x1 = ox + L * Math.sin(s[0]), y1 = oy + L * Math.cos(s[0]); return [x1, y1, x1 + L * Math.sin(s[1]), y1 + L * Math.cos(s[1])]; };
+
+// Input > drag the outer bob; inverse kinematics picks both angles
+cv.addEventListener('pointerdown', (e) => { idle = 0; drag = true; setFromPointer(e); cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', (e) => { if (drag) setFromPointer(e); });
+cv.addEventListener('pointerup', () => { if (drag) { drag = false; reset(base); } });
+function setFromPointer(e) {
+  let dx = e.clientX - ox, dy = e.clientY - oy; const d = Math.min(Math.hypot(dx, dy), 2 * L - 1), a = Math.atan2(dx, dy);
+  // two-link IK, elbow bends one way
+  const k = Math.acos(Math.min(1, d / (2 * L)));
+  base = [a + k, a - k];
+  for (const p of pends) p.s = [base[0], base[1], 0, 0];
+}
+
+// Render
+function drawPend(p, alpha, thick) {
+  const [x1, y1, x2, y2] = pos(p.s);
+  ctx.strokeStyle = `hsla(${p.hue} 90% 70% / ${alpha})`; ctx.lineWidth = thick; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.fillStyle = `hsla(${p.hue} 95% 72% / ${alpha})`;
+  ctx.beginPath(); ctx.arc(x1, y1, thick * 2.2, 0, 7); ctx.arc(x2, y2, thick * 2.6, 0, 7); ctx.fill();
+}
+function chart() {
+  // separation inset: log10 of angle-space distance between pendulum 0 and the last one
+  const w = Math.min(320, W - 32), h = 110, x0 = W - w - 16, y0 = H - h - 16;
+  ctx.fillStyle = '#0e1018d8'; ctx.strokeStyle = '#ffffff18'; ctx.beginPath(); ctx.roundRect(x0, y0, w, h, 10); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8b92a8'; ctx.font = '11px ui-monospace, Menlo, monospace'; ctx.textAlign = 'left';
+  ctx.fillText('log₁₀ separation', x0 + 10, y0 + 16);
+  const lo = -10, hi = 1, map = (v) => y0 + h - 12 - ((v - lo) / (hi - lo)) * (h - 34);
+  ctx.strokeStyle = '#ffffff12'; for (let v = lo; v <= hi; v += 3) { ctx.beginPath(); ctx.moveTo(x0 + 8, map(v)); ctx.lineTo(x0 + w - 8, map(v)); ctx.stroke(); ctx.fillText(v, x0 + w - 30, map(v) - 2); }
+  ctx.strokeStyle = '#ff7ad9'; ctx.lineWidth = 2; ctx.beginPath();
+  const n = sepLog.length; sepLog.forEach((v, i) => { const x = x0 + 8 + (i / Math.max(300, n)) * (w - 50); i ? ctx.lineTo(x, map(v)) : ctx.moveTo(x, map(v)); }); ctx.stroke();
+}
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000); last = now; idle += dt;
+  if (!drag) {
+    // 8 RK4 substeps per frame keeps energy drift tiny
+    const sub = 8, h = dt / sub;
+    for (let k = 0; k < sub; k++) for (const p of pends) p.s = rk4(p.s, h);
+    t += dt;
+  }
+  // fade trails a little each frame
+  tctx.fillStyle = 'rgba(7,8,13,0.06)'; tctx.fillRect(0, 0, W, H);
+  tctx.lineCap = 'round';
+  for (const p of pends) {
+    const [, , x2, y2] = pos(p.s);
+    if (p.prev && !drag) { tctx.strokeStyle = `hsla(${p.hue} 95% 62% / ${N > 20 ? 0.5 : 0.9})`; tctx.lineWidth = N > 20 ? 1.2 : 2.2; tctx.beginPath(); tctx.moveTo(p.prev[0], p.prev[1]); tctx.lineTo(x2, y2); tctx.stroke(); }
+    p.prev = [x2, y2];
+  }
+  ctx.clearRect(0, 0, W, H);
+  const thick = N > 20 ? 1.4 : 3;
+  for (const p of pends) drawPend(p, N > 20 ? 0.55 : 0.95, thick);
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 7); ctx.fill();
+  const a = pends[0].s, b = pends[pends.length - 1].s, sep = Math.hypot(a[0] - b[0], a[1] - b[1], (a[2] - b[2]) * 0.1, (a[3] - b[3]) * 0.1);
+  if (!drag && ((t * 20) | 0) !== sepLog._k) { sepLog._k = (t * 20) | 0; sepLog.push(Math.log10(Math.max(sep, 1e-12))); if (sepLog.length > 600) sepLog.shift(); }
+  chart();
+  const drift = Math.abs((energy(pends[0].s) - E0) / (Math.abs(E0) || 1));
+  document.getElementById('read').innerHTML = `t = ${t.toFixed(1)} s · ${N} pendulums<br>start offsets ${N > 2 ? '2e-7' : '1e-9'} rad apart<br>energy drift ${(drift * 100).toExponential(1)} %<br>drag a bob to restart`;
+  // demo loop: new random start every 30 s when idle
+  if (idle > 30 && !drag) { idle = 0; N = N === 100 ? 2 : N === 2 ? 12 : 100; reset([1.8 + Math.random() * 1.2, 2 + Math.random() * 1.2]); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Force Graph</title>
+<meta name="category" content="algorithms" />
+<meta name="order" content="4" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="d3-force, community detection, PageRank, shortest path, canvas" />
+<meta name="description" content="A force-directed network of 220 nodes laid out live with d3-force and drawn on canvas, built on a synthetic social graph (labelled as such) with hidden communities. Label propagation finds the communities and colours them, PageRank sizes the nodes, and picking any two nodes lights up the shortest path between them. Drag nodes, zoom and pan, hover to see a node's neighbours, and tune the charge, link distance and a community-clustering force. A test of graph algorithms and a smooth, dense interactive layout." />
+<meta name="prompt" content="Make an interactive force-directed graph in a single HTML file with D3 v7, rendering to canvas for speed. Generate a synthetic network with a few hidden communities, detect them with label propagation and colour by community, size nodes by PageRank, and let users drag nodes, zoom and pan, hover to highlight neighbours and click two nodes to show the shortest path. Add sliders for charge and link distance and a toggle that pulls communities into clusters." />
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root { --ink: #eef1f7; --muted: #8790a6; --panel: rgba(14, 16, 24, 0.8); --line: rgba(255, 255, 255, 0.08); --bg: #07090e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(ellipse at 50% 45%, #121726, var(--bg) 70%); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; right: 16px; top: 16px; width: 230px; padding: 14px; border-radius: 14px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--line); display: grid; gap: 10px; font-size: 12px; }
+  #panel label { display: grid; gap: 4px; color: var(--muted); }
+  #panel input[type=range] { width: 100%; accent-color: #8ea2ff; }
+  #panel .row { display: flex; gap: 6px; }
+  #panel button { flex: 1; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--ink); font: 600 12px inherit; cursor: pointer; }
+  #panel button.on { background: #8ea2ff; color: #0b1020; border-color: transparent; }
+  #info { font: 11.5px ui-monospace, Menlo, monospace; color: var(--muted); line-height: 1.6; }
+  #info b { color: var(--ink); }
+  #tip { position: fixed; pointer-events: none; padding: 6px 9px; border-radius: 8px; background: rgba(10, 12, 18, 0.92); border: 1px solid var(--line); font-size: 12px; display: none; }
+  .note { position: fixed; left: 20px; bottom: 14px; font: 11px ui-monospace, Menlo, monospace; color: #5d6578; }
+  @media (max-width: 600px) { #panel { top: auto; bottom: 10px; left: 10px; right: 10px; width: auto; grid-template-columns: 1fr 1fr; padding: 10px; gap: 8px; } #info { grid-column: 1 / -1; } .note { display: none; } .title p { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Force Graph</h1><p>drag · scroll to zoom · click two nodes for a path</p></div>
+<div id="panel">
+  <label>Charge <input id="charge" type="range" min="-120" max="-5" value="-38"></label>
+  <label>Link distance <input id="dist" type="range" min="8" max="80" value="26"></label>
+  <div class="row"><button id="cluster" class="on">Cluster</button><button id="reheat">Shake</button><button id="regen">New</button></div>
+  <div id="info"></div>
+</div>
+<div id="tip"></div>
+<div class="note">synthetic network · not real people</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/force-graph.html
+ * PURPOSE: d3-force network on canvas: synthetic community graph, label-propagation communities, PageRank sizing, BFS shortest path, drag/zoom/hover
+ * UI: Render Studio > Algorithms > Force Graph
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__graph (test hook: path, communities, pagerank)
+ */
+const $ = (id) => document.getElementById(id);
+const cv = $('c'), g = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function resize() { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; }
+addEventListener('resize', () => { resize(); sim.force('center', d3.forceCenter(W / 2, H / 2)); sim.alpha(0.3).restart(); });
+resize();
+
+// Data: stochastic block model, k hidden groups, dense inside and sparse across, plus a few hubs
+const FIRST = ['Ada', 'Bo', 'Cy', 'Dee', 'Eli', 'Fen', 'Gus', 'Hal', 'Ivo', 'Jun', 'Kai', 'Lux', 'Mae', 'Nia', 'Oz', 'Pia', 'Quin', 'Rae', 'Sol', 'Tov', 'Uma', 'Vik', 'Wren', 'Xan', 'Yui', 'Zed'];
+let nodes = [], links = [], adj = [];
+function generate() {
+  const N = innerWidth < 600 ? 140 : 220, K = 6;
+  nodes = Array.from({ length: N }, (_, i) => ({ id: i, name: `${FIRST[i % 26]}${i >= 26 ? Math.floor(i / 26) : ''}`, group: i % K, x: W / 2 + Math.cos(i) * 200, y: H / 2 + Math.sin(i) * 200 }));
+  links = []; const seen = new Set();
+  const add = (a, b) => { if (a === b) return; const k = a < b ? `${a}-${b}` : `${b}-${a}`; if (!seen.has(k)) { seen.add(k); links.push({ source: a, target: b }); } };
+  for (let i = 0; i < N; i++) {
+    // groups have different densities so communities look different sizes
+    const inside = 2 + (nodes[i].group % 3);
+    for (let k = 0; k < inside; k++) { let j; do j = (Math.random() * N) | 0; while (nodes[j].group !== nodes[i].group); add(i, j); }
+    if (Math.random() < 0.18) add(i, (Math.random() * N) | 0);
+  }
+  for (let h = 0; h < 4; h++) { const hub = (Math.random() * N) | 0; for (let k = 0; k < 9; k++) add(hub, (Math.random() * N) | 0); }
+  adj = nodes.map(() => []);
+  links.forEach((l) => { adj[l.source].push(l.target); adj[l.target].push(l.source); });
+  detect(); pagerank();
+}
+
+// Algorithms > label propagation: each node adopts its neighbours' most common label until stable
+function detect() {
+  const lab = nodes.map((n) => n.id);
+  for (let it = 0; it < 30; it++) {
+    let changed = 0;
+    for (const i of d3.shuffle(nodes.map((n) => n.id))) {
+      if (!adj[i].length) continue;
+      const cnt = new Map(); for (const j of adj[i]) cnt.set(lab[j], (cnt.get(lab[j]) || 0) + 1);
+      let best = lab[i], bc = -1; for (const [l, c] of cnt) if (c > bc || (c === bc && Math.random() < 0.5)) { best = l; bc = c; }
+      if (best !== lab[i]) { lab[i] = best; changed++; }
+    }
+    if (!changed) break;
+  }
+  // relabel 0..k-1 by size so colours stay ordered
+  const sizes = d3.rollup(lab, (v) => v.length, (d) => d), order = [...sizes.keys()].sort((a, b) => sizes.get(b) - sizes.get(a));
+  nodes.forEach((n, i) => (n.comm = order.indexOf(lab[i])));
+  commCount = order.length;
+}
+let commCount = 0;
+// Algorithms > PageRank: power iteration, damping 0.85
+function pagerank() {
+  const N = nodes.length; let pr = new Float64Array(N).fill(1 / N);
+  for (let it = 0; it < 50; it++) {
+    const nx = new Float64Array(N).fill(0.15 / N);
+    for (let i = 0; i < N; i++) { const out = adj[i].length; if (!out) { for (let j = 0; j < N; j++) nx[j] += 0.85 * pr[i] / N; continue; } for (const j of adj[i]) nx[j] += 0.85 * pr[i] / out; }
+    pr = nx;
+  }
+  const mx = d3.max(pr);
+  nodes.forEach((n, i) => { n.pr = pr[i]; n.r = 3 + Math.sqrt(pr[i] / mx) * 11; });
+}
+// Algorithms > BFS shortest path (unweighted)
+function shortest(a, b) {
+  const prev = new Int32Array(nodes.length).fill(-1), q = [a]; prev[a] = a;
+  for (let qi = 0; qi < q.length; qi++) { const u = q[qi]; if (u === b) break; for (const v of adj[u]) if (prev[v] < 0) { prev[v] = u; q.push(v); } }
+  if (prev[b] < 0) return null;
+  const p = [b]; while (p.at(-1) !== a) p.push(prev[p.at(-1)]);
+  return p.reverse();
+}
+
+// Colours: fixed categorical order, folding extra communities into grey
+const PAL = ['#5b8cff', '#ff7a59', '#2ec4a6', '#f5c044', '#c17bff', '#ff5c93', '#7fd4ff', '#9bd65b'];
+const col = (n) => (n.comm < PAL.length ? PAL[n.comm] : '#6b7385');
+
+// Simulation
+let clusterOn = true;
+const sim = d3.forceSimulation()
+  .force('link', d3.forceLink().id((d) => d.id).distance(26).strength(0.35))
+  .force('charge', d3.forceManyBody().strength(-38).distanceMax(320))
+  .force('center', d3.forceCenter(W / 2, H / 2))
+  .force('collide', d3.forceCollide().radius((d) => d.r + 1.5))
+  .force('cluster', clusterForce())
+  .on('tick', draw);
+// pulls each node toward its community centroid
+function clusterForce() {
+  let ns = [];
+  const f = (alpha) => {
+    if (!clusterOn) return;
+    const c = new Map();
+    for (const n of ns) { const o = c.get(n.comm) || { x: 0, y: 0, k: 0 }; o.x += n.x; o.y += n.y; o.k++; c.set(n.comm, o); }
+    for (const n of ns) { const o = c.get(n.comm); n.vx += (o.x / o.k - n.x) * alpha * 0.12; n.vy += (o.y / o.k - n.y) * alpha * 0.12; }
+  };
+  f.initialize = (n) => (ns = n);
+  return f;
+}
+function load() { generate(); sim.nodes(nodes); sim.force('link').links(links); sim.force('collide').radius((d) => d.r + 1.5); sim.alpha(1).restart(); sel = []; path = null; info(); }
+
+// Draw
+let transform = d3.zoomIdentity, hover = null, sel = [], path = null, pathT = 0;
+function draw() {
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  g.translate(transform.x, transform.y); g.scale(transform.k, transform.k);
+  const focus = hover ? new Set([hover.id, ...adj[hover.id]]) : null, onPath = path ? new Set(path) : null;
+  // edges: inside-community edges tinted, cross edges grey
+  g.lineWidth = 0.7 / Math.sqrt(transform.k);
+  for (const l of links) {
+    const s = l.source, t = l.target, hot = focus && (s.id === hover.id || t.id === hover.id);
+    g.strokeStyle = hot ? 'rgba(255,255,255,.75)' : s.comm === t.comm ? `${col(s)}${focus || path ? '18' : '44'}` : `rgba(140,150,170,${focus || path ? 0.05 : 0.16})`;
+    g.beginPath(); g.moveTo(s.x, s.y); g.lineTo(t.x, t.y); g.stroke();
+  }
+  if (path) {
+    // path draws on progressively
+    const k = Math.min(path.length - 1, (performance.now() - pathT) / 90);
+    g.strokeStyle = '#ffd36b'; g.lineWidth = 3 / Math.sqrt(transform.k); g.shadowColor = '#ffb020'; g.shadowBlur = 12; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(nodes[path[0]].x, nodes[path[0]].y);
+    for (let i = 1; i <= k; i++) g.lineTo(nodes[path[i]].x, nodes[path[i]].y);
+    const fr = k % 1, i0 = Math.floor(k);
+    if (fr && i0 + 1 < path.length) { const a = nodes[path[i0]], b = nodes[path[i0 + 1]]; g.lineTo(a.x + (b.x - a.x) * fr, a.y + (b.y - a.y) * fr); }
+    g.stroke(); g.shadowBlur = 0;
+  }
+  for (const n of nodes) {
+    const dim = (focus && !focus.has(n.id)) || (onPath && !onPath.has(n.id));
+    g.globalAlpha = dim ? 0.22 : 1;
+    g.fillStyle = col(n); g.beginPath(); g.arc(n.x, n.y, n.r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = sel.includes(n.id) ? '#fff' : 'rgba(7,9,14,.8)'; g.lineWidth = sel.includes(n.id) ? 2.5 : 1; g.stroke();
+  }
+  g.globalAlpha = 1;
+  // labels for the top PageRank nodes, and everything on a path or hovered
+  g.font = `600 ${11 / Math.sqrt(transform.k)}px ui-rounded, system-ui, sans-serif`; g.textAlign = 'center';
+  const top = [...nodes].sort((a, b) => b.pr - a.pr).slice(0, 8);
+  for (const n of new Set([...top, ...(path || []).map((i) => nodes[i]), ...(focus ? [hover] : [])])) {
+    g.fillStyle = 'rgba(7,9,14,.7)'; g.fillText(n.name, n.x + 0.6, n.y - n.r - 4.4); g.fillStyle = '#eef1f7'; g.fillText(n.name, n.x, n.y - n.r - 5);
+  }
+}
+(function loop() { if (path && sim.alpha() < sim.alphaMin()) draw(); requestAnimationFrame(loop); })();
+function info() {
+  $('info').innerHTML = `<b>${nodes.length}</b> nodes · <b>${links.length}</b> edges<br><b>${commCount}</b> communities found` + (path ? `<br>path ${nodes[path[0]].name} → ${nodes[path.at(-1)].name}: <b>${path.length - 1}</b> hops` : sel.length === 1 ? `<br>pick a second node` : '');
+}
+
+// Input: d3.drag on nearest node, d3.zoom otherwise; click selects for path
+const find = (e) => { const [x, y] = transform.invert(d3.pointer(e, cv)); return sim.find(x, y, 20 / transform.k) || null; };
+let lastInput = -1e9;
+d3.select(cv)
+  .call(d3.drag().container(cv).subject((e) => { const [x, y] = transform.invert([e.x, e.y]); return sim.find(x, y, 20 / transform.k) || null; })
+    .on('start', (e) => { lastInput = performance.now(); if (!e.active) sim.alphaTarget(0.25).restart(); e.subject.fx = e.subject.x; e.subject.fy = e.subject.y; })
+    // drag e.x is relative to the subject, so read the raw pointer and undo the zoom
+    .on('drag', (e) => { const [x, y] = transform.invert(d3.pointer(e.sourceEvent, cv)); e.subject.fx = x; e.subject.fy = y; })
+    .on('end', (e) => { if (!e.active) sim.alphaTarget(0); e.subject.fx = e.subject.fy = null; }))
+  .call(d3.zoom().scaleExtent([0.3, 6]).filter((e) => !e.button && (e.type === 'wheel' || !find(e))).on('zoom', (e) => { lastInput = performance.now(); transform = e.transform; draw(); }))
+  .on('click', (e) => { const n = find(e); lastInput = performance.now(); if (!n) { sel = []; path = null; } else pick(n.id); info(); draw(); })
+  .on('pointermove', (e) => { const n = find(e); if (n !== hover) { hover = n; draw(); } const tip = $('tip'); if (n) { tip.style.display = 'block'; tip.style.left = `${e.clientX + 14}px`; tip.style.top = `${e.clientY + 10}px`; tip.innerHTML = `<b>${n.name}</b> · community ${n.comm + 1}<br>${adj[n.id].length} links · PageRank ${(n.pr * 100).toFixed(2)}%`; } else tip.style.display = 'none'; })
+  .on('pointerleave', () => { hover = null; $('tip').style.display = 'none'; draw(); });
+function pick(id) {
+  if (sel.length >= 2) { sel = []; path = null; }
+  sel.push(id);
+  if (sel.length === 2) { path = shortest(sel[0], sel[1]); pathT = performance.now(); }
+}
+
+$('charge').oninput = (e) => { lastInput = performance.now(); sim.force('charge').strength(Number(e.target.value)); sim.alpha(0.5).restart(); };
+$('dist').oninput = (e) => { lastInput = performance.now(); sim.force('link').distance(Number(e.target.value)); sim.alpha(0.5).restart(); };
+$('cluster').onclick = () => { lastInput = performance.now(); clusterOn = !clusterOn; $('cluster').classList.toggle('on', clusterOn); sim.alpha(0.6).restart(); };
+$('reheat').onclick = () => { lastInput = performance.now(); nodes.forEach((n) => { n.vx += (Math.random() - 0.5) * 40; n.vy += (Math.random() - 0.5) * 40; }); sim.alpha(0.8).restart(); };
+$('regen').onclick = () => { lastInput = performance.now(); load(); };
+
+// Idle: shortest path between random far-apart nodes every few seconds
+setInterval(() => {
+  if (performance.now() - lastInput < 12000) return;
+  const a = (Math.random() * nodes.length) | 0;
+  let b = a; for (let k = 0; k < 20 && (b === a || nodes[b].comm === nodes[a].comm); k++) b = (Math.random() * nodes.length) | 0;
+  sel = [a]; pick(b); info();
+}, 3500);
+load();
+// first path early so the poster shows one
+setTimeout(() => { if (performance.now() - lastInput > 1000) { const byComm = d3.groups(nodes, (n) => n.comm); if (byComm.length > 1) { sel = [byComm[0][1][0].id]; pick(byComm[1][1][0].id); info(); } } }, 1800);
+window.__graph = { path: (a, b) => shortest(a, b), communities: () => commCount, pagerank: () => d3.sum(nodes, (n) => n.pr), degree: (i) => adj[i].length, size: () => nodes.length };
+</script>
+</body>
+</html>

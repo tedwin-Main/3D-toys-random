@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Desktop OS</title>
+<meta name="category" content="apps" />
+<meta name="order" content="1" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="window manager, drag and resize, taskbar, mini apps, vanilla JS" />
+<meta name="description" content="A whole desktop operating system in one HTML file: a window manager with drag, resize from any edge, focus order, minimise, maximise and close, a taskbar with a start menu and clock, desktop icons, and five working apps (Notepad that remembers your text, Calculator, Paint, Minesweeper and a Terminal with commands). An idle demo opens and arranges windows by itself. Tests state management and UI plumbing at app scale." />
+<meta name="prompt" content="Build a desktop operating system UI in a single HTML file with vanilla JavaScript. Include a wallpaper with desktop icons, a window manager where windows can be dragged, resized from edges and corners, focused, minimised, maximised and closed, and a taskbar with a start menu, open-window buttons and a clock. Add working apps: Notepad that saves its text, Calculator, Paint, Minesweeper and a small Terminal with a few commands. Make it look polished and modern and work with touch." />
+<style>
+  :root { --ink: #10131a; --muted: #5b6475; --glass: rgba(250, 251, 255, 0.82); --line: rgba(20, 30, 60, 0.12); --accent: #3b6cff; --bar: rgba(16, 20, 32, 0.72); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; user-select: none; }
+  #desk { position: fixed; inset: 0 0 52px 0; background: radial-gradient(1200px 700px at 75% 20%, #ffb37a 0%, rgba(255, 179, 122, 0) 60%), radial-gradient(900px 600px at 15% 85%, #6b5bff 0%, rgba(107, 91, 255, 0) 60%), linear-gradient(160deg, #1c2a6b 0%, #4a2f7a 45%, #d0607a 100%); }
+  #desk::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle at 70% 60%, rgba(255, 255, 255, 0.08), transparent 40%); pointer-events: none; }
+  .brand { position: absolute; right: 28px; bottom: 22px; color: rgba(255, 255, 255, 0.5); font-size: 13px; letter-spacing: 0.08em; pointer-events: none; }
+  .brand b { display: block; font-size: 30px; color: rgba(255, 255, 255, 0.75); letter-spacing: 0; }
+  #icons { position: absolute; left: 14px; top: 14px; display: grid; grid-auto-flow: row; gap: 6px; }
+  .icon { width: 84px; padding: 8px 4px; border-radius: 12px; text-align: center; color: #fff; font-size: 12px; text-shadow: 0 1px 3px #0008; cursor: default; }
+  .icon:hover, .icon.sel { background: rgba(255, 255, 255, 0.16); }
+  .icon .glyph { width: 46px; height: 46px; margin: 0 auto 6px; border-radius: 12px; display: grid; place-items: center; font-size: 24px; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+  .win { position: absolute; min-width: 220px; min-height: 140px; border-radius: 12px; background: var(--glass); backdrop-filter: blur(20px) saturate(1.4); box-shadow: 0 24px 60px rgba(10, 10, 40, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.5) inset, 0 0 0 1px rgba(0, 0, 0, 0.12); display: flex; flex-direction: column; overflow: hidden; transition: opacity 0.16s, transform 0.16s; }
+  .win.inactive { box-shadow: 0 12px 30px rgba(10, 10, 40, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.1); }
+  .win.inactive .tb { opacity: 0.7; }
+  .win.min { opacity: 0; transform: scale(0.9) translateY(40px); pointer-events: none; }
+  .win.opening { opacity: 0; transform: scale(0.94); }
+  .tb { height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line); cursor: default; }
+  .tb .t { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .tb button { width: 26px; height: 22px; border: 0; border-radius: 6px; background: transparent; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .tb button:hover { background: rgba(0, 0, 0, 0.07); }
+  .tb button.x:hover { background: #ff5f57; color: #fff; }
+  .body { flex: 1; position: relative; overflow: hidden; }
+  .rz { position: absolute; z-index: 2; }
+  .rz.n, .rz.s { left: 8px; right: 8px; height: 8px; cursor: ns-resize; } .rz.n { top: -3px; } .rz.s { bottom: -3px; }
+  .rz.e, .rz.w { top: 8px; bottom: 8px; width: 8px; cursor: ew-resize; } .rz.e { right: -3px; } .rz.w { left: -3px; }
+  .rz.ne, .rz.nw, .rz.se, .rz.sw { width: 14px; height: 14px; } .rz.ne { right: -3px; top: -3px; cursor: nesw-resize; } .rz.sw { left: -3px; bottom: -3px; cursor: nesw-resize; } .rz.nw { left: -3px; top: -3px; cursor: nwse-resize; } .rz.se { right: -3px; bottom: -3px; cursor: nwse-resize; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; height: 52px; background: var(--bar); backdrop-filter: blur(20px); display: flex; align-items: center; gap: 6px; padding: 0 10px; color: #fff; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+  #start { height: 36px; padding: 0 14px; border: 0; border-radius: 10px; background: linear-gradient(135deg, #5b8cff, #a35bff); color: #fff; font: 700 13px inherit; cursor: pointer; display: flex; gap: 8px; align-items: center; }
+  #tasks { flex: 1; display: flex; gap: 6px; overflow: hidden; }
+  .task { height: 36px; max-width: 170px; padding: 0 12px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: #fff; font: 500 12.5px inherit; display: flex; gap: 7px; align-items: center; cursor: pointer; white-space: nowrap; overflow: hidden; }
+  .task.active { background: rgba(255, 255, 255, 0.2); box-shadow: inset 0 -2px 0 #8fb0ff; }
+  #clock { font: 600 12.5px ui-monospace, Menlo, monospace; text-align: right; line-height: 1.25; padding: 0 6px; opacity: 0.9; }
+  #menu { position: fixed; left: 10px; bottom: 60px; width: 280px; border-radius: 16px; background: rgba(22, 26, 42, 0.86); backdrop-filter: blur(24px); color: #fff; padding: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); transform-origin: bottom left; transition: transform 0.16s, opacity 0.16s; }
+  #menu.hidden { opacity: 0; transform: scale(0.95) translateY(10px); pointer-events: none; }
+  #menu .who { display: flex; gap: 10px; align-items: center; padding: 6px 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); margin-bottom: 8px; font-size: 13px; }
+  #menu .av { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #ffb37a, #d0607a); display: grid; place-items: center; font-weight: 800; }
+  #menu .item { display: flex; gap: 10px; align-items: center; padding: 9px 8px; border-radius: 10px; font-size: 13.5px; cursor: pointer; }
+  #menu .item:hover { background: rgba(255, 255, 255, 0.1); }
+  /* apps */
+  textarea.note { width: 100%; height: 100%; border: 0; resize: none; padding: 12px 14px; font: 14px/1.5 ui-monospace, Menlo, monospace; background: #fffef8; color: #222; outline: none; user-select: text; }
+  .calc { height: 100%; display: grid; grid-template-rows: auto 1fr; background: #f2f4f9; }
+  .calc .disp { padding: 10px 14px; text-align: right; font: 600 30px ui-monospace, Menlo, monospace; color: #111; overflow: hidden; white-space: nowrap; }
+  .calc .disp small { display: block; font-size: 12px; color: #889; height: 15px; }
+  .calc .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; }
+  .calc .keys button { border: 0; border-radius: 10px; background: #fff; font: 600 16px inherit; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1); cursor: pointer; }
+  .calc .keys button.op { background: #e3e9ff; color: #2a4bd8; }
+  .calc .keys button.eq { background: var(--accent); color: #fff; }
+  .paint { height: 100%; display: flex; flex-direction: column; background: #e9ecf3; }
+  .paint .tools { display: flex; gap: 5px; padding: 6px 8px; align-items: center; flex-wrap: wrap; }
+  .paint .sw { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #0002; cursor: pointer; }
+  .paint .sw.on { box-shadow: 0 0 0 2px var(--accent); }
+  .paint canvas { flex: 1; margin: 0 8px 8px; background: #fff; border-radius: 6px; box-shadow: inset 0 0 0 1px #0001; cursor: crosshair; touch-action: none; min-height: 0; width: calc(100% - 16px); }
+  .paint .tools button { border: 0; border-radius: 6px; padding: 4px 8px; background: #fff; font: 600 11.5px inherit; cursor: pointer; }
+  .mines { height: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px; background: #e7eaf2; }
+  .mines .hud { display: flex; gap: 14px; align-items: center; font: 700 14px ui-monospace, Menlo, monospace; }
+  .mines .hud button { border: 0; border-radius: 8px; padding: 3px 10px; background: #fff; font-size: 18px; cursor: pointer; }
+  .mines .grid { display: grid; grid-template-columns: repeat(9, 26px); gap: 2px; }
+  .mines .c { width: 26px; height: 26px; border-radius: 5px; background: linear-gradient(#fdfdff, #dfe3ee); box-shadow: 0 1px 1px #0002; display: grid; place-items: center; font: 800 13px ui-monospace, Menlo, monospace; cursor: pointer; }
+  .mines .c.open { background: #f7f8fb; box-shadow: none; cursor: default; }
+  .mines .c.boom { background: #ff6b6b; }
+  .term { height: 100%; background: #0d1117; color: #c9f7d0; font: 13px/1.45 ui-monospace, Menlo, monospace; padding: 10px 12px; overflow: auto; user-select: text; }
+  .term input { background: transparent; border: 0; outline: none; color: #fff; font: inherit; width: 70%; }
+  .about { padding: 18px; font-size: 13.5px; line-height: 1.5; color: #333; }
+  .about h2 { margin: 0 0 6px; font-size: 20px; }
+  @media (max-width: 600px) { #icons { grid-template-columns: repeat(3, 84px); } .brand { display: none; } .task span.l { display: none; } #clock { font-size: 11px; } }
+</style>
+</head>
+<body>
+<div id="desk">
+  <div id="icons"></div>
+  <div class="brand"><b>Studio OS</b>one-file desktop · v1.0</div>
+</div>
+<div id="bar">
+  <button id="start"><span>◆</span>Start</button>
+  <div id="tasks"></div>
+  <div id="clock"></div>
+</div>
+<div id="menu" class="hidden"></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/desktop-os.html
+ * PURPOSE: One-file desktop: window manager (drag/resize/focus/min/max/close), taskbar, start menu, Notepad/Calc/Paint/Mines/Terminal
+ * UI: Render Studio > Apps & UI > Desktop OS
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__desk (test hook: open, windows)
+ */
+const $ = (s, el = document) => el.querySelector(s);
+const desk = $('#desk'), tasks = $('#tasks'), menu = $('#menu');
+const APPS = {
+  notepad: { name: 'Notepad', glyph: '📝', bg: 'linear-gradient(135deg,#fff3b0,#ffd36b)', w: 420, h: 300, make: notepad },
+  calc: { name: 'Calculator', glyph: '🧮', bg: 'linear-gradient(135deg,#bfe3ff,#6aa8ff)', w: 260, h: 360, make: calculator },
+  paint: { name: 'Paint', glyph: '🎨', bg: 'linear-gradient(135deg,#ffc2d8,#ff7aa8)', w: 480, h: 360, make: paint },
+  mines: { name: 'Minesweeper', glyph: '💣', bg: 'linear-gradient(135deg,#d4f5c9,#7ed36b)', w: 280, h: 372, make: mines },
+  term: { name: 'Terminal', glyph: '⌨️', bg: 'linear-gradient(135deg,#9aa4b8,#3b4252)', w: 460, h: 280, make: terminal },
+  about: { name: 'About', glyph: 'ℹ️', bg: 'linear-gradient(135deg,#e5d9ff,#a98bff)', w: 340, h: 230, make: about },
+};
+const safeGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const safeSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } };
+
+// Desktop > icons: double-click (or tap twice) opens the app
+for (const [id, a] of Object.entries(APPS)) {
+  const el = document.createElement('div');
+  el.className = 'icon'; el.dataset.app = id;
+  el.innerHTML = `<div class="glyph" style="background:${a.bg}">${a.glyph}</div>${a.name}`;
+  el.addEventListener('pointerdown', () => { document.querySelectorAll('.icon').forEach((i) => i.classList.toggle('sel', i === el)); userAct(); });
+  el.addEventListener('dblclick', () => openApp(id));
+  let lastTap = 0;
+  el.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') { const n = performance.now(); if (n - lastTap < 400) openApp(id); lastTap = n; } });
+  $('#icons').appendChild(el);
+}
+
+// Window manager > state: list of windows, z order by DOM append, one active
+const wins = [];
+let zTop = 10, cascade = 0;
+function openApp(id) {
+  userAct();
+  const a = APPS[id];
+  const existing = wins.find((w) => w.app === id && id !== 'notepad');
+  if (existing) { restore(existing); return existing; }
+  const el = document.createElement('div');
+  el.className = 'win opening';
+  const vw = desk.clientWidth, vh = desk.clientHeight;
+  const w = Math.min(a.w, vw - 20), h = Math.min(a.h, vh - 20);
+  const x = Math.min(vw - w - 10, 120 + (cascade % 6) * 34), y = Math.min(vh - h - 10, 40 + (cascade % 6) * 30);
+  cascade++;
+  Object.assign(el.style, { left: Math.max(10, x) + 'px', top: Math.max(10, y) + 'px', width: w + 'px', height: h + 'px' });
+  el.innerHTML = `<div class="tb"><span>${a.glyph}</span><span class="t">${a.name}</span><button class="mn" title="Minimise">—</button><button class="mx" title="Maximise">▢</button><button class="x" title="Close">✕</button></div><div class="body"></div>${['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].map((d) => `<div class="rz ${d}" data-d="${d}"></div>`).join('')}`;
+  desk.appendChild(el);
+  const win = { app: id, el, title: a.name, glyph: a.glyph, max: false, prev: null };
+  wins.push(win);
+  a.make($('.body', el), win);
+  wireWindow(win);
+  const tb = document.createElement('button');
+  tb.className = 'task'; tb.innerHTML = `<span>${a.glyph}</span><span class="l">${a.name}</span>`;
+  tb.onclick = () => { userAct(); if (win.el.classList.contains('min')) restore(win); else if (win.el.classList.contains('inactive')) focus(win); else minimise(win); };
+  win.task = tb; tasks.appendChild(tb);
+  focus(win);
+  requestAnimationFrame(() => el.classList.remove('opening'));
+  return win;
+}
+function focus(win) {
+  win.el.style.zIndex = ++zTop;
+  for (const w of wins) { w.el.classList.toggle('inactive', w !== win); w.task.classList.toggle('active', w === win); }
+}
+function minimise(win) { win.el.classList.add('min'); win.task.classList.remove('active'); const top = wins.filter((w) => !w.el.classList.contains('min')).sort((a, b) => b.el.style.zIndex - a.el.style.zIndex)[0]; if (top) focus(top); }
+function restore(win) { win.el.classList.remove('min'); focus(win); }
+function close(win) { win.el.remove(); win.task.remove(); wins.splice(wins.indexOf(win), 1); win.onClose?.(); }
+function toggleMax(win) {
+  const s = win.el.style;
+  if (!win.max) { win.prev = { left: s.left, top: s.top, width: s.width, height: s.height }; Object.assign(s, { left: '0px', top: '0px', width: desk.clientWidth + 'px', height: desk.clientHeight + 'px' }); win.el.style.borderRadius = '0'; }
+  else { Object.assign(s, win.prev); win.el.style.borderRadius = ''; }
+  win.max = !win.max; win.onResize?.();
+}
+
+// Window manager > drag + resize: pointer capture on title bar and the 8 edge handles
+function wireWindow(win) {
+  const el = win.el, tb = $('.tb', el);
+  el.addEventListener('pointerdown', () => focus(win), true);
+  $('.mn', el).onclick = (e) => { e.stopPropagation(); minimise(win); };
+  $('.mx', el).onclick = (e) => { e.stopPropagation(); toggleMax(win); };
+  $('.x', el).onclick = (e) => { e.stopPropagation(); close(win); };
+  tb.addEventListener('dblclick', () => toggleMax(win));
+  tb.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    userAct();
+    if (win.max) toggleMax(win);
+    const sx = e.clientX, sy = e.clientY, ox = el.offsetLeft, oy = el.offsetTop;
+    tb.setPointerCapture(e.pointerId);
+    const mv = (m) => { el.style.left = Math.min(desk.clientWidth - 60, Math.max(-el.offsetWidth + 80, ox + m.clientX - sx)) + 'px'; el.style.top = Math.min(desk.clientHeight - 36, Math.max(0, oy + m.clientY - sy)) + 'px'; };
+    const up = () => { tb.removeEventListener('pointermove', mv); tb.removeEventListener('pointerup', up); };
+    tb.addEventListener('pointermove', mv); tb.addEventListener('pointerup', up);
+  });
+  el.querySelectorAll('.rz').forEach((h) => h.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); userAct();
+    const d = h.dataset.d, sx = e.clientX, sy = e.clientY, r = { l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+    h.setPointerCapture(e.pointerId);
+    const mv = (m) => {
+      const dx = m.clientX - sx, dy = m.clientY - sy;
+      let { l, t, w, h: hh } = r;
+      if (d.includes('e')) w = Math.max(220, r.w + dx);
+      if (d.includes('s')) hh = Math.max(140, r.h + dy);
+      if (d.includes('w')) { w = Math.max(220, r.w - dx); l = r.l + r.w - w; }
+      if (d.includes('n')) { hh = Math.max(140, r.h - dy); t = r.t + r.h - hh; }
+      Object.assign(el.style, { left: l + 'px', top: t + 'px', width: w + 'px', height: hh + 'px' });
+      win.onResize?.();
+    };
+    const up = () => { h.removeEventListener('pointermove', mv); h.removeEventListener('pointerup', up); };
+    h.addEventListener('pointermove', mv); h.addEventListener('pointerup', up);
+  }));
+}
+
+// Apps > Notepad: textarea persisted per session device
+function notepad(body, win) {
+  const t = document.createElement('textarea');
+  t.className = 'note'; t.spellcheck = false;
+  t.value = safeGet('studio-os-note') ?? 'Welcome to Studio OS.\n\nEverything here is one HTML file:\n- drag windows by the title bar\n- resize from any edge or corner\n- double-click a title to maximise\n\nThis note saves itself.';
+  t.addEventListener('input', () => { safeSet('studio-os-note', t.value); userAct(); });
+  t.addEventListener('pointerdown', (e) => e.stopPropagation());
+  body.appendChild(t);
+  win.textarea = t;
+}
+// Apps > Calculator: left-to-right evaluation with chaining, % and ±
+function calculator(body) {
+  body.innerHTML = `<div class="calc"><div class="disp"><small></small><span>0</span></div><div class="keys">${['C', '±', '%', '÷', '7', '8', '9', '×', '4', '5', '6', '−', '1', '2', '3', '+', '0', '.', '⌫', '='].map((k) => `<button class="${'÷×−+'.includes(k) ? 'op' : k === '=' ? 'eq' : ''}">${k}</button>`).join('')}</div></div>`;
+  const out = $('span', body), hist = $('small', body);
+  let cur = '0', acc = null, op = null, fresh = false;
+  const apply = (a, b, o) => (o === '+' ? a + b : o === '−' ? a - b : o === '×' ? a * b : b === 0 ? NaN : a / b);
+  const fmt = (n) => (Number.isFinite(n) ? String(+n.toPrecision(12)) : 'Error');
+  body.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+    const k = b.textContent;
+    if (/[0-9]/.test(k)) { cur = fresh || cur === '0' ? k : cur + k; fresh = false; }
+    else if (k === '.') { if (fresh) { cur = '0.'; fresh = false; } else if (!cur.includes('.')) cur += '.'; }
+    else if (k === 'C') { cur = '0'; acc = null; op = null; hist.textContent = ''; }
+    else if (k === '⌫') cur = cur.length > 1 ? cur.slice(0, -1) : '0';
+    else if (k === '±') cur = fmt(-parseFloat(cur));
+    else if (k === '%') cur = fmt(parseFloat(cur) / 100);
+    else if (k === '=') { if (op !== null) { hist.textContent = `${fmt(acc)} ${op} ${cur} =`; cur = fmt(apply(acc, parseFloat(cur), op)); acc = null; op = null; fresh = true; } }
+    else { if (op !== null && !fresh) cur = fmt(apply(acc, parseFloat(cur), op)); acc = parseFloat(cur); op = k; fresh = true; hist.textContent = `${fmt(acc)} ${k}`; }
+    out.textContent = cur;
+  }));
+}
+// Apps > Paint: smoothed brush strokes, colours, sizes, clear
+function paint(body, win) {
+  const COLS = ['#111', '#e5484d', '#f5a524', '#46a758', '#3b6cff', '#8e4ec6', '#fff'];
+  body.innerHTML = `<div class="paint"><div class="tools">${COLS.map((c, i) => `<div class="sw${i ? '' : ' on'}" data-c="${c}" style="background:${c}"></div>`).join('')}<button data-s="3">S</button><button data-s="8">M</button><button data-s="18">L</button><button data-clear>Clear</button></div><canvas></canvas></div>`;
+  const c = $('canvas', body), g = c.getContext('2d');
+  let color = COLS[0], size = 8, lastP = null;
+  const fit = () => {
+    const r = c.getBoundingClientRect(), img = c.width ? g.getImageData(0, 0, c.width, c.height) : null;
+    c.width = Math.max(1, r.width); c.height = Math.max(1, r.height);
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    if (img) g.putImageData(img, 0, 0);
+  };
+  requestAnimationFrame(fit);
+  win.onResize = fit;
+  body.querySelectorAll('.sw').forEach((s) => (s.onclick = () => { color = s.dataset.c; body.querySelectorAll('.sw').forEach((x) => x.classList.toggle('on', x === s)); }));
+  body.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => (size = Number(b.dataset.s))));
+  $('[data-clear]', body).onclick = () => { g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); };
+  const pos = (e) => { const r = c.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  const stroke = (a, b) => { g.strokeStyle = color; g.lineWidth = size; g.lineCap = g.lineJoin = 'round'; g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); };
+  c.addEventListener('pointerdown', (e) => { e.stopPropagation(); c.setPointerCapture(e.pointerId); lastP = pos(e); stroke(lastP, lastP); userAct(); });
+  c.addEventListener('pointermove', (e) => { if (!lastP) return; const p = pos(e); stroke(lastP, p); lastP = p; });
+  c.addEventListener('pointerup', () => (lastP = null));
+  win.paintStroke = (pts, col, sz) => { color = col; size = sz; for (let i = 1; i < pts.length; i++) stroke(pts[i - 1], pts[i]); };
+}
+// Apps > Minesweeper: 9x9, 10 mines, safe first click, flood reveal, long-press / right-click flags
+function mines(body) {
+  body.innerHTML = `<div class="mines"><div class="hud"><span class="left">💣 10</span><button>🙂</button><span class="tm">⏱ 0</span></div><div class="grid"></div></div>`;
+  const grid = $('.grid', body), face = $('.hud button', body), left = $('.left', body), tm = $('.tm', body);
+  const N = 9, M = 10;
+  let cells, started, over, t0, timer;
+  function reset() {
+    cells = Array.from({ length: N * N }, () => ({ mine: false, open: false, flag: false, n: 0 }));
+    started = false; over = false; face.textContent = '🙂'; clearInterval(timer); tm.textContent = '⏱ 0';
+    grid.innerHTML = '';
+    cells.forEach((cell, i) => {
+      const d = document.createElement('div'); d.className = 'c'; cell.d = d;
+      let press;
+      d.addEventListener('pointerdown', (e) => { e.stopPropagation(); press = setTimeout(() => { press = null; flag(i); }, 450); });
+      d.addEventListener('pointerup', (e) => { if (press) { clearTimeout(press); if (e.button === 2) flag(i); else reveal(i); } });
+      d.addEventListener('contextmenu', (e) => e.preventDefault());
+      grid.appendChild(d);
+    });
+    paintCount();
+  }
+  const nb = (i) => { const x = i % N, y = (i / N) | 0, o = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if ((dx || dy) && X >= 0 && Y >= 0 && X < N && Y < N) o.push(X + Y * N); } return o; };
+  function lay(safe) {
+    const ban = new Set([safe, ...nb(safe)]);
+    let k = 0; while (k < M) { const i = (Math.random() * N * N) | 0; if (!ban.has(i) && !cells[i].mine) { cells[i].mine = true; k++; } }
+    cells.forEach((c, i) => (c.n = nb(i).filter((j) => cells[j].mine).length));
+  }
+  const COL = ['', '#2a4bd8', '#2f8f46', '#d33', '#5b2fa8', '#a0522d', '#0aa', '#222', '#777'];
+  function reveal(i) {
+    if (over || cells[i].flag || cells[i].open) return;
+    if (!started) { started = true; lay(i); t0 = Date.now(); timer = setInterval(() => (tm.textContent = `⏱ ${((Date.now() - t0) / 1000) | 0}`), 500); }
+    if (cells[i].mine) { over = true; face.textContent = '😵'; clearInterval(timer); cells.forEach((c) => { if (c.mine) { c.d.textContent = '💣'; c.d.classList.add('open'); } }); cells[i].d.classList.add('boom'); return; }
+    const q = [i];
+    while (q.length) {
+      const j = q.shift(), c = cells[j];
+      if (c.open || c.flag) continue;
+      c.open = true; c.d.classList.add('open'); c.d.textContent = c.n || ''; c.d.style.color = COL[c.n];
+      if (!c.n) q.push(...nb(j));
+    }
+    if (cells.filter((c) => !c.open).length === M) { over = true; face.textContent = '😎'; clearInterval(timer); }
+  }
+  function flag(i) { if (over || cells[i].open) return; cells[i].flag = !cells[i].flag; cells[i].d.textContent = cells[i].flag ? '🚩' : ''; paintCount(); }
+  const paintCount = () => (left.textContent = `💣 ${M - cells.filter((c) => c.flag).length}`);
+  face.onclick = reset;
+  reset();
+}
+// Apps > Terminal: tiny shell with a few commands that act on the desktop
+function terminal(body) {
+  body.innerHTML = `<div class="term"><div class="log">Studio OS shell — type <b>help</b></div><div>$ <input spellcheck="false"></div></div>`;
+  const log = $('.log', body), inp = $('input', body), term = $('.term', body);
+  const say = (s) => { log.innerHTML += `<br>${s}`; term.scrollTop = term.scrollHeight; };
+  const CMDS = {
+    help: () => 'commands: help, ls, open &lt;app&gt;, date, echo, neofetch, clear',
+    ls: () => Object.keys(APPS).join('  '),
+    date: () => new Date().toString(),
+    echo: (a) => a.join(' ').replace(/</g, '&lt;'),
+    open: (a) => (APPS[a[0]] ? (openApp(a[0]), `opened ${a[0]}`) : 'no such app'),
+    clear: () => { log.innerHTML = ''; return ''; },
+    neofetch: () => `<span style="color:#8fb0ff">◆ studio-os</span><br>  kernel: one html file<br>  windows: ${wins.length}<br>  screen: ${innerWidth}×${innerHeight}`,
+  };
+  inp.addEventListener('pointerdown', (e) => e.stopPropagation());
+  inp.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const [c, ...a] = inp.value.trim().split(/\s+/);
+    say(`$ ${inp.value.replace(/</g, '&lt;')}`);
+    if (c) { const r = CMDS[c] ? CMDS[c](a) : `${c.replace(/</g, '&lt;')}: command not found`; if (r) say(r); }
+    inp.value = ''; userAct();
+  });
+  term.addEventListener('click', () => inp.focus());
+}
+function about(body) { body.innerHTML = `<div class="about"><h2>Studio OS</h2>A window manager, taskbar and five apps in one HTML file with zero dependencies.<br><br>Windows: drag · resize · focus · minimise · maximise · close.</div>`; }
+
+// Taskbar > start menu + clock
+menu.innerHTML = `<div class="who"><div class="av">S</div><div><b>Studio user</b><br><span style="opacity:.6">local session</span></div></div>${Object.entries(APPS).map(([id, a]) => `<div class="item" data-app="${id}"><span>${a.glyph}</span>${a.name}</div>`).join('')}`;
+$('#start').onclick = (e) => { e.stopPropagation(); menu.classList.toggle('hidden'); userAct(); };
+menu.querySelectorAll('.item').forEach((i) => (i.onclick = () => { menu.classList.add('hidden'); openApp(i.dataset.app); }));
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#menu, #start')) menu.classList.add('hidden'); });
+const clock = $('#clock');
+const tick = () => { const d = new Date(); clock.innerHTML = `${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}<br><span style="opacity:.6">${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>`; };
+tick(); setInterval(tick, 10000);
+
+// Desktop > idle demo: scripted session opens, types, paints, drags; any real input stops it
+let lastInput = -1e9, demoRun = 0;
+function userAct() { lastInput = performance.now(); demoRun++; }
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function demo() {
+  const id = ++demoRun;
+  const alive = () => id === demoRun;
+  for (const w of [...wins]) close(w);
+  const n = openApp('notepad'); demoRun = id;
+  await wait(300); if (!alive()) return;
+  const p = openApp('paint'); demoRun = id;
+  await wait(250); if (!alive()) return;
+  p.el.style.left = Math.min(desk.clientWidth - 500, 380) + 'px'; p.el.style.top = '150px'; p.onResize?.();
+  await wait(350); if (!alive()) return;
+  const pts = []; for (let i = 0; i <= 40; i++) { const t = i / 40; pts.push([40 + t * 360, 150 + Math.sin(t * 9) * 60]); }
+  p.paintStroke(pts, '#e5484d', 10);
+  const pts2 = []; for (let i = 0; i <= 50; i++) { const a = (i / 50) * Math.PI * 2; pts2.push([250 + Math.cos(a) * 70, 120 + Math.sin(a) * 50]); }
+  p.paintStroke(pts2, '#3b6cff', 6);
+  const c = openApp('calc'); demoRun = id;
+  c.el.style.left = Math.max(10, desk.clientWidth - 300) + 'px'; c.el.style.top = '40px';
+  await wait(250); if (!alive()) return;
+  for (const k of ['1', '2', '×', '3', '4', '=']) { [...c.el.querySelectorAll('.keys button')].find((b) => b.textContent === k).click(); await wait(120); if (!alive()) return; }
+  const m = openApp('mines'); demoRun = id;
+  m.el.style.left = Math.max(10, desk.clientWidth / 2 - 260) + 'px'; m.el.style.top = Math.max(10, desk.clientHeight - 360) + 'px';
+  m.el.querySelectorAll('.c')[40].dispatchEvent(new PointerEvent('pointerdown')); m.el.querySelectorAll('.c')[40].dispatchEvent(new PointerEvent('pointerup', { button: 0 }));
+  focus(n);
+  const text = '\n\nDemo: windows open, drag and resize themselves.';
+  for (const ch of text) { n.textarea.value += ch; await wait(28); if (!alive()) return; }
+  await wait(2500); if (!alive()) return;
+  // slide notepad across to show dragging
+  const sx = n.el.offsetLeft;
+  for (let i = 0; i <= 30; i++) { n.el.style.left = sx + Math.sin((i / 30) * Math.PI) * 140 + 'px'; await wait(16); if (!alive()) return; }
+}
+setInterval(() => { if (performance.now() - lastInput > 25000) { lastInput = performance.now(); demo(); } }, 1000);
+demo();
+window.__desk = { open: openApp, get windows() { return wins.map((w) => ({ app: w.app, left: w.el.offsetLeft, top: w.el.offsetTop, w: w.el.offsetWidth, h: w.el.offsetHeight, min: w.el.classList.contains('min') })); }, stopDemo: userAct };
+</script>
+</body>
+</html>

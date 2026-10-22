@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Minesweeper Solver</title>
+<meta name="category" content="games" />
+<meta name="order" content="12" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="safe first click, flood fill, chording, constraint solver AI" />
+<meta name="description" content="Minesweeper done properly: the first click is always safe and opens an area, zero cells flood-fill, chording on satisfied numbers, flags by right-click or long-press, three difficulties, timer and an explosion cascade on loss. The attract mode runs a constraint solver (trivial rules, then subset deduction between neighbouring numbers, then the lowest-probability guess) and highlights what it proved." />
+<meta name="prompt" content="Write Minesweeper in a single HTML file: beginner, intermediate and expert boards, guaranteed safe first click, flood reveal of zeros, chording, flags with right-click and long-press on touch, mine counter, timer, and a satisfying win/lose animation. Add an AI solver that plays by itself using logical deduction (including subset rules) and only guesses when it must." />
+<style>
+  :root { --bg: #0e1016; --panel: #181b24; --ink: #eceef5; --mute: #8a90a3; --hid: #3a4258; --hid2: #2c3345; --open: #1b1f2a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: radial-gradient(ellipse at 50% 0%, #1d2236, var(--bg) 65%); color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  main { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
+  .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  .lcd { font: 800 22px ui-monospace, Menlo, monospace; color: #ff5a5a; background: #0a0b10; border-radius: 8px; padding: 5px 10px; min-width: 70px; text-align: center; text-shadow: 0 0 8px #ff3a3a88; box-shadow: inset 0 0 0 1px #2a2f3e; }
+  #face { font-size: 26px; width: 46px; height: 46px; border-radius: 12px; border: 1px solid #3a4258; background: var(--panel); cursor: pointer; }
+  .seg { display: flex; background: var(--panel); border-radius: 10px; padding: 3px; gap: 2px; }
+  .seg button, .tog { background: none; border: 0; color: var(--mute); font: 650 13px system-ui, sans-serif; padding: 7px 11px; border-radius: 8px; cursor: pointer; }
+  .seg button.on, .tog.on { background: #2f3650; color: var(--ink); }
+  .tog { background: var(--panel); }
+  #grid { display: grid; gap: 2px; padding: 8px; background: #11141c; border-radius: 12px; box-shadow: 0 24px 60px -20px #000c, inset 0 0 0 1px #262b3a; touch-action: manipulation; }
+  .c { width: var(--cs); height: var(--cs); border-radius: calc(var(--cs) * 0.16); display: grid; place-items: center; font: 800 calc(var(--cs) * 0.56)/1 ui-rounded, system-ui, sans-serif; cursor: pointer; position: relative; }
+  .c.h { background: linear-gradient(160deg, var(--hid), var(--hid2)); box-shadow: inset 0 1px 0 #ffffff1c, inset 0 -2px 0 #0004; transition: transform 0.08s; }
+  .c.h:hover { filter: brightness(1.15); }
+  .c.o { background: var(--open); animation: open 0.18s ease-out backwards; }
+  @keyframes open { from { transform: scale(0.6); opacity: 0; } }
+  .c.f::after { content: '⚑'; color: #ff5a5a; font-size: calc(var(--cs) * 0.6); text-shadow: 0 0 6px #ff3a3a88; }
+  .c.m { background: #2a1820; }
+  .c.m::after { content: ''; width: 46%; height: 46%; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #9aa, #111 60%); box-shadow: 0 0 0 calc(var(--cs) * 0.05) #0008; }
+  .c.boom { background: #ff3b3b; animation: boom 0.4s ease-out; }
+  .c.wrong::before { content: '✕'; position: absolute; color: #ffd36a; font-size: calc(var(--cs) * 0.7); z-index: 2; }
+  @keyframes boom { 0% { transform: scale(1.6); filter: brightness(2); } }
+  .c.safe { box-shadow: inset 0 0 0 2px #59f0a0; }
+  .c.risk { box-shadow: inset 0 0 0 2px #ffd36a; }
+  .n1 { color: #5aa8ff; } .n2 { color: #5ee08a; } .n3 { color: #ff6464; } .n4 { color: #b48cff; } .n5 { color: #ffb050; } .n6 { color: #4fe0e0; } .n7 { color: #eee; } .n8 { color: #999; }
+  #info { font: 12px ui-monospace, Menlo, monospace; color: var(--mute); min-height: 15px; text-align: center; }
+  .win #grid { box-shadow: 0 0 0 2px #59f0a0, 0 0 50px #59f0a055; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div class="lcd" id="mines">010</div>
+    <button id="face">🙂</button>
+    <div class="lcd" id="time">000</div>
+  </div>
+  <div class="top">
+    <div class="seg" id="diff"><button data-d="0">Beginner</button><button data-d="1">Intermediate</button><button data-d="2">Expert</button></div>
+    <button class="tog" id="ai">AI solver</button>
+  </div>
+  <div id="grid"></div>
+  <div id="info">left: reveal · right / long-press: flag · click a number: chord</div>
+</main>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/minesweeper.html
+ * PURPOSE: Minesweeper with safe first click, flood fill, chording, flags/long-press, timer, and a constraint-solver AI attract mode
+ * UI: Render Studio > Games > Minesweeper Solver
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page); window.__mines test hooks
+ */
+const DIFFS = [[9, 9, 10], [16, 16, 40], [30, 16, 99]];
+const gridEl = document.getElementById('grid'), face = document.getElementById('face'), infoEl = document.getElementById('info');
+let W, H, M, cells, els, started, over, flags, opened, t0, timer, diff = 1, ai = true, idle = 0, aiTimer = null;
+
+function setup(d) {
+  diff = d; [W, H, M] = DIFFS[d];
+  // expert goes portrait on narrow screens
+  if (innerWidth < innerHeight && W > H) [W, H] = [H, W];
+  document.querySelectorAll('#diff button').forEach((b) => b.classList.toggle('on', +b.dataset.d === d));
+  const cs = Math.floor(Math.min((innerWidth - 40) / W, (innerHeight - 190) / H, 44)) - 2;
+  gridEl.style.setProperty('--cs', cs + 'px');
+  gridEl.style.gridTemplateColumns = `repeat(${W}, ${cs}px)`;
+  gridEl.innerHTML = '';
+  cells = Array.from({ length: W * H }, () => ({ mine: false, n: 0, open: false, flag: false }));
+  els = cells.map((_, i) => { const e = document.createElement('div'); e.className = 'c h'; e.dataset.i = i; gridEl.appendChild(e); return e; });
+  started = false; over = false; flags = 0; opened = 0; clearInterval(timer); t0 = 0;
+  document.body.classList.remove('win'); face.textContent = '🙂';
+  updateLcd();
+}
+const nb = (i) => { const x = i % W, y = (i / W) | 0, out = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < W && Y < H) out.push(Y * W + X); } return out; };
+// first click: mines avoid the clicked cell and its neighbours, so it always opens an area
+function plant(safe) {
+  const ban = new Set([safe, ...nb(safe)]), pool = [];
+  for (let i = 0; i < W * H; i++) if (!ban.has(i)) pool.push(i);
+  for (let k = 0; k < M; k++) { const j = k + ((Math.random() * (pool.length - k)) | 0); [pool[k], pool[j]] = [pool[j], pool[k]]; cells[pool[k]].mine = true; }
+  for (let i = 0; i < W * H; i++) cells[i].n = nb(i).filter((j) => cells[j].mine).length;
+  started = true; t0 = performance.now(); timer = setInterval(updateLcd, 250);
+}
+function updateLcd() {
+  document.getElementById('mines').textContent = String(M - flags).padStart(3, '0');
+  document.getElementById('time').textContent = String(Math.min(999, started ? Math.floor((performance.now() - t0) / 1000) : 0)).padStart(3, '0');
+}
+function paint(i, delay = 0) {
+  const c = cells[i], e = els[i];
+  e.className = 'c ' + (c.open ? 'o' : 'h') + (c.flag && !c.open ? ' f' : '') + (c.open && c.n && !c.mine ? ' n' + c.n : '');
+  e.textContent = c.open && !c.mine && c.n ? c.n : '';
+  if (delay) e.style.animationDelay = delay + 'ms'; else e.style.animationDelay = '';
+}
+// flood fill as BFS so the ripple animates outward from the click
+function reveal(i) {
+  if (over) return;
+  if (!started) plant(i);
+  const c = cells[i]; if (c.open || c.flag) return;
+  if (c.mine) return lose(i);
+  const q = [[i, 0]], seen = new Set([i]);
+  while (q.length) {
+    const [j, d] = q.shift(), cj = cells[j];
+    if (cj.open || cj.flag) continue;
+    cj.open = true; opened++; paint(j, Math.min(d * 18, 400));
+    if (cj.n === 0) for (const k of nb(j)) if (!seen.has(k) && !cells[k].mine) { seen.add(k); q.push([k, d + 1]); }
+  }
+  tone(520 + Math.random() * 80, 0.05, 0.03);
+  if (opened === W * H - M) win();
+}
+function chord(i) {
+  const c = cells[i]; if (!c.open || !c.n) return;
+  const ns = nb(i);
+  if (ns.filter((j) => cells[j].flag).length !== c.n) return;
+  for (const j of ns) if (!cells[j].open && !cells[j].flag) reveal(j);
+}
+function toggleFlag(i) { const c = cells[i]; if (c.open || over) return; c.flag = !c.flag; flags += c.flag ? 1 : -1; paint(i); updateLcd(); tone(c.flag ? 900 : 600, 0.04, 0.04); }
+function lose(i) {
+  over = true; clearInterval(timer); face.textContent = '😵';
+  els[i].className = 'c m boom'; tone(90, 0.6, 0.15, 'sawtooth');
+  // other mines pop one by one, spreading from the blast
+  const xi = i % W, yi = (i / W) | 0;
+  const rest = cells.map((c, j) => j).filter((j) => j !== i && (cells[j].mine || cells[j].flag)).sort((a, b) => Math.hypot(a % W - xi, ((a / W) | 0) - yi) - Math.hypot(b % W - xi, ((b / W) | 0) - yi));
+  rest.forEach((j, k) => setTimeout(() => { if (cells[j].mine && !cells[j].flag) els[j].className = 'c m'; else if (!cells[j].mine && cells[j].flag) els[j].classList.add('wrong'); if (k % 3 === 0) tone(140 + Math.random() * 60, 0.08, 0.04, 'square'); }, 120 + k * 35));
+  if (ai) setTimeout(() => setup(diff), 3500);
+}
+function win() {
+  over = true; clearInterval(timer); face.textContent = '😎'; document.body.classList.add('win');
+  cells.forEach((c, j) => { if (c.mine && !c.flag) { c.flag = true; flags++; paint(j); } }); updateLcd();
+  [523, 659, 784, 1047].forEach((f, k) => setTimeout(() => tone(f, 0.18, 0.08), k * 110));
+  if (ai) setTimeout(() => setup(diff), 3500);
+}
+
+// Input > mouse buttons, long-press on touch
+let press = null;
+gridEl.addEventListener('contextmenu', (e) => e.preventDefault());
+gridEl.addEventListener('pointerdown', (e) => {
+  const i = +e.target.dataset.i; if (Number.isNaN(i)) return;
+  stopAI(); unlock();
+  if (e.button === 2) { toggleFlag(i); return; }
+  face.textContent = '😮';
+  press = { i, t: setTimeout(() => { toggleFlag(i); press.done = true; navigator.vibrate?.(20); }, 380) };
+});
+gridEl.addEventListener('pointerup', (e) => {
+  if (!over) face.textContent = '🙂';
+  if (!press) return; clearTimeout(press.t);
+  const { i, done } = press; press = null; if (done) return;
+  if (cells[i].open) chord(i); else reveal(i);
+});
+gridEl.addEventListener('pointerleave', () => { if (press) { clearTimeout(press.t); press = null; } });
+face.onclick = () => { stopAI(); setup(diff); };
+document.querySelectorAll('#diff button').forEach((b) => (b.onclick = () => { setup(+b.dataset.d); if (ai) startAI(); }));
+document.getElementById('ai').onclick = () => { if (ai) stopAI(); else { if (over || started) setup(diff); startAI(); } };
+
+// AI > constraint solver: trivial rules, then subset deduction, then least-risk guess
+function frontier() {
+  const cons = [];
+  for (let i = 0; i < W * H; i++) {
+    const c = cells[i]; if (!c.open || !c.n) continue;
+    const unk = nb(i).filter((j) => !cells[j].open && !cells[j].flag), fl = nb(i).filter((j) => cells[j].flag).length;
+    if (unk.length) cons.push({ i, set: unk, need: c.n - fl });
+  }
+  return cons;
+}
+function solveStep() {
+  if (over) return null;
+  if (!started) { const i = ((H / 2) | 0) * W + ((W / 2) | 0); return { kind: 'open', cells: [i], why: 'first click (always safe)' }; }
+  const cons = frontier();
+  const safe = new Set(), mines = new Set();
+  for (const c of cons) { if (c.need === 0) c.set.forEach((j) => safe.add(j)); if (c.need === c.set.length) c.set.forEach((j) => mines.add(j)); }
+  if (mines.size) return { kind: 'flag', cells: [...mines], why: `${mines.size} certain mine${mines.size > 1 ? 's' : ''} (count = unknowns)` };
+  if (safe.size) return { kind: 'open', cells: [...safe], why: `${safe.size} safe cell${safe.size > 1 ? 's' : ''} (number satisfied)` };
+  // subset rule: if A ⊂ B then B\A holds need(B)-need(A) mines
+  for (const a of cons) for (const b of cons) {
+    if (a === b || a.set.length >= b.set.length) continue;
+    if (!a.set.every((j) => b.set.includes(j))) continue;
+    const diffSet = b.set.filter((j) => !a.set.includes(j)), d = b.need - a.need;
+    if (d === 0) return { kind: 'open', cells: diffSet, why: 'subset rule: difference is safe' };
+    if (d === diffSet.length) return { kind: 'flag', cells: diffSet, why: 'subset rule: difference is all mines' };
+  }
+  // guess: average local probability vs global density
+  const hidden = cells.map((c, j) => j).filter((j) => !cells[j].open && !cells[j].flag);
+  const prob = new Map();
+  for (const c of cons) for (const j of c.set) prob.set(j, Math.max(prob.get(j) || 0, c.need / c.set.length));
+  const front = new Set(cons.flatMap((c) => c.set)), interior = hidden.filter((j) => !front.has(j));
+  const remaining = M - flags, frontMines = cons.reduce((s, c) => s + c.need, 0) / 2;
+  const pInterior = interior.length ? Math.max(0, remaining - frontMines) / interior.length : 1;
+  let best = null, bp = 2;
+  for (const [j, p] of prob) if (p < bp) { bp = p; best = j; }
+  // corners of the unknown interior open more often
+  if (interior.length && pInterior < bp) { bp = pInterior; best = interior.sort((a, b2) => nb(a).length - nb(b2).length)[0]; }
+  return best == null ? null : { kind: 'open', cells: [best], why: `guess · ~${Math.round(bp * 100)}% risk`, guess: true };
+}
+function aiTick() {
+  if (!ai || over) return;
+  const s = solveStep(); if (!s) return;
+  for (const e of els) e.classList.remove('safe', 'risk');
+  for (const j of s.cells) els[j].classList.add(s.guess ? 'risk' : 'safe');
+  infoEl.textContent = `AI · ${s.why}`;
+  setTimeout(() => { if (!ai) return; for (const j of s.cells) { if (s.kind === 'flag') { if (!cells[j].flag) toggleFlag(j); } else reveal(j); } }, 160);
+}
+function startAI() { ai = true; idle = 0; document.getElementById('ai').classList.add('on'); clearInterval(aiTimer); aiTimer = setInterval(aiTick, 420); }
+function stopAI() { idle = 0; if (!ai) return; ai = false; document.getElementById('ai').classList.remove('on'); clearInterval(aiTimer); for (const e of els) e.classList.remove('safe', 'risk'); infoEl.textContent = 'left: reveal · right / long-press: flag · click a number: chord'; }
+setInterval(() => { if (!ai) { idle++; if (idle > 45) { setup(diff); startAI(); } } }, 1000);
+
+// Audio: tiny clicks, built on first gesture
+let ac = null;
+function unlock() { if (!ac) { try { ac = new AudioContext(); } catch { /* none */ } } }
+function tone(f, d, v, type = 'triangle') { if (!ac) return; const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime; o.type = type; o.frequency.value = f; g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); }
+
+setup(1); startAI();
+window.__mines = { setup, reveal, stopAI, get cells() { return cells; }, get over() { return over; }, get opened() { return opened; }, get W() { return W; } };
+</script>
+</body>
+</html>

@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Watch Configurator</title>
+<meta name="category" content="scenes" />
+<meta name="order" content="2" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="product viewer, PBR, transmission glass, exploded view" />
+<meta name="description" content="A wristwatch modelled entirely in code (lathe case, rotating bezel, sunburst dial, sapphire crystal, swept leather strap) that keeps your real local time. Swap metals, dials and straps, or explode it into parts. Tests e-commerce grade PBR and modelling with no assets." />
+<meta name="prompt" content="Build a single-file Three.js product configurator for a luxury dive watch modelled entirely in code: lathe-turned case, rotating bezel with engraved markers, sunburst dial with applied indices and date window, sapphire crystal with transmission, swept leather strap. Hands show the real time with a sweeping seconds hand. Swatches for case metal, dial color and strap, plus an animated exploded view." />
+<style>
+  :root { --ink: #f4f1ea; --muted: #a49d90; --panel: rgba(16, 15, 13, 0.7); --accent: #d9b77a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0c0b; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  canvas { display: block; }
+  .title { position: fixed; left: 24px; top: 20px; pointer-events: none; }
+  .title .k { font-size: 11px; letter-spacing: 0.3em; color: var(--accent); text-transform: uppercase; font-weight: 700; }
+  .title h1 { margin: 6px 0 0; font: 600 28px/1.1 "Didot", "Bodoni 72", Georgia, serif; letter-spacing: 0.01em; }
+  .title p { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; right: 18px; top: 50%; transform: translateY(-50%); width: 236px; padding: 16px; border-radius: 18px; background: var(--panel); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; }
+  #panel h3 { margin: 0 0 8px; font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .sw { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .sw button { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15); padding: 0; }
+  .sw button.on { border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .row button { border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 10px; padding: 8px 4px; font: inherit; font-weight: 700; cursor: pointer; }
+  .row button.on { background: var(--accent); color: #1d1608; border-color: var(--accent); }
+  #name { margin-top: 14px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+  #name b { color: var(--ink); }
+  .hint { position: fixed; left: 24px; bottom: 18px; color: var(--muted); font-size: 11.5px; pointer-events: none; }
+  @media (max-width: 700px) { #panel { top: auto; bottom: 10px; right: 10px; left: 10px; width: auto; transform: none; display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; padding: 12px; } #name, .hint { display: none; } .title h1 { font-size: 22px; } .sw { margin-bottom: 10px; } .sw button { width: 28px; height: 28px; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div class="title"><div class="k">Render Studio · Ref. 300M</div><h1>Abyss Diver</h1><p>modelled in code · showing your local time</p></div>
+<div id="panel">
+  <div><h3>Case</h3><div class="sw" id="sw-case"></div></div>
+  <div><h3>Dial</h3><div class="sw" id="sw-dial"></div></div>
+  <div><h3>Strap</h3><div class="sw" id="sw-strap"></div></div>
+  <div><h3>View</h3><div class="row"><button id="explode">Explode</button><button id="spin" class="on">Turntable</button></div></div>
+  <div id="name"></div>
+</div>
+<div class="hint">Drag to rotate · scroll to zoom</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/watch-product-viewer.html
+ * PURPOSE: Three.js procedural dive watch configurator: lathe case, bezel, canvas dial, transmission crystal, swept strap, live time, exploded view
+ * UI: Render Studio > 3D Scenes > Watch Configurator
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const $ = (id) => document.getElementById(id);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
+// Studio > backdrop: radial gradient sweep
+const bgc = document.createElement('canvas'); bgc.width = bgc.height = 512;
+const bg = bgc.getContext('2d');
+const grd = bg.createRadialGradient(256, 210, 20, 256, 256, 380);
+grd.addColorStop(0, '#3a362f'); grd.addColorStop(0.55, '#16140f'); grd.addColorStop(1, '#070605');
+bg.fillStyle = grd; bg.fillRect(0, 0, 512, 512);
+scene.background = new THREE.CanvasTexture(bgc);
+scene.background.colorSpace = THREE.SRGBColorSpace;
+
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.1, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 7; controls.maxDistance = 22;
+controls.target.set(0, -1.2, 0);
+function frameCamera() {
+  const narrow = innerWidth / innerHeight < 0.9;
+  camera.position.set(0, 9.5, narrow ? 20 : 14);
+  controls.target.set(narrow ? 0 : 1.3, narrow ? -2.2 : -1.7, 0);
+}
+frameCamera();
+
+const key = new THREE.DirectionalLight(0xfff1dd, 2.2);
+key.position.set(4, 9, 5);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.radius = 6;
+Object.assign(key.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc4ff, 1.4);
+rim.position.set(-6, 3, -6);
+scene.add(rim);
+
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.ShadowMaterial({ opacity: 0.45 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -4.45; floor.receiveShadow = true;
+scene.add(floor);
+
+// Watch > materials (swappable)
+const metal = new THREE.MeshPhysicalMaterial({ color: 0xd9dadf, metalness: 1, roughness: 0.18, clearcoat: 0.3, clearcoatRoughness: 0.2 });
+const brushed = new THREE.MeshPhysicalMaterial({ color: 0xc9cacf, metalness: 1, roughness: 0.34 });
+const ceramic = new THREE.MeshPhysicalMaterial({ color: 0x0d1830, metalness: 0.1, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.05 });
+const engraving = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.4, metalness: 0.2, emissive: 0x99ffcc, emissiveIntensity: 0.02 });
+const lume = new THREE.MeshStandardMaterial({ color: 0xf3f1e4, roughness: 0.5, emissive: 0x9dffd0, emissiveIntensity: 0.05 });
+const strapMat = new THREE.MeshPhysicalMaterial({ color: 0x5a3420, roughness: 0.62, sheen: 0.6, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x8a5a3c) });
+const glass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, roughness: 0, transmission: 1, thickness: 0.25, ior: 1.77, clearcoat: 0.4, specularIntensity: 0.5, envMapIntensity: 0.3, transparent: true, opacity: 1 });
+const dialMat = new THREE.MeshPhysicalMaterial({ roughness: 0.35, metalness: 0.4, clearcoat: 0.6, clearcoatRoughness: 0.15 });
+
+const watch = new THREE.Group();
+scene.add(watch);
+const parts = {};
+function part(name) { const g = new THREE.Group(); g.userData.base = 0; watch.add(g); parts[name] = g; return g; }
+const shadowy = (m) => { m.castShadow = true; m.receiveShadow = true; return m; };
+
+// Watch > case: lathe profile (r, y), lugs, crown, caseback
+const caseG = part('case');
+const caseProfile = [[0.0, -0.36], [1.5, -0.36], [1.78, -0.3], [1.98, -0.12], [2.04, 0.06], [1.99, 0.22], [1.86, 0.3], [1.86, 0.3]].map(([r, y]) => new THREE.Vector2(r, y));
+caseG.add(shadowy(new THREE.Mesh(new THREE.LatheGeometry(caseProfile, 128), metal)));
+const lugGeo = new RoundedBoxGeometry(0.3, 0.3, 0.85, 4, 0.1);
+for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+  const lug = shadowy(new THREE.Mesh(lugGeo, brushed));
+  lug.position.set(sx * 0.84, -0.06, sz * 1.98);
+  lug.rotation.x = sz * 0.22;
+  caseG.add(lug);
+}
+const crown = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.34, 40, 1), metal));
+crown.rotation.z = Math.PI / 2; crown.position.set(2.2, 0.02, 0);
+caseG.add(crown);
+for (let i = 0; i < 24; i++) {
+  const k = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.03, 0.03), brushed);
+  const a = (i / 24) * Math.PI * 2;
+  k.position.set(2.2, 0.02 + Math.cos(a) * 0.265, Math.sin(a) * 0.265);
+  k.rotation.x = a;
+  caseG.add(k);
+}
+for (const sz of [-1, 1]) {
+  const guard = shadowy(new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.3, 0.32, 3, 0.1), brushed));
+  guard.position.set(2.0, 0.0, sz * 0.42);
+  caseG.add(guard);
+}
+const back = part('back');
+back.add(shadowy(new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.5, 0.12, 96), brushed)));
+back.children[0].position.y = -0.42;
+const backRing = new THREE.Mesh(new THREE.TorusGeometry(1.12, 0.03, 8, 96), metal);
+backRing.rotation.x = Math.PI / 2; backRing.position.y = -0.49;
+back.add(backRing);
+
+// Watch > bezel: lathe ring + ceramic insert + engraved minute markers
+const bezel = part('bezel');
+const bezelProfile = [[1.58, 0.3], [1.97, 0.3], [2.02, 0.36], [1.98, 0.46], [1.62, 0.46], [1.58, 0.42]].map(([r, y]) => new THREE.Vector2(r, y));
+bezel.add(shadowy(new THREE.Mesh(new THREE.LatheGeometry(bezelProfile, 120), brushed)));
+const insert = new THREE.Mesh(new THREE.RingGeometry(1.62, 1.94, 120), ceramic);
+insert.rotation.x = -Math.PI / 2; insert.position.y = 0.465;
+bezel.add(insert);
+for (let i = 0; i < 60; i++) {
+  const a = (i / 60) * Math.PI * 2;
+  const big = i % 5 === 0;
+  if (i === 0) continue;
+  const len = big ? 0.2 : 0.09, w = big ? 0.045 : 0.022;
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.01, len), engraving);
+  const r = 1.85 - len / 2;
+  m.position.set(Math.sin(a) * r, 0.47, -Math.cos(a) * r);
+  m.rotation.y = -a;
+  bezel.add(m);
+}
+const pipShape = new THREE.Shape();
+pipShape.moveTo(-0.12, 0); pipShape.lineTo(0.12, 0); pipShape.lineTo(0, -0.2); pipShape.closePath();
+const pip = new THREE.Mesh(new THREE.ExtrudeGeometry(pipShape, { depth: 0.02, bevelEnabled: false }), lume);
+pip.rotation.x = -Math.PI / 2; pip.position.set(0, 0.47, -1.9);
+bezel.add(pip);
+
+// Watch > dial: canvas sunburst + printed track + logo + date
+const dialCanvas = document.createElement('canvas');
+dialCanvas.width = dialCanvas.height = 1024;
+const dialTex = new THREE.CanvasTexture(dialCanvas);
+dialTex.colorSpace = THREE.SRGBColorSpace; dialTex.anisotropy = 8;
+dialMat.map = dialTex;
+function drawDial(c1, c2, ink) {
+  const g = dialCanvas.getContext('2d'), C = 512;
+  g.clearRect(0, 0, 1024, 1024);
+  const base = g.createRadialGradient(C, C, 0, C, C, C);
+  base.addColorStop(0, c1); base.addColorStop(1, c2);
+  g.fillStyle = base; g.beginPath(); g.arc(C, C, C, 0, Math.PI * 2); g.fill();
+  // sunburst: thin radial streaks alternating light/dark
+  for (let i = 0; i < 720; i++) {
+    const a = (i / 720) * Math.PI * 2;
+    g.strokeStyle = i % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+    g.lineWidth = 2.2; g.beginPath(); g.moveTo(C, C); g.lineTo(C + Math.cos(a) * C, C + Math.sin(a) * C); g.stroke();
+  }
+  const sheen = g.createConicGradient(-0.6, C, C);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.16)'); sheen.addColorStop(0.25, 'rgba(255,255,255,0)'); sheen.addColorStop(0.5, 'rgba(255,255,255,0.16)'); sheen.addColorStop(0.75, 'rgba(255,255,255,0)'); sheen.addColorStop(1, 'rgba(255,255,255,0.16)');
+  g.fillStyle = sheen; g.beginPath(); g.arc(C, C, C, 0, Math.PI * 2); g.fill();
+  // minute track
+  g.strokeStyle = ink; g.fillStyle = ink;
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * Math.PI * 2 - Math.PI / 2;
+    const r0 = i % 5 ? 478 : 462;
+    g.lineWidth = i % 5 ? 3 : 5;
+    g.beginPath(); g.moveTo(C + Math.cos(a) * r0, C + Math.sin(a) * r0); g.lineTo(C + Math.cos(a) * 500, C + Math.sin(a) * 500); g.stroke();
+  }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '700 54px Didot, "Bodoni 72", Georgia, serif';
+  g.fillText('ABYSS', C, C - 210);
+  g.font = '600 22px ui-rounded, system-ui, sans-serif';
+  g.fillText('AUTOMATIC  ·  RENDER STUDIO', C, C - 160);
+  g.font = '700 26px ui-rounded, system-ui, sans-serif';
+  g.fillStyle = '#ff7a3d';
+  g.fillText('DIVER 300M', C, C + 180);
+  g.fillStyle = ink;
+  g.font = '500 18px ui-rounded, system-ui, sans-serif';
+  g.fillText('1000 FT · CHRONOMETER', C, C + 214);
+  // date window at 3 o'clock
+  g.fillStyle = '#f8f6ef'; g.fillRect(C + 300, C - 34, 84, 68);
+  g.strokeStyle = 'rgba(0,0,0,0.5)'; g.lineWidth = 4; g.strokeRect(C + 300, C - 34, 84, 68);
+  g.fillStyle = '#111'; g.font = '700 46px ui-rounded, system-ui, sans-serif';
+  g.fillText(String(new Date().getDate()), C + 342, C + 3);
+  dialTex.needsUpdate = true;
+}
+const dialG = part('dial');
+const dial = new THREE.Mesh(new THREE.CircleGeometry(1.6, 128), dialMat);
+dial.rotation.x = -Math.PI / 2; dial.position.y = 0.3; dial.receiveShadow = true;
+dialG.add(dial);
+// applied indices: lume plots in metal surrounds, 12 is a double baton
+for (let h = 0; h < 12; h++) {
+  if (h === 3) continue;
+  const a = (h / 12) * Math.PI * 2;
+  const isTwelve = h === 0, isCardinal = h % 3 === 0;
+  const geo = isCardinal ? new RoundedBoxGeometry(isTwelve ? 0.1 : 0.12, 0.05, 0.36, 2, 0.02) : new THREE.CylinderGeometry(0.085, 0.085, 0.05, 32);
+  const r = isCardinal ? 1.18 : 1.26;
+  const offsets = isTwelve ? [-0.08, 0.08] : [0];
+  for (const o of offsets) {
+    const surround = shadowy(new THREE.Mesh(geo, metal));
+    const inner = new THREE.Mesh(isCardinal ? new THREE.BoxGeometry(isTwelve ? 0.06 : 0.07, 0.052, 0.3) : new THREE.CylinderGeometry(0.062, 0.062, 0.052, 32), lume);
+    for (const m of [surround, inner]) {
+      m.position.set(Math.sin(a) * r + Math.cos(a) * o, 0.33, -Math.cos(a) * r + Math.sin(a) * o);
+      m.rotation.y = -a;
+      dialG.add(m);
+    }
+  }
+}
+
+// Watch > hands: extruded shapes with lume inserts, pivot at center
+function handShape(len, w, tail, kind) {
+  const s = new THREE.Shape();
+  if (kind === 'sword') { s.moveTo(-w * 0.35, -tail); s.lineTo(-w, len * 0.15); s.lineTo(0, len); s.lineTo(w, len * 0.15); s.lineTo(w * 0.35, -tail); }
+  else if (kind === 'arrow') { s.moveTo(-w * 0.3, -tail); s.lineTo(-w * 0.3, len * 0.55); s.lineTo(-w * 1.4, len * 0.55); s.lineTo(0, len); s.lineTo(w * 1.4, len * 0.55); s.lineTo(w * 0.3, len * 0.55); s.lineTo(w * 0.3, -tail); }
+  else { s.moveTo(-w, -tail); s.lineTo(-w * 0.6, len); s.lineTo(w * 0.6, len); s.lineTo(w, -tail); }
+  s.closePath();
+  return s;
+}
+function makeHand(len, w, tail, kind, y, lumed, mat = metal) {
+  const g = new THREE.Group();
+  const body = shadowy(new THREE.Mesh(new THREE.ExtrudeGeometry(handShape(len, w, tail, kind), { depth: 0.025, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2 }), mat));
+  body.rotation.x = -Math.PI / 2;
+  g.add(body);
+  if (lumed) {
+    const ins = new THREE.Mesh(new THREE.ShapeGeometry(handShape(len * 0.72, w * 0.55, -len * 0.18, kind)), lume);
+    ins.rotation.x = -Math.PI / 2; ins.position.y = 0.04;
+    g.add(ins);
+  }
+  g.position.y = y;
+  return g;
+}
+const handsG = part('hands');
+const hourHand = makeHand(0.82, 0.1, 0.18, 'arrow', 0.37, true);
+const minHand = makeHand(1.3, 0.075, 0.22, 'sword', 0.41, true);
+const secHand = makeHand(1.45, 0.016, 0.38, 'stick', 0.45, false, new THREE.MeshStandardMaterial({ color: 0xff6a2a, roughness: 0.4, metalness: 0.3 }));
+const secTip = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 24), lume);
+secTip.position.set(0, 0.03, -1.05);
+secHand.add(secTip);
+const cap = shadowy(new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.08, 24), metal));
+cap.position.y = 0.47;
+handsG.add(hourHand, minHand, secHand, cap);
+
+// Watch > crystal: domed sapphire with transmission
+const crystalG = part('crystal');
+const crystal = new THREE.Mesh(new THREE.SphereGeometry(4.2, 96, 16, 0, Math.PI * 2, 0, Math.asin(1.62 / 4.2)), glass);
+crystal.position.y = 0.47 - 4.2 * Math.cos(Math.asin(1.62 / 4.2)) + 0.0;
+crystalG.add(crystal);
+
+// Watch > strap: rounded rectangle cross-section swept along a wrist loop
+const strapG = part('strap');
+const strapPath = new THREE.CatmullRomCurve3([[0, -0.08, -2.45], [0, -0.55, -3.0], [0, -1.7, -3.3], [0, -3.1, -2.85], [0, -3.95, -1.6], [0, -4.22, 0], [0, -3.95, 1.6], [0, -3.1, 2.85], [0, -1.7, 3.3], [0, -0.55, 3.0], [0, -0.08, 2.45]].map((p) => new THREE.Vector3(...p)));
+function sweepStrap(curve, width, thick, n) {
+  const pos = [], idx = [], ring = [];
+  const X = new THREE.Vector3(1, 0, 0);
+  // cross-section around the strap, slightly rounded edges
+  const sec = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const c = Math.cos(a), s = Math.sin(a);
+    sec.push([Math.sign(c) * Math.pow(Math.abs(c), 0.18) * width / 2, Math.sign(s) * Math.pow(Math.abs(s), 0.5) * thick / 2]);
+  }
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, p = curve.getPointAt(t), T = curve.getTangentAt(t);
+    const N = new THREE.Vector3().crossVectors(X, T).normalize();
+    // taper toward buckle end slightly
+    const w = 1 - 0.12 * Math.sin(t * Math.PI);
+    for (const [sx, sy] of sec) pos.push(p.x + X.x * sx * w + N.x * sy, p.y + N.y * sy, p.z + N.z * sy);
+  }
+  const m = sec.length;
+  for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) {
+    const a = i * m + j, b = i * m + ((j + 1) % m), c = (i + 1) * m + j, d = (i + 1) * m + ((j + 1) % m);
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+const strap = shadowy(new THREE.Mesh(sweepStrap(strapPath, 1.5, 0.16, 220), strapMat));
+strapG.add(strap);
+// stitching: dashed lines along both edges
+const stitchMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.8 });
+for (let i = 0; i < 160; i++) {
+  if (i % 2) continue;
+  const t = 0.02 + (i / 160) * 0.96;
+  const p = strapPath.getPointAt(t), T = strapPath.getTangentAt(t);
+  const N = new THREE.Vector3().crossVectors(new THREE.Vector3(1, 0, 0), T).normalize();
+  for (const sx of [-0.6, 0.6]) {
+    const st = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.11), stitchMat);
+    st.position.copy(p).add(N.clone().multiplyScalar(0.085)).add(new THREE.Vector3(sx, 0, 0));
+    st.lookAt(st.position.clone().add(T));
+    strapG.add(st);
+  }
+}
+const buckle = shadowy(new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.07, 12, 4, Math.PI * 2), metal));
+buckle.rotation.set(Math.PI / 2, 0, Math.PI / 4);
+buckle.scale.set(1.35, 0.75, 1);
+buckle.position.set(0, -4.25, -0.9);
+strapG.add(buckle);
+
+// Configurator > swatches
+const CASES = { Steel: [0xd9dadf, 0xc9cacf, 0.18], 'Yellow gold': [0xf2c87a, 0xe0b46a, 0.2], 'Black PVD': [0x2a2b2e, 0x232427, 0.32] };
+const DIALS = { Navy: ['#2c4a8a', '#0b1530', '#f3f1e6', 0x0d1830], Emerald: ['#2c7a55', '#0a2a1c', '#f3f1e6', 0x0b2a1d], Onyx: ['#2b2b2e', '#060607', '#f3f1e6', 0x0a0a0b], Salmon: ['#f2b49a', '#c97b5f', '#2a1a14', 0x2a1a14] };
+const STRAPS = { 'Cognac leather': [0x6a3a20, 0.62], 'Black rubber': [0x141416, 0.85], 'Olive canvas': [0x4e5236, 0.9] };
+const state = { case: 'Steel', dial: 'Navy', strap: 'Cognac leather' };
+function swatches(id, set, field, colorOf) {
+  for (const [k, v] of Object.entries(set)) {
+    const b = document.createElement('button');
+    b.title = k;
+    b.style.background = colorOf(v);
+    b.onclick = () => { state[field] = k; apply(); };
+    b.dataset.k = k;
+    $(id).append(b);
+  }
+}
+const hex = (n) => `#${n.toString(16).padStart(6, '0')}`;
+swatches('sw-case', CASES, 'case', (v) => `radial-gradient(circle at 35% 30%, #fff, ${hex(v[0])} 45%, ${hex(v[1])})`);
+swatches('sw-dial', DIALS, 'dial', (v) => `radial-gradient(circle, ${v[0]}, ${v[1]})`);
+swatches('sw-strap', STRAPS, 'strap', (v) => hex(v[0]));
+function apply() {
+  const [c1, c2, r] = CASES[state.case];
+  metal.color.set(c1); brushed.color.set(c2); metal.roughness = r;
+  const [d1, d2, ink, ins] = DIALS[state.dial];
+  drawDial(d1, d2, ink);
+  ceramic.color.set(ins);
+  const [sc, sr] = STRAPS[state.strap];
+  strapMat.color.set(sc); strapMat.roughness = sr; strapMat.sheen = state.strap.includes('leather') ? 0.6 : 0.1;
+  for (const [id, f] of [['sw-case', 'case'], ['sw-dial', 'dial'], ['sw-strap', 'strap']]) $(id).querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.k === state[f]));
+  $('name').innerHTML = `<b>${state.case}</b> case<br><b>${state.dial}</b> sunburst dial<br><b>${state.strap}</b> strap`;
+}
+apply();
+
+// Configurator > exploded view: parts lift apart along y
+const EXPLODE = { crystal: 2.3, bezel: 1.55, hands: 1.0, dial: 0.45, case: 0, back: -1.0, strap: -0.7 };
+let explode = 0, explodeTarget = 0, spin = true;
+$('explode').onclick = () => { explodeTarget = explodeTarget ? 0 : 1; $('explode').classList.toggle('on', !!explodeTarget); };
+$('spin').onclick = () => { spin = !spin; $('spin').classList.toggle('on', spin); };
+let lastInput = -1e9;
+controls.addEventListener('start', () => (lastInput = performance.now()));
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  frameCamera();
+});
+
+watch.rotation.y = -0.5;
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta());
+  // Watch > live time: 8 beats/s sweeping seconds like an automatic movement
+  const now = new Date();
+  const ms = now.getMilliseconds(), s = now.getSeconds() + Math.floor(ms / 125) / 8, m = now.getMinutes() + s / 60, h = (now.getHours() % 12) + m / 60;
+  secHand.rotation.y = -(s / 60) * Math.PI * 2;
+  minHand.rotation.y = -(m / 60) * Math.PI * 2;
+  hourHand.rotation.y = -(h / 12) * Math.PI * 2;
+  explode += (explodeTarget - explode) * Math.min(1, dt * 4);
+  const e = explode * explode * (3 - 2 * explode);
+  for (const [k, g] of Object.entries(parts)) g.position.y = EXPLODE[k] * e;
+  // stagger the hands vertically when exploded
+  hourHand.position.y = 0.37 + 0.0 * e; minHand.position.y = 0.41 + 0.35 * e; secHand.position.y = 0.45 + 0.7 * e; cap.position.y = 0.47 + 0.75 * e;
+  if (spin && performance.now() - lastInput > 2500) watch.rotation.y += dt * 0.25;
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

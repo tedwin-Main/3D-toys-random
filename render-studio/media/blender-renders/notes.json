@@ -1,0 +1,22 @@
+{
+  "eight-ball-product-shot.png": {
+    "title": "8-Ball Product Shot",
+    "about": "Cycles hero still built entirely by a headless Python script: procedural equirect decal for the 8, clear-coated resin, felt with sheen and micro bump, walnut rail, area-light studio and 85 mm shallow depth of field.",
+    "prompt": "Write a Blender Python script that builds a pool-table product shot of an 8-ball from scratch: generate the white disc and 8 as a texture with numpy, clear-coat resin material, green felt with sheen, two out-of-focus balls behind, warm overhead area light, 85 mm camera with shallow DOF, and render with Cycles."
+  },
+  "eight-ball-turntable.mp4": {
+    "title": "8-Ball Turntable",
+    "about": "The same scene as a 4-second EEVEE turntable: the camera orbits on a keyframed empty, frames render headless and ffmpeg stitches them into H.264.",
+    "prompt": "Extend the Blender script with a 120-frame EEVEE turntable: parent the camera to an empty, keyframe a linear 360 degree spin, render PNG frames headless and encode them to MP4 with ffmpeg."
+  },
+  "low-poly-island.png": {
+    "title": "Low-Poly Island",
+    "about": "Procedural diorama from one headless Blender script: fBm terrain with a noisy coast mask, per-face colours by height and slope, faceted translucent water, trees, rocks, a lighthouse and clouds, rendered in Cycles.",
+    "prompt": "Write a Blender Python script that generates a low-poly island from noise: jittered triangle grid, falloff mask for the coast, flat-shaded faces coloured by height and slope (sand, grass, forest, rock, snow), faceted see-through water, scattered low-poly trees and rocks, a striped lighthouse and puffy clouds. Render a three-quarter view in Cycles."
+  },
+  "low-poly-island-turntable.mp4": {
+    "title": "Island Turntable",
+    "about": "Six-second EEVEE orbit of the same island: camera on a keyframed empty, frames rendered headless and stitched with ffmpeg.",
+    "prompt": "Add a 180-frame EEVEE turntable of the island to the script and encode it to MP4 with ffmpeg."
+  }
+}

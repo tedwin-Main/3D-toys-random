@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>D3 Bar Chart Race</title>
+<meta name="category" content="motion" />
+<meta name="order" content="3" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="D3.js, animated ranking, synthetic data, tooltips + table view" />
+<meta name="description" content="A bar chart race of 14 fictional cities over 130 years of synthetic data: bars overtake each other with smooth rank transitions, values tween, a year ticker and story notes run alongside, with tooltips, scrubbing and a table view. Hard because enter/update/exit ranking transitions must stay smooth and readable." />
+<meta name="prompt" content="Make a D3.js bar chart race in one HTML file using clearly labelled synthetic data: 14 fictional cities, populations 1900–2030, top 10 shown. Smooth rank-swap transitions, tweened value labels, colour by region with a legend, a big year ticker, short story captions, play/pause, a year scrubber, speed control, hover tooltips and a table view. Dark theme, colourblind-safe palette." />
+<style>
+  /* tokens on :root too so body + controls outside the chart share the dark surface */
+  :root, .viz-root {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --grid: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181;
+    --accent: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--surface-0); color: var(--text-primary); font-family: ui-sans-serif, "SF Pro Text", system-ui, sans-serif; overflow: hidden; }
+  .viz-root { height: 100%; display: flex; flex-direction: column; padding: 22px 28px 18px; gap: 12px; }
+  .head { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+  .sub { margin: 4px 0 0; color: var(--text-secondary); font-size: 13px; }
+  .sub b { color: var(--text-primary); font-weight: 600; }
+  body { background: var(--surface-0); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); margin-top: 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 12px; height: 10px; border-radius: 2px; display: inline-block; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button { border: 1px solid var(--grid); background: var(--surface-1); color: var(--text-primary); border-radius: 8px; padding: 7px 12px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+  button:hover, button:focus-visible { border-color: var(--accent); outline: none; }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .scrub { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-muted); }
+  .scrub input { width: 220px; accent-color: var(--accent); }
+  .panel { flex: 1; min-height: 0; position: relative; background: var(--surface-1); border-radius: 16px; border: 1px solid #242422; overflow: hidden; }
+  svg { display: block; width: 100%; height: 100%; }
+  .tick line { stroke: var(--grid); }
+  .tick text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .domain { display: none; }
+  .label { fill: var(--text-primary); font-size: 13px; font-weight: 600; }
+  .value { fill: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .ticker { fill: var(--text-primary); opacity: 0.14; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
+  .note-line { margin: 0; min-height: 18px; color: var(--text-secondary); font-size: 13px; }
+  .bar { cursor: default; }
+  .bar.hot rect.mark { filter: brightness(1.18); }
+  #tip { position: absolute; pointer-events: none; padding: 8px 10px; border-radius: 8px; background: #0d0d0c; border: 1px solid var(--grid); font-size: 12px; color: var(--text-secondary); opacity: 0; transition: opacity 0.12s; white-space: nowrap; }
+  #tip strong { display: block; color: var(--text-primary); font-size: 15px; font-variant-numeric: tabular-nums; }
+  #tip .key { display: inline-block; width: 12px; height: 2px; vertical-align: middle; margin-right: 6px; }
+  #table { position: absolute; inset: 0; overflow: auto; padding: 16px 20px; background: var(--surface-1); display: none; }
+  #table.show { display: block; }
+  table { border-collapse: collapse; width: 100%; max-width: 640px; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--grid); }
+  th { color: var(--text-muted); font-weight: 600; font-size: 12px; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  @media (max-width: 640px) {
+    .viz-root { padding: 14px 12px 12px; }
+    h1 { font-size: 18px; }
+    .scrub input { width: 140px; }
+    .label { font-size: 11.5px; } .value { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="head">
+    <div>
+      <h1>Fourteen fictional cities, 1900–2030</h1>
+      <p class="sub"><b>Synthetic data</b>, generated in this page. Population, top 10 per year, coloured by region.</p>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="controls">
+      <button id="play" class="on">Pause</button>
+      <button id="restart">Restart</button>
+      <button id="speed">1×</button>
+      <button id="tableBtn">Table</button>
+      <label class="scrub">Year <input id="year" type="range" min="0" step="1"></label>
+    </div>
+  </div>
+  <div class="panel" id="panel">
+    <svg id="chart" role="img" aria-label="Animated bar chart race of synthetic city populations"></svg>
+    <div id="tip"></div>
+    <div id="table"></div>
+  </div>
+  <p class="note-line" id="note"></p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/d3-bar-chart-race.html
+ * PURPOSE: D3 bar chart race over seeded synthetic city populations: rank transitions, tweened labels, scrubber, tooltip, table view
+ * UI: Render Studio > Motion > D3 Bar Chart Race
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const $ = (id) => document.getElementById(id);
+const TOP = 10;
+
+// Data: seeded synthetic populations, logistic growth + scripted declines (fictional cities)
+const REGIONS = ['Northlands', 'Coastal Belt', 'Southern Isles', 'Highlands', 'Dunes'];
+const REGION_VAR = ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5'];
+const css = getComputedStyle(document.querySelector('.viz-root'));
+const color = (region) => css.getPropertyValue(REGION_VAR[REGIONS.indexOf(region)]).trim();
+const CITIES = [
+  ['Aldermoor', 0, 9.2, 1925, 0.06], ['Brightwater', 1, 14, 1975, 0.07], ['Cinderfall', 3, 6.4, 1915, 0.09, 1968, 0.45],
+  ['Dunmere', 4, 18, 2002, 0.08], ['Elsbury', 0, 7.5, 1950, 0.05], ['Farhaven', 2, 11, 1990, 0.09],
+  ['Glasswick', 1, 8.6, 1938, 0.06], ['Harrowgate', 3, 5.2, 1906, 0.1, 1985, 0.2], ['Ironvale', 0, 10.4, 1932, 0.055, 1988, 0.38],
+  ['Juniper Bay', 2, 13, 2011, 0.1], ['Kestrel Point', 1, 12, 1961, 0.065], ['Lumen', 4, 15.5, 2016, 0.12],
+  ['Mossgrove', 2, 6.6, 1953, 0.07], ['Northgate', 3, 9.6, 1984, 0.06],
+];
+let seed = 42;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const YEARS = d3.range(1900, 2031);
+const series = CITIES.map(([name, r, K, t0, rate, fallAt, fallBy]) => {
+  const base = 0.15 + rnd() * 0.5;
+  let wobble = 0;
+  return { name, region: REGIONS[r], values: YEARS.map((y) => {
+    wobble = wobble * 0.8 + (rnd() - 0.5) * 0.04;
+    let v = base + K / (1 + Math.exp(-rate * (y - t0)));
+    // scripted decline: smooth step down after fallAt, so stories in the notes line up
+    if (fallAt) v *= 1 - fallBy / (1 + Math.exp(-0.25 * (y - fallAt)));
+    return Math.max(0.05, v * (1 + wobble)) * 1e6;
+  }) };
+});
+const NOTES = [
+  [1900, 'Harrowgate and Cinderfall lead: mill towns in the Highlands'],
+  [1930, 'Northlands industry booms; Ironvale and Aldermoor surge'],
+  [1968, 'Cinderfall mills close; the city loses almost half its people'],
+  [1975, 'Coastal Belt ports take off: Brightwater and Kestrel Point'],
+  [1988, 'Ironvale foundries shut down'],
+  [2000, 'Dunes solar cities appear: Dunmere grows fastest'],
+  [2016, 'Lumen, founded 1990, is the decade\'s breakout'],
+];
+const keyframes = YEARS.map((y, i) => {
+  const ranked = series.map((s) => ({ name: s.name, region: s.region, value: s.values[i] })).sort((a, b) => b.value - a.value);
+  ranked.forEach((d, r) => (d.rank = r));
+  return { year: y, ranked, byName: new Map(ranked.map((d) => [d.name, d])) };
+});
+
+// Legend: region swatches (rect mirrors the bar mark)
+for (const r of REGIONS) {
+  const s = document.createElement('span');
+  const i = document.createElement('i');
+  i.style.background = color(r);
+  s.append(i, document.createTextNode(r));
+  $('legend').appendChild(s);
+}
+
+// Chart: layout recomputed on resize
+const svg = d3.select('#chart');
+let W, H, M, x, y, barH;
+const gAxis = svg.append('g').attr('class', 'axis');
+const gBars = svg.append('g');
+const ticker = svg.append('text').attr('class', 'ticker').attr('text-anchor', 'end');
+const note = d3.select('#note');
+const fmt = (v) => (v >= 1e6 ? d3.format('.2f')(v / 1e6) + 'M' : d3.format(',.0f')(v / 1e3) + 'k');
+const fmtTick = (v) => (v === 0 ? '0' : d3.format('~')(v / 1e6) + 'M');
+
+function layout() {
+  const box = $('panel').getBoundingClientRect();
+  W = box.width; H = box.height;
+  const narrow = W < 560;
+  M = { top: 34, right: narrow ? 56 : 80, bottom: 16, left: narrow ? 92 : 128 };
+  barH = (H - M.top - M.bottom) / TOP;
+  x = d3.scaleLinear().range([M.left, W - M.right]);
+  y = (rank) => M.top + rank * barH;
+  svg.attr('viewBox', `0 0 ${W} ${H}`);
+  ticker.attr('x', W - M.right - 6).attr('y', H - M.bottom - barH * 0.9).style('font-size', `${Math.min(140, Math.max(56, W * 0.11))}px`);
+}
+
+// Chart > render: one keyframe; dur=0 for scrubbing, step length while playing
+let frame = 0, prevFrame = 0;
+function render(i, dur) {
+  const kf = keyframes[i], prev = keyframes[prevFrame];
+  const top = kf.ranked.slice(0, TOP);
+  x.domain([0, top[0].value * 1.04]);
+  const t = svg.transition().duration(dur).ease(d3.easeLinear);
+
+  gAxis.attr('transform', `translate(0,${M.top})`).transition(t)
+    .call(d3.axisTop(x).ticks(W < 560 ? 3 : 6, '~s').tickSizeOuter(0).tickSizeInner(-(barH * TOP)).tickFormat(fmtTick));
+
+  const bars = gBars.selectAll('g.bar').data(top, (d) => d.name);
+  // enter from below the last rank; exit back down past it
+  const enter = bars.enter().append('g').attr('class', 'bar').attr('tabindex', 0)
+    .attr('transform', (d) => `translate(0,${y(TOP)})`)
+    .on('pointermove focus', showTip).on('pointerleave blur', hideTip);
+  enter.append('rect').attr('class', 'mark').attr('x', M.left).attr('rx', 0).attr('fill', (d) => color(d.region));
+  enter.append('rect').attr('class', 'cap');
+  enter.append('text').attr('class', 'label').attr('text-anchor', 'end').attr('dy', '0.35em').text((d) => d.name);
+  enter.append('text').attr('class', 'value').attr('dy', '0.35em');
+  enter.append('rect').attr('class', 'hit').attr('fill', 'transparent');
+
+  const all = enter.merge(bars);
+  all.transition(t).attr('transform', (d) => `translate(0,${y(d.rank)})`);
+  // 2px surface gap between adjacent bars; data end rounded 4px via cap rect, baseline end square
+  all.select('rect.mark').transition(t).attr('x', M.left).attr('y', barH * 0.14).attr('height', barH * 0.72).attr('width', (d) => Math.max(0, x(d.value) - M.left - 4));
+  all.select('rect.cap').attr('fill', (d) => color(d.region)).transition(t).attr('x', (d) => Math.max(M.left, x(d.value) - 8)).attr('y', barH * 0.14).attr('height', barH * 0.72).attr('width', (d) => Math.min(8, x(d.value) - M.left)).attr('rx', 4);
+  all.select('text.label').attr('x', M.left - 8).attr('y', barH / 2);
+  all.select('rect.hit').attr('x', 0).attr('y', 0).attr('height', barH).attr('width', W);
+  all.select('text.value').transition(t).attr('x', (d) => x(d.value) + 6).attr('y', barH / 2)
+    .tween('text', function (d) {
+      const from = prev.byName.get(d.name)?.value ?? d.value;
+      const it = d3.interpolateNumber(from, d.value);
+      return (tt) => (this.textContent = fmt(it(tt)));
+    });
+  bars.exit().transition(t).attr('transform', `translate(0,${y(TOP)})`).style('opacity', 0).remove();
+
+  ticker.text(kf.year);
+  const n = NOTES.filter(([yr]) => yr <= kf.year).pop();
+  note.text(n ? `${kf.year >= n[0] ? n[0] : ''}: ${n[1]} (story is synthetic)` : '');
+  $('year').value = i;
+  if (!$('table').classList.contains('show')) return;
+  fillTable(kf);
+}
+
+// Chart > tooltip: value leads, name + region follow; textContent only
+function showTip(ev, d) {
+  const cur = keyframes[frame].byName.get(d.name);
+  const tip = $('tip');
+  tip.replaceChildren();
+  const strong = document.createElement('strong');
+  strong.textContent = fmt(cur.value);
+  const key = document.createElement('span');
+  key.className = 'key'; key.style.background = color(d.region);
+  tip.append(strong, key, document.createTextNode(`${d.name} · ${d.region} · #${cur.rank + 1} in ${keyframes[frame].year}`));
+  const box = $('panel').getBoundingClientRect();
+  const px = (ev.clientX ?? box.left + M.left + 40) - box.left, py = (ev.clientY ?? box.top + y(cur.rank)) - box.top;
+  tip.style.left = `${Math.min(px + 14, box.width - 260)}px`;
+  tip.style.top = `${py + 14}px`;
+  tip.style.opacity = 1;
+  d3.select(this).classed('hot', true);
+}
+function hideTip() { $('tip').style.opacity = 0; d3.select(this).classed('hot', false); }
+
+// Panel > table view: same numbers without hovering, all 14 cities
+function fillTable(kf) {
+  const tb = $('table');
+  tb.replaceChildren();
+  const table = document.createElement('table');
+  const head = table.insertRow();
+  for (const h of ['Rank', 'City', 'Region', `Population ${kf.year}`]) { const th = document.createElement('th'); th.textContent = h; head.appendChild(th); }
+  for (const d of kf.ranked) {
+    const r = table.insertRow();
+    [d.rank + 1, d.name, d.region, fmt(d.value)].forEach((v, i) => { const c = r.insertCell(); c.textContent = v; if (i === 0 || i === 3) c.className = 'n'; });
+  }
+  tb.appendChild(table);
+}
+
+// Controls: playback loop, scrubber, speed, table toggle
+let playing = true, speed = 1, timer = null;
+const STEP = 260;
+function tick() {
+  if (!playing) return;
+  if (frame >= keyframes.length - 1) { playing = false; $('play').textContent = 'Play'; $('play').classList.remove('on'); return; }
+  prevFrame = frame; frame++;
+  render(frame, STEP / speed);
+  timer = setTimeout(tick, STEP / speed);
+}
+$('year').max = keyframes.length - 1;
+$('year').addEventListener('input', (e) => { playing = false; clearTimeout(timer); $('play').textContent = 'Play'; $('play').classList.remove('on'); prevFrame = frame; frame = +e.target.value; render(frame, 0); });
+$('play').addEventListener('click', () => {
+  playing = !playing;
+  $('play').textContent = playing ? 'Pause' : 'Play';
+  $('play').classList.toggle('on', playing);
+  if (playing) { if (frame >= keyframes.length - 1) frame = 0; clearTimeout(timer); tick(); }
+});
+$('restart').addEventListener('click', () => { clearTimeout(timer); frame = 0; prevFrame = 0; render(0, 0); playing = true; $('play').textContent = 'Pause'; $('play').classList.add('on'); timer = setTimeout(tick, 400); });
+$('speed').addEventListener('click', () => { speed = speed === 1 ? 2 : speed === 2 ? 0.5 : 1; $('speed').textContent = `${speed}×`; });
+$('tableBtn').addEventListener('click', () => { const on = $('table').classList.toggle('show'); $('tableBtn').classList.toggle('on', on); if (on) fillTable(keyframes[frame]); });
+addEventListener('keydown', (e) => { if (e.key === ' ') { e.preventDefault(); $('play').click(); } });
+addEventListener('resize', () => { layout(); render(frame, 0); });
+
+layout();
+// open on 1958 so the first frame already shows a crowded race
+frame = prevFrame = 58;
+render(frame, 0);
+timer = setTimeout(tick, 600);
+</script>
+</body>
+</html>

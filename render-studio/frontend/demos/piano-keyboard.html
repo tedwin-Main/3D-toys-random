@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Piano</title>
+<meta name="category" content="apps" />
+<meta name="order" content="7" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="WebAudio synthesis, multi-touch, recording, piano roll" />
+<meta name="description" content="A playable piano synthesized with WebAudio, no samples: four voices (grand, electric piano, organ, soft pad) built from oscillators, FM and envelopes, with a sustain pedal and a little reverb. Play with the mouse, multi-touch glissando or the computer keyboard; notes rise as glowing bars in a piano-roll waterfall above the keys. Record a take, play it back with exact timing, and when idle it plays Ode to Joy by itself. Tests audio scheduling, input handling and visual sync." />
+<meta name="prompt" content="Build a playable piano in a single HTML file using the Web Audio API with no audio files. Draw two or three octaves of white and black keys that respond to mouse, multi-touch and the computer keyboard, synthesize a few instrument sounds with proper envelopes, add a sustain toggle, and show notes as bars rising in a piano-roll view above the keys. Add record and playback with accurate timing and an auto-play demo melody." />
+<style>
+  :root { --ink: #eef0f6; --muted: #8b92a6; --panel: rgba(14, 16, 24, 0.75); --line: rgba(255, 255, 255, 0.08); --accent: #7aa2ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #07080c; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
+  #roll { position: fixed; inset: 0 0 var(--kh) 0; width: 100%; height: calc(100% - var(--kh)); display: block; }
+  :root { --kh: 34vh; }
+  #keys { position: fixed; left: 0; right: 0; bottom: 0; height: var(--kh); background: linear-gradient(#1a1b20, #0b0c0f); padding: 10px 10px 14px; box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.6); }
+  #keys .bed { position: relative; height: 100%; }
+  .wk, .bk { position: absolute; top: 0; border-radius: 0 0 7px 7px; display: flex; align-items: flex-end; justify-content: center; font: 600 11px ui-monospace, Menlo, monospace; padding-bottom: 8px; transition: transform 0.04s; }
+  .wk { height: 100%; background: linear-gradient(#f4f4f2 0%, #fff 70%, #e6e6e2 100%); box-shadow: inset 0 -6px 0 #d8d8d2, inset -1px 0 0 #bfbfb8; color: #9a9a92; z-index: 1; }
+  .bk { height: 62%; background: linear-gradient(#2a2b30, #121316 88%, #3a3b40); box-shadow: inset 0 -4px 0 #000, 0 3px 4px rgba(0, 0, 0, 0.6); color: #6a6d78; z-index: 2; border-radius: 0 0 5px 5px; }
+  .wk.on { background: linear-gradient(#e2e8ff, #c8d4ff); box-shadow: inset 0 -2px 0 #a8b6e8, inset -1px 0 0 #9aa6d0; transform-origin: top; transform: scaleY(0.995); }
+  .bk.on { background: linear-gradient(#3a4a8a, #26306a); box-shadow: inset 0 -1px 0 #000, 0 1px 2px rgba(0, 0, 0, 0.6); }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #bar { position: fixed; right: 18px; top: 18px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: 60vw; }
+  #bar button { height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(10px); color: var(--ink); font: 600 12px inherit; cursor: pointer; }
+  #bar button.on { background: var(--accent); color: #0b1020; border-color: transparent; }
+  #bar button.rec.on { background: #ff4d5e; color: #fff; }
+  #bar .sep { width: 8px; }
+  #status { position: fixed; left: 20px; bottom: calc(var(--kh) + 12px); font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+  @media (max-width: 600px) { :root { --kh: 30vh; } #bar { left: 12px; right: 12px; top: 64px; max-width: none; justify-content: flex-start; } #bar button { height: 28px; padding: 0 9px; } .title p { display: none; } .wk span { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="roll"></canvas>
+<div class="title"><h1>Piano</h1><p>keys A–K, W E T Y U · click or touch</p></div>
+<div id="bar">
+  <button data-v="grand" class="on">Grand</button><button data-v="epiano">E-Piano</button><button data-v="organ">Organ</button><button data-v="pad">Pad</button>
+  <span class="sep"></span><button id="sus">Sustain</button><button id="rec" class="rec">● Rec</button><button id="play">▶ Play</button>
+</div>
+<div id="status"></div>
+<div id="keys"><div class="bed" id="bed"></div></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/piano-keyboard.html
+ * PURPOSE: WebAudio piano: 4 synthesized voices, sustain, mouse/multi-touch/keyboard input, piano-roll waterfall, record + timed playback, idle melody
+ * UI: Render Studio > Apps & UI > Piano
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__piano (test hook: down, up, recorded, playback)
+ */
+const $ = (id) => document.getElementById(id);
+const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+let LO = 48, HI = 84; // C3..C6
+const isBlack = (n) => [1, 3, 6, 8, 10].includes(n % 12);
+const freq = (n) => 440 * 2 ** ((n - 69) / 12);
+
+// Keys > layout: whites evenly spaced, blacks centred on the gap
+const keyEl = {};
+function buildKeys() {
+  if (innerWidth < 600) { LO = 60; HI = 76; } else { LO = 48; HI = 84; }
+  const bed = $('bed'); bed.innerHTML = '';
+  const whites = []; for (let n = LO; n <= HI; n++) if (!isBlack(n)) whites.push(n);
+  const ww = 100 / whites.length;
+  let wi = 0;
+  for (let n = LO; n <= HI; n++) {
+    const el = document.createElement('div');
+    if (isBlack(n)) { el.className = 'bk'; el.style.left = `${wi * ww - ww * 0.31}%`; el.style.width = `${ww * 0.62}%`; }
+    else { el.className = 'wk'; el.style.left = `${wi * ww}%`; el.style.width = `${ww}%`; el.innerHTML = n % 12 === 0 ? `<span>C${n / 12 - 1}</span>` : ''; wi++; }
+    el.dataset.n = n; bed.appendChild(el); keyEl[n] = el;
+  }
+}
+const keyX = (n) => { const r = keyEl[n]?.getBoundingClientRect(); return r ? [r.left, r.width] : null; };
+
+// Audio > voices: each returns a stop(time) fn; master chain has a short convolution reverb
+let ac = null, master = null;
+function audio() {
+  if (ac) return ac;
+  ac = new AudioContext();
+  master = ac.createGain(); master.gain.value = 0.5;
+  const comp = ac.createDynamicsCompressor();
+  const verb = ac.createConvolver(), len = ac.sampleRate * 1.8, ir = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3; }
+  verb.buffer = ir;
+  const wet = ac.createGain(); wet.gain.value = 0.22;
+  master.connect(comp); master.connect(verb).connect(wet).connect(comp); comp.connect(ac.destination);
+  return ac;
+}
+const VOICES = {
+  grand(f, t, vel) {
+    // hammer: three detuned partial stacks with fast-decaying brightness
+    const out = ac.createGain(), lp = ac.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(Math.min(12000, f * 14), t); lp.frequency.exponentialRampToValueAtTime(Math.max(400, f * 2.2), t + 1.6);
+    const oscs = [[1, 0.6, 'triangle'], [2, 0.25, 'sine'], [3, 0.12, 'sine'], [1.003, 0.3, 'sawtooth']].map(([m, a, type]) => { const o = ac.createOscillator(), gn = ac.createGain(); o.type = type; o.frequency.value = f * m; gn.gain.value = a * (type === 'sawtooth' ? 0.25 : 1); o.connect(gn).connect(lp); o.start(t); return o; });
+    lp.connect(out); out.connect(master);
+    const decay = 2.5 + 110 / f;
+    out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.32 * vel, t + 0.004); out.gain.exponentialRampToValueAtTime(0.001, t + decay);
+    return (te) => { out.gain.cancelScheduledValues(te); out.gain.setValueAtTime(out.gain.value, te); out.gain.exponentialRampToValueAtTime(0.0005, te + 0.25); oscs.forEach((o) => o.stop(te + 0.3)); };
+  },
+  epiano(f, t, vel) {
+    // FM tine: modulator at 1x with decaying index gives the bell attack
+    const car = ac.createOscillator(), mod = ac.createOscillator(), mg = ac.createGain(), out = ac.createGain();
+    car.frequency.value = f; mod.frequency.value = f * 1; mg.gain.setValueAtTime(f * 3.5 * vel, t); mg.gain.exponentialRampToValueAtTime(f * 0.2, t + 0.8);
+    mod.connect(mg).connect(car.frequency); car.connect(out).connect(master);
+    out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.3 * vel, t + 0.003); out.gain.exponentialRampToValueAtTime(0.002, t + 3.5);
+    car.start(t); mod.start(t);
+    return (te) => { out.gain.cancelScheduledValues(te); out.gain.setValueAtTime(out.gain.value, te); out.gain.exponentialRampToValueAtTime(0.0005, te + 0.2); car.stop(te + 0.25); mod.stop(te + 0.25); };
+  },
+  organ(f, t, vel) {
+    // drawbars 16' 8' 4' 2 2/3' with a touch of vibrato
+    const out = ac.createGain(), vib = ac.createOscillator(), vg = ac.createGain(); vib.frequency.value = 6.2; vg.gain.value = f * 0.004; vib.connect(vg); vib.start(t);
+    const oscs = [[0.5, 0.5], [1, 0.8], [2, 0.5], [3, 0.3], [4, 0.2]].map(([m, a]) => { const o = ac.createOscillator(), gn = ac.createGain(); o.frequency.value = f * m; vg.connect(o.frequency); gn.gain.value = a; o.connect(gn).connect(out); o.start(t); return o; });
+    out.connect(master); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.09 * vel, t + 0.01);
+    return (te) => { out.gain.cancelScheduledValues(te); out.gain.setValueAtTime(out.gain.value, te); out.gain.linearRampToValueAtTime(0, te + 0.06); [...oscs, vib].forEach((o) => o.stop(te + 0.08)); };
+  },
+  pad(f, t, vel) {
+    const out = ac.createGain(), lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f * 4; lp.Q.value = 2;
+    const oscs = [-7, 0, 7].map((cents) => { const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = cents; o.connect(lp); o.start(t); return o; });
+    lp.connect(out).connect(master); out.gain.setValueAtTime(0, t); out.gain.linearRampToValueAtTime(0.12 * vel, t + 0.35);
+    return (te) => { out.gain.cancelScheduledValues(te); out.gain.setValueAtTime(out.gain.value, te); out.gain.linearRampToValueAtTime(0, te + 1.1); oscs.forEach((o) => o.stop(te + 1.2)); };
+  },
+};
+let voice = 'grand', sustain = false;
+
+// Notes > state: active voices, sustained-but-released set, waterfall bars
+const active = new Map(), held = new Set(), bars = [];
+let rec = null, recStart = 0, take = [];
+function down(n, vel = 0.85, fromPlayback = false) {
+  if (n < LO || n > HI || active.has(n)) return;
+  let stop = null;
+  try { audio(); if (ac.state === 'suspended') ac.resume(); stop = VOICES[voice](freq(n), ac.currentTime, vel); } catch { /* audio unavailable: visuals still run */ }
+  active.set(n, stop); held.delete(n);
+  keyEl[n]?.classList.add('on');
+  bars.push({ n, t0: performance.now(), t1: null, hue: (n % 12) * 30 });
+  if (rec && !fromPlayback) take.push({ n, t: performance.now() - recStart, on: true, vel });
+  status();
+}
+function up(n, fromPlayback = false) {
+  if (!active.has(n)) return;
+  keyEl[n]?.classList.remove('on');
+  for (const b of bars) if (b.n === n && b.t1 === null) b.t1 = performance.now();
+  if (rec && !fromPlayback) take.push({ n, t: performance.now() - recStart, on: false });
+  if (sustain) { held.add(n); return; }
+  release(n);
+}
+function release(n) { const stop = active.get(n); active.delete(n); held.delete(n); try { stop && stop(ac.currentTime); } catch { /* already stopped */ } }
+function setSustain(v) { sustain = v; $('sus').classList.toggle('on', v); if (!v) [...held].forEach(release); }
+
+// Input > pointer: each pointer owns one note; sliding across keys glisses
+const ptrNote = new Map();
+const noteAt = (x, y) => { const el = document.elementsFromPoint(x, y).find((e) => e.dataset && e.dataset.n); return el ? Number(el.dataset.n) : null; };
+$('keys').addEventListener('pointerdown', (e) => { userAct(); $('keys').setPointerCapture(e.pointerId); const n = noteAt(e.clientX, e.clientY); if (n !== null) { ptrNote.set(e.pointerId, n); down(n, 0.6 + 0.4 * Math.min(1, (e.clientY - $('keys').getBoundingClientRect().top) / $('keys').clientHeight)); } });
+$('keys').addEventListener('pointermove', (e) => { if (!ptrNote.has(e.pointerId)) return; const n = noteAt(e.clientX, e.clientY), old = ptrNote.get(e.pointerId); if (n !== null && n !== old) { up(old); ptrNote.set(e.pointerId, n); down(n); } });
+const ptrEnd = (e) => { if (ptrNote.has(e.pointerId)) { up(ptrNote.get(e.pointerId)); ptrNote.delete(e.pointerId); } };
+$('keys').addEventListener('pointerup', ptrEnd); $('keys').addEventListener('pointercancel', ptrEnd);
+// Input > computer keyboard: two rows map a chromatic octave from C4, Z/X shift octave
+const KB = 'awsedftgyhujkolp;'; let kbBase = 60;
+addEventListener('keydown', (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey) return;
+  const k = e.key.toLowerCase(), i = KB.indexOf(k);
+  if (i >= 0) { userAct(); down(kbBase + i); }
+  else if (k === 'z') kbBase = Math.max(LO, kbBase - 12); else if (k === 'x') kbBase = Math.min(HI - 12, kbBase + 12);
+  else if (e.code === 'Space') { e.preventDefault(); setSustain(true); }
+});
+addEventListener('keyup', (e) => { const i = KB.indexOf(e.key.toLowerCase()); if (i >= 0) up(kbBase + i); else if (e.code === 'Space') setSustain(false); });
+
+// Record / playback: timestamps relative to first press; playback replays through down/up
+let playTimers = [];
+function toggleRec() { userAct(); stopPlay(); if (rec) { rec = null; } else { rec = true; take = []; recStart = performance.now(); } syncBtns(); }
+function startPlay(seq, isDemo = false) {
+  stopPlay();
+  const t0 = seq.length ? seq[0].t : 0;
+  playTimers = seq.map((ev) => setTimeout(() => (ev.on ? down(ev.n, ev.vel ?? 0.8, true) : up(ev.n, true)), ev.t - t0 + 60));
+  const end = seq.length ? seq.at(-1).t - t0 + 400 : 0;
+  playTimers.push(setTimeout(() => { playing = false; syncBtns(); if (isDemo) demoRunning = false; }, end));
+  playing = !isDemo; syncBtns();
+}
+let playing = false;
+function stopPlay() { playTimers.forEach(clearTimeout); playTimers = []; playing = false; [...active.keys()].forEach((n) => up(n, true)); syncBtns(); }
+function syncBtns() { $('rec').classList.toggle('on', !!rec); $('rec').textContent = rec ? '■ Stop' : '● Rec'; $('play').classList.toggle('on', playing); $('play').textContent = playing ? '■ Stop' : '▶ Play'; status(); }
+function status() { $('status').textContent = rec ? `recording · ${take.filter((e) => e.on).length} notes` : take.length ? `take: ${take.filter((e) => e.on).length} notes` : [...active.keys()].map((n) => NAMES[n % 12] + (Math.floor(n / 12) - 1)).join(' '); }
+$('rec').onclick = toggleRec;
+$('play').onclick = () => { userAct(); if (playing) stopPlay(); else { rec = null; startPlay(take); } };
+$('sus').onclick = () => { userAct(); setSustain(!sustain); };
+document.querySelectorAll('[data-v]').forEach((b) => (b.onclick = () => { userAct(); voice = b.dataset.v; document.querySelectorAll('[data-v]').forEach((x) => x.classList.toggle('on', x === b)); }));
+
+// Roll > waterfall: bars grow from the key while held, then drift up and fade
+const cv = $('roll'), g = cv.getContext('2d');
+function resize() { const dpr = Math.min(devicePixelRatio || 1, 2); cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); buildKeys(); }
+addEventListener('resize', resize);
+const SPEED = 0.12; // px per ms
+function frame() {
+  const w = cv.clientWidth, h = cv.clientHeight, now = performance.now();
+  g.fillStyle = '#07080c'; g.fillRect(0, 0, w, h);
+  // faint lane lines on each C
+  for (let n = LO; n <= HI; n += 12) { const k = keyX(n); if (k) { g.fillStyle = 'rgba(255,255,255,.04)'; g.fillRect(k[0], 0, 1, h); } }
+  g.globalCompositeOperation = 'lighter';
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const b = bars[i], k = keyX(b.n); if (!k) continue;
+    const top = h - (now - b.t0) * SPEED, bot = b.t1 === null ? h : h - (now - b.t1) * SPEED;
+    if (bot < -20) { bars.splice(i, 1); continue; }
+    const pad = isBlack(b.n) ? 1 : 3, x = k[0] + pad, bw = k[1] - pad * 2;
+    const gr = g.createLinearGradient(0, top, 0, bot);
+    gr.addColorStop(0, `hsla(${b.hue + 200},90%,70%,.25)`); gr.addColorStop(1, `hsla(${b.hue + 200},95%,62%,.95)`);
+    g.fillStyle = gr; g.shadowColor = `hsl(${b.hue + 200},90%,60%)`; g.shadowBlur = 16;
+    g.beginPath(); g.roundRect(x, Math.max(top, -10), bw, Math.max(4, bot - Math.max(top, -10)), 4); g.fill();
+  }
+  g.shadowBlur = 0; g.globalCompositeOperation = 'source-over';
+  // glow line where keys meet the roll
+  const gl = g.createLinearGradient(0, h - 30, 0, h); gl.addColorStop(0, 'rgba(122,162,255,0)'); gl.addColorStop(1, active.size ? 'rgba(122,162,255,.35)' : 'rgba(122,162,255,.08)');
+  g.fillStyle = gl; g.fillRect(0, h - 30, w, 30);
+  requestAnimationFrame(frame);
+}
+
+// Idle demo: Ode to Joy (Beethoven, public domain) with a left-hand bass, through the same down/up path
+let lastInput = -1e9, demoRunning = false;
+function userAct() { lastInput = performance.now(); if (demoRunning) { demoRunning = false; stopPlay(); } }
+function odeToJoy() {
+  const mel = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4. D4- D4_ E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4. C4- C4_'.split(' ');
+  const seq = []; let t = 0; const beat = 380;
+  const midi = (s) => NAMES.indexOf(s.replace(/[0-9.\-_]/g, '')) + 12 * (Number(s.match(/\d/)[0]) + 1);
+  mel.forEach((s, i) => {
+    const len = s.endsWith('.') ? 1.5 : s.endsWith('-') ? 0.5 : s.endsWith('_') ? 2 : 1, n = midi(s);
+    seq.push({ n, t, on: true, vel: 0.8 }, { n, t: t + beat * len * 0.9, on: false });
+    if (i % 4 === 0) { const bass = [48, 43, 48, 43, 48, 43, 45, 43][(i / 4) % 8]; seq.push({ n: bass, t, on: true, vel: 0.55 }, { n: bass, t: t + beat * 3.6, on: false }); }
+    t += beat * len;
+  });
+  return seq.sort((a, b) => a.t - b.t);
+}
+setInterval(() => { if (!demoRunning && !playing && !rec && performance.now() - lastInput > 12000) { demoRunning = true; lastInput = performance.now(); startPlay(odeToJoy(), true); } }, 1000);
+resize();
+requestAnimationFrame(frame);
+demoRunning = true; startPlay(odeToJoy(), true);
+window.__piano = { down, up, recorded: () => take, startRec: toggleRec, playback: () => startPlay(take), active: () => [...active.keys()], stopDemo: userAct };
+</script>
+</body>
+</html>

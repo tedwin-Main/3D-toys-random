@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Maze Pathfinding</title>
+<meta name="category" content="algorithms" />
+<meta name="order" content="2" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="maze generation, A*, Dijkstra, BFS, binary heap" />
+<meta name="description" content="Four pathfinders race through the same maze: A* with a Manhattan heuristic, Dijkstra, breadth-first search and greedy best-first. The maze is carved live by a recursive backtracker or randomized Prim's, then braided so there are loops and real choices, with patches of mud that cost five times as much to cross. Each pane shows the explored region as a heat map, the frontier and the final route with nodes expanded, steps and cost, so you can see BFS ignore mud, greedy rush into traps, and A* match Dijkstra's cost with far less work. Draw walls or mud and drag the start or goal: every solver re-plans instantly." />
+<meta name="prompt" content="Build a maze generator and pathfinding visualizer in a single HTML file with canvas. Animate maze generation with recursive backtracking or Prim's algorithm, add loops and weighted mud cells, then run A*, Dijkstra, BFS and greedy best-first side by side on the same maze with a priority queue, showing visited cells, the frontier and the final path with counts for nodes explored and path cost. Let the user draw walls and mud and drag the start and goal, re-solving live." />
+<style>
+  :root { --ink: #eef1f7; --muted: #8790a6; --line: rgba(255, 255, 255, 0.08); --bg: #0a0c12; --accent: #ffd36b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+  header { height: 60px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0 8px 0 0; font-size: 18px; }
+  header .sp { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .seg button, header > button { height: 30px; padding: 0 11px; border: 0; background: #151925; color: var(--ink); font: 600 12px inherit; cursor: pointer; }
+  header > button { border: 1px solid var(--line); border-radius: 9px; }
+  .seg button.on { background: #6c8cff; color: #0b1020; }
+  #board { position: absolute; top: 60px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); }
+  .pane { position: relative; background: var(--bg); touch-action: none; }
+  .pane canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pane .lbl { position: absolute; left: 10px; top: 8px; padding: 5px 9px; border-radius: 8px; background: rgba(10, 12, 18, 0.82); font-size: 13px; font-weight: 700; pointer-events: none; }
+  .pane .lbl span { display: block; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  .pane .lbl b { color: var(--accent); }
+  @media (max-width: 700px) { header { height: auto; padding: 8px 10px; gap: 6px; } header h1 { width: 100%; font-size: 16px; } #board { top: 104px; } .pane .lbl { font-size: 11px; padding: 4px 6px; } .pane .lbl span { font-size: 9.5px; } .hide-m { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Maze Pathfinding</h1>
+  <div class="seg" id="tool"><button data-t="wall" class="on">Wall</button><button data-t="mud">Mud</button><button data-t="erase">Erase</button></div>
+  <div class="seg" id="gen"><button data-g="backtrack" class="on">Backtracker</button><button data-g="prim">Prim</button></div>
+  <span class="sp"></span>
+  <span class="hide-m" style="font-size:11px;color:var(--muted)">drag S / G · paint walls or mud</span>
+  <button id="new">New maze</button>
+</header>
+<div id="board"></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/maze-astar.html
+ * PURPOSE: Maze pathfinding race: animated backtracker/Prim generation, braiding + mud weights, A* + Dijkstra + BFS + greedy as step generators, live re-plan on edit
+ * UI: Render Studio > Algorithms > Maze Pathfinding
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__maze (test hook: solveAll, grid)
+ */
+const $ = (id) => document.getElementById(id);
+const MUD = 5;
+
+// Grid: odd dimensions so walls sit on even indices and cells on odd ones
+let COLS = 0, ROWS = 0, wall, cost, S, G;
+const idx = (x, y) => y * COLS + x;
+function sizeGrid() {
+  const pw = (innerWidth) / 2, ph = (innerHeight - (innerWidth < 700 ? 104 : 60)) / 2;
+  const cell = innerWidth < 700 ? 7 : 9;
+  COLS = Math.floor(pw / cell) | 1; ROWS = Math.floor(ph / cell) | 1;
+  if (COLS % 2 === 0) COLS--; if (ROWS % 2 === 0) ROWS--;
+  wall = new Uint8Array(COLS * ROWS).fill(1); cost = new Uint8Array(COLS * ROWS).fill(1);
+  S = idx(1, 1); G = idx(COLS - 2, ROWS - 2);
+}
+
+// Generation: generators yield after each carve so it animates
+const rnd = (n) => (Math.random() * n) | 0;
+const DIRS = [[2, 0], [-2, 0], [0, 2], [0, -2]];
+function* backtrack() {
+  const stack = [[1, 1]]; wall[idx(1, 1)] = 0;
+  while (stack.length) {
+    const [x, y] = stack.at(-1);
+    const opts = DIRS.map(([dx, dy]) => [x + dx, y + dy, dx, dy]).filter(([nx, ny]) => nx > 0 && ny > 0 && nx < COLS - 1 && ny < ROWS - 1 && wall[idx(nx, ny)]);
+    if (!opts.length) { stack.pop(); continue; }
+    const [nx, ny, dx, dy] = opts[rnd(opts.length)];
+    wall[idx(x + dx / 2, y + dy / 2)] = 0; wall[idx(nx, ny)] = 0; stack.push([nx, ny]);
+    yield;
+  }
+}
+function* prim() {
+  wall[idx(1, 1)] = 0;
+  const front = [];
+  const addF = (x, y) => DIRS.forEach(([dx, dy]) => { const nx = x + dx, ny = y + dy; if (nx > 0 && ny > 0 && nx < COLS - 1 && ny < ROWS - 1 && wall[idx(nx, ny)]) front.push([nx, ny, x, y]); });
+  addF(1, 1);
+  while (front.length) {
+    const k = rnd(front.length), [x, y, px, py] = front[k]; front[k] = front.at(-1); front.pop();
+    if (!wall[idx(x, y)]) continue;
+    wall[idx(x, y)] = 0; wall[idx((x + px) / 2, (y + py) / 2)] = 0; addF(x, y);
+    yield;
+  }
+}
+// braid: knock out walls at some dead ends so routes loop; then drop mud blobs on open floor
+function braidAndMud() {
+  for (let y = 1; y < ROWS - 1; y += 2) for (let x = 1; x < COLS - 1; x += 2) {
+    const ws = DIRS.filter(([dx, dy]) => wall[idx(x + dx / 2, y + dy / 2)]);
+    if (ws.length === 3 && Math.random() < 0.55) {
+      const ok = ws.filter(([dx, dy]) => x + dx > 0 && y + dy > 0 && x + dx < COLS - 1 && y + dy < ROWS - 1);
+      if (ok.length) { const [dx, dy] = ok[rnd(ok.length)]; wall[idx(x + dx / 2, y + dy / 2)] = 0; }
+    }
+  }
+  for (let b = 0; b < 7; b++) {
+    const cx = 4 + rnd(COLS - 8), cy = 4 + rnd(ROWS - 8), r = 2.5 + Math.random() * 4;
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if ((x - cx) ** 2 + (y - cy) ** 2 < r * r && !wall[idx(x, y)]) cost[idx(x, y)] = MUD;
+  }
+  cost[S] = cost[G] = 1;
+}
+
+// Binary heap keyed by f, ties broken by insertion order for stable visuals
+class Heap {
+  constructor() { this.h = []; this.n = 0; }
+  push(k, f, g2) { const h = this.h; h.push({ k, f, g2, o: this.n++ }); let i = h.length - 1; while (i) { const p = (i - 1) >> 1; if (this.lt(h[i], h[p])) { [h[i], h[p]] = [h[p], h[i]]; i = p; } else break; } }
+  pop() { const h = this.h, top = h[0], last = h.pop(); if (h.length) { h[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < h.length && this.lt(h[l], h[m])) m = l; if (r < h.length && this.lt(h[r], h[m])) m = r; if (m === i) break; [h[i], h[m]] = [h[m], h[i]]; i = m; } } return top; }
+  lt(a, b) { return a.f < b.f || (a.f === b.f && (a.g2 > b.g2 || (a.g2 === b.g2 && a.o < b.o))); }
+  get size() { return this.h.length; }
+}
+
+// Solvers: one generic best-first search; each algorithm is just a priority function
+const man = (a) => Math.abs((a % COLS) - (G % COLS)) + Math.abs(((a / COLS) | 0) - ((G / COLS) | 0));
+const SOLVERS = {
+  'A*': (g2, k) => g2 + man(k),
+  Dijkstra: (g2) => g2,
+  BFS: null,
+  Greedy: (g2, k) => man(k),
+};
+function* search(name) {
+  const N = COLS * ROWS, dist = new Float64Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), order = new Int32Array(N).fill(-1), state = { dist, from, order, expanded: 0, frontier: new Set(), path: null, cost: 0 };
+  const prio = SOLVERS[name];
+  dist[S] = 0;
+  if (!prio) {
+    // BFS: plain FIFO, counts steps and ignores mud weights entirely
+    const q = [S]; let qi = 0; order[S] = 0;
+    while (qi < q.length) {
+      const k = q[qi++]; state.frontier.delete(k); state.expanded++;
+      if (k === G) break;
+      for (const n of nbrs(k)) if (order[n] < 0) { order[n] = state.expanded; from[n] = k; dist[n] = dist[k] + 1; q.push(n); state.frontier.add(n); }
+      yield state;
+    }
+  } else {
+    const h = new Heap(); h.push(S, prio(0, S), 0);
+    const closed = new Uint8Array(N);
+    while (h.size) {
+      const { k } = h.pop(); if (closed[k]) continue;
+      closed[k] = 1; order[k] = state.expanded++; state.frontier.delete(k);
+      if (k === G) break;
+      for (const n of nbrs(k)) {
+        const g2 = dist[k] + cost[n];
+        if (!closed[n] && g2 < dist[n]) { dist[n] = g2; from[n] = k; h.push(n, prio(g2, n), g2); state.frontier.add(n); }
+      }
+      yield state;
+    }
+  }
+  if (from[G] >= 0 || G === S) {
+    const p = [G]; while (p.at(-1) !== S) p.push(from[p.at(-1)]);
+    state.path = p.reverse(); state.cost = p.slice(1).reduce((s, k) => s + cost[k], 0);
+  }
+  state.done = true;
+  yield state;
+}
+function nbrs(k) { const x = k % COLS, y = (k / COLS) | 0, out = []; if (x > 0 && !wall[k - 1]) out.push(k - 1); if (x < COLS - 1 && !wall[k + 1]) out.push(k + 1); if (y > 0 && !wall[k - COLS]) out.push(k - COLS); if (y < ROWS - 1 && !wall[k + COLS]) out.push(k + COLS); return out; }
+const runToEnd = (name) => { let st; for (st of search(name)); return st; };
+
+// Panes
+const NAMES = Object.keys(SOLVERS);
+const panes = NAMES.map((name, i) => {
+  const el = document.createElement('div'); el.className = 'pane';
+  el.innerHTML = `<canvas></canvas><div class="lbl">${name}<span></span></div>`;
+  $('board').appendChild(el);
+  return { name, el, cv: el.querySelector('canvas'), info: el.querySelector('.lbl span'), gen: null, st: null, hue: [45, 200, 150, 330][i] };
+});
+function draw(P) {
+  const cv = P.cv, w = cv.clientWidth, h = cv.clientHeight, dpr = Math.min(devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = w * dpr; cv.height = h * dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cs = Math.min(w / COLS, h / ROWS), ox = (w - cs * COLS) / 2, oy = (h - cs * ROWS) / 2;
+  g.fillStyle = '#0a0c12'; g.fillRect(0, 0, w, h);
+  const st = P.st, maxO = st ? Math.max(1, st.expanded) : 1;
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const k = idx(x, y);
+    if (wall[k]) { g.fillStyle = '#2a3042'; }
+    else if (st && st.order[k] >= 0) { const t = st.order[k] / maxO; g.fillStyle = `hsl(${P.hue + t * 40},${cost[k] > 1 ? 45 : 70}%,${cost[k] > 1 ? 22 + t * 8 : 18 + t * 16}%)`; }
+    else g.fillStyle = cost[k] > 1 ? '#3a2c1c' : '#11141d';
+    g.fillRect(ox + x * cs, oy + y * cs, cs + 0.5, cs + 0.5);
+  }
+  if (st) {
+    g.fillStyle = 'rgba(255,255,255,.55)';
+    for (const k of st.frontier) g.fillRect(ox + (k % COLS) * cs + cs * 0.25, oy + ((k / COLS) | 0) * cs + cs * 0.25, cs * 0.5, cs * 0.5);
+    if (st.path) {
+      g.strokeStyle = '#ffd36b'; g.lineWidth = Math.max(2, cs * 0.45); g.lineJoin = g.lineCap = 'round'; g.shadowColor = '#ffb020'; g.shadowBlur = 8;
+      g.beginPath(); st.path.forEach((k, i) => { const px = ox + ((k % COLS) + 0.5) * cs, py = oy + (((k / COLS) | 0) + 0.5) * cs; i ? g.lineTo(px, py) : g.moveTo(px, py); }); g.stroke(); g.shadowBlur = 0;
+    }
+  }
+  for (const [k, c, t] of [[S, '#46d37a', 'S'], [G, '#ff5468', 'G']]) {
+    const px = ox + ((k % COLS) + 0.5) * cs, py = oy + (((k / COLS) | 0) + 0.5) * cs;
+    g.fillStyle = c; g.beginPath(); g.arc(px, py, cs * 1.1, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#0a0c12'; g.font = `800 ${cs * 1.3}px ui-rounded, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, px, py + 0.5);
+  }
+  P.geom = { cs, ox, oy };
+  P.info.innerHTML = st ? `${st.expanded.toLocaleString()} explored · ${st.path ? `<b>${st.path.length - 1}</b> steps · cost <b>${st.cost}</b>` : st.done ? 'no path' : '…'}` : 'generating…';
+}
+
+// Phases: gen (animated carve) then solve (animated) then hold, then repeat when idle
+let phase = 'gen', genIt = null, genAlg = 'backtrack', holdUntil = 0, lastInput = -1e9;
+function newMaze() {
+  sizeGrid(); phase = 'gen'; genIt = genAlg === 'backtrack' ? backtrack() : prim();
+  panes.forEach((P) => (P.st = null));
+}
+function startSolve(animated = true) {
+  panes.forEach((P) => { P.gen = search(P.name); P.st = animated ? null : runToEnd(P.name); if (!animated) P.gen = null; });
+  phase = animated ? 'solve' : 'hold'; holdUntil = performance.now() + 4000;
+}
+function frame(now) {
+  if (phase === 'gen') {
+    // carve speed scales with grid size so generation takes ~2 s
+    const k = Math.max(4, Math.round((COLS * ROWS) / 500));
+    for (let i = 0; i < k; i++) if (genIt.next().done) { braidAndMud(); startSolve(); break; }
+  } else if (phase === 'solve') {
+    let all = true;
+    for (const P of panes) { if (!P.gen) continue; for (let i = 0; i < 6; i++) { const r = P.gen.next(); if (r.value) P.st = r.value; if (r.done || P.st?.done) { P.gen = null; break; } } if (P.gen) all = false; }
+    if (all) { phase = 'hold'; holdUntil = now + 4000; }
+  } else if (phase === 'hold' && now > holdUntil && now - lastInput > 10000) { genAlg = genAlg === 'backtrack' ? 'prim' : 'backtrack'; syncSeg(); newMaze(); }
+  panes.forEach(draw);
+  requestAnimationFrame(frame);
+}
+
+// Input: drag S/G, or paint the chosen tool; any edit re-solves all four instantly
+let tool = 'wall', drag = null;
+function cellAt(P, e) { const r = P.cv.getBoundingClientRect(), { cs, ox, oy } = P.geom, x = Math.floor((e.clientX - r.left - ox) / cs), y = Math.floor((e.clientY - r.top - oy) / cs); return x >= 0 && y >= 0 && x < COLS && y < ROWS ? idx(x, y) : -1; }
+function paint(k) {
+  if (k < 0 || k === S || k === G) return;
+  if (tool === 'wall') { wall[k] = 1; cost[k] = 1; } else if (tool === 'mud') { wall[k] = 0; cost[k] = MUD; } else { wall[k] = 0; cost[k] = 1; }
+}
+panes.forEach((P) => {
+  P.el.addEventListener('pointerdown', (e) => {
+    lastInput = performance.now(); if (phase === 'gen') return;
+    P.el.setPointerCapture(e.pointerId);
+    const k = cellAt(P, e);
+    const near = (a) => Math.abs((a % COLS) - (k % COLS)) <= 1 && Math.abs(((a / COLS) | 0) - ((k / COLS) | 0)) <= 1;
+    drag = near(S) ? 'S' : near(G) ? 'G' : 'paint';
+    if (drag === 'paint') paint(k);
+    startSolve(false);
+  });
+  P.el.addEventListener('pointermove', (e) => {
+    if (!drag) return; lastInput = performance.now();
+    const k = cellAt(P, e); if (k < 0) return;
+    if (drag === 'S' && !wall[k] && k !== G) S = k; else if (drag === 'G' && !wall[k] && k !== S) G = k; else if (drag === 'paint') paint(k);
+    startSolve(false);
+  });
+  const end = () => (drag = null);
+  P.el.addEventListener('pointerup', end); P.el.addEventListener('pointercancel', end);
+});
+function syncSeg() { document.querySelectorAll('#gen button').forEach((b) => b.classList.toggle('on', b.dataset.g === genAlg)); }
+$('tool').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; tool = b.dataset.t; document.querySelectorAll('#tool button').forEach((x) => x.classList.toggle('on', x === b)); };
+$('gen').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; lastInput = performance.now(); genAlg = b.dataset.g; syncSeg(); newMaze(); };
+$('new').onclick = () => { lastInput = performance.now(); newMaze(); };
+let rw = innerWidth; addEventListener('resize', () => { if (Math.abs(innerWidth - rw) > 60) { rw = innerWidth; newMaze(); } });
+
+newMaze();
+requestAnimationFrame(frame);
+window.__maze = {
+  // finishes generation synchronously then solves with every algorithm
+  solveAll: () => { if (phase === 'gen') { while (!genIt.next().done); braidAndMud(); } startSolve(false); return panes.map((P) => ({ name: P.name, found: !!P.st.path, steps: P.st.path ? P.st.path.length - 1 : null, cost: P.st.cost, expanded: P.st.expanded })); },
+  dims: () => [COLS, ROWS],
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Warp Starfield</title>
+<meta name="category" content="generative" />
+<meta name="order" content="10" />
+<meta name="capture" content="3800" />
+<meta name="tags" content="starfield, perspective projection, motion streaks, canvas" />
+<meta name="description" content="A starfield that jumps to hyperspace: 4,000 stars in 3D projected through a moving camera, each drawn as a streak from its last screen position so length tracks speed, colours shifting toward blue as velocity climbs, a tunnel glow and a white flash on the jump, then a slow drop back to cruise. Steer with the pointer and hold to warp. A classic test of projection and motion feel." />
+<meta name="prompt" content="Create a hyperspace warp starfield in a single HTML file using canvas. Put a few thousand stars in 3D space in front of the camera, project them with perspective, and draw each as a streak from its previous screen position so the streaks stretch as speed rises. Holding the mouse, a finger or the space bar should spool up into a warp jump with a blue shift, a glowing tunnel and a flash, then ease back to cruising, with pointer steering and an automatic jump loop when idle." />
+<style>
+  :root { --ink: #eef2ff; --muted: #8a93b0; --panel: rgba(8, 10, 20, 0.6); --accent: #8fb8ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #hud { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 14px; align-items: center; padding: 10px 16px; border-radius: 999px; background: var(--panel); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.08); font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
+  #bar { width: 160px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+  #bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #8fb8ff, #fff); }
+  #speed { color: var(--ink); min-width: 92px; }
+  @media (max-width: 600px) { #hud { bottom: 14px; } #bar { width: 90px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Warp Starfield</h1><p>hold to jump · move to steer</p></div>
+<div id="hud"><span>WARP</span><div id="bar"><i></i></div><span id="speed"></span></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/warp-starfield.html
+ * PURPOSE: Hyperspace starfield: 3D stars, perspective streaks from previous screen pos, blue shift, tunnel glow, jump flash
+ * UI: Render Studio > 2D & Generative > Warp Starfield
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function resize() { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); }
+addEventListener('resize', resize);
+resize();
+
+// Warp > stars: x,y in a wide slab, z in (0, DEPTH]; px/py remember the last projected point
+const N = innerWidth < 600 ? 2500 : 4000, DEPTH = 1600, SPREAD = 1400;
+const stars = Array.from({ length: N }, () => spawn(Math.random() * DEPTH));
+function spawn(z) {
+  const hue = Math.random() < 0.15 ? 30 + Math.random() * 25 : 200 + Math.random() * 40;
+  return { x: (Math.random() - 0.5) * SPREAD * 2, y: (Math.random() - 0.5) * SPREAD * 2, z, px: null, py: null, hue, mag: 0.4 + Math.random() * 0.8 };
+}
+
+// Warp > input: hold pointer / space to charge, pointer position steers
+let holding = false, lastInput = -1e9, aimX = 0, aimY = 0;
+addEventListener('pointerdown', (e) => { holding = true; lastInput = performance.now(); aim(e); });
+addEventListener('pointermove', (e) => { aim(e); if (e.pointerType !== 'mouse' || holding) lastInput = performance.now(); });
+addEventListener('pointerup', () => (holding = false));
+addEventListener('pointercancel', () => (holding = false));
+addEventListener('keydown', (e) => { if (e.code === 'Space') { holding = true; lastInput = performance.now(); e.preventDefault(); } });
+addEventListener('keyup', (e) => { if (e.code === 'Space') holding = false; });
+function aim(e) { aimX = (e.clientX / W - 0.5) * 2; aimY = (e.clientY / H - 0.5) * 2; }
+
+// Warp > speed model: cruise 2, charge ramps to warp 90 with an overshoot; flash on reaching jump
+let speed = 2, charge = 0, flash = 0, jumped = false, cx = 0, cy = 0, autoT = 0;
+const bar = document.querySelector('#bar i'), speedEl = document.getElementById('speed');
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  // attract: charge for 2.5 s every 9 s
+  const idle = now - lastInput > 4000;
+  autoT = idle ? autoT + dt : 0;
+  const autoHold = idle && (autoT % 9) > 1.2 && (autoT % 9) < 4.6;
+  const want = holding || autoHold;
+  charge = want ? Math.min(1, charge + dt * 0.55) : Math.max(0, charge - dt * 0.6);
+  if (charge >= 0.98 && !jumped) { jumped = true; flash = 1; }
+  if (charge < 0.3) jumped = false;
+  const target = 2 + Math.pow(charge, 3) * 95;
+  speed += (target - speed) * Math.min(1, dt * (want ? 3.5 : 1.2));
+  flash = Math.max(0, flash - dt * 1.6);
+  if (idle) { aimX = Math.sin(now / 3100) * 0.35; aimY = Math.cos(now / 4300) * 0.25; }
+  cx += (aimX * W * 0.12 - cx) * Math.min(1, dt * 2);
+  cy += (aimY * H * 0.12 - cy) * Math.min(1, dt * 2);
+
+  const ox = W / 2 - cx, oy = H / 2 - cy, f = Math.min(W, H) * 0.9;
+  const warp = Math.min(1, (speed - 2) / 60);
+  // motion blur: translucent clear leaves short afterglow at high speed
+  g.globalCompositeOperation = 'source-over';
+  g.fillStyle = `rgba(0,0,${4 + warp * 10},${0.85 - warp * 0.35})`;
+  g.fillRect(0, 0, W, H);
+  // tunnel glow toward the vanishing point
+  if (warp > 0.02) {
+    const r = Math.max(W, H) * 0.75, grad = g.createRadialGradient(ox, oy, 0, ox, oy, r);
+    grad.addColorStop(0, `rgba(170,200,255,${0.22 * warp})`);
+    grad.addColorStop(0.25, `rgba(60,90,220,${0.1 * warp})`);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = grad; g.fillRect(0, 0, W, H);
+  }
+  g.globalCompositeOperation = 'lighter';
+  g.lineCap = 'round';
+  const dz = speed * 60 * dt;
+  for (const s of stars) {
+    s.z -= dz;
+    if (s.z <= 1) { Object.assign(s, spawn(DEPTH)); continue; }
+    const sx = ox + (s.x / s.z) * f, sy = oy + (s.y / s.z) * f;
+    if (sx < -200 || sx > W + 200 || sy < -200 || sy > H + 200) { Object.assign(s, spawn(DEPTH)); continue; }
+    const near = 1 - s.z / DEPTH;
+    const bright = Math.min(1, near * near * 1.6 + 0.08) * s.mag;
+    // warm stars shift down through red/magenta so they never pass through green
+    const hue = s.hue + ((s.hue < 100 ? -140 : 220) - s.hue) * warp;
+    const light = 60 + warp * 25;
+    if (s.px !== null && speed > 3) {
+      g.strokeStyle = `hsla(${hue},90%,${light}%,${bright})`;
+      g.lineWidth = 0.6 + near * 2.2;
+      g.beginPath(); g.moveTo(s.px, s.py); g.lineTo(sx, sy); g.stroke();
+    } else {
+      g.fillStyle = `hsla(${hue},80%,${light}%,${bright})`;
+      const r = 0.4 + near * 1.6;
+      g.fillRect(sx - r, sy - r, r * 2, r * 2);
+    }
+    s.px = sx; s.py = sy;
+  }
+  if (flash > 0) { g.globalCompositeOperation = 'source-over'; g.fillStyle = `rgba(230,240,255,${flash * flash * 0.85})`; g.fillRect(0, 0, W, H); }
+  bar.style.width = `${charge * 100}%`;
+  speedEl.textContent = speed > 40 ? `${(speed / 10).toFixed(1)} × c` : `${(speed * 0.05).toFixed(2)} × c`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

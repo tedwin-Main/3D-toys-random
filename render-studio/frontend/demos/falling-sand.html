@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Falling Sand</title>
+<meta name="category" content="physics" />
+<meta name="order" content="11" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="cellular automaton, 11 materials, reactions, density, Powder Toy style" />
+<meta name="description" content="A falling-sand toy in the Powder Toy tradition: sand, water, oil, lava, wood, plant, fire, smoke, steam, rock and wall, each a few lines of cellular-automaton rules. Density lets sand sink through water and oil float on it, lava meeting water turns to rock and steam, fire spreads through wood, oil and plants, and plants grow into water. Bottom-up updates with alternating scan direction avoid the usual left-leaning bias." />
+<meta name="prompt" content="Make a falling sand game in one HTML file. Materials: sand, water, oil, lava, wood, plant, fire, smoke, steam, stone wall. Liquids spread sideways, density makes sand sink in water and oil float, fire spreads to flammables and makes smoke, water puts out fire into steam, lava plus water makes rock, plants grow into water. Toolbar with brush size, clear and pause, touch drawing, and a scripted demo scene when idle." />
+<style>
+  :root { --panel: #15171ecc; --ink: #eceef5; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #08090c; touch-action: none; user-select: none; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+  #bar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 4px; padding: 6px; border-radius: 14px; background: var(--panel); backdrop-filter: blur(10px); border: 1px solid #ffffff14; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 20px); }
+  #bar button { border: 0; border-radius: 9px; padding: 7px 10px; font: 650 12px ui-sans-serif, system-ui; color: var(--ink); background: #ffffff0d; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  #bar button i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #bar button.on { background: #ffffff2a; box-shadow: inset 0 0 0 1px #ffffff40; }
+  #bar .sep { width: 1px; background: #ffffff1a; margin: 2px 3px; }
+  #hud { position: fixed; left: 14px; top: 12px; color: var(--ink); font: 600 12px ui-monospace, Menlo, monospace; opacity: 0.75; pointer-events: none; text-shadow: 0 1px 3px #000; }
+  #hud b { font: 800 16px ui-sans-serif, system-ui; display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><b>Falling Sand</b><span id="info"></span></div>
+<div id="bar"></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/falling-sand.html
+ * PURPOSE: Falling-sand cellular automaton: 11 materials with density, flow, burning, steam, lava-water rock and plant growth; scripted idle scene
+ * UI: Render Studio > Physics > Falling Sand
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const E = 0, WALL = 1, SAND = 2, WATER = 3, WOOD = 4, FIRE = 5, SMOKE = 6, STEAM = 7, OIL = 8, LAVA = 9, PLANT = 10, ROCK = 11;
+const MATS = [
+  [SAND, 'Sand', [218, 178, 102]], [WATER, 'Water', [40, 110, 230]], [OIL, 'Oil', [70, 52, 30]], [LAVA, 'Lava', [255, 100, 20]],
+  [WOOD, 'Wood', [120, 76, 40]], [PLANT, 'Plant', [60, 180, 70]], [FIRE, 'Fire', [255, 170, 40]], [WALL, 'Wall', [120, 124, 136]], [E, 'Erase', [30, 30, 30]],
+];
+const DENS = { [E]: 0, [SMOKE]: 0.1, [STEAM]: 0.1, [FIRE]: 0.2, [OIL]: 0.8, [WATER]: 1, [LAVA]: 2.5, [SAND]: 3 };
+const FLAMMABLE = { [WOOD]: 0.015, [OIL]: 0.06, [PLANT]: 0.03 };
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H, grid, life, shade, clock, img, buf, CELL;
+function init() {
+  CELL = innerWidth < 600 ? 3 : 4;
+  W = Math.ceil(innerWidth / CELL); H = Math.ceil(innerHeight / CELL);
+  cv.width = W; cv.height = H;
+  grid = new Uint8Array(W * H); life = new Uint8Array(W * H); shade = new Uint8Array(W * H); clock = new Uint8Array(W * H);
+  for (let i = 0; i < shade.length; i++) shade[i] = Math.random() * 255;
+  img = ctx.createImageData(W, H); buf = new Uint32Array(img.data.buffer);
+}
+init();
+addEventListener('resize', () => { init(); idleScene(); });
+const at = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? WALL : grid[y * W + x]);
+function setCell(x, y, m) { if (x < 0 || y < 0 || x >= W || y >= H) return; const i = y * W + x; grid[i] = m; life[i] = m === FIRE ? 30 + Math.random() * 40 : m === SMOKE ? 60 + Math.random() * 60 : m === STEAM ? 80 + Math.random() * 80 : 0; }
+let frameFlip = 0;
+// move/swap a cell and stamp the clock so it isn't updated twice this frame
+function swap(a, b) { const t = grid[a]; grid[a] = grid[b]; grid[b] = t; const l = life[a]; life[a] = life[b]; life[b] = l; const s = shade[a]; shade[a] = shade[b]; shade[b] = s; clock[a] = clock[b] = frameFlip; }
+const heavier = (m, other) => (DENS[m] ?? 99) > (DENS[other] ?? 99);
+
+// Sim > per-material rules
+function liquid(x, y, i, m, spread) {
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  for (const [dx, dy] of [[0, 1], [dir, 1], [-dir, 1]]) { const nx = x + dx, ny = y + dy; if (ny >= H || nx < 0 || nx >= W) continue; const j = ny * W + nx, o = grid[j]; if (o === E || (o !== WALL && o !== m && DENS[o] !== undefined && heavier(m, o))) { swap(i, j); return; } }
+  // sideways spread: travel up to `spread` cells while the path is open
+  for (let k = 1; k <= spread; k++) { const nx = x + dir * k; if (nx < 0 || nx >= W) break; const o = grid[y * W + nx]; if (o !== E && !(DENS[o] !== undefined && heavier(m, o) && o !== m)) break; if (k === spread || (y + 1 < H && grid[(y + 1) * W + nx] === E)) { swap(i, y * W + nx); return; } }
+}
+function gas(x, y, i, m) {
+  if (--life[i] <= 0) { grid[i] = m === STEAM && Math.random() < 0.3 ? WATER : E; return; }
+  const dx = (Math.random() * 3 | 0) - 1, ny = y - 1, nx = x + dx;
+  if (ny >= 0 && nx >= 0 && nx < W) { const j = ny * W + nx, o = grid[j]; if (o === E || ((o === WATER || o === OIL) && Math.random() < 0.3)) { swap(i, j); return; } }
+  const sx = x + (Math.random() < 0.5 ? -1 : 1); if (sx >= 0 && sx < W && grid[y * W + sx] === E) swap(i, y * W + sx);
+}
+function neighbours(x, y, fn) { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < W && ny < H) fn(ny * W + nx, grid[ny * W + nx]); } }
+function step() {
+  frameFlip = frameFlip === 1 ? 2 : 1;
+  for (let y = H - 1; y >= 0; y--) {
+    // alternate scan direction per row and frame so flow has no left/right bias
+    const ltr = (y + frameFlip) % 2 === 0;
+    for (let k = 0; k < W; k++) {
+      const x = ltr ? k : W - 1 - k, i = y * W + x, m = grid[i];
+      if (m === E || m === WALL || m === ROCK || clock[i] === frameFlip) continue;
+      clock[i] = frameFlip;
+      switch (m) {
+        case SAND: {
+          const b = at(x, y + 1);
+          if (b === E || b === WATER || b === OIL || b === SMOKE || b === STEAM) { swap(i, i + W); break; }
+          const d = Math.random() < 0.5 ? -1 : 1;
+          for (const dx of [d, -d]) { const o = at(x + dx, y + 1); if (o === E || o === WATER || o === OIL) { swap(i, i + W + dx); break; } }
+          break;
+        }
+        case WATER: {
+          let hit = false;
+          neighbours(x, y, (j, o) => { if (hit) return; if (o === FIRE) { grid[j] = STEAM; life[j] = 90; } else if (o === LAVA) { grid[j] = ROCK; grid[i] = STEAM; life[i] = 120; hit = true; } });
+          if (!hit) liquid(x, y, i, WATER, 5);
+          break;
+        }
+        case OIL: liquid(x, y, i, OIL, 3); break;
+        case LAVA: {
+          neighbours(x, y, (j, o) => { if (FLAMMABLE[o] && Math.random() < 0.1) { grid[j] = FIRE; life[j] = 50; } });
+          if (Math.random() < 0.0006) { grid[i] = ROCK; break; }
+          // viscous: only moves some frames
+          if (Math.random() < 0.35) liquid(x, y, i, LAVA, 1);
+          if (Math.random() < 0.004 && at(x, y - 1) === E) { setCell(x, y - 1, SMOKE); }
+          break;
+        }
+        case FIRE: {
+          if (--life[i] <= 0) { grid[i] = Math.random() < 0.4 ? SMOKE : E; life[i] = 70; break; }
+          neighbours(x, y, (j, o) => { const p = FLAMMABLE[o]; if (p && Math.random() < p * 6) { grid[j] = FIRE; life[j] = o === WOOD ? 90 + Math.random() * 60 : 40; } });
+          // flicker upward
+          const nx = x + (Math.random() * 3 | 0) - 1;
+          if (Math.random() < 0.5 && at(nx, y - 1) === E) swap(i, (y - 1) * W + nx);
+          else if (at(x, y + 1) === E && Math.random() < 0.3) swap(i, i + W);
+          break;
+        }
+        case SMOKE: case STEAM: gas(x, y, i, m); break;
+        case WOOD: break;
+        case PLANT: {
+          if (Math.random() < 0.02) neighbours(x, y, (j, o) => { if (o === WATER && Math.random() < 0.25) grid[j] = PLANT; });
+          break;
+        }
+      }
+    }
+  }
+}
+
+// Render > palette with per-cell shade jitter; lava and fire glow
+const COL = [];
+COL[E] = [8, 9, 12]; COL[WALL] = [104, 108, 122]; COL[SAND] = [218, 178, 102]; COL[WATER] = [36, 104, 220]; COL[WOOD] = [116, 74, 40]; COL[FIRE] = [255, 150, 30]; COL[SMOKE] = [70, 70, 76]; COL[STEAM] = [190, 200, 215]; COL[OIL] = [64, 46, 28]; COL[LAVA] = [255, 90, 10]; COL[PLANT] = [56, 170, 66]; COL[ROCK] = [72, 64, 64];
+const JIT = { [SAND]: 30, [WALL]: 14, [WOOD]: 22, [WATER]: 18, [PLANT]: 30, [ROCK]: 20, [OIL]: 12 };
+function render(t) {
+  for (let i = 0; i < grid.length; i++) {
+    const m = grid[i];
+    let [r, g, b] = COL[m];
+    if (m === E) { buf[i] = 0xff0c0908; continue; }
+    const j = JIT[m] ? (shade[i] / 255 - 0.5) * JIT[m] : 0;
+    r += j; g += j; b += j;
+    if (m === FIRE) { const f = life[i] / 80; r = 255; g = 90 + f * 150 + Math.random() * 40; b = 20 + f * 60; }
+    else if (m === LAVA) { const p = Math.sin(t * 3 + shade[i] * 0.1) * 30; g += p; b += p * 0.3; }
+    else if (m === SMOKE || m === STEAM) { const a = Math.min(1, life[i] / 80); r = 12 + (r - 12) * a; g = 12 + (g - 12) * a; b = 14 + (b - 14) * a; }
+    else if (m === WATER) { b += Math.sin(t * 4 + i * 0.05) * 10; }
+    buf[i] = (255 << 24) | (Math.max(0, Math.min(255, b)) << 16) | (Math.max(0, Math.min(255, g)) << 8) | Math.max(0, Math.min(255, r));
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// UI > toolbar
+let cur = SAND, brush = 4, paused = false, idle = 99, scriptT = 0;
+const bar = document.getElementById('bar');
+for (const [m, name, c] of MATS) { const b = document.createElement('button'); b.innerHTML = `<i style="background:rgb(${c})"></i>${name}`; b.onclick = () => { cur = m; idle = 0; sync(); }; b.dataset.m = m; bar.appendChild(b); }
+bar.insertAdjacentHTML('beforeend', '<span class="sep"></span><button id="bs">Brush 4</button><button id="bp">Pause</button><button id="bc">Clear</button>');
+function sync() { bar.querySelectorAll('[data-m]').forEach((b) => b.classList.toggle('on', +b.dataset.m === cur)); document.getElementById('bs').textContent = `Brush ${brush}`; document.getElementById('bp').textContent = paused ? 'Play' : 'Pause'; }
+document.getElementById('bs').onclick = () => { brush = brush === 2 ? 4 : brush === 4 ? 8 : brush === 8 ? 14 : 2; idle = 0; sync(); };
+document.getElementById('bp').onclick = () => { paused = !paused; idle = 0; sync(); };
+document.getElementById('bc').onclick = () => { grid.fill(0); idle = 0; };
+sync();
+function paint(cx, cy, m, r) { for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) if (x * x + y * y <= r * r && (m === E || m === WALL || m === WOOD || Math.random() < 0.55)) { const X = cx + x, Y = cy + y; if (at(X, Y) === E || m === E || m === WALL) setCell(X, Y, m); } }
+let pen = null;
+cv.addEventListener('pointerdown', (e) => { idle = 0; if (scriptT) { grid.fill(0); scriptT = 0; } pen = { x: e.clientX / CELL | 0, y: e.clientY / CELL | 0 }; cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove', (e) => { if (!pen) return; idle = 0; const x = e.clientX / CELL | 0, y = e.clientY / CELL | 0; const n = Math.max(Math.abs(x - pen.x), Math.abs(y - pen.y), 1); for (let k = 0; k <= n; k++) paint(Math.round(pen.x + (x - pen.x) * k / n), Math.round(pen.y + (y - pen.y) * k / n), cur, brush); pen.x = x; pen.y = y; });
+cv.addEventListener('pointerup', () => { pen = null; });
+
+// Idle > scripted scene: wood towers, oil pool, plants, then pour sand/water/lava and light a fire
+function idleScene() {
+  grid.fill(0);
+  const g = H - 1;
+  for (let x = 0; x < W; x++) { setCell(x, g, WALL); setCell(x, g - 1, WALL); }
+  const cup = (x0, x1, h) => { for (let y = g - h; y < g; y++) { setCell(x0, y, WALL); setCell(x1, y, WALL); } };
+  cup(Math.floor(W * 0.55), Math.floor(W * 0.8), Math.floor(H * 0.25));
+  for (let y = g - Math.floor(H * 0.2); y < g - 1; y++) for (let x = Math.floor(W * 0.56); x < Math.floor(W * 0.8); x++) if (y > g - Math.floor(H * 0.1)) setCell(x, y, OIL);
+  for (let k = 0; k < 3; k++) { const x0 = Math.floor(W * (0.12 + k * 0.12)); for (let y = g - Math.floor(H * (0.15 + k * 0.05)); y < g - 1; y++) for (let x = x0; x < x0 + 4; x++) setCell(x, y, WOOD); }
+  for (let x = Math.floor(W * 0.84); x < W - 2; x += 3) setCell(x, g - 2, PLANT);
+  for (let x = Math.floor(W * 0.3); x < Math.floor(W * 0.5); x++) setCell(x, Math.floor(H * 0.45) + Math.round(Math.sin(x * 0.2) * 2), WALL);
+  scriptT = 0.001;
+}
+function idleScript(dt) {
+  scriptT += dt;
+  const pour = (fx, m, n = 3) => { const x = Math.floor(W * fx); for (let k = 0; k < n; k++) if (at(x + k - 1, 2) === E && Math.random() < 0.6) setCell(x + k - 1, 2, m); };
+  if (scriptT < 14) pour(0.4, SAND, 4);
+  if (scriptT > 2 && scriptT < 20) pour(0.92, WATER, 4);
+  if (scriptT > 6 && scriptT < 13) pour(0.22, LAVA, 2);
+  if (scriptT > 9 && scriptT < 9.1) paint(Math.floor(W * 0.68), H - 4 - Math.floor(H * 0.1), FIRE, 3);
+  if (scriptT > 16 && scriptT < 24) pour(0.68, WATER, 5);
+  if (scriptT > 34) idleScene();
+}
+idleScene();
+
+let last = performance.now(), fps = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; fps = fps * 0.95 + (1 / Math.max(dt, 1e-3)) * 0.05;
+  idle += dt;
+  if (idle > 20 && !scriptT) idleScene();
+  if (scriptT) idleScript(dt);
+  if (pen) { /* holding still keeps pouring */ paint(pen.x, pen.y, cur, brush); }
+  if (!paused) { step(); }
+  render(now / 1000);
+  document.getElementById('info').textContent = `${W}×${H} cells · ${Math.round(fps)} fps${scriptT ? ' · demo scene (tap to draw)' : ''}`;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

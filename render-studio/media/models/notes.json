@@ -1,0 +1,12 @@
+{
+  "eight-ball.glb": {
+    "title": "8-Ball (GLB)",
+    "about": "glTF binary exported from the Blender script: 160-segment sphere with custom equirect UVs and the generated decal texture embedded. Orbit it in the viewer.",
+    "prompt": "Export the procedurally textured 8-ball from Blender as a single GLB with its texture embedded, ready for three.js or model-viewer."
+  },
+  "low-poly-island.glb": {
+    "title": "Low-Poly Island (GLB)",
+    "about": "The generated island as glTF binary: terrain with vertex colours, props mesh with flat materials and a translucent water tile. Orbit it in the viewer.",
+    "prompt": "Export the procedural low-poly island from Blender as one GLB with vertex colours and materials, ready for three.js."
+  }
+}

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lottie Micro-animations</title>
+<meta name="category" content="motion" />
+<meta name="order" content="2" />
+<meta name="capture" content="2200" />
+<meta name="tags" content="Lottie JSON, lottie-web, trim paths, easing curves" />
+<meta name="description" content="Six product micro-animations written directly as Lottie JSON (no After Effects): a bouncing 8-ball loader, success check, material spinner, like burst, typing dots and download progress. Hard because Lottie's keyframe, bezier-tangent and trim-path format has to be written correctly by hand." />
+<meta name="prompt" content="Write six UI micro-animations as raw Lottie JSON without After Effects, and show them with lottie-web in a polished grid: a squash-and-stretch 8-ball loader, a success checkmark with a sparkle burst, a material-style spinner using trim paths, a heart like burst, a typing indicator and a download progress bar. Each card gets play/pause, speed control and a button to download its .json file." />
+<style>
+  :root { --bg: #0c0c10; --card: #15151c; --ink: #ecebf2; --muted: #8d8b99; --accent: #7c6cff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  body { min-height: 100vh; background: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(124,108,255,0.14), transparent 70%), var(--bg); }
+  header { max-width: 1120px; margin: 0 auto; padding: 38px 24px 8px; display: flex; align-items: end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 30px; letter-spacing: -0.03em; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  .all { display: flex; gap: 8px; }
+  button { border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: var(--ink); border-radius: 9px; padding: 7px 11px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { max-width: 1120px; margin: 0 auto; padding: 22px 24px 50px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .card { background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015)); border: 1px solid rgba(255,255,255,0.07); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; }
+  .stage { height: 170px; border-radius: 14px; background: radial-gradient(circle at 50% 45%, rgba(255,255,255,0.05), transparent 70%), #101016; display: grid; place-items: center; overflow: hidden; }
+  .stage > div { width: 190px; height: 190px; }
+  .card h2 { margin: 14px 0 2px; font-size: 15.5px; letter-spacing: -0.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; min-height: 36px; }
+  .ctrl { display: flex; gap: 6px; margin-top: 12px; align-items: center; }
+  .ctrl .size { margin-left: auto; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .scrub { width: 100%; margin-top: 10px; accent-color: var(--accent); }
+  @media (max-width: 900px) { main { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { main { grid-template-columns: 1fr; padding: 16px; } header { padding: 26px 16px 4px; } h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header>
+  <div><h1>Lottie micro-animations</h1><p>Six animations written as raw Lottie JSON, rendered by lottie-web 5.12. No After Effects.</p></div>
+  <div class="all"><button id="all-play">Pause all</button><button id="all-slow">Slow-mo</button></div>
+</header>
+<main id="grid"></main>
+<script src="https://cdn.jsdelivr.net/npm/lottie-web@5.12.2/build/player/lottie.min.js"></script>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/lottie-loaders.html
+ * PURPOSE: builds six Lottie JSON animations in code (layers, shapes, keyframes, trim paths) and plays them with lottie-web
+ * UI: Render Studio > Motion > Lottie Micro-animations
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+
+// Lottie builder: static / animated properties with cubic easing per keyframe
+const EASE = { io: [0.45, 0, 0.55, 1], in: [0.55, 0, 1, 0.45], out: [0, 0.55, 0.45, 1], lin: [0, 0, 1, 1], back: [0.34, 1.56, 0.64, 1], soft: [0.33, 0, 0.2, 1] };
+const S = (k) => ({ a: 0, k });
+const A = (frames) => ({
+  a: 1,
+  k: frames.map(([t, v, e = 'io'], i) => {
+    const s = Array.isArray(v) ? v : [v];
+    const kf = { t, s };
+    if (i < frames.length - 1) {
+      const [ox, oy, ix, iy] = EASE[e];
+      kf.o = { x: s.map(() => ox), y: s.map(() => oy) };
+      kf.i = { x: s.map(() => ix), y: s.map(() => iy) };
+    }
+    return kf;
+  }),
+});
+const hexRGB = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).concat(1);
+const tr = ({ p = [0, 0], a = [0, 0], s = [100, 100], r = 0, o = 100 } = {}) => ({ ty: 'tr', p: p.a ? p : S(p), a: S(a), s: s.a ? s : S(s), r: r.a ? r : S(r), o: o.a ? o : S(o), sk: S(0), sa: S(0) });
+const group = (it, t) => ({ ty: 'gr', nm: 'g', it: [...it, tr(t)] });
+const ellipse = (size, p = [0, 0]) => ({ ty: 'el', d: 1, p: S(p), s: size.a ? size : S(size) });
+const rect = (size, p = [0, 0], r = 0) => ({ ty: 'rc', d: 1, p: p.a ? p : S(p), s: size.a ? size : S(size), r: S(r) });
+const path = (v, i, o, c = true) => ({ ty: 'sh', ks: S({ v, i: i || v.map(() => [0, 0]), o: o || v.map(() => [0, 0]), c }) });
+const fill = (hex, op = 100) => ({ ty: 'fl', c: S(hexRGB(hex)), o: op.a ? op : S(op), r: 1 });
+const stroke = (hex, w, op = 100) => ({ ty: 'st', c: S(hexRGB(hex)), o: op.a ? op : S(op), w: w.a ? w : S(w), lc: 2, lj: 2 });
+const trim = (s, e, o = 0) => ({ ty: 'tm', s: s.a ? s : S(s), e: e.a ? e : S(e), o: o.a ? o : S(o), m: 1 });
+const radial = (stops, r) => ({ ty: 'gf', o: S(100), r: 1, t: 2, g: { p: stops.length, k: S(stops.flatMap(([o, h]) => [o, ...hexRGB(h).slice(0, 3)])) }, s: S([-r * 0.35, -r * 0.4]), e: S([r * 0.9, r * 0.9]), h: S(0), a: S(0) });
+let ind = 0;
+const layer = (shapes, ks = {}, op = 120) => ({ ddd: 0, ind: ++ind, ty: 4, nm: `L${ind}`, sr: 1, ks: { o: ks.o || S(100), r: ks.r || S(0), p: ks.p || S([100, 100, 0]), a: S([0, 0, 0]), s: ks.s || S([100, 100, 100]) }, ao: 0, shapes, ip: 0, op, st: 0, bm: 0 });
+const anim = (nm, op, layers) => ({ v: '5.7.4', fr: 60, ip: 0, op, w: 200, h: 200, nm, ddd: 0, assets: [], layers });
+
+// Lottie > 8-ball loader: squash + stretch bounce, ball spins, shadow breathes
+// motion lives on group transforms (2D), not layer ks.p: layer position keyframes would need spatial tangents
+function eightBall() {
+  const T = 72;
+  // lottie paints earlier group items on top, so the 8 strokes come before the white disc
+  const face = group([group([ellipse([11, 10], [0, -6]), stroke('#0b0b0d', 3.6)]), group([ellipse([14, 12], [0, 5.5]), stroke('#0b0b0d', 3.6)]), ellipse([38, 38]), fill('#f6f2ea')], { r: A([[0, 0, 'lin'], [T, 360]]) });
+  const gloss = group([ellipse([26, 14], [-16, -22]), fill('#ffffff', 40)], { r: -30 });
+  const body = group([ellipse([84, 84]), stroke('#34343f', 2), radial([[0, '#6a6a78'], [0.4, '#1d1d25'], [1, '#030304']], 42)]);
+  const ball = layer([group([gloss, face, body], {
+    p: A([[0, [0, -52], 'in'], [T / 2, [0, 22], 'out'], [T, [0, -52]]]),
+    s: A([[0, [96, 104], 'in'], [T / 2 - 4, [92, 108], 'lin'], [T / 2, [120, 82], 'out'], [T / 2 + 8, [96, 104], 'io'], [T, [96, 104]]]),
+  })], {}, T);
+  const shadow = layer([group([ellipse([84, 14]), fill('#000000')], {
+    p: [0, 66],
+    s: A([[0, [50, 50], 'in'], [T / 2, [105, 105], 'out'], [T, [50, 50]]]),
+    o: A([[0, 30, 'in'], [T / 2, 85, 'out'], [T, 30]]),
+  })], {}, T);
+  return anim('8-ball loader', T, [ball, shadow]);
+}
+
+// Lottie > success: ring draws, disc pops, check strokes on, sparkle burst
+function success() {
+  const T = 120;
+  const ring = layer([group([ellipse([110, 110]), stroke('#34d399', 6), trim(0, A([[0, 0, 'soft'], [28, 100]]))], { r: -90 })], {}, T);
+  const disc = layer([group([ellipse([110, 110]), fill('#10b981')])], { s: A([[24, [0, 0, 100], 'back'], [44, [100, 100, 100]]]) }, T);
+  const check = layer([group([path([[-24, 2], [-7, 18], [25, -16]], null, null, false), stroke('#ffffff', 9), trim(0, A([[40, 0, 'soft'], [62, 100]]))])], {}, T);
+  const sparks = [];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    sparks.push(group([path([[c * 66, s * 66], [c * 86, s * 86]], null, null, false), stroke(i % 2 ? '#a7f3d0' : '#34d399', 4), trim(A([[46, 0, 'out'], [62, 100]]), A([[40, 0, 'out'], [52, 100]]))]));
+  }
+  const burst = layer(sparks, {}, T);
+  return anim('success', T, [check, disc, ring, burst]);
+}
+
+// Lottie > spinner: material-style chasing arc via animated trim start/end + rotation
+function spinner() {
+  const T = 90;
+  const arc = layer([group([
+    ellipse([96, 96]), stroke('#7c6cff', 10),
+    trim(A([[0, 0, 'io'], [30, 0, 'io'], [T, 78]]), A([[0, 4, 'io'], [45, 80, 'io'], [T, 82]]), A([[0, 0, 'lin'], [T, 140]])),
+  ])], { r: A([[0, 0, 'lin'], [T, 360]]) }, T);
+  const track = layer([group([ellipse([96, 96]), stroke('#ffffff', 10, 7)])], {}, T);
+  return anim('spinner', T, [arc, track]);
+}
+
+// Lottie > like: heart pops with overshoot, ring expands and thins, confetti dots fly out
+function like() {
+  const T = 100;
+  const hv = [[0, 22], [-28, -6], [-14, -26], [0, -14], [14, -26], [28, -6]];
+  const hi = [[12, -10], [0, 12], [-10, 0], [-2, -8], [-8, 0], [0, -12]];
+  const ho = [[-12, -10], [0, -12], [8, 0], [2, -8], [10, 0], [0, 12]];
+  const heart = layer([group([path(hv, hi, ho), fill('#ff4d6d')], { s: [130, 130] })], {
+    s: A([[10, [0, 0, 100], 'back'], [30, [120, 120, 100], 'io'], [42, [100, 100, 100]]]),
+  }, T);
+  const ringL = layer([group([ellipse(A([[8, [10, 10], 'out'], [34, [150, 150]]])), stroke('#ff8fa3', A([[8, 26, 'out'], [34, 0]]))])], {}, T);
+  const dots = [];
+  const cols = ['#ffd166', '#ff4d6d', '#7c6cff', '#06d6a0', '#ff8fa3', '#4cc9f0', '#ffd166'];
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 - Math.PI / 2, c = Math.cos(a), s = Math.sin(a);
+    dots.push(group([ellipse(A([[22, [10, 10], 'out'], [46, [0, 0]]])), fill(cols[i])], { p: A([[18, [c * 30, s * 30], 'out'], [46, [c * 82, s * 82]]]) }));
+  }
+  return anim('like', T, [heart, layer(dots, {}, T), ringL]);
+}
+
+// Lottie > typing: three dots hop with staggered keyframes
+function typing() {
+  const T = 72;
+  const dots = [-28, 0, 28].map((x, i) => {
+    const d = i * 10;
+    return group([ellipse([18, 18]), fill('#cfcbe6')], {
+      p: A([[d, [x, 0], 'out'], [d + 12, [x, -14], 'in'], [d + 24, [x, 0], 'lin'], [T, [x, 0]]]),
+      o: A([[d, 45, 'out'], [d + 12, 100, 'in'], [d + 24, 45, 'lin'], [T, 45]]),
+    });
+  });
+  const bubble = layer([group([rect([120, 64], [0, 0], 32), fill('#26243a')])], {}, T);
+  return anim('typing', T, [layer(dots, {}, T), bubble]);
+}
+
+// Lottie > download: arrow drops in, bar fills left-anchored, arrow becomes check
+function download() {
+  const T = 150;
+  const arrow = layer([group([
+    path([[0, -26], [0, 12]], null, null, false), path([[-16, -4], [0, 12], [16, -4]], null, null, false), stroke('#4cc9f0', 7),
+  ], { p: A([[0, [0, -40], 'out'], [18, [0, 0], 'io'], [30, [0, -6], 'io'], [42, [0, 0], 'io'], [54, [0, -6], 'io'], [66, [0, 0], 'io'], [96, [0, 0], 'in'], [108, [0, 10]]]), o: A([[0, 0, 'out'], [14, 100, 'lin'], [100, 100, 'in'], [108, 0]]) })], { p: S([100, 82, 0]) }, T);
+  const check = layer([group([path([[-14, 0], [-4, 10], [16, -10]], null, null, false), stroke('#06d6a0', 7), trim(0, A([[106, 0, 'soft'], [124, 100]]))])], { p: S([100, 84, 0]) }, T);
+  const W = 120;
+  const bar = layer([
+    group([rect(A([[20, [0, 10], 'soft'], [100, [W, 10]]]), A([[20, [-W / 2, 0], 'soft'], [100, [0, 0]]]), 5), fill('#4cc9f0')]),
+    group([rect([W, 10], [0, 0], 5), fill('#ffffff', 10)]),
+  ], { p: S([100, 136, 0]), o: A([[100, 100, 'in'], [112, 0]]) }, T);
+  return anim('download', T, [arrow, check, bar]);
+}
+
+// Grid > cards: one lottie player per JSON, with controls
+const ITEMS = [
+  ['8-ball loader', 'Squash and stretch on contact, spinning face, shadow that breathes with height.', eightBall],
+  ['Success check', 'Trim-path ring, overshoot pop, check stroke and an 8-spark burst.', success],
+  ['Material spinner', 'One arc: trim start and end chase each other while the layer rotates.', spinner],
+  ['Like burst', 'Bezier heart with back-ease pop, thinning shock ring and confetti.', like],
+  ['Typing indicator', 'Three dots with staggered hop keyframes in a chat bubble.', typing],
+  ['Download progress', 'Arrow bounces, bar fills left-anchored, then morphs into a check.', download],
+];
+const players = [];
+const grid = document.getElementById('grid');
+for (const [title, about, build] of ITEMS) {
+  const data = build();
+  const json = JSON.stringify(data);
+  const card = document.createElement('article');
+  card.className = 'card';
+  card.innerHTML = `<div class="stage"><div></div></div><h2>${title}</h2><p>${about}</p>
+    <input class="scrub" type="range" min="0" max="1" step="0.001" value="0">
+    <div class="ctrl"><button class="pp on">Playing</button><button class="sp">1×</button><button class="dl">JSON</button><span class="size">${(json.length / 1024).toFixed(1)} KB</span></div>`;
+  grid.appendChild(card);
+  const player = lottie.loadAnimation({ container: card.querySelector('.stage > div'), renderer: 'svg', loop: true, autoplay: true, animationData: data });
+  players.push(player);
+  const pp = card.querySelector('.pp'), sp = card.querySelector('.sp'), scrub = card.querySelector('.scrub');
+  // Grid > card > play/pause
+  pp.addEventListener('click', () => { player.isPaused ? player.play() : player.pause(); pp.classList.toggle('on', !player.isPaused); pp.textContent = player.isPaused ? 'Paused' : 'Playing'; });
+  // Grid > card > speed cycle
+  const speeds = [1, 0.5, 0.25, 2];
+  sp.addEventListener('click', () => { const s = speeds[(speeds.indexOf(player.playSpeed) + 1) % speeds.length]; player.setSpeed(s); sp.textContent = `${s}×`; });
+  // Grid > card > scrub: pauses and seeks to a frame
+  scrub.addEventListener('input', () => { player.goToAndStop(+scrub.value * (player.totalFrames - 1), true); pp.classList.remove('on'); pp.textContent = 'Paused'; });
+  player.addEventListener('enterFrame', () => { if (!player.isPaused) scrub.value = player.currentFrame / (player.totalFrames - 1); });
+  // Grid > card > download the exact JSON being played
+  card.querySelector('.dl').addEventListener('click', () => {
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([json], { type: 'application/json' })), download: `${title.toLowerCase().replace(/\W+/g, '-')}.json` });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+}
+
+// Header > global controls
+let allPaused = false, slow = false;
+document.getElementById('all-play').addEventListener('click', (e) => {
+  allPaused = !allPaused;
+  players.forEach((p) => (allPaused ? p.pause() : p.play()));
+  document.querySelectorAll('.pp').forEach((b) => { b.classList.toggle('on', !allPaused); b.textContent = allPaused ? 'Paused' : 'Playing'; });
+  e.target.textContent = allPaused ? 'Play all' : 'Pause all';
+});
+document.getElementById('all-slow').addEventListener('click', (e) => {
+  slow = !slow;
+  players.forEach((p) => p.setSpeed(slow ? 0.25 : 1));
+  document.querySelectorAll('.sp').forEach((b) => (b.textContent = slow ? '0.25×' : '1×'));
+  e.target.classList.toggle('on', slow);
+});
+</script>
+</body>
+</html>

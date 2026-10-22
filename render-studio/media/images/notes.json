@@ -1,0 +1,32 @@
+{
+  "marble-texture.png": {
+    "title": "Seamless Marble",
+    "about": "Tileable Calacatta-style marble: domain-warped Perlin fBm folded through a sharp sine to make grey veins with fine gold threads. Pure numpy, no image inputs.",
+    "prompt": "Write a Python script with numpy and Pillow that generates a seamless 1024px marble texture: tileable Perlin fBm, domain warping, sharp sine veins in grey plus thin gold veins on a warm white base."
+  },
+  "voronoi-cells.png": {
+    "title": "Stained-Glass Voronoi",
+    "about": "72-cell tileable Voronoi diagram computed brute force with F1/F2 distances: each cell glows from its centre and dark leading appears where F2 minus F1 is small, like stained glass.",
+    "prompt": "Using numpy and Pillow, render a tileable stained-glass Voronoi texture: random points wrapped across tile edges, F1 and F2 distance fields, jewel-tone cells brightened toward their centres and dark leading lines where F2-F1 is small."
+  },
+  "spaceship-sprite-sheet.png": {
+    "title": "Pixel Spaceship Sprites",
+    "about": "40 procedural pixel spaceships from a mirrored 12x12 mask (Bollinger style): random body cells, automatic outlines, row-shaded hulls and contrasting cockpits, packed into a game-ready sprite sheet.",
+    "prompt": "Generate a sprite sheet of 40 unique pixel-art spaceships in Python: use a half mask with always-empty, maybe-body and maybe-cockpit cells, mirror it, outline the body automatically, shade by row with a random hue, and lay them out on an 8x5 grid over a starfield."
+  },
+  "terrain-heightmap.png": {
+    "title": "Island Heightmap (16-bit)",
+    "about": "16-bit greyscale heightmap of a procedural island: rolling plus ridged Perlin fBm with a radial falloff. Drop it into Blender displace, Unity or Unreal terrain.",
+    "prompt": "With numpy, build a 1024px island heightmap from rolling fBm plus squared ridged noise and a radial falloff, normalise it and save a 16-bit greyscale PNG."
+  },
+  "terrain-relief.png": {
+    "title": "Shaded Relief Map",
+    "about": "The same island rendered as a cartographic relief map: hypsometric colour ramp from deep sea to snow, north-west hillshade from the height gradient, and contour lines on land.",
+    "prompt": "Turn a heightmap into a shaded relief map in Python: hypsometric colour ramp (deep water, shallows, sand, grass, forest, rock, snow), a hillshade from slope and aspect lit from the north-west, and subtle contour lines."
+  },
+  "demo-reel.gif": {
+    "title": "Demo Reel GIF",
+    "about": "The demo reel at 3x speed as a palette-optimised GIF (palettegen + paletteuse) for READMEs and chat embeds.",
+    "prompt": "Convert the demo reel MP4 into a small looping GIF with ffmpeg: speed it up 3x, 10 fps, 480 px wide, generated palette with Bayer dithering."
+  }
+}

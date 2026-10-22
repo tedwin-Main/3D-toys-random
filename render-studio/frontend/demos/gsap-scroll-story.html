@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GSAP Scroll Story</title>
+<meta name="category" content="motion" />
+<meta name="order" content="1" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="GSAP, ScrollTrigger, pinning, scrubbed timelines" />
+<meta name="description" content="A scroll-driven studio story: split-letter headline, a pinned section where an 8-ball rolls through the process, a horizontal pinned gallery, counters, and a final pin that zooms into the ball's answer window. Hard because several pinned, scrubbed timelines must hand off cleanly at every viewport size." />
+<meta name="prompt" content="Build a scroll-story landing page for a creative studio called 8Ball Studio with GSAP and ScrollTrigger. Kinetic split-letter hero, a pinned section where an SVG 8-ball rolls across while process steps light up, a pinned horizontal card gallery, count-up stats, and a finale that zooms into the 8-ball until its answer window says 'Outlook good'. Add a scroll progress bar and an auto-play tour button. One HTML file, responsive." />
+<style>
+  :root { --bg: #0d0b09; --ink: #f3ece0; --muted: #a39a8c; --accent: #ff7a2f; --blue: #2b4bff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "SF Pro Display", ui-sans-serif, system-ui, sans-serif; }
+  body { overflow-x: hidden; }
+  .progress { position: fixed; left: 0; top: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); z-index: 20; }
+  header { position: fixed; left: 0; right: 0; top: 0; z-index: 15; display: flex; align-items: center; justify-content: space-between; padding: 18px 28px; mix-blend-mode: difference; color: #fff; font-weight: 600; font-size: 14px; }
+  header .tour { pointer-events: auto; border: 1px solid rgba(255,255,255,0.5); background: transparent; color: #fff; border-radius: 999px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  section { position: relative; }
+  .ball-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+
+  /* Story > Hero */
+  .hero { min-height: 100vh; display: grid; grid-template-columns: 1.3fr 1fr; align-items: center; padding: 100px 6vw 120px; gap: 4vw; background: radial-gradient(ellipse 60% 70% at 75% 45%, rgba(255,122,47,0.16), transparent 70%); overflow: hidden; }
+  .eyebrow { font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin-bottom: 22px; }
+  .hero h1 { margin: 0; font-size: clamp(48px, 8.2vw, 132px); line-height: 0.9; letter-spacing: -0.055em; font-weight: 800; }
+  .w { display: inline-block; white-space: nowrap; overflow: hidden; padding-bottom: 0.08em; margin-bottom: -0.08em; }
+  .c { display: inline-block; will-change: transform; }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p { max-width: 430px; color: var(--muted); font-size: 18px; line-height: 1.5; margin: 28px 0 0; }
+  .ball-wrap { position: relative; width: min(38vw, 460px); aspect-ratio: 1; justify-self: center; }
+  .ball-wrap::after { content: ''; position: absolute; left: 12%; right: 12%; bottom: -10%; height: 12%; border-radius: 50%; background: radial-gradient(closest-side, rgba(0,0,0,0.7), transparent); filter: blur(4px); }
+  .scroll-hint { position: absolute; left: 6vw; bottom: 70px; font-size: 13px; color: var(--muted); display: flex; gap: 10px; align-items: center; }
+  .scroll-hint i { width: 1px; height: 36px; background: linear-gradient(var(--ink), transparent); animation: drip 1.6s ease-in-out infinite; transform-origin: top; }
+  @keyframes drip { 0% { transform: scaleY(0); } 60% { transform: scaleY(1); } 100% { transform: scaleY(1); opacity: 0; } }
+  .marquee { position: absolute; left: 0; right: 0; bottom: 0; border-top: 1px solid rgba(243,236,224,0.12); padding: 16px 0; overflow: hidden; white-space: nowrap; font-size: 15px; letter-spacing: 0.3em; color: var(--muted); }
+  .marquee span { display: inline-block; animation: marq 26s linear infinite; }
+  @keyframes marq { to { transform: translateX(-50%); } }
+
+  /* Story > Roll (pinned process) */
+  .roll { height: 100vh; overflow: hidden; display: grid; grid-template-columns: 1fr 1fr; align-items: center; padding: 0 6vw; background: #15110d; }
+  .roll h2 { font-size: clamp(34px, 4.6vw, 70px); line-height: 0.98; letter-spacing: -0.04em; margin: 0; max-width: 11ch; }
+  .steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; justify-self: end; width: min(420px, 100%); }
+  .steps li { display: grid; grid-template-columns: 56px 1fr; gap: 14px; padding: 18px 0; border-top: 1px solid rgba(243,236,224,0.14); opacity: 0.22; }
+  .steps b { font: 600 13px ui-monospace, Menlo, monospace; color: var(--accent); padding-top: 4px; }
+  .steps strong { display: block; font-size: 22px; letter-spacing: -0.02em; }
+  .steps span { color: var(--muted); font-size: 14.5px; line-height: 1.45; }
+  .roller { position: absolute; width: 150px; height: 150px; left: 0; bottom: 9vh; }
+  .track-line { position: absolute; left: 0; right: 0; bottom: 9vh; height: 1px; background: rgba(243,236,224,0.12); }
+
+  /* Story > Horizontal gallery */
+  .hscroll { height: 100vh; overflow: hidden; display: flex; flex-direction: column; justify-content: center; background: var(--ink); color: #15110d; }
+  .hscroll h2 { margin: 0 0 4vh 6vw; font-size: clamp(30px, 4vw, 60px); letter-spacing: -0.04em; }
+  .track { display: flex; gap: 28px; padding: 0 6vw; width: max-content; }
+  .card { width: min(70vw, 440px); height: min(56vh, 480px); border-radius: 26px; padding: 26px; display: flex; flex-direction: column; justify-content: space-between; color: #fff; position: relative; overflow: hidden; flex: none; }
+  .card .art { position: absolute; inset: -20%; }
+  .card h3 { position: relative; margin: 0; font-size: 34px; letter-spacing: -0.03em; }
+  .card p { position: relative; margin: 0; font-size: 15px; line-height: 1.5; max-width: 30ch; opacity: 0.9; }
+  .card small { position: relative; font: 600 12px ui-monospace, Menlo, monospace; opacity: 0.75; }
+  .k1 { background: #1d1a4f; } .k1 .art { background: radial-gradient(circle at 70% 30%, #6f5cff, transparent 45%), radial-gradient(circle at 20% 80%, #ff4fa3, transparent 40%); }
+  .k2 { background: #0d3b30; } .k2 .art { background: repeating-linear-gradient(115deg, rgba(255,255,255,0.08) 0 2px, transparent 2px 22px), radial-gradient(circle at 80% 70%, #23d39a, transparent 50%); }
+  .k3 { background: #4a1608; } .k3 .art { background: conic-gradient(from 40deg at 60% 40%, #ff7a2f, #ffc857, #ff3d5a, #ff7a2f); opacity: 0.55; }
+  .k4 { background: #0b1b33; } .k4 .art { background: radial-gradient(circle at 50% 50%, transparent 30%, rgba(88,196,221,0.35) 31%, transparent 33%), radial-gradient(circle at 50% 50%, transparent 45%, rgba(88,196,221,0.25) 46%, transparent 48%), radial-gradient(circle at 30% 70%, #2b4bff, transparent 50%); }
+  .k5 { background: #222; } .k5 .art { background: linear-gradient(135deg, #111 25%, #333 25% 50%, #111 50% 75%, #333 75%); background-size: 40px 40px; opacity: 0.6; }
+
+  /* Story > Stats */
+  .stats { padding: 18vh 6vw; display: grid; grid-template-columns: repeat(3, 1fr); gap: 4vw; border-bottom: 1px solid rgba(243,236,224,0.1); }
+  .stat b { display: block; font-size: clamp(54px, 8vw, 120px); letter-spacing: -0.05em; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 15px; }
+
+  /* Story > Oracle (pinned zoom finale) */
+  .oracle { height: 100vh; overflow: hidden; display: grid; place-items: center; background: var(--bg); }
+  .oracle .big { width: min(60vmin, 560px); aspect-ratio: 1; position: relative; z-index: 1; }
+  .oracle .answer { position: absolute; z-index: 2; text-align: center; opacity: 0; }
+  .oracle .answer h2 { margin: 0; font-size: clamp(48px, 9vw, 140px); letter-spacing: -0.05em; line-height: 0.9; }
+  .oracle .answer p { color: rgba(255,255,255,0.75); font-size: 18px; margin: 18px 0 26px; }
+  .oracle .answer a { display: inline-block; padding: 15px 26px; border-radius: 999px; background: #fff; color: #0b0b2a; text-decoration: none; font-weight: 700; }
+  .oracle .q { position: absolute; top: 14vh; z-index: 2; font-size: clamp(20px, 2.4vw, 32px); color: var(--muted); letter-spacing: -0.01em; }
+  footer { padding: 40px 6vw; color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; }
+
+  @media (max-width: 760px) {
+    header { padding: 14px 16px; }
+    .hero { grid-template-columns: 1fr; padding-top: 90px; gap: 30px; }
+    .ball-wrap { width: 62vw; grid-row: 1; }
+    .hero p { font-size: 16px; }
+    .roll { grid-template-columns: 1fr; align-content: center; gap: 30px; }
+    .steps { justify-self: start; }
+    .steps li { padding: 10px 0; }
+    .roller { width: 90px; height: 90px; }
+    .stats { grid-template-columns: 1fr; gap: 40px; }
+    .scroll-hint { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="progress"></div>
+<header><span>8Ball Studio</span><button class="tour" id="tour">▶ Auto tour</button></header>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <radialGradient id="shell" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#5a5a66" /><stop offset="0.35" stop-color="#1b1b22" /><stop offset="1" stop-color="#020203" /></radialGradient>
+    <radialGradient id="spec" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity="0.95" /><stop offset="1" stop-color="#fff" stop-opacity="0" /></radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0.6" stop-color="#ff7a2f" stop-opacity="0" /><stop offset="1" stop-color="#ff7a2f" stop-opacity="0.45" /></linearGradient>
+    <g id="ball-body">
+      <circle r="100" fill="url(#shell)" />
+      <circle r="100" fill="url(#rim)" />
+    </g>
+    <g id="ball-face">
+      <circle r="40" fill="#f6f2ea" />
+      <text y="16" text-anchor="middle" font-family="SF Pro Display, system-ui, sans-serif" font-weight="800" font-size="50" fill="#0b0b0d">8</text>
+    </g>
+    <g id="ball-gloss"><ellipse cx="-36" cy="-48" rx="34" ry="20" fill="url(#spec)" transform="rotate(-30 -36 -48)" opacity="0.85" /></g>
+  </defs>
+</svg>
+
+<section class="hero">
+  <div>
+    <div class="eyebrow">8Ball Studio · scroll story</div>
+    <h1 data-split>Every pixel is a <em>decision.</em></h1>
+    <p>We design brands, sites and motion with the conviction of a well-shaken answer. Scroll to see how.</p>
+  </div>
+  <div class="ball-wrap">
+    <svg class="ball-svg" viewBox="-110 -110 220 220"><use href="#ball-body" /><g class="hero-face"><use href="#ball-face" /></g><use href="#ball-gloss" /></svg>
+  </div>
+  <div class="scroll-hint"><i></i>Scroll</div>
+  <div class="marquee"><span>BRAND · WEB · MOTION · 3D · PRODUCT · BRAND · WEB · MOTION · 3D · PRODUCT · BRAND · WEB · MOTION · 3D · PRODUCT · BRAND · WEB · MOTION · 3D · PRODUCT · </span></div>
+</section>
+
+<section class="roll">
+  <h2>We shake it until the answer is obvious.</h2>
+  <ol class="steps">
+    <li><b>01</b><div><strong>Ask</strong><span>Workshops that turn vague goals into one sharp question.</span></div></li>
+    <li><b>02</b><div><strong>Shake</strong><span>Wide exploration: dozens of directions, killed fast.</span></div></li>
+    <li><b>03</b><div><strong>Read</strong><span>Prototype the strongest idea in real code and motion.</span></div></li>
+    <li><b>04</b><div><strong>Ship</strong><span>Launch, measure, refine. Then ask the next question.</span></div></li>
+  </ol>
+  <div class="track-line"></div>
+  <div class="roller"><svg class="ball-svg" viewBox="-110 -110 220 220"><use href="#ball-body" /><g class="roll-spin"><use href="#ball-face" transform="translate(0 38) scale(0.8)" /></g><use href="#ball-gloss" /></svg></div>
+</section>
+
+<section class="hscroll">
+  <h2>Selected work</h2>
+  <div class="track">
+    <article class="card k1"><div class="art"></div><small>01 · Brand</small><div><h3>Nebula Bank</h3><p>An identity system that shifts colour with every transaction.</p></div></article>
+    <article class="card k2"><div class="art"></div><small>02 · Web</small><div><h3>Fernhouse</h3><p>A slow-web storefront for a plant nursery, 98 Lighthouse score.</p></div></article>
+    <article class="card k3"><div class="art"></div><small>03 · Motion</small><div><h3>Solstice Fest</h3><p>Festival titles and 40 social loops built from one type system.</p></div></article>
+    <article class="card k4"><div class="art"></div><small>04 · 3D</small><div><h3>Orbit Audio</h3><p>Real-time product configurator for a pair of headphones.</p></div></article>
+    <article class="card k5"><div class="art"></div><small>05 · Product</small><div><h3>Checkmate</h3><p>A chess-coaching app with a calmer, kinder interface.</p></div></article>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stat"><b data-count="148">0</b><span>projects shipped (sample numbers)</span></div>
+  <div class="stat"><b data-count="23">0</b><span>design awards</span></div>
+  <div class="stat"><b data-count="9800">0</b><span>coffees, approximately</span></div>
+</section>
+
+<section class="oracle">
+  <div class="q">Will your next launch land?</div>
+  <div class="big">
+    <svg class="ball-svg" viewBox="-110 -110 220 220">
+      <use href="#ball-body" />
+      <g class="o-window" opacity="0">
+        <circle r="46" fill="#05051c" />
+        <path d="M0 -34 L30 18 L-30 18 Z" fill="#2b4bff" />
+        <text y="2" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="7" fill="#dfe6ff" letter-spacing="0.5">OUTLOOK</text>
+        <text y="11" text-anchor="middle" font-family="system-ui, sans-serif" font-weight="800" font-size="7" fill="#dfe6ff" letter-spacing="0.5">GOOD</text>
+      </g>
+      <g class="o-face"><use href="#ball-face" /></g>
+      <use href="#ball-gloss" />
+    </svg>
+  </div>
+  <div class="answer"><h2>Outlook good.</h2><p>Let's make yours a yes.</p><a href="#" onclick="return false">Start a project</a></div>
+</section>
+<footer><span>8Ball Studio · fictional studio for this demo</span><span>GSAP 3.12 · ScrollTrigger</span></footer>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollToPlugin.min.js"></script>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/gsap-scroll-story.html
+ * PURPOSE: GSAP ScrollTrigger scroll story: split hero, pinned roll, pinned horizontal gallery, counters, pinned zoom finale, auto tour
+ * UI: Render Studio > Motion > GSAP Scroll Story
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+gsap.registerPlugin(ScrollTrigger, ScrollToPlugin);
+
+// Story > Hero > headline: split into word-wrapped chars so lines never break mid-word
+document.querySelectorAll('[data-split]').forEach((el) => {
+  const walk = (node) => [...node.childNodes].map((n) => {
+    if (n.nodeType === 3) return n.textContent.split(/(\s+)/).map((w) => (/^\s+$/.test(w) || !w ? w : `<span class="w">${[...w].map((ch) => `<span class="c">${ch}</span>`).join('')}</span>`)).join('');
+    return `<${n.tagName.toLowerCase()}>${walk(n)}</${n.tagName.toLowerCase()}>`;
+  }).join('');
+  el.innerHTML = walk(el);
+});
+
+// Story > Hero > intro: chars rise, ball drops in with elastic, gentle float
+const intro = gsap.timeline({ defaults: { ease: 'power4.out' } });
+intro.from('.hero .c', { yPercent: 115, rotate: 10, duration: 1, stagger: 0.022 })
+  .from('.hero .eyebrow, .hero p', { y: 20, opacity: 0, duration: 0.8, stagger: 0.1 }, 0.3)
+  .from('.ball-wrap', { y: -260, scale: 0.7, opacity: 0, duration: 1.5, ease: 'bounce.out' }, 0.15)
+  .from('.hero-face', { rotate: -200, svgOrigin: '0 0', duration: 1.6, ease: 'power3.out' }, 0.25);
+gsap.to('.ball-wrap svg', { y: -14, duration: 2.4, ease: 'sine.inOut', repeat: -1, yoyo: true, delay: 1.6 });
+gsap.to('.ball-wrap', { yPercent: 35, rotate: 60, scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+gsap.to('.hero h1', { yPercent: -20, opacity: 0.2, scrollTrigger: { trigger: '.hero', start: 'top top', end: 'bottom top', scrub: true } });
+
+// Story > progress bar
+gsap.to('.progress', { scaleX: 1, ease: 'none', scrollTrigger: { start: 0, end: 'max', scrub: 0.3 } });
+
+// Story > Roll: pinned, ball rolls the full width (rotation matches distance), steps light up in turn
+const roll = gsap.timeline({ scrollTrigger: { trigger: '.roll', start: 'top top', end: '+=260%', pin: true, scrub: 1 } });
+const rollDist = () => innerWidth - document.querySelector('.roller').offsetWidth;
+// face orbits off-centre at distance/circumference * 360 deg so it reads as rolling; body + gloss stay lit from above
+roll.fromTo('.roller', { x: 0 }, { x: rollDist, ease: 'none', duration: 4 }, 0)
+  .fromTo('.roll-spin', { rotate: 0 }, { rotate: () => (rollDist() / (Math.PI * document.querySelector('.roller').offsetWidth)) * 360, svgOrigin: '0 0', ease: 'none', duration: 4 }, 0);
+document.querySelectorAll('.steps li').forEach((li, i) => {
+  roll.to(li, { opacity: 1, duration: 0.4 }, i * 0.9 + 0.2)
+    .to(li, { opacity: i === 3 ? 1 : 0.35, duration: 0.4 }, i * 0.9 + 1.1);
+});
+roll.to('.roll', { backgroundColor: '#1d140c', duration: 4, ease: 'none' }, 0);
+
+// Story > Gallery: pinned horizontal track, cards' art drifts for depth
+const track = document.querySelector('.track');
+const trackDist = () => track.scrollWidth - innerWidth;
+const hz = gsap.to(track, { x: () => -trackDist(), ease: 'none', scrollTrigger: { trigger: '.hscroll', start: 'top top', end: () => '+=' + trackDist(), pin: true, scrub: 1, invalidateOnRefresh: true } });
+document.querySelectorAll('.card .art').forEach((a) => gsap.fromTo(a, { xPercent: -8 }, { xPercent: 8, ease: 'none', scrollTrigger: { trigger: a.parentElement, containerAnimation: hz, start: 'left right', end: 'right left', scrub: true } }));
+
+// Story > Stats: count up once on enter
+document.querySelectorAll('[data-count]').forEach((el) => {
+  const target = +el.dataset.count, o = { v: 0 };
+  ScrollTrigger.create({ trigger: el, start: 'top 85%', once: true, onEnter: () => gsap.to(o, { v: target, duration: 2, ease: 'power3.out', onUpdate: () => (el.textContent = Math.round(o.v).toLocaleString()) }) });
+});
+
+// Story > Oracle: pinned zoom, face spins away, answer window surfaces, page floods blue
+const oracle = gsap.timeline({ scrollTrigger: { trigger: '.oracle', start: 'top top', end: '+=240%', pin: true, scrub: 1 } });
+oracle.from('.oracle .big', { scale: 0.45, rotate: -40, duration: 1 })
+  .to('.o-face', { scale: 0, rotate: 220, svgOrigin: '0 0', duration: 0.8, ease: 'power2.in' }, 0.9)
+  .to('.o-window', { opacity: 1, duration: 0.4 }, 1.35)
+  .from('.o-window', { rotate: -120, scale: 0.4, svgOrigin: '0 0', duration: 0.8, ease: 'back.out(1.6)' }, 1.35)
+  .to('.oracle .big', { scale: 9, duration: 1.6, ease: 'power3.in' }, 2.4)
+  .to('.oracle .q', { opacity: 0, y: -30, duration: 0.5 }, 2.4)
+  .to('.oracle', { backgroundColor: '#0b0b2a', duration: 0.6 }, 3.3)
+  .to('.oracle .big', { opacity: 0, duration: 0.4 }, 3.6)
+  .to('.oracle .answer', { opacity: 1, duration: 0.6 }, 3.7)
+  .from('.oracle .answer h2', { yPercent: 40, duration: 0.6 }, 3.7);
+
+// Header > Auto tour: smooth scroll to the end, any manual input cancels it
+let tour;
+const stopTour = () => { if (tour) { tour.kill(); tour = null; document.getElementById('tour').textContent = '▶ Auto tour'; } };
+document.getElementById('tour').addEventListener('click', () => {
+  if (tour) return stopTour();
+  if (scrollY >= ScrollTrigger.maxScroll(window) - 4) scrollTo(0, 0);
+  document.getElementById('tour').textContent = '■ Stop';
+  tour = gsap.to(window, { scrollTo: 'max', duration: 30, ease: 'none', onComplete: stopTour });
+});
+['wheel', 'touchstart', 'keydown'].forEach((ev) => addEventListener(ev, stopTour, { passive: true }));
+</script>
+</body>
+</html>

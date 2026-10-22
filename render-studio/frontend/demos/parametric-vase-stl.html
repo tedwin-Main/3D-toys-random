@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Parametric Vase + Gear</title>
+<meta name="category" content="generators" />
+<meta name="order" content="2" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="Three.js, watertight mesh, involute gear, binary STL export, OpenSCAD-style CAD" />
+<meta name="description" content="A browser CAD toy in the spirit of OpenSCAD and CadQuery: a vase built from a monotone spline profile with twist, ribs and real wall thickness, and an involute spur gear with bore and lightening holes. Both are watertight, report size, volume and filament weight, and export as binary STL ready for a slicer. Hard because the mesh has to be closed and correctly wound, not just look right." />
+<meta name="prompt" content="Make a parametric 3D designer in one HTML file with Three.js. Mode 1: a vase from a smooth profile (base, belly, neck, lip) with twist, ribs, facet count and wall thickness, built as a watertight shell with inner wall, lip and floor. Mode 2: an involute spur gear with teeth, module, thickness, bore and lightening holes. Show glaze/metal material presets on a studio turntable, live stats (size, volume, PLA grams), and export binary STL." />
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<style>
+  :root { --ink: #f2efe9; --muted: #a8a196; --line: rgba(242, 239, 233, 0.12); --panel: rgba(22, 20, 18, 0.78); --accent: #e7b46a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; background: radial-gradient(120% 90% at 40% 30%, #3a332c 0%, #1b1815 55%, #0d0c0b 100%); }
+  canvas { display: block; }
+  #title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  #title h1 { margin: 0; font-size: 22px; letter-spacing: -0.2px; }
+  #title p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); }
+  #stats { position: fixed; left: 20px; bottom: 18px; display: flex; gap: 8px; flex-wrap: wrap; max-width: calc(100vw - 360px); }
+  .chip { padding: 8px 11px; border-radius: 11px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  .chip b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .chip span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+  #panel { position: fixed; right: 16px; top: 16px; bottom: 16px; width: 300px; padding: 14px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); display: flex; flex-direction: column; gap: 10px; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(0, 0, 0, 0.3); }
+  .tabs button { height: 32px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: 700 13px ui-rounded, system-ui, sans-serif; cursor: pointer; }
+  .tabs button.on { background: rgba(255, 255, 255, 0.1); color: var(--ink); }
+  #sliders { flex: 1; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 9px; }
+  label { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; font-size: 12.5px; color: var(--muted); }
+  label output { color: var(--ink); font: 600 12px ui-monospace, "SF Mono", monospace; }
+  input[type="range"] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); height: 18px; margin: 0; }
+  .swatches { display: flex; gap: 8px; }
+  .sw { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; box-shadow: inset 0 -6px 10px rgba(0, 0, 0, 0.35), inset 0 4px 8px rgba(255, 255, 255, 0.35); }
+  .sw.on { border-color: var(--ink); }
+  .btns { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .btns button { height: 36px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.06); color: var(--ink); font: 700 12.5px ui-rounded, system-ui, sans-serif; cursor: pointer; }
+  .btns button.primary { background: var(--accent); color: #1b1410; border-color: transparent; }
+  .btns button:hover { filter: brightness(1.12); }
+  .sec { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+  @media (max-width: 700px) {
+    #panel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; height: 44vh; padding: 10px; gap: 8px; }
+    #stats { left: 8px; right: 8px; bottom: calc(44vh + 16px); max-width: none; gap: 6px; }
+    .chip { padding: 6px 9px; } .chip b { font-size: 13px; } .chip:nth-child(n + 4) { display: none; }
+    #title { left: 14px; top: 12px; } #title h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div id="title"><h1 id="tname">Parametric Vase</h1><p>Watertight mesh · binary STL export</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <div class="tabs"><button data-mode="vase" class="on">Vase</button><button data-mode="gear">Gear</button></div>
+  <div class="sec">Material</div>
+  <div class="swatches" id="swatches"></div>
+  <div class="sec">Parameters</div>
+  <div id="sliders"></div>
+  <div class="btns"><button id="rand">Shuffle</button><button id="spin">Spin</button><button id="stl" class="primary">STL ↓</button></div>
+</div>
+<script type="module">
+/**
+ * FILE: render-studio/frontend/demos/parametric-vase-stl.html
+ * PURPOSE: parametric CAD toy: watertight vase shell (spline profile, twist, ribs, wall) + involute spur gear, live stats, binary STL export
+ * UI: Render Studio > Generators > Parametric Vase + Gear
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = (id) => document.getElementById(id);
+const mobile = innerWidth < 700;
+
+// Scene > renderer, studio env, turntable, contact shadow
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.05, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.6;
+controls.minDistance = 1.2; controls.maxDistance = 9;
+controls.maxPolarAngle = Math.PI * 0.52;
+const key = new THREE.DirectionalLight(0xfff1e0, 2.2);
+key.position.set(2.5, 5, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = key.shadow.camera.bottom = -2.5;
+key.shadow.camera.right = key.shadow.camera.top = 2.5;
+key.shadow.radius = 6; key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xbfd6ff, 1.1);
+rim.position.set(-4, 2.5, -3);
+scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(4, 64), new THREE.ShadowMaterial({ opacity: 0.35 }));
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.062; // below plinth top so the two never z-fight
+floor.receiveShadow = true;
+scene.add(floor);
+const plinth = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.3, 0.06, 96), new THREE.MeshStandardMaterial({ color: 0x2a2622, roughness: 0.55, metalness: 0.1 }));
+plinth.position.y = -0.03; plinth.receiveShadow = true;
+scene.add(plinth);
+const holder = new THREE.Group();
+holder.scale.setScalar(0.01); // geometry is in mm, scene units are 10 cm
+scene.add(holder);
+let mesh = null;
+
+// Materials > glaze + metal presets
+const MATS = {
+  vase: [
+    { name: 'Celadon', color: 0x8fb9a2, roughness: 0.18, clearcoat: 1, sheen: 0 },
+    { name: 'Terracotta', color: 0xb8643f, roughness: 0.78, clearcoat: 0, sheen: 0.4 },
+    { name: 'Obsidian', color: 0x15161a, roughness: 0.12, clearcoat: 1, sheen: 0 },
+    { name: 'Porcelain', color: 0xf1ede4, roughness: 0.25, clearcoat: 0.8, sheen: 0 },
+    { name: 'Cobalt', color: 0x2c4fa3, roughness: 0.2, clearcoat: 1, sheen: 0 },
+  ],
+  gear: [
+    { name: 'Brass', color: 0xd4a64a, roughness: 0.28, metalness: 1 },
+    { name: 'Steel', color: 0xb9bec6, roughness: 0.22, metalness: 1 },
+    { name: 'Copper', color: 0xc8714a, roughness: 0.3, metalness: 1 },
+    { name: 'PLA Orange', color: 0xff7a2f, roughness: 0.5, metalness: 0 },
+    { name: 'Anodized', color: 0x5b3fc4, roughness: 0.32, metalness: 0.8 },
+  ],
+};
+
+// Params > slider specs per mode
+const SPEC = {
+  vase: [
+    ['height', 'Height', 60, 260, 1, 170, 'mm'], ['base', 'Base radius', 15, 70, 0.5, 30, 'mm'], ['belly', 'Belly radius', 20, 95, 0.5, 60, 'mm'],
+    ['bellyAt', 'Belly height', 0.15, 0.75, 0.01, 0.36, ''], ['neck', 'Neck radius', 8, 60, 0.5, 21, 'mm'], ['lip', 'Lip radius', 10, 80, 0.5, 31, 'mm'],
+    ['twist', 'Twist', -180, 180, 1, 70, '°'], ['ribs', 'Ribs', 0, 32, 1, 14, ''], ['ribDepth', 'Rib depth', 0, 0.2, 0.005, 0.075, ''],
+    ['facets', 'Facets', 6, 160, 1, 128, ''], ['wall', 'Wall', 1, 5, 0.1, 2.2, 'mm'],
+  ],
+  gear: [
+    ['teeth', 'Teeth', 8, 60, 1, 28, ''], ['module', 'Module', 1, 5, 0.1, 3, 'mm'], ['thick', 'Thickness', 3, 30, 0.5, 12, 'mm'],
+    ['bore', 'Bore Ø', 2, 30, 0.5, 10, 'mm'], ['holes', 'Lightening holes', 0, 8, 1, 6, ''], ['pressure', 'Pressure angle', 14.5, 25, 0.5, 20, '°'],
+  ],
+};
+let mode = 'vase';
+const P = { vase: {}, gear: {} };
+for (const m of ['vase', 'gear']) for (const [k, , , , , v] of SPEC[m]) P[m][k] = v;
+const matIdx = { vase: 0, gear: 0 };
+
+// Geometry > monotone cubic (Fritsch-Carlson) so the profile never overshoots
+function monotone(xs, ys) {
+  const n = xs.length, d = [], m = [];
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = m[i + 1] = 0; continue; }
+    const a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+    if (s > 9) { const t = 3 / Math.sqrt(s); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
+  }
+  return (x) => {
+    let i = 0;
+    while (i < n - 2 && x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i], t = (x - xs[i]) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  };
+}
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// Geometry > vase: outer skin, lip ring, inner skin, inner floor, outer base (watertight, outward winding)
+function buildVase(p) {
+  const H = p.height, S = Math.round(p.facets), NV = 150, tb = Math.max(2.4, p.wall * 1.4);
+  const prof = monotone([0, p.bellyAt, 0.82, 1], [p.base, p.belly, p.neck, p.lip]);
+  const radius = (v, j, inner) => {
+    const y = v * H;
+    let r = prof(v) * (0.93 + 0.07 * smooth(0, 5, y)); // small foot chamfer
+    const fade = smooth(0, 0.08, v) * smooth(1, 0.9, v);
+    if (p.ribs > 0) r *= 1 + p.ribDepth * fade * Math.cos(p.ribs * (j / S) * Math.PI * 2);
+    return inner ? Math.max(1, r - p.wall) : r;
+  };
+  const pos = [], idx = [];
+  const ring = (y, v, inner) => {
+    const tw = (p.twist * Math.PI) / 180 * v;
+    for (let j = 0; j < S; j++) { const a = (j / S) * Math.PI * 2 + tw, r = radius(v, j, inner); pos.push(r * Math.cos(a), y, r * Math.sin(a)); }
+  };
+  for (let i = 0; i <= NV; i++) ring((i / NV) * H, i / NV, false);
+  const IN = pos.length / 3;
+  for (let i = 0; i <= NV; i++) { const y = tb + ((H - tb) * i) / NV; ring(y, y / H, true); }
+  const C0 = pos.length / 3; pos.push(0, 0, 0);
+  const Ci = C0 + 1; pos.push(0, tb, 0);
+  const o = (i, j) => i * S + (j % S), n = (i, j) => IN + i * S + (j % S);
+  for (let i = 0; i < NV; i++) for (let j = 0; j < S; j++) {
+    idx.push(o(i, j), o(i + 1, j), o(i, j + 1), o(i, j + 1), o(i + 1, j), o(i + 1, j + 1));
+    idx.push(n(i, j), n(i, j + 1), n(i + 1, j), n(i, j + 1), n(i + 1, j + 1), n(i + 1, j));
+  }
+  for (let j = 0; j < S; j++) {
+    idx.push(o(NV, j), n(NV, j), o(NV, j + 1), o(NV, j + 1), n(NV, j), n(NV, j + 1));
+    idx.push(C0, o(0, j), o(0, j + 1));
+    idx.push(Ci, n(0, j + 1), n(0, j));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+// Geometry > involute spur gear profile, extruded and laid flat
+function buildGear(p) {
+  const N = Math.round(p.teeth), m = p.module, alpha = (p.pressure * Math.PI) / 180;
+  const rp = (N * m) / 2, rb = rp * Math.cos(alpha), ra = rp + m, rr = Math.max(rp - 1.25 * m, p.bore / 2 + 2);
+  const inv = (a) => Math.tan(a) - a;
+  const half = Math.PI / (2 * N) + inv(alpha);
+  // flank polar angle at radius r (relative to tooth centre)
+  const th = (r) => Math.max(0.002, half - inv(Math.acos(Math.min(1, rb / Math.max(r, rb)))));
+  const shape = new THREE.Shape();
+  const r0 = Math.max(rr, rb), FS = 8;
+  let first = true;
+  const pt = (r, a) => { const x = r * Math.cos(a), y = r * Math.sin(a); if (first) { shape.moveTo(x, y); first = false; } else shape.lineTo(x, y); };
+  for (let k = 0; k < N; k++) {
+    const c = (k / N) * Math.PI * 2;
+    if (rr < rb) pt(rr, c - th(rb));
+    for (let s = 0; s <= FS; s++) { const r = r0 + ((ra - r0) * s) / FS; pt(r, c - th(r)); }
+    for (let s = 1; s < 4; s++) pt(ra, c - th(ra) + (2 * th(ra) * s) / 4);
+    for (let s = FS; s >= 0; s--) { const r = r0 + ((ra - r0) * s) / FS; pt(r, c + th(r)); }
+    if (rr < rb) pt(rr, c + th(rb));
+    const next = ((k + 1) / N) * Math.PI * 2, a0 = c + th(r0), a1 = next - th(r0);
+    for (let s = 1; s < 4; s++) pt(rr, a0 + ((a1 - a0) * s) / 4);
+  }
+  const hole = (cx, cy, r) => { const h = new THREE.Path(); h.absarc(cx, cy, r, 0, Math.PI * 2, true); shape.holes.push(h); };
+  hole(0, 0, p.bore / 2);
+  const hub = p.bore / 2 + Math.max(3, m * 1.6), rim = rr - Math.max(3, m * 1.4);
+  const hr = (rim - hub) * 0.42, hc = (rim + hub) / 2;
+  if (p.holes > 0 && hr > 2) for (let i = 0; i < p.holes; i++) { const a = (i / p.holes) * Math.PI * 2 + Math.PI / p.holes; hole(hc * Math.cos(a), hc * Math.sin(a), Math.min(hr, (Math.PI * hc) / p.holes - 2.2)); }
+  const g = new THREE.ExtrudeGeometry(shape, { depth: p.thick, bevelEnabled: true, bevelThickness: 0.5, bevelSize: 0.35, bevelSegments: 2, curveSegments: 40 });
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, 0.5, 0);
+  g.computeVertexNormals();
+  return { g, rp, ra };
+}
+
+// Geometry > signed volume (mm^3) for stats and winding sanity
+function volume(g) {
+  const p = g.attributes.position.array, ix = g.index ? g.index.array : null, n = ix ? ix.length : p.length / 3;
+  let v = 0;
+  for (let t = 0; t < n; t += 3) {
+    const a = (ix ? ix[t] : t) * 3, b = (ix ? ix[t + 1] : t + 1) * 3, c = (ix ? ix[t + 2] : t + 2) * 3;
+    v += (p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1]) - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c]) + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c])) / 6;
+  }
+  return v;
+}
+
+// Generators > rebuild mesh + stats on any change
+let rebuildQueued = false;
+function rebuild() {
+  rebuildQueued = false;
+  const p = P[mode];
+  let g, extra = [];
+  if (mode === 'vase') g = buildVase(p);
+  else { const r = buildGear(p); g = r.g; extra = [['Pitch Ø', `${(r.rp * 2).toFixed(1)} mm`]]; }
+  const spec = MATS[mode][matIdx[mode]];
+  const mat = new THREE.MeshPhysicalMaterial({ color: spec.color, roughness: spec.roughness, metalness: spec.metalness ?? 0, clearcoat: spec.clearcoat ?? 0, clearcoatRoughness: 0.12, sheen: spec.sheen ?? 0, sheenColor: 0xffe0c8, flatShading: mode === 'vase' && p.facets < 24 });
+  if (mesh) { holder.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
+  mesh = new THREE.Mesh(g, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  holder.add(mesh);
+  g.computeBoundingBox();
+  const bb = g.boundingBox, sz = bb.getSize(new THREE.Vector3());
+  const vol = Math.abs(volume(g)) / 1000, tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+  const chips = [['Size', `${sz.x.toFixed(0)}×${sz.z.toFixed(0)}×${sz.y.toFixed(0)} mm`], ['Volume', `${vol.toFixed(1)} cm³`], ['PLA', `${(vol * 1.24).toFixed(0)} g`], ['Triangles', tris.toLocaleString()], ...extra];
+  $('stats').innerHTML = chips.map(([k, v]) => `<div class="chip"><b>${v}</b><span>${k}</span></div>`).join('');
+  // frame camera to the part height
+  const h = sz.y * 0.01, target = new THREE.Vector3(0, mode === 'vase' ? h * 0.46 : 0.05, 0);
+  controls.target.lerp(target, 1);
+  if (!rebuild.framed || rebuild.framed !== mode) {
+    rebuild.framed = mode;
+    // portrait screens have a narrow horizontal fov, so back off
+    const dist = (mode === 'vase' ? Math.max(3.2, h * 2.6) : Math.max(2.6, sz.x * 0.01 * 3)) / Math.min(1, camera.aspect / 0.95);
+    camera.position.set(dist * 0.75, target.y + dist * (mode === 'vase' ? 0.32 : 0.62), dist * 0.75);
+  }
+}
+const queue = () => { if (!rebuildQueued) { rebuildQueued = true; requestAnimationFrame(rebuild); } };
+
+// UI > sliders + swatches for current mode
+function buildUI() {
+  $('sliders').innerHTML = '';
+  for (const [k, label, min, max, step, , unit] of SPEC[mode]) {
+    const el = document.createElement('label');
+    const fmt = (v) => `${step < 1 ? (+v).toFixed(step < 0.01 ? 3 : 2) : v}${unit}`;
+    el.innerHTML = `${label}<output>${fmt(P[mode][k])}</output><input type="range" min="${min}" max="${max}" step="${step}" value="${P[mode][k]}" />`;
+    const inp = el.querySelector('input'), out = el.querySelector('output');
+    inp.addEventListener('input', () => { P[mode][k] = +inp.value; out.textContent = fmt(inp.value); queue(); });
+    $('sliders').append(el);
+  }
+  $('swatches').innerHTML = '';
+  MATS[mode].forEach((m, i) => {
+    const b = document.createElement('button');
+    b.className = 'sw' + (i === matIdx[mode] ? ' on' : '');
+    b.title = m.name;
+    b.style.background = `#${m.color.toString(16).padStart(6, '0')}`;
+    b.onclick = () => { matIdx[mode] = i; buildUI(); queue(); };
+    $('swatches').append(b);
+  });
+  $('tname').textContent = mode === 'vase' ? 'Parametric Vase' : 'Involute Spur Gear';
+}
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b));
+  buildUI(); rebuild();
+}));
+// Parameters > Shuffle: random but sane values within each slider range
+$('rand').onclick = () => {
+  for (const [k, , min, max, step] of SPEC[mode]) {
+    if (k === 'facets' || k === 'wall' || k === 'pressure' || k === 'bore') continue;
+    const v = min + Math.random() * (max - min);
+    P[mode][k] = Math.round(v / step) * step;
+  }
+  if (mode === 'vase') { P.vase.neck = Math.min(P.vase.neck, P.vase.belly * 0.7); P.vase.ribDepth = Math.min(P.vase.ribDepth, 0.12); }
+  matIdx[mode] = Math.floor(Math.random() * MATS[mode].length);
+  buildUI(); rebuild();
+};
+$('spin').onclick = () => { controls.autoRotate = !controls.autoRotate; $('spin').textContent = controls.autoRotate ? 'Spin' : 'Still'; };
+// Generators > STL: binary, per-face normals, mm units
+$('stl').onclick = () => {
+  const g = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const p = g.attributes.position.array, n = p.length / 9;
+  const buf = new ArrayBuffer(84 + n * 50), dv = new DataView(buf);
+  const head = `render-studio ${mode}`;
+  for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
+  dv.setUint32(80, n, true);
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3(), N = new THREE.Vector3();
+  for (let t = 0; t < n; t++) {
+    A.fromArray(p, t * 9); B.fromArray(p, t * 9 + 3); C.fromArray(p, t * 9 + 6);
+    N.subVectors(C, B).cross(A.clone().sub(B)).normalize();
+    // STL is Z-up: swap y/z and flip handedness
+    const o = 84 + t * 50, w = (k, v) => dv.setFloat32(o + k * 4, v, true);
+    w(0, N.x); w(1, -N.z); w(2, N.y);
+    [A, B, C].forEach((V, j) => { w(3 + j * 3, V.x); w(4 + j * 3, -V.z); w(5 + j * 3, V.y); });
+    dv.setUint16(o + 48, 0, true);
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'model/stl' }));
+  a.download = `${mode === 'vase' ? 'vase' : 'spur-gear'}-${Date.now().toString(36)}.stl`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+// Scene > shift view so the part is not hidden behind the panel
+camera.setViewOffset(innerWidth, innerHeight, mobile ? 0 : 150, mobile ? innerHeight * 0.2 : 0, innerWidth, innerHeight);
+addEventListener('resize', () => camera.setViewOffset(innerWidth, innerHeight, innerWidth < 700 ? 0 : 150, innerWidth < 700 ? innerHeight * 0.2 : 0, innerWidth, innerHeight));
+buildUI();
+rebuild();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>

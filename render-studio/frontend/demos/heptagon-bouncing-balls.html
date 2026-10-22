@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spinning Heptagon</title>
+<meta name="category" content="physics" />
+<meta name="order" content="1" />
+<meta name="capture" content="650" />
+<meta name="tags" content="the viral test, rigid bodies, spin + friction, canvas 2D" />
+<meta name="description" content="The viral early-2025 benchmark: 20 numbered balls bounce inside a spinning heptagon with gravity, friction, ball-to-ball collisions and visible spin. Hard because rotating walls must hand momentum to the balls without tunnelling." />
+<meta name="prompt" content="Write one HTML file that shows 20 balls bouncing inside a spinning heptagon. Same radius, numbered 1-20, all dropped from the center. Gravity, friction, ball-ball collisions and realistic bounces off the rotating walls; numbers rotate to show spin. Heptagon spins 360 degrees per 5 seconds. No physics library." />
+<style>
+  :root { --ink: #f3efe6; --muted: #a59f93; --panel: rgba(18, 14, 10, 0.72); --accent: #f39800; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0a07; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 276px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 74px 1fr 38px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .btns button:hover { border-color: var(--accent); }
+  .btns button.on { background: var(--accent); color: #1b1004; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; line-height: 1.5; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  #toggle { display: none; }
+  @media (max-width: 600px) {
+    #panel { left: 10px; right: 10px; bottom: 10px; width: auto; }
+    #panel:not(.open) label, #panel:not(.open) .hint { display: none; }
+    #toggle { display: inline-block; }
+    .btns { grid-template-columns: repeat(5, 1fr); }
+    #stats { top: auto; bottom: 84px; right: 14px; }
+    .title p { max-width: 70vw; }
+    .title h1 { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Spinning Heptagon</h1><p>20 balls · gravity · friction · spin · no physics library</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Spin <input id="spin" type="range" min="-360" max="360" step="6" value="72"><output id="spin-o"></output></label>
+  <label>Gravity <input id="grav" type="range" min="0" max="2" step="0.05" value="1"><output id="grav-o"></output></label>
+  <label>Bounce <input id="bounce" type="range" min="0.3" max="0.95" step="0.01" value="0.8"><output id="bounce-o"></output></label>
+  <label>Friction <input id="fric" type="range" min="0" max="0.6" step="0.01" value="0.18"><output id="fric-o"></output></label>
+  <div class="btns">
+    <button id="drop">Drop (R)</button>
+    <button id="pause">Pause</button>
+    <button id="trails" class="on">Trails</button>
+    <button id="sound" class="on">Sound</button>
+    <button id="toggle">⚙</button>
+  </div>
+  <div class="hint">Drag a ball to grab and throw it. Click empty space to add a ball. Space pauses.</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/heptagon-bouncing-balls.html
+ * PURPOSE: spinning heptagon benchmark: impulse-based 2D rigid balls with spin, friction, moving-wall collisions
+ * UI: Render Studio > Physics > Spinning Heptagon
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: none (standalone page)
+ */
+const COLORS = ['#f8b862', '#f6ad49', '#f39800', '#f08300', '#ec6d51', '#ee7948', '#ed6d3d', '#ec6800', '#ec6800', '#ee7800', '#eb6238', '#ea5506', '#ea5506', '#eb6101', '#e49e61', '#e45e32', '#e17b34', '#dd7a56', '#db8449', '#d66a35'];
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = (id) => document.getElementById(id);
+let W, H, DPR, cx, cy, R, BR, scale;
+let angle = 0, paused = false, trails = true, sound = true;
+let balls = [];
+
+// Physics > settings: sliders feed these each frame
+const opts = { spin: 72, grav: 1, bounce: 0.8, fric: 0.18 };
+for (const k of Object.keys(opts)) {
+  const el = $(k), out = $(`${k}-o`);
+  const show = () => { opts[k] = Number(el.value); out.textContent = k === 'spin' ? `${opts[k]}°` : opts[k].toFixed(2); };
+  el.addEventListener('input', show);
+  show();
+}
+
+// Physics > layout: heptagon + ball size follow viewport
+function resize() {
+  const oldR = R, ocx = cx, ocy = cy;
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const mobile = W < 600;
+  cx = W / 2; cy = mobile ? H * 0.42 : H / 2;
+  R = Math.min(W, mobile ? H * 0.72 : H) * 0.43;
+  BR = R * 0.062;
+  scale = R / 340;
+  if (oldR) for (const b of balls) { b.x = cx + (b.x - ocx) * (R / oldR); b.y = cy + (b.y - ocy) * (R / oldR); b.r = BR; }
+}
+addEventListener('resize', resize);
+resize();
+
+function makeBall(n, x, y) {
+  const m = 1, I = 0.5 * m * BR * BR;
+  const t = Math.random() * Math.PI * 2, sp = (0.35 + Math.random() * 0.65) * 520 * scale;
+  return { n, x, y, vx: Math.cos(t) * sp, vy: Math.sin(t) * sp - 200 * scale, a: 0, w: 0, r: BR, m, I, color: COLORS[(n - 1) % COLORS.length], trail: [] };
+}
+// Physics > Drop: all balls start at center with a small random burst so the drop reads lively
+function drop() {
+  balls = [];
+  for (let i = 1; i <= 20; i++) balls.push(makeBall(i, cx + (Math.random() - 0.5) * BR * 0.6, cy + (Math.random() - 0.5) * BR * 0.6));
+}
+drop();
+
+function verts() {
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const t = angle + (i / 7) * Math.PI * 2 - Math.PI / 2;
+    out.push([cx + Math.cos(t) * R, cy + Math.sin(t) * R]);
+  }
+  return out;
+}
+
+const cross = (ax, ay, bx, by) => ax * by - ay * bx;
+
+// Physics > contact: impulse along unit dir d at contact offset (rx,ry) from ball center, against moving surface velocity (sx,sy)
+function relVel(b, rx, ry) { return [b.vx - b.w * ry, b.vy + b.w * rx]; }
+function applyImpulse(b, rx, ry, jx, jy) {
+  b.vx += jx / b.m; b.vy += jy / b.m;
+  b.w += cross(rx, ry, jx, jy) / b.I;
+}
+
+let impacts = [];
+function wallCollide(b, V, omega) {
+  for (let i = 0; i < 7; i++) {
+    const [ax, ay] = V[i], [bx, by] = V[(i + 1) % 7];
+    const ex = bx - ax, ey = by - ay, len = Math.hypot(ex, ey);
+    const tx = ex / len, ty = ey / len;
+    // inward normal (polygon is clockwise on screen with y down)
+    const nx = -ty, ny = tx;
+    const dist = (b.x - ax) * nx + (b.y - ay) * ny;
+    if (dist >= b.r) continue;
+    const along = (b.x - ax) * tx + (b.y - ay) * ty;
+    if (along < -b.r || along > len + b.r) continue;
+    // push out
+    const pen = b.r - dist;
+    b.x += nx * pen; b.y += ny * pen;
+    // contact point + wall velocity there (rigid rotation about center)
+    const px = b.x - nx * b.r, py = b.y - ny * b.r;
+    const swx = -omega * (py - cy), swy = omega * (px - cx);
+    const rx = -nx * b.r, ry = -ny * b.r;
+    let [vx, vy] = relVel(b, rx, ry);
+    vx -= swx; vy -= swy;
+    const vn = vx * nx + vy * ny;
+    if (vn >= 0) continue;
+    // restitution off for slow contacts so balls can rest instead of jittering
+    const e = vn < -35 * scale ? opts.bounce : 0;
+    const jn = (-(1 + e) * vn) / (1 / b.m);
+    applyImpulse(b, rx, ry, nx * jn, ny * jn);
+    // friction: kill relative tangential slip, Coulomb clamp
+    [vx, vy] = relVel(b, rx, ry);
+    vx -= swx; vy -= swy;
+    const vt = vx * tx + vy * ty;
+    const kt = 1 / b.m + cross(rx, ry, tx, ty) ** 2 / b.I;
+    let jt = -vt / kt;
+    const maxF = (opts.fric + 0.02) * jn;
+    jt = Math.max(-maxF, Math.min(maxF, jt));
+    applyImpulse(b, rx, ry, tx * jt, ty * jt);
+    if (-vn > 140 * scale) impacts.push(Math.min(1, -vn / (1400 * scale)));
+  }
+}
+
+function ballCollide(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, d2 = dx * dx + dy * dy, rr = a.r + b.r;
+  if (d2 >= rr * rr || d2 === 0) return;
+  const d = Math.sqrt(d2), nx = dx / d, ny = dy / d, pen = rr - d;
+  a.x -= nx * pen * 0.5; a.y -= ny * pen * 0.5;
+  b.x += nx * pen * 0.5; b.y += ny * pen * 0.5;
+  const rax = nx * a.r, ray = ny * a.r, rbx = -nx * b.r, rby = -ny * b.r;
+  const va = relVel(a, rax, ray), vb = relVel(b, rbx, rby);
+  const rvx = vb[0] - va[0], rvy = vb[1] - va[1];
+  const vn = rvx * nx + rvy * ny;
+  if (vn >= 0) return;
+  const e = vn < -60 * scale ? opts.bounce * 0.95 : 0;
+  const jn = (-(1 + e) * vn) / (1 / a.m + 1 / b.m);
+  applyImpulse(a, rax, ray, -nx * jn, -ny * jn);
+  applyImpulse(b, rbx, rby, nx * jn, ny * jn);
+  // ball-ball friction: transfers spin between touching balls
+  const tx = -ny, ty = nx;
+  const va2 = relVel(a, rax, ray), vb2 = relVel(b, rbx, rby);
+  const vt = (vb2[0] - va2[0]) * tx + (vb2[1] - va2[1]) * ty;
+  const kt = 1 / a.m + 1 / b.m + cross(rax, ray, tx, ty) ** 2 / a.I + cross(rbx, rby, tx, ty) ** 2 / b.I;
+  let jt = -vt / kt;
+  const maxF = opts.fric * 0.6 * jn;
+  jt = Math.max(-maxF, Math.min(maxF, jt));
+  applyImpulse(a, rax, ray, -tx * jt, -ty * jt);
+  applyImpulse(b, rbx, rby, tx * jt, ty * jt);
+  if (-vn > 220 * scale) impacts.push(Math.min(1, -vn / (1800 * scale)) * 0.6);
+}
+
+// Physics > pointer: grab + throw, click empty space adds ball
+let grab = null;
+const ptr = { x: 0, y: 0, vx: 0, vy: 0, t: 0 };
+cv.addEventListener('pointerdown', (e) => {
+  unlockAudio();
+  const hit = balls.find((b) => Math.hypot(b.x - e.clientX, b.y - e.clientY) < b.r * 1.4);
+  Object.assign(ptr, { x: e.clientX, y: e.clientY, vx: 0, vy: 0, t: performance.now() });
+  if (hit) { grab = hit; cv.setPointerCapture(e.pointerId); return; }
+  const n = balls.length + 1;
+  if (n <= 60) balls.push(makeBall(n, cx, cy));
+});
+cv.addEventListener('pointermove', (e) => {
+  const now = performance.now(), dt = Math.max(1, now - ptr.t) / 1000;
+  ptr.vx = ptr.vx * 0.5 + ((e.clientX - ptr.x) / dt) * 0.5;
+  ptr.vy = ptr.vy * 0.5 + ((e.clientY - ptr.y) / dt) * 0.5;
+  Object.assign(ptr, { x: e.clientX, y: e.clientY, t: now });
+  cv.style.cursor = grab ? 'grabbing' : balls.some((b) => Math.hypot(b.x - e.clientX, b.y - e.clientY) < b.r * 1.4) ? 'grab' : 'crosshair';
+});
+addEventListener('pointerup', () => {
+  if (!grab) return;
+  const cap = 2600 * scale, sp = Math.hypot(ptr.vx, ptr.vy), k = sp > cap ? cap / sp : 1;
+  grab.vx = ptr.vx * k; grab.vy = ptr.vy * k;
+  grab = null;
+});
+
+function step(dt) {
+  const omega = (opts.spin * Math.PI) / 180;
+  angle += omega * dt;
+  const V = verts();
+  const g = 1500 * scale * opts.grav;
+  for (const b of balls) {
+    if (b === grab) {
+      // spring toward pointer, keeps inside walls via collision pass
+      b.vx = (ptr.x - b.x) * 18; b.vy = (ptr.y - b.y) * 18;
+    } else {
+      b.vy += g * dt;
+      // air drag + rolling resistance
+      b.vx *= 1 - 0.08 * dt; b.vy *= 1 - 0.08 * dt; b.w *= 1 - 0.25 * dt;
+    }
+    b.x += b.vx * dt; b.y += b.vy * dt; b.a += b.w * dt;
+  }
+  for (let it = 0; it < 2; it++) {
+    for (let i = 0; i < balls.length; i++) for (let j = i + 1; j < balls.length; j++) ballCollide(balls[i], balls[j]);
+    for (const b of balls) wallCollide(b, V, omega);
+  }
+  // safety: anything that escaped (fast throw) gets pulled back in
+  const apo = R * Math.cos(Math.PI / 7);
+  for (const b of balls) {
+    const dx = b.x - cx, dy = b.y - cy, d = Math.hypot(dx, dy);
+    if (d > apo - b.r * 0.5) { b.x = cx + (dx / d) * (apo - b.r); b.y = cy + (dy / d) * (apo - b.r); b.vx *= -0.3; b.vy *= -0.3; }
+  }
+}
+
+// Audio > impacts: short woody tock, pitch by strength, throttled
+let actx = null, lastTock = 0;
+function unlockAudio() { if (!actx && sound) { actx = new AudioContext(); } actx?.resume(); }
+function tock(s) {
+  if (!actx || !sound) return;
+  const now = actx.currentTime;
+  if (now - lastTock < 0.025) return;
+  lastTock = now;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(380 + s * 520 + Math.random() * 60, now);
+  o.frequency.exponentialRampToValueAtTime(140, now + 0.08);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(0.05 + s * 0.18, now + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+  o.connect(g).connect(actx.destination);
+  o.start(now); o.stop(now + 0.12);
+}
+
+// Render > background vignette + heptagon + balls
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(f > 0 ? v + (255 - v) * f : v * (1 + f)));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+function draw() {
+  const bg = ctx.createRadialGradient(cx, cy, R * 0.1, cx, cy, Math.max(W, H) * 0.75);
+  bg.addColorStop(0, '#2a1a0c'); bg.addColorStop(0.55, '#140d07'); bg.addColorStop(1, '#070504');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  const V = verts();
+  // heptagon floor fill
+  ctx.beginPath();
+  V.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  const fill = ctx.createRadialGradient(cx, cy - R * 0.3, 0, cx, cy, R);
+  fill.addColorStop(0, 'rgba(255,170,80,0.07)'); fill.addColorStop(1, 'rgba(255,120,40,0.02)');
+  ctx.fillStyle = fill;
+  ctx.fill();
+  // glowing rim
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.shadowColor = 'rgba(255,150,40,0.85)'; ctx.shadowBlur = 28 * scale;
+  ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 5 * scale;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,240,210,0.9)'; ctx.lineWidth = 1.4 * scale;
+  ctx.stroke();
+  ctx.restore();
+  for (const [x, y] of V) {
+    ctx.beginPath(); ctx.arc(x, y, 4.5 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff1d6'; ctx.fill();
+  }
+  // trails
+  if (trails) {
+    for (const b of balls) {
+      if (b.trail.length < 2) continue;
+      // fading comet tail, only when moving fast enough to read as motion
+      if (Math.hypot(b.vx, b.vy) < 260 * scale) continue;
+      ctx.lineCap = 'round'; ctx.strokeStyle = b.color;
+      for (let i = 1; i < b.trail.length; i++) {
+        const f = i / b.trail.length;
+        ctx.globalAlpha = f * 0.35; ctx.lineWidth = b.r * 1.3 * f;
+        ctx.beginPath(); ctx.moveTo(...b.trail[i - 1]); ctx.lineTo(...b.trail[i]); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+  for (const b of balls) {
+    // contact shadow
+    ctx.beginPath(); ctx.ellipse(b.x + b.r * 0.15, b.y + b.r * 0.25, b.r, b.r, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fill();
+    // sphere shading, light fixed top-left (not rotating with ball)
+    const g = ctx.createRadialGradient(b.x - b.r * 0.4, b.y - b.r * 0.45, b.r * 0.08, b.x, b.y, b.r * 1.05);
+    g.addColorStop(0, shade(b.color, 0.55)); g.addColorStop(0.45, b.color); g.addColorStop(1, shade(b.color, -0.45));
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    ctx.fillStyle = g; ctx.fill();
+    // number + spin mark rotate with ball
+    ctx.save();
+    ctx.translate(b.x, b.y); ctx.rotate(b.a);
+    ctx.beginPath(); ctx.arc(0, 0, b.r * 0.56, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,250,240,0.92)'; ctx.fill();
+    ctx.fillStyle = '#2a1508';
+    ctx.font = `800 ${b.r * (b.n > 9 ? 0.62 : 0.74)}px ui-rounded, system-ui, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(b.n, 0, b.r * 0.04);
+    ctx.fillRect(-b.r * 0.2, b.r * 0.34, b.r * 0.4, b.r * 0.07);
+    ctx.restore();
+    // specular
+    ctx.beginPath(); ctx.ellipse(b.x - b.r * 0.38, b.y - b.r * 0.48, b.r * 0.26, b.r * 0.14, -0.6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.fill();
+  }
+}
+
+// Render > loop: fixed substeps, clamp long frames (tab switch)
+let last = performance.now(), fpsT = 0, fpsN = 0, fps = 0;
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  if (!paused) {
+    const sub = 10;
+    for (let i = 0; i < sub; i++) step(dt / sub);
+    for (const b of balls) { b.trail.push([b.x, b.y]); if (b.trail.length > 10) b.trail.shift(); }
+    impacts.sort((a, b) => b - a).slice(0, 3).forEach(tock);
+  }
+  impacts = [];
+  draw();
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  const ke = balls.reduce((s, b) => s + 0.5 * (b.vx * b.vx + b.vy * b.vy) + 0.5 * b.I * b.w * b.w, 0) / (scale * scale * 1000);
+  $('stats').innerHTML = `${balls.length} balls<br>${opts.spin === 72 ? '360° / 5 s' : `${opts.spin}°/s`}<br>KE ${ke.toFixed(0)}<br>${fps} fps`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// HUD > buttons + keys
+$('drop').onclick = drop;
+$('pause').onclick = () => { paused = !paused; $('pause').classList.toggle('on', paused); $('pause').textContent = paused ? 'Play' : 'Pause'; };
+$('trails').onclick = () => { trails = !trails; $('trails').classList.toggle('on', trails); };
+$('sound').onclick = () => { sound = !sound; $('sound').classList.toggle('on', sound); if (sound) unlockAudio(); };
+$('toggle').onclick = () => $('panel').classList.toggle('open');
+addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') drop();
+  else if (e.key === ' ') { e.preventDefault(); $('pause').click(); }
+  else if (e.key === 't') $('trails').click();
+});
+</script>
+</body>
+</html>

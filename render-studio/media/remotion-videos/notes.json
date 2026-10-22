@@ -1,0 +1,7 @@
+{
+  "studio-promo.mp4": {
+    "title": "Studio Promo",
+    "about": "15-second 1080p promo written as React and rendered by Remotion: CSS 8-ball rolls in, kinetic letter-spring title, slide-over montage of real demo posters with category chips, a tilted drifting poster wall and an outro.",
+    "prompt": "Build a Remotion composition (1920x1080, 30 fps, 15 s) promoting a gallery of demos: an 8-ball rolls in beside a springy kinetic title, then a fast montage of demo screenshots with category labels, a tilted scrolling wall of every screenshot with tool names popping in, and a clean logo outro. Use spring() and interpolate() only, no external assets beyond the screenshots."
+  }
+}

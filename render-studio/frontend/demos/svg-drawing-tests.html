@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SVG Drawing Tests</title>
+<meta name="category" content="generative" />
+<meta name="order" content="11" />
+<meta name="capture" content="4600" />
+<meta name="tags" content="hand-written SVG, path data, inverse kinematics, draw-on animation" />
+<meta name="description" content="The classic 'draw it in raw SVG' tests, written by hand as path data with no tools: a pelican riding a bicycle, a game controller, a unicorn and Voltwhisk, an original electric-mouse mascot with a coiled cable tail. Each one sketches itself stroke by stroke, then fills in and comes alive: the pelican really pedals, its legs solved with two-bone inverse kinematics, the wheels spin, the sticks and buttons move and the sparks flicker. Toggle wireframe to see how each shape is built and read the exact source alongside. Tests spatial reasoning in pure coordinates." />
+<meta name="prompt" content="Write an SVG drawing showcase in a single HTML file with every illustration hand-written as SVG markup: a pelican riding a bicycle, a game controller, a unicorn and an original cute electric mouse mascot. Animate each drawing so it sketches itself stroke by stroke and then fills in, make the pelican's legs actually follow the pedals and the wheels spin, add a wireframe toggle and show the SVG source next to the drawing with tabs to switch between them." />
+<style>
+  :root { --ink: #eef1f7; --muted: #8790a6; --line: rgba(255, 255, 255, 0.08); --bg: #0b0d14; --panel: #11141d; --accent: #9fb3ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  header { height: 58px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0 8px 0 0; font-size: 18px; }
+  header .sp { flex: 1; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button, header > button { height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line); background: #151925; color: var(--ink); font: 600 12.5px inherit; cursor: pointer; }
+  .tabs button.on, header > button.on { background: var(--accent); color: #0b1020; border-color: transparent; }
+  main { position: absolute; top: 58px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr 380px; }
+  #stage { position: relative; display: grid; place-items: center; background: radial-gradient(circle at 50% 45%, #1a2034, var(--bg) 70%); background-color: var(--bg); overflow: hidden; }
+  #stage::before { content: ""; position: absolute; inset: 0; background-image: linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px); background-size: 24px 24px; }
+  #art { position: relative; width: min(84%, 74vh); aspect-ratio: 1; }
+  #art svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.45)); }
+  #caption { position: absolute; left: 20px; bottom: 16px; font-size: 13px; color: var(--muted); }
+  #caption b { color: var(--ink); }
+  aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside .meta { padding: 12px 16px; font: 11.5px ui-monospace, Menlo, monospace; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; }
+  pre { margin: 0; padding: 14px 16px; overflow: auto; flex: 1; font: 11px/1.55 ui-monospace, Menlo, monospace; color: #b8c2dc; white-space: pre-wrap; word-break: break-all; }
+  pre .t { color: #ff8fb1; } pre .a { color: #8fd3ff; } pre .v { color: #ffd38f; }
+  /* sketch phase: every shape becomes a thin outline that draws on */
+  svg.sketch * { fill: transparent !important; stroke: var(--accent) !important; stroke-width: 1.4px !important; }
+  svg.sketch stop { stop-color: transparent; }
+  svg.reveal * { transition: fill 0.7s, stroke 0.7s, stroke-width 0.7s; }
+  @media (max-width: 760px) { header { padding: 0 10px; gap: 6px; overflow-x: auto; } header h1 { display: none; } .tabs button, header > button { padding: 0 9px; font-size: 12px; white-space: nowrap; } main { grid-template-columns: 1fr; grid-template-rows: 1fr 150px; } aside { border-left: 0; border-top: 1px solid var(--line); } #art { width: 92%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SVG Drawing Tests</h1>
+  <div class="tabs" id="tabs"></div>
+  <span class="sp"></span>
+  <button id="wire">Wireframe</button><button id="redraw">↺ Redraw</button>
+</header>
+<main>
+  <div id="stage"><div id="art"></div><div id="caption"></div></div>
+  <aside><div class="meta"><span id="lines"></span><span id="bytes"></span></div><pre id="src"></pre></aside>
+</main>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/svg-drawing-tests.html
+ * PURPOSE: Hand-written SVG showcase (pelican on bicycle, controller, unicorn, original mascot): sketch-on reveal, IK pedalling, wireframe, live source view
+ * UI: Render Studio > 2D & Generative > SVG Drawing Tests
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__svg (test hook: show, names)
+ */
+const $ = (id) => document.getElementById(id);
+
+// Art > pelican on a bicycle: wheels, crank and legs are driven by tick()
+const PELICAN = `<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pbody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#ddd6c8"/></linearGradient>
+    <linearGradient id="pbeak" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ffb347"/><stop offset="1" stop-color="#f0782a"/></linearGradient>
+  </defs>
+  <ellipse cx="210" cy="346" rx="150" ry="8" fill="#000" opacity=".3"/>
+  <g id="road" stroke="#3a4260" stroke-width="3" stroke-linecap="round"><line x1="30" y1="346" x2="380" y2="346" stroke-dasharray="18 22"/></g>
+  <g id="rear"><circle cx="118" cy="290" r="52" fill="none" stroke="#1d2130" stroke-width="9"/><circle cx="118" cy="290" r="45" fill="none" stroke="#9aa3b8" stroke-width="2.5"/><g id="rspokes" stroke="#9aa3b8" stroke-width="1.2"><line x1="118" y1="245" x2="118" y2="335"/><line x1="73" y1="290" x2="163" y2="290"/><line x1="86" y1="258" x2="150" y2="322"/><line x1="150" y1="258" x2="86" y2="322"/><line x1="101" y1="248" x2="135" y2="332"/><line x1="76" y1="307" x2="160" y2="273"/></g><circle cx="118" cy="290" r="5" fill="#d9dee9"/></g>
+  <g id="front"><circle cx="302" cy="290" r="52" fill="none" stroke="#1d2130" stroke-width="9"/><circle cx="302" cy="290" r="45" fill="none" stroke="#9aa3b8" stroke-width="2.5"/><g id="fspokes" stroke="#9aa3b8" stroke-width="1.2"><line x1="302" y1="245" x2="302" y2="335"/><line x1="257" y1="290" x2="347" y2="290"/><line x1="270" y1="258" x2="334" y2="322"/><line x1="334" y1="258" x2="270" y2="322"/><line x1="285" y1="248" x2="319" y2="332"/><line x1="260" y1="307" x2="344" y2="273"/></g><circle cx="302" cy="290" r="5" fill="#d9dee9"/></g>
+  <path id="legB" d="" fill="none" stroke="#e8892e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/>
+  <g fill="none" stroke="#e5484d" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M118 290 L200 296 L182 214 Z"/>
+    <path d="M182 214 L276 206 L200 296"/>
+    <path d="M276 206 L302 290"/>
+  </g>
+  <path d="M276 206 L281 180 Q284 172 296 174 L306 177" fill="none" stroke="#2a2f40" stroke-width="6" stroke-linecap="round"/>
+  <path d="M160 206 Q170 199 198 203 Q201 211 190 213 L166 213 Q158 212 160 206 Z" fill="#2a2f40"/>
+  <g id="crank"><circle cx="200" cy="296" r="11" fill="#c9ced9" stroke="#2a2f40" stroke-width="2"/><line id="crankArm" x1="200" y1="296" x2="200" y2="320" stroke="#2a2f40" stroke-width="5" stroke-linecap="round"/><rect id="pedal" x="190" y="317" width="20" height="6" rx="2" fill="#2a2f40"/></g>
+  <path d="M138 168 L104 150 L112 166 L98 172 L134 182 Z" fill="#cfc7b6" stroke="#a69d8b" stroke-width="2" stroke-linejoin="round"/>
+  <ellipse cx="183" cy="176" rx="56" ry="36" transform="rotate(-12 183 176)" fill="url(#pbody)" stroke="#b9b09e" stroke-width="2"/>
+  <path d="M150 168 Q186 146 226 164 Q256 176 290 182 Q252 192 222 192 Q182 196 150 168 Z" fill="#c9c1b0" stroke="#a69d8b" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M168 172 Q196 166 222 178 M176 182 Q200 178 220 186" fill="none" stroke="#a69d8b" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M212 158 C232 140 222 118 226 104 C230 90 250 86 256 98 C262 112 246 120 244 136 C242 150 240 160 226 170 Z" fill="url(#pbody)" stroke="#b9b09e" stroke-width="2" stroke-linejoin="round"/>
+  <circle cx="242" cy="94" r="18" fill="#fffdf8" stroke="#b9b09e" stroke-width="2"/>
+  <path d="M232 78 Q236 66 246 70 Q240 72 240 80" fill="#f2c9a0" stroke="#d9a877" stroke-width="1.5"/>
+  <path d="M254 98 Q300 108 352 124 Q354 128 349 129 Q298 120 255 106 Z" fill="url(#pbeak)" stroke="#c45f1c" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M255 106 Q300 120 348 129 Q322 160 286 150 Q262 140 254 112 Z" fill="#f6a35a" stroke="#c45f1c" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M262 118 Q290 140 320 140" fill="none" stroke="#d97a2e" stroke-width="1.2"/>
+  <circle cx="246" cy="91" r="4.2" fill="#1b1f2a"/><circle cx="247.4" cy="89.6" r="1.4" fill="#fff"/>
+  <path id="legF" d="" fill="none" stroke="#f09a3e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M244 176 Q262 184 280 182" fill="none" stroke="#c9c1b0" stroke-width="9" stroke-linecap="round"/>
+</svg>`;
+
+// Art > game controller (generic, no brand marks)
+const CONTROLLER = `<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cbody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3d4560"/><stop offset=".55" stop-color="#262c40"/><stop offset="1" stop-color="#191d2b"/></linearGradient>
+    <radialGradient id="cstick" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#4a5270"/><stop offset="1" stop-color="#151926"/></radialGradient>
+    <radialGradient id="cglow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#9fb3ff"/><stop offset="1" stop-color="#5b6cff"/></radialGradient>
+  </defs>
+  <ellipse cx="200" cy="330" rx="150" ry="10" fill="#000" opacity=".35"/>
+  <path d="M96 140 C104 122 140 116 162 124 L160 134 C136 130 112 132 100 146 Z" fill="#2c3247" stroke="#121520" stroke-width="2"/>
+  <path d="M304 140 C296 122 260 116 238 124 L240 134 C264 130 288 132 300 146 Z" fill="#2c3247" stroke="#121520" stroke-width="2"/>
+  <path d="M120 138 C150 122 250 122 280 138 C322 144 346 162 356 200 C368 250 386 298 360 318 C338 334 316 318 298 290 C284 270 270 262 250 262 L150 262 C130 262 116 270 102 290 C84 318 62 334 40 318 C14 298 32 250 44 200 C54 162 78 144 120 138 Z" fill="url(#cbody)" stroke="#11141e" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M128 146 C156 134 244 134 272 146" fill="none" stroke="#5a6488" stroke-width="2" stroke-linecap="round" opacity=".7"/>
+  <circle cx="122" cy="190" r="30" fill="#151926" stroke="#0e1018" stroke-width="2"/>
+  <g id="lstick"><circle cx="122" cy="190" r="22" fill="url(#cstick)" stroke="#0e1018" stroke-width="2"/><circle cx="122" cy="190" r="14" fill="none" stroke="#5a6488" stroke-width="1.5" stroke-dasharray="2 3"/></g>
+  <circle cx="246" cy="236" r="28" fill="#151926" stroke="#0e1018" stroke-width="2"/>
+  <g id="rstick"><circle cx="246" cy="236" r="20" fill="url(#cstick)" stroke="#0e1018" stroke-width="2"/><circle cx="246" cy="236" r="12" fill="none" stroke="#5a6488" stroke-width="1.5" stroke-dasharray="2 3"/></g>
+  <path d="M146 222 h18 v-18 h18 v18 h18 v18 h-18 v18 h-18 v-18 h-18 Z" transform="translate(-14 0)" fill="#1a1e2c" stroke="#0e1018" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M159 213 l5 -5 l5 5 M159 249 l5 5 l5 -5 M141 231 l-5 5 l5 5 M187 231 l5 5 l-5 5" transform="translate(-14 -5)" fill="none" stroke="#5a6488" stroke-width="2" stroke-linecap="round"/>
+  <g id="face">
+    <circle cx="282" cy="166" r="12" fill="#f5c044" stroke="#0e1018" stroke-width="2"/>
+    <circle cx="260" cy="188" r="12" fill="#5b8cff" stroke="#0e1018" stroke-width="2"/>
+    <circle cx="304" cy="188" r="12" fill="#ff5c6c" stroke="#0e1018" stroke-width="2"/>
+    <circle cx="282" cy="210" r="12" fill="#3ecf8e" stroke="#0e1018" stroke-width="2"/>
+  </g>
+  <rect x="166" y="170" width="20" height="9" rx="4.5" fill="#151926" stroke="#5a6488" stroke-width="1.2"/>
+  <rect x="214" y="170" width="20" height="9" rx="4.5" fill="#151926" stroke="#5a6488" stroke-width="1.2"/>
+  <circle id="home" cx="200" cy="150" r="13" fill="url(#cglow)" stroke="#0e1018" stroke-width="2"/>
+  <path d="M194 150 l6 -6 l6 6 l-6 6 Z" fill="#fff" opacity=".9"/>
+  <g fill="#9fb3ff"><circle cx="186" cy="200" r="2.5"/><circle cx="196" cy="200" r="2.5" opacity=".3"/><circle cx="206" cy="200" r="2.5" opacity=".3"/><circle cx="216" cy="200" r="2.5" opacity=".3"/></g>
+</svg>`;
+
+// Art > unicorn with rainbow mane and tail
+const UNICORN = `<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="uhorn" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#f0b429"/><stop offset="1" stop-color="#fff1b8"/></linearGradient>
+    <linearGradient id="ubody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffaff"/><stop offset="1" stop-color="#eadff7"/></linearGradient>
+  </defs>
+  <ellipse cx="205" cy="338" rx="120" ry="10" fill="#000" opacity=".3"/>
+  <g fill="none" stroke-linecap="round" stroke-width="11">
+    <path d="M112 212 C70 214 58 252 76 280 C88 298 70 314 52 306" stroke="#ff6b8b"/>
+    <path d="M114 222 C82 230 78 262 92 284 C102 300 90 320 70 320" stroke="#ffb84d"/>
+    <path d="M116 232 C94 246 96 272 106 290 C114 306 108 324 90 330" stroke="#6ee7a8"/>
+    <path d="M118 242 C106 260 110 282 118 296 C124 310 122 326 110 336" stroke="#6cb8ff"/>
+  </g>
+  <rect x="128" y="236" width="24" height="90" rx="11" fill="url(#ubody)" stroke="#c9b7e8" stroke-width="2.5"/>
+  <rect x="166" y="244" width="24" height="82" rx="11" fill="#efe5fa" stroke="#c9b7e8" stroke-width="2.5"/>
+  <rect x="232" y="244" width="24" height="82" rx="11" fill="#efe5fa" stroke="#c9b7e8" stroke-width="2.5"/>
+  <rect x="268" y="236" width="24" height="90" rx="11" fill="url(#ubody)" stroke="#c9b7e8" stroke-width="2.5"/>
+  <g fill="#b48cff" stroke="#8d6ad8" stroke-width="2"><rect x="126" y="314" width="28" height="14" rx="5"/><rect x="164" y="314" width="28" height="14" rx="5"/><rect x="230" y="314" width="28" height="14" rx="5"/><rect x="266" y="314" width="28" height="14" rx="5"/></g>
+  <ellipse cx="208" cy="226" rx="98" ry="56" fill="url(#ubody)" stroke="#c9b7e8" stroke-width="2.5"/>
+  <path d="M252 206 C262 166 266 138 276 116 L318 126 C306 154 300 186 292 222 Z" fill="url(#ubody)" stroke="#c9b7e8" stroke-width="2.5" stroke-linejoin="round"/>
+  <ellipse cx="300" cy="116" rx="44" ry="33" transform="rotate(-18 300 116)" fill="url(#ubody)" stroke="#c9b7e8" stroke-width="2.5"/>
+  <ellipse cx="338" cy="134" rx="28" ry="22" transform="rotate(-10 338 134)" fill="#f7eefc" stroke="#c9b7e8" stroke-width="2.5"/>
+  <ellipse cx="350" cy="130" rx="3" ry="4" fill="#b59ccf"/>
+  <path d="M274 92 L280 60 L298 86 Z" fill="#fffaff" stroke="#c9b7e8" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M280 86 L282 70 L290 84 Z" fill="#ffc2d4"/>
+  <path d="M300 84 L328 22 L318 90 Z" fill="url(#uhorn)" stroke="#d99a1a" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M305 76 L320 72 M309 62 L323 58 M314 48 L325 45 M318 36 L327 34" stroke="#d99a1a" stroke-width="2" stroke-linecap="round"/>
+  <g stroke="#0e1018" stroke-width="0"><circle cx="270" cy="88" r="13" fill="#ff6b8b"/><circle cx="262" cy="106" r="13" fill="#ffb84d"/><circle cx="258" cy="126" r="13" fill="#ffe066"/><circle cx="254" cy="146" r="13" fill="#6ee7a8"/><circle cx="250" cy="166" r="13" fill="#6cb8ff"/><circle cx="246" cy="186" r="12" fill="#b48cff"/><circle cx="286" cy="80" r="11" fill="#b48cff"/><circle cx="300" cy="78" r="9" fill="#6cb8ff"/></g>
+  <path d="M302 112 Q310 118 318 112" fill="none" stroke="#3b2d4f" stroke-width="3" stroke-linecap="round"/>
+  <path d="M304 114 l-3 5 M310 116 l0 6 M316 114 l3 5" stroke="#3b2d4f" stroke-width="2" stroke-linecap="round"/>
+  <ellipse cx="322" cy="132" rx="9" ry="6" fill="#ffc2d4" opacity=".8"/>
+  <path d="M340 148 Q348 152 356 146" fill="none" stroke="#b59ccf" stroke-width="2" stroke-linecap="round"/>
+  <g id="sparkles" fill="#ffe066"><path d="M80 90 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 Z"/><path d="M360 220 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 Z"/><path d="M150 120 l2.5 6 l6 2.5 l-6 2.5 l-2.5 6 l-2.5 -6 l-6 -2.5 l6 -2.5 Z"/></g>
+</svg>`;
+
+// Art > Voltwhisk: original electric-mouse mascot (mint fur, bolt ears, coiled cable tail with a plug)
+const MASCOT = `<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="mfur" cx=".4" cy=".35" r=".75"><stop offset="0" stop-color="#b8f5e1"/><stop offset="1" stop-color="#4fc9a6"/></radialGradient>
+    <radialGradient id="mcheek" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff3a6"/><stop offset="1" stop-color="#ffcc33"/></radialGradient>
+  </defs>
+  <ellipse cx="200" cy="340" rx="100" ry="10" fill="#000" opacity=".3"/>
+  <path d="M268 300 C318 310 330 270 304 262 C282 256 280 290 306 292 C340 294 352 250 334 236 C320 226 304 240 318 252 C330 262 352 252 356 232" fill="none" stroke="#2f3a5a" stroke-width="7" stroke-linecap="round"/>
+  <g transform="rotate(-25 356 226)"><rect x="346" y="204" width="22" height="26" rx="5" fill="#3b4a6b" stroke="#1f2740" stroke-width="2"/><rect x="350" y="192" width="4" height="14" rx="1" fill="#c9d1e6"/><rect x="360" y="192" width="4" height="14" rx="1" fill="#c9d1e6"/></g>
+  <ellipse cx="200" cy="262" rx="82" ry="74" fill="url(#mfur)" stroke="#2f9c80" stroke-width="3"/>
+  <ellipse cx="200" cy="282" rx="50" ry="44" fill="#eafff6"/>
+  <ellipse cx="156" cy="328" rx="26" ry="13" fill="#4fc9a6" stroke="#2f9c80" stroke-width="3"/>
+  <ellipse cx="244" cy="328" rx="26" ry="13" fill="#4fc9a6" stroke="#2f9c80" stroke-width="3"/>
+  <circle cx="116" cy="92" r="46" fill="url(#mfur)" stroke="#2f9c80" stroke-width="3"/>
+  <circle cx="284" cy="92" r="46" fill="url(#mfur)" stroke="#2f9c80" stroke-width="3"/>
+  <circle cx="116" cy="92" r="30" fill="#2f3a5a"/>
+  <circle cx="284" cy="92" r="30" fill="#2f3a5a"/>
+  <path d="M120 68 L104 96 L116 96 L110 118 L130 86 L118 86 Z" fill="#ffd84d"/>
+  <path d="M288 68 L272 96 L284 96 L278 118 L298 86 L286 86 Z" fill="#ffd84d"/>
+  <circle cx="200" cy="168" r="78" fill="url(#mfur)" stroke="#2f9c80" stroke-width="3"/>
+  <path d="M176 96 Q186 82 196 96 Q204 80 214 96" fill="#4fc9a6" stroke="#2f9c80" stroke-width="3" stroke-linejoin="round"/>
+  <ellipse cx="170" cy="164" rx="14" ry="18" fill="#1b2235"/>
+  <ellipse cx="230" cy="164" rx="14" ry="18" fill="#1b2235"/>
+  <circle cx="175" cy="157" r="5.5" fill="#fff"/><circle cx="165" cy="171" r="2.5" fill="#fff"/>
+  <circle cx="235" cy="157" r="5.5" fill="#fff"/><circle cx="225" cy="171" r="2.5" fill="#fff"/>
+  <circle cx="142" cy="196" r="16" fill="url(#mcheek)"/>
+  <circle cx="258" cy="196" r="16" fill="url(#mcheek)"/>
+  <ellipse cx="200" cy="186" rx="7" ry="5" fill="#ff8fa3"/>
+  <path d="M186 198 Q193 206 200 198 Q207 206 214 198" fill="none" stroke="#1b2235" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M120 180 L96 174 M120 190 L94 192 M280 180 L304 174 M280 190 L306 192" stroke="#2f9c80" stroke-width="2.5" stroke-linecap="round"/>
+  <ellipse cx="140" cy="258" rx="14" ry="22" transform="rotate(25 140 258)" fill="#4fc9a6" stroke="#2f9c80" stroke-width="3"/>
+  <ellipse cx="260" cy="258" rx="14" ry="22" transform="rotate(-25 260 258)" fill="#4fc9a6" stroke="#2f9c80" stroke-width="3"/>
+  <g id="sparks" fill="none" stroke="#ffd84d" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M108 210 l-14 6 l8 6 l-14 6"/><path d="M292 210 l14 6 l-8 6 l14 6"/><path d="M200 70 l-6 -14 l8 2 l-4 -14"/></g>
+</svg>`;
+
+const ARTS = [
+  { name: 'Pelican on a bicycle', short: 'Pelican', svg: PELICAN, note: '<b>Pelican on a bicycle</b> · legs solved with two-bone IK to follow the pedals' },
+  { name: 'Game controller', short: 'Controller', svg: CONTROLLER, note: '<b>Game controller</b> · one compound body path, sticks and buttons animate' },
+  { name: 'Unicorn', short: 'Unicorn', svg: UNICORN, note: '<b>Unicorn</b> · layered shapes, rainbow strokes, gradient horn' },
+  { name: 'Voltwhisk (original mascot)', short: 'Voltwhisk', svg: MASCOT, note: '<b>Voltwhisk</b> · an original electric-mouse mascot with a cable tail' },
+];
+
+// Show: insert markup, run the sketch-then-fill reveal
+let cur = 0, root = null, shownAt = 0, wire = false;
+function show(i) {
+  cur = i; shownAt = performance.now();
+  $('art').innerHTML = ARTS[i].svg; root = $('art').querySelector('svg');
+  $('caption').innerHTML = ARTS[i].note;
+  document.querySelectorAll('#tabs button').forEach((b, k) => b.classList.toggle('on', k === i));
+  const src = ARTS[i].svg;
+  $('src').innerHTML = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/(&lt;\/?)([a-zA-Z]+)/g, '$1<span class="t">$2</span>').replace(/([a-z-]+)=("[^"]*")/g, '<span class="a">$1</span>=<span class="v">$2</span>');
+  $('lines').textContent = `${src.split('\n').length} lines · hand-written`;
+  $('bytes').textContent = `${(new Blob([src]).size / 1024).toFixed(1)} KB`;
+  tick(performance.now());
+  root.classList.add('sketch');
+  const shapes = [...root.querySelectorAll('path, circle, ellipse, rect, line')];
+  shapes.forEach((el, k) => {
+    let L = 300; try { L = Math.ceil(el.getTotalLength()) || 300; } catch { /* zero-size shape */ }
+    el.style.strokeDasharray = `${L} ${L}`; el.style.strokeDashoffset = L;
+    el.style.transition = `stroke-dashoffset 0.9s ease ${k * 0.028}s`;
+  });
+  root.getBoundingClientRect();
+  shapes.forEach((el) => (el.style.strokeDashoffset = 0));
+  const total = 900 + shapes.length * 28;
+  setTimeout(() => {
+    if (!root || !root.isConnected || wire) return;
+    // restore authored dasharrays (road, stick rings) after the draw-on
+    shapes.forEach((el) => { el.style.strokeDasharray = ''; el.style.strokeDashoffset = ''; el.style.transition = ''; });
+    root.classList.add('reveal'); root.classList.remove('sketch');
+  }, total);
+}
+
+// Tick: per-drawing animation driven from one rAF
+const IK_THIGH = 50, IK_SHIN = 52;
+function leg(hip, foot) {
+  // two-bone IK: knee from circle-circle intersection, bend forward
+  const dx = foot[0] - hip[0], dy = foot[1] - hip[1], d = Math.min(IK_THIGH + IK_SHIN - 0.5, Math.hypot(dx, dy));
+  const a = (IK_THIGH ** 2 - IK_SHIN ** 2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, IK_THIGH ** 2 - a * a));
+  const ux = dx / Math.hypot(dx, dy), uy = dy / Math.hypot(dx, dy);
+  const mx = hip[0] + ux * a, my = hip[1] + uy * a, knee = [mx - uy * h, my + ux * h];
+  if (knee[0] < mx) { knee[0] = mx + uy * h; knee[1] = my - ux * h; }
+  return `M${hip[0]} ${hip[1]} L${knee[0].toFixed(1)} ${knee[1].toFixed(1)} L${foot[0].toFixed(1)} ${foot[1].toFixed(1)} l8 2 M${foot[0].toFixed(1)} ${foot[1].toFixed(1)} l6 -4`;
+}
+function tick(now) {
+  if (root) {
+    const t = (now - shownAt) / 1000, q = (s) => root.querySelector(s);
+    if (cur === 0) {
+      const a = t * 4.2, bb = [200, 296], r = 24;
+      const p1 = [bb[0] + Math.cos(a) * r, bb[1] + Math.sin(a) * r], p2 = [bb[0] - Math.cos(a) * r, bb[1] - Math.sin(a) * r];
+      q('#crankArm')?.setAttribute('x2', p1[0]); q('#crankArm')?.setAttribute('y2', p1[1]);
+      q('#pedal')?.setAttribute('x', p1[0] - 10); q('#pedal')?.setAttribute('y', p1[1] - 3);
+      q('#legF')?.setAttribute('d', leg([196, 196], p1));
+      q('#legB')?.setAttribute('d', leg([188, 194], p2));
+      const wa = (t * 4.2 * 180 / Math.PI * 0.55) % 360;
+      q('#rspokes')?.setAttribute('transform', `rotate(${wa} 118 290)`); q('#fspokes')?.setAttribute('transform', `rotate(${wa} 302 290)`);
+      q('#road line')?.setAttribute('stroke-dashoffset', (t * 120) % 40);
+    } else if (cur === 1) {
+      q('#lstick')?.setAttribute('transform', `translate(${Math.cos(t * 1.7) * 5} ${Math.sin(t * 2.3) * 5})`);
+      q('#rstick')?.setAttribute('transform', `translate(${Math.sin(t * 1.3) * 5} ${Math.cos(t * 1.9) * 4})`);
+      const b = Math.floor(t * 2.5) % 4;
+      root.querySelectorAll('#face circle').forEach((c, k) => { c.setAttribute('transform', k === b ? `translate(0 1.5)` : ''); c.style.filter = k === b ? 'brightness(1.35)' : ''; });
+      q('#home')?.setAttribute('opacity', 0.75 + 0.25 * Math.sin(t * 3));
+    } else if (cur === 2) {
+      root.querySelectorAll('#sparkles path').forEach((p, k) => p.setAttribute('opacity', 0.35 + 0.65 * Math.abs(Math.sin(t * 2 + k * 1.7))));
+    } else {
+      const flick = Math.random() < 0.18;
+      q('#sparks')?.setAttribute('opacity', flick ? 0.2 : 0.6 + 0.4 * Math.sin(t * 9));
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+// Controls + idle rotation
+let lastInput = -1e9;
+$('tabs').innerHTML = ARTS.map((a) => `<button>${a.short}</button>`).join('');
+$('tabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; lastInput = performance.now(); wire = false; $('wire').classList.remove('on'); show([...$('tabs').children].indexOf(b)); };
+$('redraw').onclick = () => { lastInput = performance.now(); show(cur); };
+$('wire').onclick = () => { lastInput = performance.now(); wire = !wire; $('wire').classList.toggle('on', wire); if (wire) { root.classList.remove('reveal'); root.classList.add('sketch'); root.querySelectorAll('*').forEach((el) => { el.style.strokeDasharray = ''; el.style.strokeDashoffset = ''; }); } else { root.classList.add('reveal'); root.classList.remove('sketch'); } };
+setInterval(() => { if (performance.now() - lastInput > 12000 && !wire) show((cur + 1) % ARTS.length); }, 8000);
+show(0);
+requestAnimationFrame(tick);
+window.__svg = { show, names: ARTS.map((a) => a.name) };
+</script>
+</body>
+</html>

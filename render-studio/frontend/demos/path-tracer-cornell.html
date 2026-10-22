@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cornell Box Path Tracer</title>
+<meta name="category" content="shaders" />
+<meta name="order" content="4" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="path tracing, GPU, next event estimation, glass, progressive" />
+<meta name="description" content="A progressive Monte Carlo path tracer running in a WebGL2 fragment shader: the Cornell box with an area light, next-event estimation, cosine-weighted bounces, Fresnel glass with caustics, mirror and rough gold, Russian roulette and float accumulation. Noise melts into soft shadows and colour bleeding over a few seconds. The test is physically based light transport with no engine." />
+<meta name="prompt" content="Write a GPU path tracer in a single HTML file using a WebGL2 fragment shader. Render the classic Cornell box (red and green walls, ceiling area light) with a mirror sphere and a glass sphere, progressive accumulation into a float buffer, next event estimation for the light, Fresnel refraction with caustics and ACES tone mapping. Show the sample count, let me drag to move the camera, switch between spheres, boxes and a materials scene, and change the bounce depth." />
+<style>
+  :root { --ink: #eef2ff; --muted: #9aa3bf; --panel: rgba(8, 10, 20, 0.66); --accent: #ffb35c; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; touch-action: none; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .title { position: fixed; left: 20px; top: 18px; pointer-events: none; }
+  .title h1 { margin: 0; font-size: 20px; }
+  .title p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+  #panel { position: fixed; left: 16px; bottom: 16px; width: 270px; padding: 14px; border-radius: 16px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.07); font-size: 12.5px; }
+  #panel label { display: grid; grid-template-columns: 60px 1fr 30px; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--muted); }
+  #panel output { text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .btns button { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); color: var(--ink); border-radius: 9px; padding: 6px 4px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btns button.on { background: var(--accent); color: #1d0f02; border-color: var(--accent); }
+  .hint { margin-top: 10px; color: var(--muted); font-size: 11.5px; }
+  #stats { position: fixed; right: 18px; top: 18px; font: 12px ui-monospace, Menlo, monospace; color: var(--muted); text-align: right; pointer-events: none; }
+  @media (max-width: 600px) { #panel { left: 10px; right: 10px; width: auto; } #stats { top: 70px; right: auto; left: 20px; text-align: left; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Cornell Box</h1><p>progressive GPU path tracer · one fragment shader</p></div>
+<div id="stats"></div>
+<div id="panel">
+  <label>Bounces <input id="bounces" type="range" min="1" max="10" step="1" value="6"><output id="bounces-o"></output></label>
+  <div class="btns">
+    <button data-scene="0" class="on">Spheres</button><button data-scene="1">Boxes</button><button data-scene="2">Metals</button><button id="reset">Reset</button>
+  </div>
+  <div class="hint">Drag to move the camera · noise clears as samples add up</div>
+</div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/path-tracer-cornell.html
+ * PURPOSE: WebGL2 progressive path tracer: Cornell box, NEE area light, glass/mirror/rough metal, float accumulation, ACES
+ * UI: Render Studio > Shaders > Cornell Box
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__pt (test hook: spp, scene)
+ */
+const cv = document.getElementById('c');
+const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
+const $ = (id) => document.getElementById(id);
+gl.getExtension('EXT_color_buffer_float');
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+
+// Shader > trace pass: one or more paths per pixel, blended into the running average
+const TRACE = `#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform int uFrame; uniform int uSpp; uniform int uScene; uniform int uBounces;
+uniform vec3 uRo; uniform mat3 uCam; uniform sampler2D uPrev;
+out vec4 o;
+const float PI = 3.14159265;
+const float LS = 0.24;          // light half-size
+const vec3 LE = vec3(17., 14.5, 11.);
+uint seed;
+uint hash(uint x){ x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x; }
+float rnd(){ seed = hash(seed); return float(seed) / 4294967296.; }
+vec3 rndSphere(){ float z = rnd() * 2. - 1., a = rnd() * 2. * PI, r = sqrt(1. - z * z); return vec3(r * cos(a), r * sin(a), z); }
+
+struct Hit { float t; vec3 n; int m; };
+// materials: 0 white, 1 red, 2 green, 3 light, 4 mirror, 5 glass, 6 rough gold, 7 blue, 8 copper
+vec3 albedo(int m){
+  if (m == 1) return vec3(.63, .065, .05);
+  if (m == 2) return vec3(.14, .45, .091);
+  if (m == 4) return vec3(.95);
+  if (m == 6) return vec3(1., .78, .34);
+  if (m == 7) return vec3(.12, .25, .7);
+  if (m == 8) return vec3(.95, .55, .38);
+  return vec3(.73);
+}
+
+void sphere(vec3 ro, vec3 rd, vec3 c, float r, int m, inout Hit h){
+  vec3 oc = ro - c; float b = dot(oc, rd), d = b * b - dot(oc, oc) + r * r;
+  if (d < 0.) return; d = sqrt(d);
+  float t = -b - d; if (t < 1e-4) t = -b + d;
+  if (t < 1e-4 || t >= h.t) return;
+  h.t = t; h.n = (ro + rd * t - c) / r; h.m = m;
+}
+void box(vec3 ro, vec3 rd, vec3 c, vec3 hs, float ang, int m, inout Hit h){
+  float cs = cos(ang), sn = sin(ang); mat2 R = mat2(cs, sn, -sn, cs);
+  vec3 lo = ro - c; lo.xz = R * lo.xz; vec3 ld = rd; ld.xz = R * ld.xz;
+  vec3 inv = 1. / ld, t1 = (-hs - lo) * inv, t2 = (hs - lo) * inv, tn = min(t1, t2), tf = max(t1, t2);
+  float a = max(max(tn.x, tn.y), tn.z), b = min(min(tf.x, tf.y), tf.z);
+  if (a > b || b < 1e-4) return;
+  float t = a > 1e-4 ? a : b; if (t >= h.t) return;
+  vec3 q = (lo + ld * t) / hs, aq = abs(q);
+  vec3 n = aq.x > aq.y && aq.x > aq.z ? vec3(sign(q.x), 0, 0) : aq.y > aq.z ? vec3(0, sign(q.y), 0) : vec3(0, 0, sign(q.z));
+  n.xz = transpose(R) * n.xz;
+  h.t = t; h.n = n; h.m = m;
+}
+void wall(vec3 ro, vec3 rd, int ax, float k, vec3 n, int m, inout Hit h){
+  float t = (k - ro[ax]) / rd[ax];
+  if (t < 1e-4 || t >= h.t) return;
+  vec3 p = ro + rd * t;
+  if (abs(p.x) > 1.0001 || abs(p.y) > 1.0001 || p.z > 1.0001 || p.z < -1.0001) return;
+  h.t = t; h.n = n; h.m = m;
+  if (ax == 1 && k > 0. && abs(p.x) < LS && abs(p.z) < LS) h.m = 3;
+}
+Hit scene(vec3 ro, vec3 rd){
+  Hit h; h.t = 1e10; h.m = -1;
+  wall(ro, rd, 1, -1., vec3(0, 1, 0), 0, h);
+  wall(ro, rd, 1, 1., vec3(0, -1, 0), 0, h);
+  wall(ro, rd, 2, -1., vec3(0, 0, 1), 0, h);
+  wall(ro, rd, 0, -1., vec3(1, 0, 0), 1, h);
+  wall(ro, rd, 0, 1., vec3(-1, 0, 0), 2, h);
+  if (uScene == 0) {
+    sphere(ro, rd, vec3(-.42, -.62, -.38), .38, 4, h);
+    sphere(ro, rd, vec3(.44, -.62, .22), .38, 5, h);
+  } else if (uScene == 1) {
+    box(ro, rd, vec3(-.34, -.4, -.3), vec3(.29, .6, .29), .33, 0, h);
+    box(ro, rd, vec3(.36, -.7, .28), vec3(.29, .3, .29), -.3, 0, h);
+  } else {
+    sphere(ro, rd, vec3(-.55, -.72, -.25), .28, 6, h);
+    sphere(ro, rd, vec3(0., -.72, -.5), .28, 7, h);
+    sphere(ro, rd, vec3(.55, -.72, -.2), .28, 8, h);
+    sphere(ro, rd, vec3(.12, -.75, .45), .25, 5, h);
+  }
+  return h;
+}
+
+vec3 trace(vec3 ro, vec3 rd){
+  vec3 L = vec3(0), T = vec3(1);
+  bool spec = true;
+  for (int b = 0; b < 10; b++) {
+    if (b >= uBounces) break;
+    Hit h = scene(ro, rd);
+    if (h.m < 0) break;
+    vec3 p = ro + rd * h.t;
+    bool front = dot(rd, h.n) < 0.;
+    vec3 nn = front ? h.n : -h.n;
+    if (h.m == 3) { if (spec) L += T * LE; break; }
+    if (h.m == 5) {
+      float eta = front ? 1. / 1.5 : 1.5, c = -dot(rd, nn);
+      float f0 = .04, fr = f0 + (1. - f0) * pow(1. - c, 5.);
+      vec3 rf = refract(rd, nn, eta);
+      if (rnd() < fr || dot(rf, rf) == 0.) { rd = reflect(rd, nn); ro = p + nn * 1e-3; }
+      else { rd = rf; ro = p - nn * 1e-3; }
+      spec = true; continue;
+    }
+    vec3 alb = albedo(h.m);
+    if (h.m == 4 || h.m == 6 || h.m == 8) {
+      rd = reflect(rd, nn);
+      if (h.m != 4) rd = normalize(rd + (h.m == 6 ? .22 : .08) * rndSphere());
+      if (dot(rd, nn) <= 0.) break;
+      T *= alb; ro = p + nn * 1e-3; spec = true; continue;
+    }
+    // Shader > next event estimation: sample a point on the light, shadow ray
+    vec3 lp = vec3((rnd() * 2. - 1.) * LS, .999, (rnd() * 2. - 1.) * LS), ld = lp - p;
+    float d2 = dot(ld, ld); ld *= inversesqrt(d2);
+    float ca = dot(nn, ld), cl = ld.y;
+    if (ca > 0. && cl > 0.) {
+      Hit s = scene(p + nn * 1e-3, ld);
+      if (s.m == 3) L += T * alb / PI * LE * ca * cl * (4. * LS * LS) / d2;
+    }
+    // cosine-weighted bounce; light hits after a diffuse bounce were already counted by NEE
+    rd = normalize(nn + rndSphere()); ro = p + nn * 1e-3; T *= alb; spec = false;
+    if (b > 2) { float q = max(T.r, max(T.g, T.b)); if (rnd() > q) break; T /= q; }
+  }
+  return L;
+}
+
+void main(){
+  seed = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u + uint(uFrame) * 26699u | 1u;
+  vec3 col = vec3(0);
+  for (int s = 0; s < 4; s++) {
+    if (s >= uSpp) break;
+    vec2 uv = (gl_FragCoord.xy + vec2(rnd(), rnd()) - .5 * uRes) / min(uRes.x, uRes.y) * 2.;
+    col += trace(uRo, normalize(uCam * vec3(uv, 2.75)));
+  }
+  col /= float(uSpp);
+  // clamp fireflies from glass caustics so the average settles fast
+  col = min(col, vec3(12.));
+  vec4 prev = texelFetch(uPrev, ivec2(gl_FragCoord.xy), 0);
+  float n = prev.a + float(uSpp);
+  o = vec4(mix(prev.rgb, col, float(uSpp) / n), n);
+}`;
+
+// Shader > display pass: ACES tone map + gamma
+const SHOW = `#version 300 es
+precision highp float;
+uniform sampler2D uAcc; out vec4 o;
+vec3 aces(vec3 x){ return clamp((x * (2.51 * x + .03)) / (x * (2.43 * x + .59) + .14), 0., 1.); }
+void main(){ vec3 c = texelFetch(uAcc, ivec2(gl_FragCoord.xy), 0).rgb; o = vec4(pow(aces(c * .9), vec3(1. / 2.2)), 1.); }`;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs, names) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.bindAttribLocation(p, 0, 'p');
+  gl.linkProgram(p);
+  return { p, u: Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)])) };
+}
+const trace = program(TRACE, ['uRes', 'uFrame', 'uSpp', 'uScene', 'uBounces', 'uRo', 'uCam', 'uPrev']);
+const show = program(SHOW, ['uAcc']);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+// Shader > accumulation: two float targets ping-ponged, alpha holds the sample count
+let W = 0, H = 0, acc = [], cur = 0, frame = 0;
+function target() {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  return { t, f };
+}
+function clearAcc() {
+  for (const a of acc) { gl.bindFramebuffer(gl.FRAMEBUFFER, a.f); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); }
+  frame = 0;
+}
+function resize() {
+  const s = Math.min(devicePixelRatio || 1, 1);
+  W = cv.width = Math.round(innerWidth * s); H = cv.height = Math.round(innerHeight * s);
+  for (const a of acc) { gl.deleteTexture(a.t); gl.deleteFramebuffer(a.f); }
+  acc = [target(), target()];
+  clearAcc();
+}
+addEventListener('resize', resize);
+resize();
+
+// Cornell Box > camera: small orbit around the box opening, any move restarts accumulation
+const cam = { yaw: 0, pitch: 0 };
+let lastInput = -1e9, scene = 0, drag = null;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = [e.clientX, e.clientY]; lastInput = performance.now(); });
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  cam.yaw = Math.max(-0.55, Math.min(0.55, cam.yaw - (e.clientX - drag[0]) * 0.003));
+  cam.pitch = Math.max(-0.35, Math.min(0.35, cam.pitch + (e.clientY - drag[1]) * 0.003));
+  drag = [e.clientX, e.clientY]; lastInput = performance.now(); clearAcc();
+});
+cv.addEventListener('pointerup', () => (drag = null));
+cv.addEventListener('pointercancel', () => (drag = null));
+
+// Cornell Box > Panel: scene buttons, bounce slider, reset
+const bounces = $('bounces');
+const showB = () => ($('bounces-o').textContent = bounces.value);
+bounces.addEventListener('input', () => { showB(); clearAcc(); lastInput = performance.now(); });
+showB();
+function setScene(n) {
+  scene = n;
+  document.querySelectorAll('[data-scene]').forEach((b) => b.classList.toggle('on', Number(b.dataset.scene) === n));
+  clearAcc();
+}
+document.querySelectorAll('[data-scene]').forEach((b) => (b.onclick = () => { lastInput = performance.now(); setScene(Number(b.dataset.scene)); }));
+$('reset').onclick = () => { cam.yaw = cam.pitch = 0; lastInput = performance.now(); clearAcc(); };
+
+// Cornell Box > attract: next scene every 9 s when idle so clips show the noise clearing
+let sceneT = 0, spp = 2, ftAvg = 16, last = performance.now(), fps = 60, fpsN = 0, fpsT = 0;
+window.__pt = { get spp() { return frame; }, get scene() { return scene; }, setScene };
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  ftAvg = ftAvg * 0.9 + dt * 1000 * 0.1;
+  // more paths per frame while there is headroom, fewer when frames run long
+  if (ftAvg > 19 && spp > 1) spp--; else if (ftAvg < 15 && spp < 4) spp++;
+  sceneT += dt;
+  if (now - lastInput > 12000 && sceneT > 9) { sceneT = 0; setScene((scene + 1) % 3); }
+  if (now - lastInput <= 12000) sceneT = 0;
+
+  const dist = 4.0, cp = Math.cos(cam.pitch);
+  const ro = [Math.sin(cam.yaw) * cp * dist, Math.sin(cam.pitch) * dist, Math.cos(cam.yaw) * cp * dist];
+  const f = ro.map((v) => -v / dist);
+  let r = [-f[2], 0, f[0]];
+  const rl = Math.hypot(...r); r = r.map((v) => v / rl);
+  const u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]];
+
+  const src = acc[cur], dst = acc[1 - cur];
+  gl.useProgram(trace.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, dst.f);
+  gl.viewport(0, 0, W, H);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src.t);
+  gl.uniform1i(trace.u.uPrev, 0);
+  gl.uniform2f(trace.u.uRes, W, H);
+  gl.uniform1i(trace.u.uFrame, frame++);
+  gl.uniform1i(trace.u.uSpp, spp);
+  gl.uniform1i(trace.u.uScene, scene);
+  gl.uniform1i(trace.u.uBounces, Number(bounces.value));
+  gl.uniform3fv(trace.u.uRo, ro);
+  gl.uniformMatrix3fv(trace.u.uCam, false, [...r, ...u, ...f]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  cur = 1 - cur;
+
+  gl.useProgram(show.p);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, dst.t);
+  gl.uniform1i(show.u.uAcc, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  totalSpp = (frame === 1 ? 0 : totalSpp) + spp;
+  fpsN++; fpsT += dt;
+  if (fpsT > 0.5) { fps = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; }
+  $('stats').innerHTML = `${totalSpp} spp<br>${fps} fps · ${spp}/frame<br>${W}×${H}`;
+  requestAnimationFrame(loop);
+}
+let totalSpp = 0;
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

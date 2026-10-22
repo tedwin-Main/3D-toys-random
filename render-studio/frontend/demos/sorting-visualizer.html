@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sorting Race</title>
+<meta name="category" content="algorithms" />
+<meta name="order" content="1" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="generators, algorithm animation, WebAudio sonification, canvas" />
+<meta name="description" content="Eight sorting algorithms racing side by side on identical data: bubble, insertion, selection, shell, merge, quick, heap and radix. Each one is written as a generator that yields every compare and write, so the animation shows the real work and the counters are honest. Switch to solo mode for a big view with sonification, where each access plays a pitch for its value. Choose the input shape (random, nearly sorted, reversed, few unique) to see where each algorithm shines or collapses." />
+<meta name="prompt" content="Make a sorting algorithm visualizer in a single HTML file. Implement bubble, insertion, selection, shell, merge, quick, heap and radix sort as step-by-step generators, show them racing side by side on the same shuffled bars with comparison and write counters and a finish order, and offer a solo mode with sound where each array access plays a tone. Add controls for array size, speed and input shape: random, nearly sorted, reversed and few unique." />
+<style>
+  :root { --ink: #eef1f7; --muted: #8790a6; --panel: rgba(14, 16, 24, 0.78); --line: rgba(255, 255, 255, 0.08); --bg: #090b11; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  header { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 18px; }
+  header .sp { flex: 1; }
+  header select, header button { height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: #151925; color: var(--ink); font: 600 12px inherit; cursor: pointer; }
+  header button.on { background: #6c8cff; color: #0b1020; border-color: transparent; }
+  header label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  header input[type=range] { width: 90px; accent-color: #6c8cff; }
+  #board { position: absolute; top: 64px; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(2, 1fr); gap: 1px; background: var(--line); }
+  #board.solo { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  .lane { position: relative; background: var(--bg); overflow: hidden; }
+  .lane canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .lane .lbl { position: absolute; left: 12px; top: 10px; font-weight: 700; font-size: 14px; text-shadow: 0 1px 4px #000; }
+  .lane .stats { position: absolute; left: 12px; top: 30px; font: 11px ui-monospace, Menlo, monospace; color: var(--muted); text-shadow: 0 1px 4px #000; }
+  .lane .place { position: absolute; right: 12px; top: 8px; font: 800 22px ui-rounded, system-ui, sans-serif; color: #ffd36b; opacity: 0; transition: opacity 0.3s; text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6); }
+  .lane.done .place { opacity: 1; }
+  .lane.hidden { display: none; }
+  @media (max-width: 700px) { header { height: auto; padding: 10px 12px; gap: 8px; } header h1 { width: 100%; } #board { top: 108px; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(4, 1fr); } header label span { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sorting Race</h1>
+  <button id="mode" class="on">Race</button>
+  <select id="algo" hidden></select>
+  <select id="shape"><option value="random">Random</option><option value="nearly">Nearly sorted</option><option value="reversed">Reversed</option><option value="few">Few unique</option></select>
+  <label><span>Size</span><input id="size" type="range" min="16" max="400" value="120"></label>
+  <label><span>Speed</span><input id="speed" type="range" min="1" max="100" value="40"></label>
+  <div class="sp"></div>
+  <button id="go">Shuffle + run</button>
+</header>
+<div id="board"></div>
+<script>
+/**
+ * FILE: render-studio/frontend/demos/sorting-visualizer.html
+ * PURPOSE: Sorting race: 8 algorithms as op-yielding generators on shared data, compare/write counters, finish order, solo mode with sonification
+ * UI: Render Studio > Algorithms > Sorting Race
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__sort (test hook: run, names)
+ */
+const $ = (id) => document.getElementById(id);
+
+// Algorithms: generators over an Arr wrapper; every get/compare/set yields so lanes animate real work
+class Arr {
+  constructor(a) { this.a = a; this.cmp = 0; this.wr = 0; this.hl = []; }
+  get length() { return this.a.length; }
+}
+function* lt(A, i, j) { A.cmp++; A.hl = [i, j]; yield 'c'; return A.a[i] < A.a[j]; }
+function* ltv(A, i, v) { A.cmp++; A.hl = [i]; yield 'c'; return A.a[i] < v; }
+function* gtv(A, i, v) { A.cmp++; A.hl = [i]; yield 'c'; return A.a[i] > v; }
+function* swap(A, i, j) { A.wr += 2; [A.a[i], A.a[j]] = [A.a[j], A.a[i]]; A.hl = [i, j]; yield 's'; }
+function* put(A, i, v) { A.wr++; A.a[i] = v; A.hl = [i]; yield 's'; }
+const ALGOS = {
+  Bubble: function* (A) { const n = A.length; for (let i = 0; i < n; i++) { let sw = false; for (let j = 0; j < n - 1 - i; j++) if (yield* lt(A, j + 1, j)) { yield* swap(A, j, j + 1); sw = true; } if (!sw) break; } },
+  Insertion: function* (A) { for (let i = 1; i < A.length; i++) for (let j = i; j > 0 && (yield* lt(A, j, j - 1)); j--) yield* swap(A, j, j - 1); },
+  Selection: function* (A) { const n = A.length; for (let i = 0; i < n - 1; i++) { let m = i; for (let j = i + 1; j < n; j++) if (yield* lt(A, j, m)) m = j; if (m !== i) yield* swap(A, i, m); } },
+  Shell: function* (A) {
+    // Ciura gaps, extended by 2.25x for big arrays
+    const gaps = [1, 4, 10, 23, 57, 132, 301, 701]; while (gaps.at(-1) * 2.25 < A.length) gaps.push(Math.floor(gaps.at(-1) * 2.25));
+    for (const gap of gaps.reverse()) for (let i = gap; i < A.length; i++) for (let j = i; j >= gap && (yield* lt(A, j, j - gap)); j -= gap) yield* swap(A, j, j - gap);
+  },
+  Merge: function* (A) {
+    // bottom-up merge through an aux buffer; writes go back into the visible array
+    const n = A.length, aux = new Array(n);
+    for (let w = 1; w < n; w *= 2) for (let lo = 0; lo < n - w; lo += 2 * w) {
+      const mid = lo + w, hi = Math.min(lo + 2 * w, n);
+      for (let k = lo; k < hi; k++) aux[k] = A.a[k];
+      let i = lo, j = mid;
+      for (let k = lo; k < hi; k++) {
+        if (i >= mid) yield* put(A, k, aux[j++]);
+        else if (j >= hi) yield* put(A, k, aux[i++]);
+        else { A.cmp++; A.hl = [i, j]; yield 'c'; yield* put(A, k, aux[j] < aux[i] ? aux[j++] : aux[i++]); }
+      }
+    }
+  },
+  Quick: function* (A) {
+    // Hoare partition, median-of-three pivot, explicit stack so the generator stays flat
+    const st = [[0, A.length - 1]];
+    while (st.length) {
+      const [lo, hi] = st.pop(); if (lo >= hi) continue;
+      const mid = (lo + hi) >> 1;
+      if (yield* lt(A, mid, lo)) yield* swap(A, mid, lo);
+      if (yield* lt(A, hi, lo)) yield* swap(A, hi, lo);
+      if (yield* lt(A, hi, mid)) yield* swap(A, hi, mid);
+      const p = A.a[mid]; let i = lo - 1, j = hi + 1;
+      for (;;) {
+        do i++; while (yield* ltv(A, i, p));
+        do j--; while (yield* gtv(A, j, p));
+        if (i >= j) break;
+        yield* swap(A, i, j);
+      }
+      st.push([lo, j], [j + 1, hi]);
+    }
+  },
+  Heap: function* (A) {
+    const n = A.length;
+    function* sift(s, end) { let r = s; for (;;) { let c = 2 * r + 1; if (c > end) return; if (c + 1 <= end && (yield* lt(A, c, c + 1))) c++; if (yield* lt(A, r, c)) { yield* swap(A, r, c); r = c; } else return; } }
+    for (let s = (n >> 1) - 1; s >= 0; s--) yield* sift(s, n - 1);
+    for (let end = n - 1; end > 0; end--) { yield* swap(A, 0, end); yield* sift(0, end - 1); }
+  },
+  Radix: function* (A) {
+    // LSD base 4 counting sort: no comparisons at all, only reads and writes
+    const n = A.length, max = Math.max(...A.a);
+    for (let exp = 1; Math.floor(max / exp) > 0; exp *= 4) {
+      const cnt = [0, 0, 0, 0], out = new Array(n);
+      for (let i = 0; i < n; i++) { cnt[Math.floor(A.a[i] / exp) % 4]++; A.hl = [i]; yield 'r'; }
+      for (let d = 1; d < 4; d++) cnt[d] += cnt[d - 1];
+      for (let i = n - 1; i >= 0; i--) out[--cnt[Math.floor(A.a[i] / exp) % 4]] = A.a[i];
+      for (let i = 0; i < n; i++) yield* put(A, i, out[i]);
+    }
+  },
+};
+const NAMES = Object.keys(ALGOS);
+
+// Data shapes
+function makeData(n, shape) {
+  const a = Array.from({ length: n }, (_, i) => i + 1);
+  if (shape === 'few') for (let i = 0; i < n; i++) a[i] = Math.ceil(((i % 5) + 1) * n / 5);
+  if (shape !== 'reversed') for (let i = n - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
+  if (shape === 'reversed') a.reverse();
+  if (shape === 'nearly') { a.sort((x, y) => x - y); for (let k = 0; k < n / 20; k++) { const i = (Math.random() * (n - 3)) | 0; [a[i], a[i + 2]] = [a[i + 2], a[i]]; } }
+  return a;
+}
+
+// Lanes: one canvas per algorithm, bars coloured by value, highlights for the last op
+const lanes = NAMES.map((name) => {
+  const el = document.createElement('div'); el.className = 'lane';
+  el.innerHTML = `<canvas></canvas><div class="lbl">${name}</div><div class="stats"></div><div class="place"></div>`;
+  $('board').appendChild(el);
+  return { name, el, cv: el.querySelector('canvas'), stats: el.querySelector('.stats'), place: el.querySelector('.place'), A: null, gen: null, done: false, steps: 0 };
+});
+let solo = false, soloName = 'Quick', finished = 0, maxV = 1;
+NAMES.forEach((n) => $('algo').insertAdjacentHTML('beforeend', `<option${n === soloName ? ' selected' : ''}>${n}</option>`));
+function draw(L) {
+  const cv = L.cv, w = cv.clientWidth, h = cv.clientHeight, dpr = Math.min(devicePixelRatio || 1, 2);
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = w * dpr; cv.height = h * dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const a = L.A.a, n = a.length, top = 52, bw = w / n, hl = L.done ? [] : L.A.hl;
+  for (let i = 0; i < n; i++) {
+    const v = a[i] / maxV, bh = v * (h - top - 6);
+    g.fillStyle = L.done ? `hsl(${150 + v * 40},70%,${45 + v * 15}%)` : `hsl(${230 - v * 190},75%,${42 + v * 18}%)`;
+    g.fillRect(i * bw, h - bh, Math.max(1, bw - (bw > 4 ? 1 : 0)), bh);
+  }
+  g.fillStyle = '#fff';
+  for (const i of hl) if (i >= 0 && i < n) { const bh = (a[i] / maxV) * (h - top - 6); g.fillRect(i * bw, h - bh, Math.max(1.5, bw - 1), bh); }
+  L.stats.textContent = `${L.A.cmp.toLocaleString()} compares · ${L.A.wr.toLocaleString()} writes`;
+}
+
+// Audio (solo only): triangle blip pitched by value, rate-limited
+let ac = null, lastBeep = 0;
+function beep(v) {
+  const now = performance.now(); if (now - lastBeep < 14) return; lastBeep = now;
+  try {
+    ac ||= new AudioContext(); if (ac.state === 'suspended') return;
+    const o = ac.createOscillator(), gn = ac.createGain(); o.type = 'triangle'; o.frequency.value = 160 + v * 1100;
+    gn.gain.setValueAtTime(0.06, ac.currentTime); gn.gain.exponentialRampToValueAtTime(0.0005, ac.currentTime + 0.08);
+    o.connect(gn).connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.09);
+  } catch { /* no audio */ }
+}
+
+function start() {
+  const data = makeData(Number($('size').value), $('shape').value);
+  maxV = Math.max(...data); finished = 0;
+  lanes.forEach((L) => {
+    L.A = new Arr(data.slice()); L.gen = ALGOS[L.name](L.A); L.done = false; L.steps = 0;
+    L.el.classList.remove('done'); L.place.textContent = '';
+    L.el.classList.toggle('hidden', solo && L.name !== soloName);
+  });
+}
+// Speed: ops per frame grows exponentially along the slider so 400 bars of bubble still finish
+const opsPerFrame = () => Math.max(1, Math.round(Math.pow(1.075, Number($('speed').value)) / (solo ? 4 : 1)));
+let restartAt = 0;
+function frame(now) {
+  const k = opsPerFrame();
+  for (const L of lanes) {
+    if (L.done || (solo && L.name !== soloName)) continue;
+    for (let s = 0; s < k; s++) { const r = L.gen.next(); if (r.done) { L.done = true; finished++; L.place.textContent = ['🥇', '🥈', '🥉'][finished - 1] || `#${finished}`; L.el.classList.add('done'); break; } }
+    if (solo && L.A.hl.length) beep(L.A.a[L.A.hl[0]] / maxV);
+  }
+  for (const L of lanes) if (!L.el.classList.contains('hidden')) draw(L);
+  const target = solo ? 1 : lanes.length;
+  if (finished >= target && !restartAt) restartAt = now + 2500;
+  if (restartAt && now > restartAt && performance.now() - lastInput > 8000) { restartAt = 0; start(); }
+  requestAnimationFrame(frame);
+}
+
+let lastInput = -1e9;
+const act = () => (lastInput = performance.now());
+$('go').onclick = () => { act(); restartAt = 0; start(); };
+$('shape').onchange = $('size').onchange = () => { act(); restartAt = 0; start(); };
+$('speed').oninput = act;
+$('mode').onclick = () => { act(); solo = !solo; $('mode').textContent = solo ? 'Solo' : 'Race'; $('algo').hidden = !solo; $('board').classList.toggle('solo', solo); restartAt = 0; start(); try { ac ||= new AudioContext(); ac.resume(); } catch { /* no audio */ } };
+$('algo').onchange = () => { act(); soloName = $('algo').value; restartAt = 0; start(); };
+if (innerWidth < 700) $('size').value = 60;
+start();
+requestAnimationFrame(frame);
+// test hook: runs one algorithm to completion off-screen and returns the result and counters
+window.__sort = { names: NAMES, run: (name, arr) => { const A = new Arr(arr.slice()); for (const _ of ALGOS[name](A)); return { out: A.a, cmp: A.cmp, wr: A.wr }; } };
+</script>
+</body>
+</html>
