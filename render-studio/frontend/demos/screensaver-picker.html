@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Screensaver Picker</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="47" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="canvas 2D, five screensaver engines, painter's-sorted flat-shaded 3D, beveled 98-style tabs, fullscreen preview with exit on input" />
+<meta name="description" content="The Display Properties dialog from a late-90s desktop, live: a beige CRT in the dialog previews Mystify, Bezier, Marquee, Starfield and Flying Shapes, each with its own speed and settings, and Preview runs the chosen saver fullscreen until you move the mouse. The Background tab repaints the desktop in classic tile patterns, Appearance swaps window colour schemes and Settings slides the resolution. Hard because five independent screensaver engines run from one interface at any canvas size, Flying Shapes is a small painter's-sorted flat-shaded 3D renderer, and every tab, bevel and control is rebuilt by hand."/>
+<meta name="prompt" content="Build a late-90s Display Properties dialog in one HTML file with a beveled 98-style UI and tabs: Screen Saver tab with a beige CRT monitor preview, a saver dropdown (None, Bezier, Flying Shapes, Marquee, Mystify, Starfield), speed slider, marquee text, wait spinner and a Preview button that runs the saver fullscreen and exits on mouse movement or a key. Implement all five savers on canvas at any size (Flying Shapes as a tiny flat-shaded 3D renderer with painter's sort). Background tab changes the desktop tile pattern, Appearance swaps title bar colour schemes, Settings has a resolution slider. Attract mode cycles savers and briefly runs a fullscreen preview." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/screensaver-picker.html
+ * PURPOSE: 98-style Display Properties: live CRT previews of Mystify, Bezier, Marquee, Starfield, Flying Shapes, fullscreen preview
+ * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Screensaver Picker
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__savers (pick, preview, tab, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { --t1: #000080; --t2: #1084d0; --face: #c0c0c0; background: #008080; font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; color: #000; display: grid; place-items: center; user-select: none; transition: background 0.2s; }
+.dlg { width: 404px; background: var(--face); padding: 3px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080, inset 2px 2px #fff, 5px 5px 0 rgba(0, 0, 0, 0.3); transform-origin: 50% 50%; }
+.title { height: 18px; display: flex; align-items: center; gap: 2px; padding: 0 2px 0 4px; color: #fff; font-weight: bold; background: linear-gradient(90deg, var(--t1), var(--t2)); }
+.title span { flex: 1; }
+.title i { width: 16px; height: 14px; display: grid; place-items: center; font: bold 9px Tahoma, sans-serif; font-style: normal; color: #000; background: var(--face); box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080; }
+.tabs { display: flex; padding: 8px 6px 0; position: relative; z-index: 1; }
+.tab { padding: 3px 9px 4px; margin-right: -2px; border-radius: 3px 3px 0 0; background: var(--face); box-shadow: inset 1px 1px #fff, inset -1px 0 #0a0a0a, inset -2px 0 #808080; cursor: pointer; position: relative; top: 2px; }
+.tab.on { top: 0; padding-bottom: 6px; margin: 0 -2px; z-index: 2; }
+.sheet { margin: 0 6px; padding: 12px 10px 10px; min-height: 372px; box-shadow: inset 1px 1px #fff, inset -1px -1px #0a0a0a, inset -2px -2px #808080; }
+.pane { display: none; } .pane.on { display: block; }
+.mon { position: relative; width: 194px; height: 180px; margin: 0 auto 12px; }
+.bezel { position: absolute; left: 0; top: 0; width: 194px; height: 150px; padding: 12px 12px 18px; border-radius: 8px 8px 4px 4px; background: linear-gradient(180deg, #ece6d4, #cfc6ad); box-shadow: inset 0 1px 0 #fff, inset -2px -2px 0 #a99f84, 2px 2px 0 #6b6553; }
+.bezel::after { content: ""; position: absolute; right: 14px; bottom: 6px; width: 6px; height: 4px; border-radius: 2px; background: #5aff5a; box-shadow: 0 0 4px #5aff5a; }
+.screen { width: 170px; height: 120px; border-radius: 4px; background: #000; box-shadow: inset 0 0 0 2px #3a372f; overflow: hidden; }
+.screen canvas { width: 100%; height: 100%; display: block; }
+.stand { position: absolute; left: 72px; top: 150px; width: 50px; height: 12px; background: linear-gradient(#cfc6ad, #a99f84); }
+.foot { position: absolute; left: 42px; top: 162px; width: 110px; height: 12px; border-radius: 4px; background: linear-gradient(#e2dcc6, #b3a98c); box-shadow: 1px 1px 0 #6b6553; }
+fieldset { margin: 0 0 8px; padding: 8px 10px 10px; border: 0; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff, inset 2px 2px #fff, inset -2px -2px #808080; position: relative; }
+legend { padding: 0 3px; }
+.line { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.b { min-width: 75px; height: 23px; padding: 0 10px; border: 0; background: var(--face); font: 11px Tahoma, sans-serif; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf; cursor: pointer; }
+.b:active { box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #808080; }
+.b.def { outline: 1px solid #000; outline-offset: -1px; }
+select, input[type="text"], .spin { height: 21px; border: 0; padding: 2px 3px; font: 11px Tahoma, sans-serif; background: #fff; box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a; border-radius: 0; }
+select { width: 150px; }
+.spin { width: 40px; text-align: right; display: inline-grid; align-items: center; }
+input[type="range"] { flex: 1; accent-color: #000080; }
+.list { height: 110px; overflow: auto; background: #fff; box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a; padding: 2px; }
+.list div { padding: 1px 4px; cursor: pointer; }
+.list div.on { background: #000080; color: #fff; }
+.acts { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 6px 6px; }
+.sample { margin: 0 auto 12px; width: 300px; height: 150px; padding: 8px; background: #808080; box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff; }
+.sample .w { background: var(--face); padding: 2px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff; }
+.sample .w + .w { margin: -46px 0 0 40px; position: relative; }
+.sample .w > div:not(.title) { padding: 6px; height: 60px; background: #fff; }
+.sample .w:first-child .title { background: linear-gradient(90deg, #808080, #b5b5b5); color: #d4d0c8; }
+#full { position: fixed; inset: 0; width: 100%; height: 100%; background: #000; display: none; z-index: 9; cursor: none; }
+.hint { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 5px 12px; color: #fff; font: 12px Tahoma, sans-serif; background: rgba(0, 0, 0, 0.45); white-space: nowrap; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="dlg" id="dlg">
+  <div class="title"><span>Display Properties</span><i>?</i><i>&#10005;</i></div>
+  <div class="tabs" id="tabs"><div class="tab" data-p="bg">Background</div><div class="tab on" data-p="ss">Screen Saver</div><div class="tab" data-p="ap">Appearance</div><div class="tab" data-p="st">Settings</div></div>
+  <div class="sheet">
+    <div class="mon"><div class="bezel"><div class="screen"><canvas id="prev" width="340" height="240"></canvas></div></div><div class="stand"></div><div class="foot"></div></div>
+    <div class="pane" id="p-bg"><fieldset><legend>Pattern</legend><div class="list" id="pats"></div></fieldset></div>
+    <div class="pane on" id="p-ss">
+      <fieldset><legend>Screen Saver</legend>
+        <div class="line"><select id="saver"></select><button class="b" id="bSet">Settings...</button><button class="b" id="bPrev">Preview</button></div>
+        <div class="line"><label><input type="checkbox" /> Password protected</label><span style="margin-left:auto">Wait:</span><span class="spin" id="wait">5</span><span>minutes</span></div>
+        <div class="line" id="speedRow"><span>Speed:</span><span>Slow</span><input type="range" id="speed" min="0.3" max="2.5" step="0.1" value="1" /><span>Fast</span></div>
+        <div class="line" id="textRow"><span>Text:</span><input type="text" id="mtext" value="Welcome to the year 2000!" style="flex:1" /></div>
+      </fieldset>
+      <fieldset><legend>Energy saving features of monitor</legend><div class="line">To adjust the power settings for your monitor, click Settings. <button class="b">Settings</button></div></fieldset>
+    </div>
+    <div class="pane" id="p-ap"><div class="sample"><div class="w"><div class="title"><span>Inactive Window</span></div><div></div></div><div class="w"><div class="title"><span>Active Window</span><i>&#10005;</i></div><div>Window Text<br /><br /><button class="b">OK</button></div></div></div>
+      <fieldset><legend>Scheme</legend><div class="line"><select id="scheme"><option>Classic Teal</option><option>Desert</option><option>Eggplant</option><option>Rainy Day</option><option>High Contrast</option></select></div></fieldset></div>
+    <div class="pane" id="p-st"><fieldset><legend>Screen area</legend><div class="line"><span>Less</span><input type="range" id="res" min="0" max="3" step="1" value="2" /><span>More</span></div><div style="text-align:center;margin-top:6px" id="resTxt">1024 by 768 pixels</div></fieldset>
+      <fieldset><legend>Colors</legend><div class="line"><select><option>True Color (24 bit)</option><option>High Color (16 bit)</option><option>256 Colors</option></select></div></fieldset></div>
+  </div>
+  <div class="acts"><button class="b def">OK</button><button class="b">Cancel</button><button class="b">Apply</button></div>
+</div>
+<canvas id="full"></canvas>
+<div class="hint" id="hint">pick a screen saver · Preview runs it fullscreen · move the mouse to wake</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const rand = (a, b) => a + Math.random() * (b - a);
+
+// Savers > each one: init(w,h) state, draw(ctx,s,w,h,dt,opt)
+const bounce = (p, w, h, dt) => { p.x += p.vx * dt; p.y += p.vy * dt; if (p.x < 0 || p.x > w) { p.vx *= -1; p.x = Math.max(0, Math.min(w, p.x)); } if (p.y < 0 || p.y > h) { p.vy *= -1; p.y = Math.max(0, Math.min(h, p.y)); } };
+const pt = (w, h) => ({ x: rand(0, w), y: rand(0, h), vx: rand(-0.25, 0.25) * w * (Math.random() < 0.5 ? -1 : 1) + 0.05 * w, vy: rand(-0.25, 0.25) * h + 0.05 * h });
+const SAVERS = {
+  none: { init: () => ({}), draw(x, s, w, h) { x.fillStyle = getComputedStyle(document.body).backgroundColor; x.fillRect(0, 0, w, h); } },
+  bezier: {
+    init: (w, h) => ({ curves: [0, 1].map(() => ({ p: [0, 1, 2, 3].map(() => pt(w, h)), hue: rand(0, 360) })), fresh: true }),
+    draw(x, s, w, h, dt, o) {
+      if (s.fresh) { x.fillStyle = '#000'; x.fillRect(0, 0, w, h); s.fresh = false; }
+      x.fillStyle = 'rgba(0,0,0,0.06)'; x.fillRect(0, 0, w, h);
+      for (const c of s.curves) { c.p.forEach((p) => bounce(p, w, h, dt * o.speed)); c.hue = (c.hue + dt * 30) % 360;
+        for (let k = 0; k < 3; k++) { const off = k * w * 0.012; x.strokeStyle = `hsl(${c.hue + k * 12},100%,${60 - k * 8}%)`; x.lineWidth = Math.max(1, w / 400); x.beginPath(); x.moveTo(c.p[0].x + off, c.p[0].y); x.bezierCurveTo(c.p[1].x + off, c.p[1].y, c.p[2].x, c.p[2].y + off, c.p[3].x, c.p[3].y + off); x.stroke(); } }
+    },
+  },
+  mystify: {
+    init: (w, h) => ({ polys: [0, 1].map((i) => ({ p: [0, 1, 2, 3].map(() => pt(w, h)), hist: [], hue: i * 160 + rand(0, 60), acc: 0 })) }),
+    draw(x, s, w, h, dt, o) {
+      x.fillStyle = '#000'; x.fillRect(0, 0, w, h); x.lineWidth = Math.max(1, w / 500);
+      for (const q of s.polys) {
+        q.p.forEach((p) => bounce(p, w, h, dt * o.speed)); q.hue = (q.hue + dt * 25) % 360; q.acc += dt * o.speed;
+        if (q.acc > 0.045) { q.acc = 0; q.hist.unshift(q.p.map((p) => [p.x, p.y])); q.hist.length = Math.min(q.hist.length, 7); }
+        q.hist.forEach((poly, i) => { x.strokeStyle = `hsla(${q.hue},100%,${62 - i * 3}%,${1 - i * 0.08})`; x.beginPath(); poly.forEach(([px, py], k) => (k ? x.lineTo(px, py) : x.moveTo(px, py))); x.closePath(); x.stroke(); });
+      }
+    },
+  },
+  marquee: {
+    init: (w, h) => ({ x: w, y: rand(0.2, 0.8) * h, hue: rand(0, 360) }),
+    draw(x, s, w, h, dt, o) {
+      x.fillStyle = '#000'; x.fillRect(0, 0, w, h); const fs = h * 0.16; x.font = `bold italic ${fs}px "Times New Roman", serif`; x.textBaseline = 'middle';
+      const tw = x.measureText(o.text).width; s.x -= dt * w * 0.32 * o.speed;
+      if (s.x < -tw) { s.x = w; s.y = rand(0.2, 0.8) * h; s.hue = rand(0, 360); }
+      x.fillStyle = `hsl(${s.hue},100%,60%)`; x.fillText(o.text, s.x, s.y);
+    },
+  },
+  starfield: {
+    init: () => ({ stars: Array.from({ length: 260 }, () => ({ x: rand(-1, 1), y: rand(-1, 1), z: rand(0.05, 1) })) }),
+    draw(x, s, w, h, dt, o) {
+      x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+      for (const st of s.stars) { st.z -= dt * 0.35 * o.speed; if (st.z < 0.02) { st.x = rand(-1, 1); st.y = rand(-1, 1); st.z = 1; }
+        const px = w / 2 + (st.x / st.z) * w * 0.5, py = h / 2 + (st.y / st.z) * w * 0.5; if (px < 0 || px > w || py < 0 || py > h) { st.z = 1; continue; }
+        const r = Math.max(0.6, (1 - st.z) * w / 130); x.fillStyle = `rgba(255,255,255,${Math.min(1, (1 - st.z) * 1.4)})`; x.fillRect(px - r / 2, py - r / 2, r, r); }
+    },
+  },
+  shapes: {
+    init: () => ({ list: Array.from({ length: 10 }, () => spawn(rand(0.4, 1.7))) }),
+    draw(x, s, w, h, dt, o) {
+      x.fillStyle = '#000'; x.fillRect(0, 0, w, h);
+      for (const sh of s.list) { sh.z -= dt * 0.3 * o.speed; sh.a += dt * sh.va * o.speed; sh.b += dt * sh.vb * o.speed; if (sh.z < 0.3) Object.assign(sh, spawn(1.7)); }
+      const faces = [];
+      for (const sh of [...s.list].sort((a, b) => b.z - a.z)) {
+        const ca = Math.cos(sh.a), sa = Math.sin(sh.a), cb = Math.cos(sh.b), sb = Math.sin(sh.b);
+        const v = MESH[sh.type].v.map(([X, Y, Z]) => { const y1 = Y * ca - Z * sa, z1 = Y * sa + Z * ca, x2 = X * cb + z1 * sb, z2 = -X * sb + z1 * cb; return [x2 * 0.09 + sh.x, y1 * 0.09 + sh.y, z2 * 0.09 + sh.z]; });
+        for (const f of MESH[sh.type].f) {
+          const P = f.map((i) => v[i]), [a, b, c] = P, u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], t = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+          const n = [u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]], len = Math.hypot(...n), cen = P.reduce((m, p) => [m[0] + p[0] / P.length, m[1] + p[1] / P.length, m[2] + p[2] / P.length], [0, 0, 0]);
+          if (n[0] * cen[0] + n[1] * cen[1] + n[2] * cen[2] >= 0) continue;
+          const lit = 0.35 + 0.65 * Math.max(0, (-n[0] * 0.4 - n[1] * 0.6 - n[2] * 0.7) / len);
+          faces.push({ z: cen[2], pts: P.map(([X, Y, Z]) => [w / 2 + (X / Z) * w * 0.5, h / 2 + (Y / Z) * w * 0.5]), col: `hsl(${sh.hue},85%,${18 + lit * 50}%)` });
+        }
+      }
+      faces.sort((a, b) => b.z - a.z).forEach((f) => { x.fillStyle = f.col; x.beginPath(); f.pts.forEach(([px, py], i) => (i ? x.lineTo(px, py) : x.moveTo(px, py))); x.closePath(); x.fill(); x.strokeStyle = 'rgba(0,0,0,0.35)'; x.lineWidth = 1; x.stroke(); });
+    },
+  },
+};
+const MESH = {
+  cube: { v: [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]], f: [[0, 1, 2, 3], [5, 4, 7, 6], [4, 0, 3, 7], [1, 5, 6, 2], [4, 5, 1, 0], [3, 2, 6, 7]] },
+  octa: { v: [[1.3, 0, 0], [-1.3, 0, 0], [0, 1.3, 0], [0, -1.3, 0], [0, 0, 1.3], [0, 0, -1.3]], f: [[0, 2, 4], [2, 1, 4], [1, 3, 4], [3, 0, 4], [2, 0, 5], [1, 2, 5], [3, 1, 5], [0, 3, 5]] },
+  pyra: { v: [[0, -1.4, 0], [-1.1, 0.9, -1.1], [1.1, 0.9, -1.1], [1.1, 0.9, 1.1], [-1.1, 0.9, 1.1]], f: [[0, 2, 1], [0, 3, 2], [0, 4, 3], [0, 1, 4], [1, 2, 3, 4]] },
+};
+function spawn(z) { return { type: ['cube', 'octa', 'pyra'][Math.floor(Math.random() * 3)], x: rand(-0.7, 0.7), y: rand(-0.45, 0.45), z, a: rand(0, 6), b: rand(0, 6), va: rand(0.5, 1.6), vb: rand(0.4, 1.3), hue: [0, 50, 120, 200, 280, 320][Math.floor(Math.random() * 6)] }; }
+
+// Fix winding > faces wound so outward normals face away from camera test above
+for (const m of Object.values(MESH)) {
+  const c = m.v.reduce((a, p) => [a[0] + p[0], a[1] + p[1], a[2] + p[2]], [0, 0, 0]).map((s) => s / m.v.length);
+  m.f = m.f.map((f) => { const [a, b, d] = f.map((i) => m.v[i]), u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], t = [d[0] - a[0], d[1] - a[1], d[2] - a[2]], n = [u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]], o = [a[0] - c[0], a[1] - c[1], a[2] - c[2]]; return n[0] * o[0] + n[1] * o[1] + n[2] * o[2] < 0 ? [...f].reverse() : f; });
+}
+
+// Runner > one saver instance per canvas
+const NAMES = [['none', '(None)'], ['bezier', 'Bezier'], ['shapes', 'Flying Shapes'], ['marquee', 'Marquee'], ['mystify', 'Mystify'], ['starfield', 'Starfield']];
+$('#saver').innerHTML = NAMES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+const opt = { speed: 1, text: $('#mtext').value };
+function runner(cv) { return { cv, x: cv.getContext('2d'), kind: null, s: null, set(k) { this.kind = k; this.s = SAVERS[k].init(cv.width, cv.height); }, step(dt) { SAVERS[this.kind].draw(this.x, this.s, this.cv.width, this.cv.height, dt, opt); } }; }
+const prev = runner($('#prev')), full = runner($('#full'));
+let current = 'mystify';
+function pick(k) { current = k; $('#saver').value = k; prev.set(k); $('#textRow').style.visibility = k === 'marquee' ? 'visible' : 'hidden'; $('#speedRow').style.visibility = k === 'none' ? 'hidden' : 'visible'; }
+$('#saver').onchange = (e) => pick(e.target.value);
+$('#speed').oninput = (e) => (opt.speed = +e.target.value);
+$('#mtext').oninput = (e) => (opt.text = e.target.value || ' ');
+$('#bSet').onclick = () => { if (current === 'marquee') $('#mtext').focus(); else $('#speed').focus(); };
+
+// Preview > fullscreen saver, wake on input after grace
+let fullOn = false, fullAt = 0, wakeFrom = null;
+function preview(on = true) {
+  fullOn = on; const f = $('#full'); f.style.display = on ? 'block' : 'none'; $('#hint').style.display = on ? 'none' : '';
+  if (on) { const d = Math.min(2, devicePixelRatio); f.width = innerWidth * d; f.height = innerHeight * d; full.set(current); fullAt = performance.now(); wakeFrom = null; }
+}
+$('#bPrev').onclick = () => preview(true);
+addEventListener('pointermove', (e) => { if (!fullOn || performance.now() - fullAt < 600) return; if (!wakeFrom) wakeFrom = [e.clientX, e.clientY]; else if (Math.hypot(e.clientX - wakeFrom[0], e.clientY - wakeFrom[1]) > 8) preview(false); });
+addEventListener('pointerdown', () => { if (fullOn && performance.now() - fullAt > 300) preview(false); });
+addEventListener('keydown', () => fullOn && preview(false));
+
+// Tabs > background patterns, schemes, resolution
+let tabNow = 'ss';
+function tab(p) { tabNow = p; document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('on', t.dataset.p === p)); document.querySelectorAll('.pane').forEach((x) => x.classList.toggle('on', x.id === `p-${p}`)); }
+document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => tab(t.dataset.p)));
+const PATS = { '(None)': '', Tiles: 'repeating-conic-gradient(rgba(0,0,0,.18) 0 25%, transparent 0 50%) 0 0/16px 16px', Bricks: 'linear-gradient(rgba(0,0,0,.25) 2px, transparent 2px) 0 0/24px 12px, linear-gradient(90deg, rgba(0,0,0,.25) 2px, transparent 2px) 0 0/24px 24px', Waves: 'radial-gradient(circle at 50% 0, transparent 9px, rgba(0,0,0,.2) 10px, transparent 11px) 0 0/20px 12px', Stars: 'radial-gradient(rgba(255,255,255,.6) 1px, transparent 1.5px) 0 0/14px 14px, radial-gradient(rgba(255,255,255,.35) 1px, transparent 1.5px) 7px 7px/14px 14px', Weave: 'repeating-linear-gradient(45deg, rgba(0,0,0,.15) 0 3px, transparent 3px 8px), repeating-linear-gradient(-45deg, rgba(255,255,255,.12) 0 3px, transparent 3px 8px)' };
+$('#pats').innerHTML = Object.keys(PATS).map((n, i) => `<div class="${i ? '' : 'on'}">${n}</div>`).join('');
+$('#pats').onclick = (e) => { const d = e.target; if (d.parentElement !== $('#pats')) return; $('#pats').querySelectorAll('div').forEach((x) => x.classList.toggle('on', x === d)); document.body.style.background = `${PATS[d.textContent] ? PATS[d.textContent] + ', ' : ''}${SCHEMES[$('#scheme').selectedIndex][3]}`; };
+const SCHEMES = [['#000080', '#1084d0', '#c0c0c0', '#008080'], ['#a28d68', '#d8c49c', '#d5ccbb', '#a28d68'], ['#5a4b7a', '#8a7aaa', '#90a8a8', '#585858'], ['#4f6582', '#a0b8d0', '#b4c4d4', '#5a6e8c'], ['#800080', '#ff00ff', '#000', '#000']];
+$('#scheme').onchange = (e) => { const [a, b, f, bg] = SCHEMES[e.target.selectedIndex]; const st = document.body.style; st.setProperty('--t1', a); st.setProperty('--t2', b); st.setProperty('--face', f); st.background = bg; document.body.style.color = e.target.selectedIndex === 4 ? '#fff' : '#000'; };
+$('#res').oninput = (e) => ($('#resTxt').textContent = ['640 by 480', '800 by 600', '1024 by 768', '1280 by 1024'][e.target.value] + ' pixels');
+
+// Fit > scale dialog to small screens
+function fit() { const k = Math.min(1.4, (innerWidth - 16) / 410, (innerHeight - 90) / 480); $('#dlg').style.transform = `scale(${k})`; }
+fit(); addEventListener('resize', fit);
+
+// Attract > cycle savers, brief fullscreen run
+let idleAt = performance.now(), cyc = 0, touched = false;
+addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+function attract(now) {
+  if (touched || now - idleAt < 5200) return; idleAt = now;
+  const order = ['bezier', 'shapes', 'marquee', 'starfield', 'mystify'];
+  if (fullOn) { preview(false); return; }
+  if (tabNow !== 'ss') tab('ss');
+  if (cyc % 6 === 5) preview(true); else pick(order[cyc % 5]);
+  cyc++;
+}
+pick('mystify');
+if (capture) { touched = true; }
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (tabNow === 'ss' || prev.kind === 'none') prev.step(dt); else { prev.x.fillStyle = getComputedStyle(document.body).backgroundColor; prev.x.fillRect(0, 0, 340, 240); }
+  if (fullOn) full.step(dt);
+  attract(now); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__savers = { pick, preview, tab, state: () => ({ saver: current, full: fullOn, tab: tabNow, speed: opt.speed }) };
+</script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PDA Today Screen</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="56" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="template-matching unistroke handwriting recognizer, QVGA app shell with Today, Calendar, Notes, Inbox and Tasks, painted canvas wallpaper, stylus cursor and WebAudio taps" />
+<meta name="description" content="A glossy 2003 pocket PC you drive with a stylus: the Today screen over a painted lake wallpaper shows the date, owner, next appointment, tasks and unread mail; the Start menu opens Calendar (month grid with appointment days), Inbox, Tasks (tick them off) and Notes, where a letter recognizer panel turns your single-stroke letters into text, Graffiti style. A reminder balloon pops up with Snooze and Dismiss, the hardware buttons jump between apps, and the stylus clicks on glass. Hard because the handwriting is recognised for real: every stroke is resampled, scaled with its aspect kept and matched against unistroke templates for letters, space and backspace, and attract mode writes a note by drawing actual strokes through the same recognizer."/>
+<meta name="prompt" content="Build a 2003-era Pocket PC style PDA in one HTML file: a silver device with hardware app buttons and a 5-way pad, a 240x320 screen scaled to fit, a stylus cursor, and apps: Today screen (date, owner, appointment, tasks, unread mail over a painted wallpaper), Start menu, Calendar month view with agenda, Inbox, Tasks with checkboxes, and Notes with a letter recognizer input panel that recognises single-stroke letters (resample, scale, template match like the $1 recognizer) plus space and backspace strokes. Add a reminder balloon with snooze, stylus tap sounds and a chime. Attract mode writes a note by drawing real strokes through the recognizer; works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/pda-today-screen.html
+ * PURPOSE: 2003 pocket PC: Today screen, Start menu, calendar, inbox, tasks, notes with unistroke handwriting recognizer
+ * UI: Render Studio > Retro Aesthetics > Frutiger Aero > Core Aero > PDA Today Screen
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__pda (app, write, recognize, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 11px Tahoma, Verdana, sans-serif; user-select: none; background: radial-gradient(ellipse at 50% 20%, #e8f6ff, #9fc9ec 55%, #4f88c4); }
+body::before { content: ""; position: fixed; left: -10%; right: -10%; bottom: -30%; height: 60%; border-radius: 50%; background: radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.5), transparent 60%); }
+#dev { position: absolute; left: 50%; top: 50%; width: 284px; height: 520px; transform-origin: 50% 50%; border-radius: 34px 34px 60px 60px; background: linear-gradient(90deg, #8e99a6, #dfe5ec 18%, #f6f8fa 40%, #c9d1da 70%, #8e99a6); box-shadow: inset 0 2px 0 #fff, inset 0 -4px 8px rgba(0, 0, 0, 0.25), 0 30px 60px rgba(10, 40, 90, 0.45); }
+#dev::before { content: ""; position: absolute; inset: 6px; border-radius: 30px 30px 56px 56px; border: 1px solid rgba(255, 255, 255, 0.7); pointer-events: none; }
+.grille { position: absolute; left: 50%; top: 16px; width: 60px; height: 6px; transform: translateX(-50%); border-radius: 3px; background: repeating-linear-gradient(90deg, #5a6470 0 2px, transparent 2px 4px); opacity: 0.6; }
+.brand { position: absolute; left: 22px; top: 26px; font: bold italic 11px Arial; letter-spacing: 0.2em; color: #4a5a70; }
+#led { position: absolute; right: 26px; top: 28px; width: 8px; height: 8px; border-radius: 50%; background: #3a4a3a; box-shadow: inset 0 1px 2px #000; }
+#led.on { background: #4dff6a; box-shadow: 0 0 8px #4dff6a; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.3; } }
+#bezel { position: absolute; left: 14px; top: 44px; width: 256px; height: 336px; border-radius: 10px; background: #1a2230; padding: 8px; box-shadow: inset 0 2px 6px #000, 0 1px 0 #fff; }
+#scr { position: relative; width: 240px; height: 320px; overflow: hidden; background: #fff; cursor: none; }
+#scr * { cursor: none; }
+.keys { position: absolute; left: 0; right: 0; top: 396px; height: 110px; }
+.hk { position: absolute; width: 38px; height: 38px; border-radius: 50%; border: 0; cursor: pointer; background: radial-gradient(circle at 40% 30%, #fff, #c9d6e6 50%, #7d93b0); box-shadow: inset 0 -2px 3px rgba(0, 0, 0, 0.3), 0 3px 6px rgba(0, 0, 0, 0.3); display: grid; place-items: center; }
+.hk svg { width: 18px; height: 18px; fill: #2a4a78; }
+.hk:active { transform: translateY(2px); }
+#pad { position: absolute; left: 50%; top: 14px; width: 74px; height: 74px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(circle at 50% 50%, #e8eef6 0 30%, #9fb0c6 31% 34%, #dfe6ef 35%); box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35), inset 0 2px 0 #fff; }
+#pad b { position: absolute; width: 22px; height: 22px; cursor: pointer; display: grid; place-items: center; color: #4a5a70; font-size: 9px; }
+.top { position: absolute; left: 0; right: 0; top: 0; height: 26px; display: flex; align-items: center; gap: 5px; padding: 0 5px; color: #fff; background: linear-gradient(180deg, #4a8ae8, #1a56c0 50%, #0c3c9a 51%, #1a5ad0); z-index: 6; }
+.orb { width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle at 40% 30%, #fff, #8fe0ff 30%, #1aa0e0 60%, #0a5a9a); box-shadow: 0 0 4px rgba(255, 255, 255, 0.6); }
+.top .t { font: bold 13px Tahoma, sans-serif; }
+.top .r { margin-left: auto; display: flex; align-items: center; gap: 6px; font-weight: bold; }
+.sig { display: flex; align-items: flex-end; gap: 1px; height: 10px; } .sig i { width: 2px; background: #fff; }
+.bot { position: absolute; left: 0; right: 0; bottom: 0; height: 26px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; color: #fff; background: linear-gradient(180deg, #5a8ad8, #2a5ab8); z-index: 6; font-weight: bold; }
+.bot span { padding: 4px 6px; } .bot .kb { width: 26px; height: 14px; border: 1px solid #fff; border-radius: 2px; background: repeating-linear-gradient(90deg, transparent 0 4px, rgba(255, 255, 255, 0.6) 4px 5px); }
+.app { position: absolute; left: 0; right: 0; top: 26px; bottom: 26px; display: none; overflow: hidden; }
+.app.on { display: block; }
+#today canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.trow { position: relative; display: flex; align-items: center; gap: 7px; padding: 7px 8px; color: #fff; text-shadow: 0 1px 2px rgba(0, 30, 70, 0.8); border-bottom: 1px solid rgba(255, 255, 255, 0.25); }
+.trow:active, .trow.hi { background: rgba(10, 80, 200, 0.55); }
+.trow .ic { width: 18px; height: 18px; flex: none; border-radius: 3px; background: rgba(255, 255, 255, 0.85); display: grid; place-items: center; }
+.trow .ic svg { width: 13px; height: 13px; }
+.trow b { display: block; }
+.trow small { opacity: 0.9; }
+.trow.date { font: bold 12px Tahoma; padding-top: 9px; }
+.list { background: #fff; height: 100%; overflow: auto; }
+.li { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid #dfe6ef; }
+.li:active, .li.hi { background: #cfe2ff; }
+.li.done span { text-decoration: line-through; color: #8a96a6; }
+.li input { margin: 0; }
+.li.unread { font-weight: bold; }
+.hdr { padding: 5px 8px; background: linear-gradient(180deg, #f4f8fc, #dbe6f2); border-bottom: 1px solid #b8c8dc; font-weight: bold; color: #1a3a6a; display: flex; justify-content: space-between; }
+.cal { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; background: #fff; }
+.cal div { padding: 4px 0; border-bottom: 1px solid #eef2f6; }
+.cal .dw { color: #6a7a8a; font-size: 9px; font-weight: bold; }
+.cal .d.ap { font-weight: bold; color: #0a4ab0; }
+.cal .d.today { background: #1a5ad0; color: #fff; border-radius: 3px; }
+.cal .d.sel { outline: 1px solid #1a5ad0; }
+.cal .d.mute { color: #c0c8d0; }
+#agenda .li b { color: #0a4ab0; width: 40px; flex: none; }
+#msg { padding: 8px; line-height: 1.45; background: #fff; height: 100%; }
+#note { position: absolute; inset: 0; background: repeating-linear-gradient(180deg, #fff 0 15px, #dbe8f4 15px 16px); padding: 4px 6px; font: 12px/16px Tahoma; color: #102a50; white-space: pre-wrap; word-break: break-word; }
+#note .caret { display: inline-block; width: 1px; height: 13px; background: #102a50; vertical-align: -2px; animation: blink 1s steps(2) infinite; }
+#sip { position: absolute; left: 0; right: 0; bottom: 26px; height: 88px; z-index: 5; background: linear-gradient(180deg, #e8eef6, #c9d6e6); border-top: 1px solid #8ea4c2; display: none; }
+#sip.on { display: block; }
+#ink { position: absolute; left: 6px; top: 6px; width: 228px; height: 76px; background: #fff; border: 1px solid #8ea4c2; touch-action: none; }
+#sipl { position: absolute; left: 10px; top: 8px; font-size: 9px; color: #8a9ab0; pointer-events: none; }
+#guess { position: absolute; right: 12px; top: 8px; font: bold 16px Tahoma; color: #1a5ad0; pointer-events: none; }
+#start { position: absolute; left: 2px; top: 26px; width: 150px; z-index: 7; display: none; background: #fff; border: 1px solid #5a7ab0; box-shadow: 2px 3px 8px rgba(0, 0, 0, 0.35); }
+#start div { display: flex; align-items: center; gap: 6px; padding: 5px 8px; }
+#start div:active, #start div.hi { background: #1a5ad0; color: #fff; }
+#start hr { margin: 2px 0; border: 0; border-top: 1px solid #c8d4e2; }
+#bubble { position: absolute; left: 8px; right: 8px; bottom: 34px; z-index: 8; display: none; padding: 8px; border-radius: 6px; background: linear-gradient(180deg, #fffbe2, #fff2b0); border: 1px solid #c8a83a; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35); }
+#bubble h4 { margin: 0 0 4px; font-size: 11px; color: #6a4a00; }
+#bubble .bb { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+#bubble button, .sbtn { font: inherit; padding: 3px 10px; border: 1px solid #7a8aa6; border-radius: 3px; background: linear-gradient(180deg, #fff, #dbe4ee); }
+#stylus { position: fixed; z-index: 50; width: 120px; height: 12px; pointer-events: none; transform-origin: 0 50%; transform: rotate(-58deg); display: none; }
+#stylus::before { content: ""; position: absolute; left: 0; top: 4px; width: 14px; height: 4px; border-radius: 2px 0 0 2px; background: linear-gradient(180deg, #333, #111); clip-path: polygon(0 50%, 100% 0, 100% 100%); }
+#stylus::after { content: ""; position: absolute; left: 13px; top: 1px; right: 0; height: 10px; border-radius: 5px; background: linear-gradient(180deg, #f4f6f8, #9aa6b4); box-shadow: 0 6px 10px rgba(0, 0, 0, 0.3); }
+.tap { position: absolute; z-index: 40; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; border: 2px solid rgba(26, 90, 208, 0.7); pointer-events: none; animation: tap 0.4s ease-out forwards; }
+@keyframes tap { from { transform: scale(0.3); } to { transform: scale(1.6); opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="dev">
+  <div class="grille"></div><span class="brand">NAVIGO</span><span id="led"></span>
+  <div id="bezel"><div id="scr">
+    <div class="top"><div class="orb" id="startBtn"></div><span class="t" id="title">Today</span><div class="r"><div class="sig"><i style="height:3px"></i><i style="height:5px"></i><i style="height:7px"></i><i style="height:10px"></i></div><span>&#128264;</span><span id="clk">9:41</span></div></div>
+    <div class="app on" id="today"><canvas id="wall" width="480" height="536"></canvas><div style="position:relative" id="trows"></div></div>
+    <div class="app" id="calendar"><div class="hdr"><span>&#9664;</span><span id="calT">October 2003</span><span>&#9654;</span></div><div class="cal" id="cal"></div><div id="agenda" class="list" style="height:auto"></div></div>
+    <div class="app" id="inbox"><div class="hdr"><span>Inbox</span><span id="unread"></span></div><div class="list" id="mails"></div></div>
+    <div class="app" id="mail"><div class="hdr"><span id="mSub"></span><span id="mBack">Done</span></div><div id="msg"></div></div>
+    <div class="app" id="tasks"><div class="hdr"><span>All Tasks</span><span id="tcount"></span></div><div class="list" id="tlist"></div></div>
+    <div class="app" id="notes"><div id="note"></div></div>
+    <div id="sip"><div id="ink"><canvas id="inkc" width="456" height="152" style="width:100%;height:100%"></canvas></div><span id="sipl">write letters here: a single stroke each</span><span id="guess"></span></div>
+    <div id="start"><div data-a="today">Today</div><hr /><div data-a="calendar">Calendar</div><div data-a="inbox">Inbox</div><div data-a="notes">Notes</div><div data-a="tasks">Tasks</div><hr /><div>Settings</div><div>Help</div></div>
+    <div id="bubble"><h4>&#9200; Reminder</h4><div id="bText"></div><div class="bb"><button id="bSnooze">Snooze</button><button id="bDismiss">Dismiss</button></div></div>
+    <div class="bot"><span id="soft1">Calendar</span><span class="kb" id="kbBtn"></span><span id="soft2">Contacts</span></div>
+  </div></div>
+  <div class="keys">
+    <button class="hk" data-a="calendar" style="left:24px;top:30px"><svg viewBox="0 0 20 20"><rect x="2" y="4" width="16" height="14" rx="2" /><rect x="4" y="8" width="12" height="8" fill="#fff" /></svg></button>
+    <button class="hk" data-a="inbox" style="left:68px;top:52px"><svg viewBox="0 0 20 20"><path d="M2 5h16v11H2z" /><path d="M2 5l8 6 8-6" stroke="#fff" fill="none" stroke-width="1.5" /></svg></button>
+    <div id="pad"><b style="left:26px;top:2px" data-d="up">&#9650;</b><b style="left:26px;bottom:2px" data-d="down">&#9660;</b><b style="left:2px;top:26px" data-d="left">&#9664;</b><b style="right:2px;top:26px" data-d="right">&#9654;</b><b style="left:26px;top:26px;border-radius:50%" data-d="ok"></b></div>
+    <button class="hk" data-a="tasks" style="right:68px;top:52px"><svg viewBox="0 0 20 20"><path d="M3 10l4 4 10-10" stroke="#2a4a78" stroke-width="3" fill="none" /></svg></button>
+    <button class="hk" data-a="today" style="right:24px;top:30px"><svg viewBox="0 0 20 20"><path d="M10 3l8 7h-3v7H5v-7H2z" /></svg></button>
+  </div>
+</div>
+<div id="stylus"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+
+// Fit > device scaled to viewport
+let K = 1;
+function fit() { K = Math.min(innerWidth < 600 ? (innerWidth - 16) / 284 : 2.2, (innerHeight - 20) / 520); $('#dev').style.transform = `translate(-50%, -50%) scale(${K})`; }
+addEventListener('resize', fit); fit();
+
+// Wallpaper > painted lake at sunrise
+{
+  const x = $('#wall').getContext('2d'), W = 480, H = 536, hz = H * 0.56;
+  let g = x.createLinearGradient(0, 0, 0, hz); g.addColorStop(0, '#1a5ad0'); g.addColorStop(0.6, '#6fb8f0'); g.addColorStop(1, '#ffe0a8'); x.fillStyle = g; x.fillRect(0, 0, W, hz);
+  const sg = x.createRadialGradient(W * 0.68, hz - 20, 0, W * 0.68, hz - 20, 170); sg.addColorStop(0, 'rgba(255,250,220,1)'); sg.addColorStop(0.15, 'rgba(255,230,160,0.8)'); sg.addColorStop(1, 'rgba(255,230,160,0)'); x.fillStyle = sg; x.fillRect(0, 0, W, H);
+  x.fillStyle = '#2e5a88'; x.beginPath(); x.moveTo(0, hz); for (let i = 0; i <= W; i += 8) x.lineTo(i, hz - 30 - Math.sin(i * 0.015) * 22 - Math.sin(i * 0.05) * 8); x.lineTo(W, hz); x.fill();
+  g = x.createLinearGradient(0, hz, 0, H); g.addColorStop(0, '#3a7ac0'); g.addColorStop(1, '#0a2a5a'); x.fillStyle = g; x.fillRect(0, hz, W, H);
+  for (let i = 0; i < 120; i++) { const y = hz + Math.pow(Math.random(), 1.5) * (H - hz), w = 10 + Math.random() * 60; x.fillStyle = `rgba(255,230,170,${0.5 - (y - hz) / (H - hz) * 0.45})`; x.fillRect(W * 0.68 - w / 2 + (Math.random() - 0.5) * (y - hz) * 1.2, y, w, 2); }
+  x.fillStyle = 'rgba(0,20,60,0.25)'; x.fillRect(0, 0, W, H);
+}
+
+// Data > owner, appointments, mail, tasks
+const NOW = new Date(2003, 9, 23, 9, 41);
+const APPTS = { 23: [['10:00', 'Design review, Room 4'], ['12:30', 'Lunch with Sam'], ['16:00', 'Sync PDA to desktop']], 24: [['09:00', 'Dentist']], 27: [['11:00', 'Quarterly planning']], 29: [['18:00', 'Pottery class']], 31: [['20:00', 'Costume party']], 15: [['14:00', 'Flight to Oslo']], 8: [['10:30', 'Car service']] };
+const MAILS = [{ f: 'Sam Okafor', s: 'Lunch today?', b: 'Hey! Still on for 12:30? The noodle place by the river has a new menu. Bring your PDA, I want to beam you the photos from the trip.', u: 1 }, { f: 'Mira Lindqvist', s: 'Review deck v3', b: 'Attached the updated slides for the 10:00 design review. Main change is the new glossy button set on page 6.', u: 1 }, { f: 'Sync Service', s: 'Your device synced', b: 'Your handheld synchronised 42 items with your desktop at 7:02 AM. Next sync scheduled for 4:00 PM.', u: 0 }];
+const TASKS = [['Buy batteries for the camera', 0], ['Print boarding pass', 0], ['Call the landlord', 1], ['Back up memory card', 0], ['Water the ferns', 1]];
+const ICO = { cal: '<svg viewBox="0 0 14 14"><rect x="1" y="2" width="12" height="11" fill="#1a5ad0"/><rect x="2" y="5" width="10" height="7" fill="#fff"/></svg>', mail: '<svg viewBox="0 0 14 14"><rect x="1" y="3" width="12" height="9" fill="#e8a020"/><path d="M1 3l6 5 6-5" stroke="#fff" fill="none"/></svg>', task: '<svg viewBox="0 0 14 14"><path d="M2 7l3 3 7-7" stroke="#1a9a3a" stroke-width="2.5" fill="none"/></svg>', me: '<svg viewBox="0 0 14 14"><circle cx="7" cy="5" r="3" fill="#4a6a9a"/><path d="M1 13c1-4 11-4 12 0z" fill="#4a6a9a"/></svg>' };
+
+// Apps > Today, Calendar, Inbox, Tasks, Notes
+let app = 'today', selDay = 23, openMail = 0, noteText = 'Shopping\n', snoozed = 0;
+function renderToday() {
+  const unread = MAILS.filter((m) => m.u).length, open = TASKS.filter((t) => !t[1]).length, ap = APPTS[23][0];
+  $('#trows').innerHTML = `<div class="trow date">Thursday, October 23, 2003</div>
+  <div class="trow" data-a="notes"><div class="ic">${ICO.me}</div><div><b>Alex Rivera</b><small>alex.rivera@example.net</small></div></div>
+  <div class="trow" data-a="calendar"><div class="ic">${ICO.cal}</div><div><b>${ap[1]}</b><small>${ap[0]} AM &#183; ${APPTS[23].length} appointments today</small></div></div>
+  <div class="trow" data-a="inbox"><div class="ic">${ICO.mail}</div><div><b>${unread} Unread messages</b><small>Inbox: ${MAILS.length} messages</small></div></div>
+  <div class="trow" data-a="tasks"><div class="ic">${ICO.task}</div><div><b>${open} Active tasks</b><small>${TASKS.find((t) => !t[1])?.[0] ?? 'No tasks'}</small></div></div>`;
+}
+function renderCal() {
+  const first = new Date(2003, 9, 1).getDay(); let h = 'SMTWTFS'.split('').map((d) => `<div class="dw">${d}</div>`).join('');
+  for (let i = 0; i < first; i++) h += `<div class="d mute">${28 + i}</div>`;
+  for (let d = 1; d <= 31; d++) h += `<div class="d${APPTS[d] ? ' ap' : ''}${d === 23 ? ' today' : ''}${d === selDay ? ' sel' : ''}" data-day="${d}">${d}</div>`;
+  for (let i = 1; (first + 31 + i - 1) % 7 !== 0; i++) h += `<div class="d mute">${i}</div>`;
+  $('#cal').innerHTML = h;
+  $('#agenda').innerHTML = `<div class="hdr"><span>October ${selDay}</span><span>${(APPTS[selDay] || []).length} items</span></div>` + ((APPTS[selDay] || []).map(([t, s]) => `<div class="li"><b>${t}</b><span>${s}</span></div>`).join('') || '<div class="li" style="color:#8a96a6">No appointments</div>');
+}
+function renderInbox() { const u = MAILS.filter((m) => m.u).length; $('#unread').textContent = `${u} unread`; $('#mails').innerHTML = MAILS.map((m, i) => `<div class="li${m.u ? ' unread' : ''}" data-m="${i}"><div class="ic" style="width:16px">${ICO.mail}</div><div><span>${m.f}</span><br /><small>${m.s}</small></div></div>`).join(''); }
+function renderTasks() { $('#tcount').textContent = `${TASKS.filter((t) => !t[1]).length} active`; $('#tlist').innerHTML = TASKS.map(([t, d], i) => `<div class="li${d ? ' done' : ''}" data-t="${i}"><input type="checkbox" ${d ? 'checked' : ''} /><span>${t}</span></div>`).join(''); }
+function renderNote() { $('#note').innerHTML = noteText.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '<span class="caret"></span>'; }
+const TITLES = { today: 'Today', calendar: 'Calendar', inbox: 'Inbox', mail: 'Inbox', tasks: 'Tasks', notes: 'Notes' };
+const SOFT = { today: ['Calendar', 'Contacts'], calendar: ['New', 'Menu'], inbox: ['New', 'Menu'], mail: ['Reply', 'Menu'], tasks: ['New', 'Menu'], notes: ['Done', 'Tools'] };
+function go(a) {
+  app = a; document.querySelectorAll('.app').forEach((el) => el.classList.toggle('on', el.id === a)); $('#title').textContent = TITLES[a]; [$('#soft1').textContent, $('#soft2').textContent] = SOFT[a];
+  $('#sip').classList.toggle('on', a === 'notes'); $('#start').style.display = 'none';
+  ({ today: renderToday, calendar: renderCal, inbox: renderInbox, tasks: renderTasks, notes: renderNote, mail: () => {} })[a]();
+}
+$('#trows').onclick = (e) => { const r = e.target.closest('[data-a]'); if (r) go(r.dataset.a); };
+$('#cal').onclick = (e) => { const d = e.target.closest('[data-day]'); if (d) { selDay = +d.dataset.day; renderCal(); } };
+$('#mails').onclick = (e) => { const m = e.target.closest('[data-m]'); if (!m) return; openMail = +m.dataset.m; const ml = MAILS[openMail]; ml.u = 0; $('#mSub').textContent = ml.s; $('#msg').innerHTML = `<b>From:</b> ${ml.f}<br /><b>To:</b> Alex Rivera<br /><br />${ml.b}`; go('mail'); };
+$('#mBack').onclick = () => go('inbox');
+$('#tlist').onclick = (e) => { const t = e.target.closest('[data-t]'); if (t) { TASKS[+t.dataset.t][1] ^= 1; renderTasks(); chime(1); } };
+$('#startBtn').onclick = () => { const s = $('#start'); s.style.display = s.style.display === 'block' ? 'none' : 'block'; };
+$('#start').onclick = (e) => { const d = e.target.closest('[data-a]'); if (d) go(d.dataset.a); };
+$('#soft1').onclick = () => (app === 'today' ? go('calendar') : app === 'notes' ? go('today') : null);
+$('#kbBtn').onclick = () => $('#sip').classList.toggle('on');
+document.querySelectorAll('.hk').forEach((b) => (b.onclick = () => { click(); go(b.dataset.a); }));
+$('#pad').onclick = (e) => {
+  const d = e.target.closest('[data-d]')?.dataset.d; if (!d) return; click();
+  if (app === 'calendar') { selDay = Math.max(1, Math.min(31, selDay + ({ up: -7, down: 7, left: -1, right: 1 }[d] || 0))); renderCal(); }
+  if (app === 'today') { const rows = [...document.querySelectorAll('.trow[data-a]')], i = rows.findIndex((r) => r.classList.contains('hi')); if (d === 'ok' && i >= 0) return go(rows[i].dataset.a); const n = d === 'down' ? i + 1 : d === 'up' ? i - 1 : i; rows.forEach((r, j) => r.classList.toggle('hi', j === (n + rows.length) % rows.length)); }
+};
+setInterval(() => { NOW.setMinutes(NOW.getMinutes() + 1); $('#clk').textContent = `${NOW.getHours() % 12 || 12}:${String(NOW.getMinutes()).padStart(2, '0')}`; }, 6000);
+
+// Recognizer > unistroke templates, resample, aspect-kept scale, nearest match
+const arc = (cx, cy, r, a0, a1, n = 14) => Array.from({ length: n + 1 }, (_, i) => { const a = ((a0 + (a1 - a0) * (i / n)) * Math.PI) / 180; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+const TPL = {
+  A: [[0, 1], [0.5, 0], [1, 1]], C: arc(0.5, 0.5, 0.5, -45, -315), E: [[1, 0.05], [0.3, 0], [0.05, 0.22], [0.45, 0.5], [0.05, 0.78], [0.3, 1], [1, 0.95]], H: [[0, 0], [0, 1], [0, 0.5], [1, 0.5], [1, 1]],
+  I: [[0.5, 0], [0.5, 1]], L: [[0, 0], [0, 1], [0.7, 1]], M: [[0, 1], [0, 0], [0.5, 0.6], [1, 0], [1, 1]], N: [[0, 1], [0, 0], [1, 1], [1, 0]], O: arc(0.5, 0.5, 0.5, -90, -450, 24),
+  S: [...arc(0.5, 0.25, 0.25, -20, -270, 10), ...arc(0.5, 0.75, 0.25, -90, 160, 10)], T: [[0, 0], [1, 0], [0.5, 0], [0.5, 1]], U: [[0, 0], [0, 0.6], ...arc(0.5, 0.6, 0.5, 180, 0, 10), [1, 0]], V: [[0, 0], [0.5, 1], [1, 0]],
+  W: [[0, 0], [0.25, 1], [0.5, 0.35], [0.75, 1], [1, 0]], Z: [[0, 0], [1, 0], [0, 1], [1, 1]], ' ': [[0, 0.5], [1, 0.5]], '\b': [[1, 0.5], [0, 0.5]],
+};
+const NP = 40;
+function densify(p) { const out = []; for (let i = 0; i < p.length - 1; i++) for (let k = 0; k < 8; k++) out.push([p[i][0] + (p[i + 1][0] - p[i][0]) * k / 8, p[i][1] + (p[i + 1][1] - p[i][1]) * k / 8]); out.push(p[p.length - 1]); return out; }
+function resample(pts) {
+  let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  const I = L / (NP - 1), out = [pts[0]], p = pts.map((q) => [...q]); let D = 0;
+  for (let i = 1; i < p.length; i++) { const d = Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]); if (D + d >= I && d > 0) { const t = (I - D) / d, q = [p[i - 1][0] + t * (p[i][0] - p[i - 1][0]), p[i - 1][1] + t * (p[i][1] - p[i - 1][1])]; out.push(q); p.splice(i, 0, q); D = 0; } else D += d; }
+  while (out.length < NP) out.push(p[p.length - 1]); return out.slice(0, NP);
+}
+function norm(pts) { const r = resample(pts), xs = r.map((q) => q[0]), ys = r.map((q) => q[1]), x0 = Math.min(...xs), y0 = Math.min(...ys), s = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0) || 1, cx = (x0 + Math.max(...xs)) / 2, cy = (y0 + Math.max(...ys)) / 2; return r.map(([x, y]) => [(x - cx) / s, (y - cy) / s]); }
+const NT = Object.fromEntries(Object.entries(TPL).map(([k, p]) => [k, norm(densify(p))]));
+function recognize(pts) {
+  let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  if (L < 6) return { ch: '.', d: 0 };
+  const n = norm(pts); let best = null, bd = 1e9;
+  for (const [k, t] of Object.entries(NT)) { let d = 0; for (let i = 0; i < NP; i++) d += Math.hypot(n[i][0] - t[i][0], n[i][1] - t[i][1]); d /= NP; if (d < bd) { bd = d; best = k; } }
+  return { ch: bd < 0.2 ? best : null, d: bd };
+}
+
+// Ink > capture strokes in the input panel
+const ic = $('#inkc'), ix = ic.getContext('2d');
+let stroke = null, fadeT = 0;
+function inkPt(e) { const r = ic.getBoundingClientRect(); return [((e.clientX - r.left) / r.width) * 228, ((e.clientY - r.top) / r.height) * 76]; }
+function drawInk(pts) { ix.clearRect(0, 0, 456, 152); ix.strokeStyle = '#102a50'; ix.lineWidth = 4; ix.lineCap = ix.lineJoin = 'round'; ix.beginPath(); pts.forEach(([x, y], i) => (i ? ix.lineTo(x * 2, y * 2) : ix.moveTo(x * 2, y * 2))); ix.stroke(); }
+ic.onpointerdown = (e) => { ic.setPointerCapture(e.pointerId); stroke = [inkPt(e)]; drawInk(stroke); };
+ic.onpointermove = (e) => { if (stroke) { stroke.push(inkPt(e)); drawInk(stroke); } };
+ic.onpointerup = () => { if (stroke) commit(stroke); stroke = null; };
+function commit(pts) {
+  const { ch } = recognize(pts); $('#guess').textContent = ch === null ? '?' : ch === ' ' ? '␣' : ch === '\b' ? '⌫' : ch;
+  if (ch === '\b') noteText = noteText.slice(0, -1); else if (ch !== null) noteText += ch;
+  renderNote(); click(); fadeT = performance.now(); setTimeout(() => { if (performance.now() - fadeT > 550) { ix.clearRect(0, 0, 456, 152); $('#guess').textContent = ''; } }, 600);
+  return ch;
+}
+
+// Audio > stylus click, chimes
+let ac; const ok = () => ac && ac.state === 'running';
+let touched = false;
+addEventListener('pointerdown', (e) => { if (!ac) ac = new AudioContext(); ac.resume(); if (e.isTrusted) touched = true; }, { capture: true });
+function click() { if (!ok()) return; const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime; o.type = 'square'; o.frequency.value = 2400; g.gain.setValueAtTime(0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.025); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.03); }
+function chime(small) { if (!ok()) return; (small ? [1568] : [1046.5, 1318.5, 1568, 2093]).forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + i * 0.12; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.75); }); }
+
+// Reminder > balloon, LED, snooze
+function remind() { $('#bText').innerHTML = `<b>${APPTS[23][0][1]}</b><br />Today ${APPTS[23][0][0]} AM, in 15 minutes`; $('#bubble').style.display = 'block'; $('#led').classList.add('on'); chime(); }
+$('#bDismiss').onclick = () => { $('#bubble').style.display = 'none'; $('#led').classList.remove('on'); };
+$('#bSnooze').onclick = () => { $('#bubble').style.display = 'none'; snoozed++; setTimeout(remind, 9000); };
+
+// Stylus > cursor follows pointer over the device, tap ripples
+const sty = $('#stylus'), hover = matchMedia('(hover: hover)').matches;
+addEventListener('pointermove', (e) => { if (!hover) return; const r = $('#scr').getBoundingClientRect(), inside = e.clientX > r.left && e.clientX < r.right && e.clientY > r.top && e.clientY < r.bottom; sty.style.display = inside ? 'block' : 'none'; sty.style.left = `${e.clientX}px`; sty.style.top = `${e.clientY - 6}px`; });
+$('#scr').addEventListener('pointerdown', (e) => { const r = $('#scr').getBoundingClientRect(), t = Object.assign(document.createElement('i'), { className: 'tap' }); t.style.left = `${(e.clientX - r.left) / K}px`; t.style.top = `${(e.clientY - r.top) / K}px`; $('#scr').appendChild(t); setTimeout(() => t.remove(), 450); click(); });
+function fakeTap(el) { const r = el.getBoundingClientRect(), s = $('#scr').getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2; if (hover) { sty.style.display = 'block'; sty.style.left = `${x}px`; sty.style.top = `${y - 6}px`; } const t = Object.assign(document.createElement('i'), { className: 'tap' }); t.style.left = `${(x - s.left) / K}px`; t.style.top = `${(y - s.top) / K}px`; $('#scr').appendChild(t); setTimeout(() => t.remove(), 450); el.click(); }
+
+// Attract > write strokes through the recognizer
+function strokeFor(ch) { const p = densify(TPL[ch]), sx = ch === ' ' || ch === '\b' ? 120 : 34 + Math.random() * 10, sy = ch === ' ' || ch === '\b' ? 4 : 44 + Math.random() * 10, ox = 114 - sx / 2 + (Math.random() - 0.5) * 30, oy = 38 - sy / 2; return p.map(([x, y]) => [ox + x * sx + (Math.random() - 0.5) * 1.6, oy + y * sy + (Math.random() - 0.5) * 1.6]); }
+async function write(text) {
+  for (const ch of text.toUpperCase()) {
+    if (touched && !capture) return; const pts = strokeFor(TPL[ch] ? ch : ' '), ir = ic.getBoundingClientRect();
+    for (let i = 1; i <= pts.length; i += 2) { drawInk(pts.slice(0, i)); if (hover) { sty.style.display = 'block'; sty.style.left = `${ir.left + (pts[i - 1][0] / 228) * ir.width}px`; sty.style.top = `${ir.top + (pts[i - 1][1] / 76) * ir.height - 6}px`; } await new Promise((r) => setTimeout(r, capture ? 0 : 14)); }
+    commit(pts); await new Promise((r) => setTimeout(r, capture ? 0 : 420));
+  }
+}
+const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
+async function attract() {
+  for (;;) {
+    for (const [d, fn] of [[1.6, () => remind()], [2.2, () => fakeTap($('#bDismiss'))], [1.4, () => fakeTap(document.querySelector('.trow[data-a="calendar"]'))], [1.6, () => fakeTap(document.querySelector('[data-day="24"]'))], [1.6, () => fakeTap(document.querySelector('[data-day="31"]'))], [1.6, () => fakeTap($('#startBtn'))], [1.2, () => fakeTap(document.querySelector('#start [data-a="inbox"]'))], [1.6, () => fakeTap(document.querySelector('[data-m="0"]'))], [2.4, () => fakeTap($('#mBack'))], [1.4, () => fakeTap(document.querySelector('.hk[data-a="tasks"]'))], [1.4, () => fakeTap(document.querySelector('[data-t="0"]'))], [1.4, () => fakeTap($('#startBtn'))], [1.0, () => fakeTap(document.querySelector('#start [data-a="notes"]'))]]) { await wait(d); if (touched) return; fn(); }
+    await wait(0.8); if (touched) return; noteText = noteText.endsWith('\n') ? noteText : `${noteText}\n`; renderNote(); await write('LUNCH AT NOON'); await wait(2.5); if (touched) return;
+    MAILS[0].u = 1; TASKS[0][1] = 0; noteText = 'Shopping\n'; selDay = 23; go('today'); await wait(1.5);
+  }
+}
+renderToday();
+if (capture) { remind(); } else attract();
+
+window.__pda = { app: go, write, recognize: (pts) => recognize(pts).ch, strokeFor, state: () => ({ app, note: noteText, selDay, unread: MAILS.filter((m) => m.u).length, tasks: TASKS.filter((t) => !t[1]).length, bubble: $('#bubble').style.display === 'block' }) };
+</script>
+</body>
+</html>

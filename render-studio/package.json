@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node backend/start-server.js",
     "dev": "node --watch backend/start-server.js",
-    "capture": "node backend/capture-demos.js"
+    "capture": "node backend/capture-demos.js",
+    "instagram": "node backend/capture-instagram-reels.js"
   },
   "engines": {
     "node": ">=20"

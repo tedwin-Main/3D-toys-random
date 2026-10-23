@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Corporate People Site</title>
+<meta name="category" content="aero" />
+<meta name="style" content="humanity" />
+<meta name="order" content="40" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="canvas 2D procedural people, animated globe arcs, glossy CSS, IntersectionObserver counters, carousel" />
+<meta name="description" content="Humanity Aero, the stock-photo side of Frutiger: a 2008 corporate brochure site for a fictional global firm, with smiling, diverse, procedurally drawn business people waving, walking and shaking hands on a gleaming white plaza under glass towers, a glossy globe stitched together by animated connection arcs, the 'Connecting people' tagline, glossy nav pills, reflective feature icons, counting statistics, a team carousel and rotating testimonial bubbles. Hard because every person is drawn from parameters (skin tone, hair style, outfit, prop, pose) with walking and waving cycles, scaled by depth on the plaza, and the whole page stays one file with no images."/>
+<meta name="prompt" content="Build a 2008 Humanity Aero corporate brochure site in one HTML file for a fictional global company: a canvas hero with a white plaza, glass towers, a glossy globe with animated dashed connection arcs and diverse smiling vector business people drawn procedurally from parameters (skin, hair, outfit, prop) who wave, walk and shake hands; a glossy header with nav pills, a 'Connecting people' tagline and gel button, reflective feature icons, counting statistics, a team carousel with procedural portraits, rotating testimonial bubbles and a gradient footer. Make it responsive and auto-tour when idle." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/humanity-corporate-site.html
+ * PURPOSE: Humanity Aero brochure site: procedural vector people on a white plaza, globe arcs, glossy corporate sections
+ * UI: Render Studio > Frutiger Aero > Humanity Aero > Corporate People Site
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__humanity (go, next, people)
+ */
+:root { --blue: #1f7ad6; --sky: #6cc4f5; --green: #59b947; --ink: #24405c; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; font: 14px/1.55 "Segoe UI", Tahoma, Verdana, sans-serif; color: var(--ink); background: linear-gradient(180deg, #eaf5fd, #fff 420px) #fff; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+header { position: sticky; top: 0; z-index: 5; background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(240, 248, 255, 0.95)); border-bottom: 1px solid #cfe2f3; box-shadow: 0 2px 10px rgba(30, 90, 150, 0.08); }
+header .wrap { display: flex; align-items: center; gap: 18px; height: 66px; }
+.logo { display: flex; align-items: center; gap: 9px; font-size: 21px; font-weight: 700; letter-spacing: -0.5px; color: #1b5fa8; white-space: nowrap; }
+.logo b { color: var(--green); font-weight: 400; }
+.logo svg { width: 36px; height: 36px; }
+nav { display: flex; gap: 4px; margin-left: auto; }
+nav a { padding: 7px 14px; border-radius: 999px; color: var(--ink); text-decoration: none; font-weight: 600; font-size: 13px; }
+nav a:hover, nav a.on { color: #fff; background: linear-gradient(180deg, #7fcaf6, #2b8ee0 55%, #1d78cc); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 5px rgba(30, 110, 200, 0.35); }
+.search { border: 1px solid #b9d3ea; border-radius: 999px; padding: 6px 12px; width: 150px; font: inherit; background: #fff; }
+#hero { position: relative; margin: 22px auto 0; border-radius: 22px; overflow: hidden; box-shadow: 0 16px 40px rgba(30, 90, 150, 0.18); border: 1px solid #fff; }
+#heroCv { display: block; width: 100%; height: 470px; }
+.tag { position: absolute; left: 40px; top: 36px; max-width: 470px; }
+.tag h1 { margin: 0; font-size: 42px; line-height: 1.05; font-weight: 300; color: #fff; text-shadow: 0 2px 10px rgba(0, 60, 120, 0.35); letter-spacing: -1px; }
+.tag h1 b { font-weight: 700; }
+.tag p { margin: 12px 0 18px; font-size: 16px; color: #f2fbff; text-shadow: 0 1px 6px rgba(0, 60, 120, 0.4); }
+.gel { display: inline-block; padding: 11px 26px; border-radius: 999px; color: #fff; font-weight: 700; text-decoration: none; background: linear-gradient(180deg, #a6e27a, #59b947 50%, #3f9a31); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 4px 12px rgba(60, 140, 40, 0.4); border: 1px solid #3d8f30; cursor: pointer; font-size: 15px; }
+section { padding: 46px 0 10px; }
+h2 { font-size: 28px; font-weight: 300; margin: 0 0 22px; color: #1b5fa8; }
+h2 b { font-weight: 700; }
+.feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.feat { padding: 22px; border-radius: 18px; background: linear-gradient(180deg, #fff, #f1f8fe); border: 1px solid #d7e8f6; box-shadow: 0 6px 18px rgba(30, 90, 150, 0.08); }
+.feat .ic { width: 64px; height: 64px; border-radius: 18px; margin-bottom: 10px; position: relative; box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); -webkit-box-reflect: below 2px linear-gradient(transparent 60%, rgba(255, 255, 255, 0.35)); }
+.feat .ic::after { content: ""; position: absolute; inset: 3px 3px 50% 3px; border-radius: 15px 15px 40% 40%; background: linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.1)); }
+.feat .ic svg { position: absolute; inset: 14px; width: 36px; height: 36px; stroke: #fff; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.feat h3 { margin: 18px 0 6px; font-size: 18px; color: var(--ink); }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; text-align: center; padding: 26px; border-radius: 18px; color: #fff; background: linear-gradient(180deg, #4bb0ef, #1f7ad6); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+.stats b { display: block; font-size: 34px; font-weight: 300; }
+#team { position: relative; overflow: hidden; }
+#track { display: flex; gap: 18px; transition: transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.member { flex: none; width: 200px; text-align: center; padding: 16px; border-radius: 18px; background: #fff; border: 1px solid #d7e8f6; box-shadow: 0 6px 14px rgba(30, 90, 150, 0.08); }
+.member canvas { width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(180deg, #cdeafe, #fff); box-shadow: 0 0 0 4px #fff, 0 0 0 5px #cfe2f3; }
+.member h4 { margin: 10px 0 0; font-size: 15px; }
+.member small { color: #6b86a0; }
+.arrows { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.arrows button { width: 36px; height: 36px; border-radius: 50%; border: 1px solid #b9d3ea; background: linear-gradient(#fff, #e6f2fc); color: var(--blue); font-size: 18px; cursor: pointer; }
+#quotes { position: relative; height: 150px; }
+.q { position: absolute; inset: 0 auto auto 0; max-width: 640px; padding: 20px 26px; border-radius: 22px; background: #fff; border: 1px solid #d7e8f6; box-shadow: 0 8px 22px rgba(30, 90, 150, 0.1); font-size: 17px; font-style: italic; opacity: 0; transform: translateY(10px); transition: opacity 0.6s, transform 0.6s; }
+.q::after { content: ""; position: absolute; left: 40px; bottom: -14px; border: 14px solid transparent; border-top-color: #fff; border-bottom: 0; filter: drop-shadow(0 2px 0 #d7e8f6); }
+.q.on { opacity: 1; transform: none; }
+.q small { display: block; font-style: normal; margin-top: 8px; color: #6b86a0; font-size: 13px; }
+footer { margin-top: 50px; padding: 30px 0; color: #dff1ff; background: linear-gradient(180deg, #2b8ee0, #155a9e); font-size: 13px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; }
+footer a { color: #fff; margin-right: 14px; }
+@media (max-width: 760px) {
+  nav, .search { display: none; }
+  #heroCv { height: 520px; }
+  .tag { left: 20px; right: 20px; top: 22px; }
+  .tag h1 { font-size: 30px; }
+  .tag p { font-size: 14px; margin: 8px 0 12px; }
+  .gel { padding: 9px 20px; font-size: 14px; }
+  .feats { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="logo"><svg viewBox="0 0 40 40"><defs><radialGradient id="lg" cx="0.35" cy="0.3"><stop offset="0" stop-color="#bfe8ff"/><stop offset="1" stop-color="#1f7ad6"/></radialGradient></defs><circle cx="20" cy="20" r="16" fill="url(#lg)"/><path d="M5 24c10-8 22-10 32-6" stroke="#7ad35f" stroke-width="4" fill="none" stroke-linecap="round"/><ellipse cx="15" cy="12" rx="8" ry="4" fill="rgba(255,255,255,0.6)"/></svg>Lumina<b>Global</b></div>
+  <nav><a class="on" href="#top">Home</a><a href="#solutions">Solutions</a><a href="#about">About Us</a><a href="#team">Careers</a><a href="#contact">Contact</a></nav>
+  <input class="search" placeholder="Search..." />
+</div></header>
+<div class="wrap" id="top">
+  <div id="hero"><canvas id="heroCv"></canvas>
+    <div class="tag"><h1><b>Connecting people.</b><br />Empowering tomorrow.</h1><p>Together with partners in 120 countries, we build sustainable solutions for a brighter, more connected world.</p><a class="gel" href="#solutions">Discover our solutions</a></div>
+  </div>
+</div>
+<div class="wrap">
+  <section id="solutions"><h2>Our <b>solutions</b></h2><div class="feats">
+    <div class="feat"><div class="ic" style="background:linear-gradient(160deg,#7fd0ff,#1f7ad6)"><svg viewBox="0 0 36 36"><circle cx="12" cy="12" r="5"/><circle cx="25" cy="13" r="4"/><path d="M3 30c1-7 5-10 9-10s8 3 9 10M19 22c2-2 4-3 6-3 4 0 7 3 8 9"/></svg></div><h3>Collaboration</h3>Bringing teams together across time zones with seamless, people-first technology.</div>
+    <div class="feat"><div class="ic" style="background:linear-gradient(160deg,#b6ef8a,#3f9a31)"><svg viewBox="0 0 36 36"><path d="M8 28C8 14 18 6 30 6c0 13-8 22-22 22z"/><path d="M8 28l12-12"/></svg></div><h3>Sustainability</h3>Greener operations and clean energy partnerships for the communities we serve.</div>
+    <div class="feat"><div class="ic" style="background:linear-gradient(160deg,#ffd27a,#f08a1c)"><svg viewBox="0 0 36 36"><path d="M18 4a9 9 0 0 1 5 16v4h-10v-4A9 9 0 0 1 18 4zM14 29h8M15 33h6"/></svg></div><h3>Innovation</h3>Ideas that turn tomorrow's challenges into today's opportunities.</div>
+  </div></section>
+  <section id="about"><div class="stats"><div><b data-n="120">0</b>countries</div><div><b data-n="45000">0</b>employees</div><div><b data-n="98">0</b>% client satisfaction</div><div><b data-n="25">0</b>years of trust</div></div></section>
+  <section id="team"><h2>Meet our <b>people</b></h2><div id="track"></div><div class="arrows"><button id="prev">‹</button><button id="next">›</button></div></section>
+  <section id="contact"><h2>What our <b>partners</b> say</h2><div id="quotes"></div></section>
+</div>
+<footer><div class="wrap"><div><a href="#top">Home</a><a href="#solutions">Solutions</a><a href="#about">About</a><a href="#contact">Contact</a></div><div>© 2008 Lumina Global Solutions · Terms · Privacy</div></div></footer>
+<script>
+const $ = (s) => document.querySelector(s);
+const SKIN = ['#f6d3b3', '#e8b48d', '#c98d62', '#a5683f', '#7a4a2a', '#5a3620'], HAIR = ['#2a1b12', '#5b3a1e', '#c99a3d', '#1a1a1a', '#8a5a33', '#d9d2c5'];
+const SHIRT = ['#1f7ad6', '#ffffff', '#59b947', '#f08a1c', '#7a5ad8', '#e8577a', '#3fb8c4', '#2b3f5c'];
+const rnd = ((s) => () => ((s = (s * 16807) % 2147483647) / 2147483647))(2008);
+const pk = (a) => a[Math.floor(rnd() * a.length)];
+
+// People > vector figure from parameters, pose by time
+function person(g, p, x, y, s, t) {
+  const ph = t * (p.walk ? 7 : 2) + p.ph, bob = p.walk ? Math.abs(Math.sin(ph)) * 2 * s : Math.sin(ph) * 0.8 * s;
+  g.save(); g.translate(x, y); g.scale(p.dir * s, s);
+  g.fillStyle = 'rgba(40,80,120,0.16)'; g.beginPath(); g.ellipse(0, 0, 16, 4, 0, 0, Math.PI * 2); g.fill();
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  // legs
+  const sw = p.walk ? Math.sin(ph) * 9 : 0;
+  g.strokeStyle = p.pants; g.lineWidth = 7;
+  if (p.skirt) { g.fillStyle = p.pants; g.beginPath(); g.moveTo(-9, -40 - bob); g.lineTo(9, -40 - bob); g.lineTo(12, -22 - bob); g.lineTo(-12, -22 - bob); g.fill(); g.strokeStyle = p.skin; g.lineWidth = 5; }
+  g.beginPath(); g.moveTo(-4, -38 - bob); g.lineTo(-4 + sw, -2); g.moveTo(4, -38 - bob); g.lineTo(4 - sw, -2); g.stroke();
+  g.strokeStyle = '#2b2b33'; g.lineWidth = 6; g.beginPath(); g.moveTo(-6 + sw, -1); g.lineTo(-1 + sw, -1); g.moveTo(2 - sw, -1); g.lineTo(7 - sw, -1); g.stroke();
+  // torso
+  const ty = -42 - bob; g.fillStyle = p.shirt; g.beginPath(); g.roundRect(-12, ty - 30, 24, 34, 9); g.fill();
+  if (p.jacket) { g.fillStyle = p.jacket; g.beginPath(); g.roundRect(-12, ty - 30, 9, 34, [9, 0, 0, 9]); g.roundRect(3, ty - 30, 9, 34, [0, 9, 9, 0]); g.fill(); }
+  if (p.tie) { g.fillStyle = p.tie; g.beginPath(); g.moveTo(-2, ty - 28); g.lineTo(2, ty - 28); g.lineTo(3, ty - 10); g.lineTo(0, ty - 6); g.lineTo(-3, ty - 10); g.fill(); }
+  // arms
+  g.strokeStyle = p.jacket || p.shirt; g.lineWidth = 7;
+  const arm = (side, ang, bend) => { const sx = side * 11, sy = ty - 25, ex = sx + Math.sin(ang) * 13 * side, ey = sy + Math.cos(ang) * 13, hx = ex + Math.sin(ang + bend * side) * 12 * side, hy = ey + Math.cos(ang + bend * side) * 12; g.strokeStyle = p.jacket || p.shirt; g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.lineTo(hx, hy); g.stroke(); g.fillStyle = p.skin; g.beginPath(); g.arc(hx, hy, 3.6, 0, Math.PI * 2); g.fill(); return [hx, hy]; };
+  if (p.pose === 'wave') { arm(-1, 0.2 + (p.walk ? Math.sin(ph) * 0.4 : 0), 0.1); arm(1, Math.PI - 0.5, -0.6 + Math.sin(t * 8 + p.ph) * 0.5); }
+  else if (p.pose === 'shake') { arm(-1, 0.15, 0.1); arm(1, 1.0, 0.3 + Math.sin(t * 6) * 0.1); }
+  else { const a = p.walk ? Math.sin(ph) * 0.5 : 0.15; arm(-1, 0.15 + a, 0.15); const [hx, hy] = arm(1, 0.15 - a, p.prop ? 1.1 : 0.15);
+    if (p.prop === 'laptop') { g.fillStyle = '#c9d3dd'; g.fillRect(hx - 2, hy - 10, 16, 11); g.fillStyle = '#7fd0ff'; g.fillRect(hx, hy - 8, 12, 7); }
+    else if (p.prop === 'coffee') { g.fillStyle = '#fff'; g.fillRect(hx - 3, hy - 9, 7, 9); g.fillStyle = '#8a5a33'; g.fillRect(hx - 3, hy - 6, 7, 3); }
+    else if (p.prop === 'folder') { g.fillStyle = '#59b947'; g.fillRect(hx - 2, hy - 13, 6, 16); } }
+  // head
+  const hy0 = ty - 42; g.fillStyle = p.skin; g.fillRect(-3.5, hy0 + 6, 7, 8); g.beginPath(); g.arc(0, hy0, 11, 0, Math.PI * 2); g.fill();
+  g.fillStyle = p.hairC;
+  if (p.hair === 'short') { g.beginPath(); g.arc(0, hy0 - 2, 11.5, Math.PI * 1.05, Math.PI * 1.95); g.fill(); g.fillRect(-11, hy0 - 4, 4, 5); }
+  else if (p.hair === 'long') { g.beginPath(); g.arc(0, hy0 - 1, 12.5, Math.PI * 0.95, Math.PI * 2.05); g.fill(); g.fillRect(-12.5, hy0 - 1, 6, 20); g.fillRect(6.5, hy0 - 1, 6, 20); }
+  else if (p.hair === 'bun') { g.beginPath(); g.arc(0, hy0 - 2, 11.5, Math.PI, Math.PI * 2); g.fill(); g.beginPath(); g.arc(-7, hy0 - 12, 6, 0, Math.PI * 2); g.fill(); }
+  else if (p.hair === 'curly') { for (let k = 0; k < 7; k++) { g.beginPath(); g.arc(-10 + k * 3.4, hy0 - 8 - Math.sin(k) * 2, 5, 0, Math.PI * 2); g.fill(); } }
+  else if (p.hair === 'hijab') { g.fillStyle = p.scarf; g.beginPath(); g.arc(0, hy0, 13.5, Math.PI * 0.75, Math.PI * 2.25); g.lineTo(9, hy0 + 18); g.lineTo(-9, hy0 + 18); g.fill(); g.fillStyle = p.skin; g.beginPath(); g.ellipse(1, hy0 + 1.5, 8, 9.5, 0, 0, Math.PI * 2); g.fill(); }
+  // face
+  g.fillStyle = '#2b2b33'; g.beginPath(); g.arc(3.5, hy0 - 1, 1.3, 0, Math.PI * 2); g.arc(8, hy0 - 1, 1.3, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#a0413a'; g.lineWidth = 1.6; g.beginPath(); g.arc(5.5, hy0 + 3, 3.5, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+  g.fillStyle = 'rgba(255,120,120,0.25)'; g.beginPath(); g.arc(9.5, hy0 + 2.5, 2.2, 0, Math.PI * 2); g.fill();
+  g.restore();
+}
+function makePerson(over = {}) {
+  const hair = pk(['short', 'short', 'long', 'bun', 'curly', 'hijab']), femme = hair === 'long' || hair === 'bun' || hair === 'hijab';
+  return { skin: pk(SKIN), hairC: pk(HAIR), hair, shirt: pk(SHIRT), jacket: rnd() < 0.5 ? pk(['#2b3f5c', '#3c4d63', '#5a6f86', '#e9eef3']) : null, tie: !femme && rnd() < 0.5 ? pk(['#e8577a', '#1f7ad6', '#59b947']) : null, pants: pk(['#2b3f5c', '#3a3a44', '#5a6f86', '#c9b79a']), skirt: femme && rnd() < 0.6, scarf: pk(['#5ab1e0', '#e8577a', '#59b947', '#f0a83c']), prop: pk([null, null, 'laptop', 'coffee', 'folder']), pose: 'stand', walk: false, dir: 1, ph: rnd() * 6, ...over };
+}
+
+// Hero > sky, glass towers, plaza, globe with arcs, crowd
+const cv = $('#heroCv'), g = cv.getContext('2d');
+let W = 0, H = 0;
+const crowd = [];
+function setup() {
+  crowd.length = 0;
+  const spots = [[0.12, 0.84, 'wave'], [0.25, 0.74, 'stand'], [0.47, 0.88, 'shake', 1], [0.53, 0.88, 'shake', -1], [0.7, 0.78, 'stand'], [0.83, 0.9, 'wave'], [0.36, 0.7, 'stand'], [0.92, 0.72, 'stand']];
+  spots.forEach(([x, y, pose, dir]) => crowd.push(makePerson({ x, y, pose, dir: dir ?? (x > 0.5 ? -1 : 1) })));
+  for (let i = 0; i < 4; i++) crowd.push(makePerson({ x: rnd(), y: 0.66 + rnd() * 0.3, walk: true, dir: rnd() < 0.5 ? -1 : 1, v: 0.025 + rnd() * 0.02, pose: rnd() < 0.3 ? 'wave' : 'stand' }));
+}
+const ARCS = Array.from({ length: 7 }, () => [rnd() * Math.PI * 2, rnd() * 1.2 - 0.6, rnd() * Math.PI * 2, rnd() * 1.2 - 0.6, rnd() * 3]);
+function resize() { const r = cv.getBoundingClientRect(), d = Math.min(2, devicePixelRatio); W = r.width; H = r.height; cv.width = W * d; cv.height = H * d; g.setTransform(d, 0, 0, d, 0, 0); }
+function hero(t) {
+  const narrow = W < 700, sky = g.createLinearGradient(0, 0, 0, H * 0.62); sky.addColorStop(0, '#2f9ae8'); sky.addColorStop(1, '#bfe8ff'); g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  const fl = g.createRadialGradient(W * 0.72, H * 0.1, 0, W * 0.72, H * 0.1, W * 0.5); fl.addColorStop(0, 'rgba(255,255,255,0.75)'); fl.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = fl; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(255,255,255,0.85)'; for (let i = 0; i < 5; i++) { const x = ((i * 0.27 + t * 0.006) % 1.3 - 0.15) * W, y = H * (0.12 + (i % 3) * 0.07); g.beginPath(); g.ellipse(x, y, 70, 14, 0, 0, Math.PI * 2); g.ellipse(x + 30, y - 8, 40, 14, 0, 0, Math.PI * 2); g.fill(); }
+  // towers
+  const hz = H * 0.6;
+  [[0.04, 0.3, 0.08], [0.13, 0.18, 0.07], [0.56, 0.26, 0.06], [0.63, 0.12, 0.09], [0.74, 0.22, 0.07], [0.87, 0.16, 0.1]].forEach(([x, top, w], i) => {
+    const X = x * W, Y = narrow ? H * 0.34 + top * H * 0.5 : top * H, Wd = w * W, tg = g.createLinearGradient(X, 0, X + Wd, 0); tg.addColorStop(0, 'rgba(120,190,235,0.85)'); tg.addColorStop(0.5, 'rgba(210,240,255,0.9)'); tg.addColorStop(1, 'rgba(90,160,215,0.85)');
+    g.fillStyle = tg; g.fillRect(X, Y, Wd, hz - Y); g.strokeStyle = 'rgba(255,255,255,0.5)'; g.lineWidth = 1;
+    for (let yy = Y + 10; yy < hz; yy += 12) { g.beginPath(); g.moveTo(X, yy); g.lineTo(X + Wd, yy); g.stroke(); }
+    g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.moveTo(X, Y); g.lineTo(X + Wd * 0.45, Y); g.lineTo(X, Y + (hz - Y) * 0.5); g.fill();
+  });
+  // plaza
+  const pg = g.createLinearGradient(0, hz, 0, H); pg.addColorStop(0, '#e8f2f8'); pg.addColorStop(1, '#ffffff'); g.fillStyle = pg; g.fillRect(0, hz, W, H - hz);
+  g.strokeStyle = 'rgba(150,185,210,0.35)'; g.lineWidth = 1;
+  for (let i = -12; i <= 12; i++) { g.beginPath(); g.moveTo(W / 2 + i * W * 0.02, hz); g.lineTo(W / 2 + i * W * 0.16, H); g.stroke(); }
+  for (let k = 1; k < 8; k++) { const yy = hz + (H - hz) * Math.pow(k / 8, 1.8); g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke(); }
+  const gl = g.createLinearGradient(0, hz, 0, hz + 30); gl.addColorStop(0, 'rgba(255,255,255,0.9)'); gl.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gl; g.fillRect(0, hz, W, 30);
+  // globe
+  const R = narrow ? W * 0.15 : H * 0.2, gx = narrow ? W * 0.8 : W * 0.82, gy = narrow ? H * 0.6 : H * 0.34;
+  const og = g.createRadialGradient(gx - R * 0.35, gy - R * 0.4, R * 0.1, gx, gy, R); og.addColorStop(0, '#d8f3ff'); og.addColorStop(0.45, '#3aa5ec'); og.addColorStop(1, '#0d4f9a');
+  g.save(); g.shadowColor = 'rgba(0,60,130,0.35)'; g.shadowBlur = 30; g.fillStyle = og; g.beginPath(); g.arc(gx, gy, R, 0, Math.PI * 2); g.fill(); g.restore();
+  g.save(); g.beginPath(); g.arc(gx, gy, R, 0, Math.PI * 2); g.clip(); g.fillStyle = 'rgba(120,215,90,0.85)';
+  const proj = (lon, lat) => { const l = lon + t * 0.25, c = Math.cos(lat); return [gx + Math.sin(l) * c * R, gy - Math.sin(lat) * R, Math.cos(l) * c]; };
+  [[0.3, 0.5, 0.5], [1.4, 0.2, 0.6], [2.6, -0.3, 0.45], [3.7, 0.6, 0.55], [4.6, -0.2, 0.5], [5.6, 0.35, 0.4]].forEach(([lon, lat, s]) => { for (let k = 0; k < 9; k++) { const [x, y, z] = proj(lon + Math.sin(k * 2.1) * s * 0.6, lat + Math.cos(k * 1.7) * s * 0.5); if (z > 0) { g.beginPath(); g.arc(x, y, R * 0.11 * z, 0, Math.PI * 2); g.fill(); } } });
+  g.fillStyle = 'rgba(255,255,255,0.55)'; g.beginPath(); g.ellipse(gx - R * 0.25, gy - R * 0.5, R * 0.5, R * 0.25, -0.4, 0, Math.PI * 2); g.fill(); g.restore();
+  // arcs
+  g.lineWidth = 2; g.setLineDash([6, 6]); g.lineDashOffset = -t * 30;
+  ARCS.forEach(([l1, a1, l2, a2, off]) => { const p1 = proj(l1, a1), p2 = proj(l2, a2); if (p1[2] < 0 || p2[2] < 0) return; const mx = (p1[0] + p2[0]) / 2, my = (p1[1] + p2[1]) / 2, dx = mx - gx, dy = my - gy, k = 1.5; g.strokeStyle = 'rgba(255,240,140,0.95)'; g.beginPath(); g.moveTo(p1[0], p1[1]); g.quadraticCurveTo(gx + dx * k * 1.4, gy + dy * k * 1.4 - R * 0.2, p2[0], p2[1]); g.stroke(); [p1, p2].forEach(([x, y]) => { g.fillStyle = '#fff6b0'; g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill(); }); });
+  g.setLineDash([]);
+  g.strokeStyle = 'rgba(255,255,255,0.6)'; g.lineWidth = 1.5; g.beginPath(); g.ellipse(gx, gy, R * 1.35, R * 0.32, -0.25, 0, Math.PI * 2); g.stroke();
+  // crowd by depth
+  const dt = 1 / 60;
+  crowd.forEach((p) => { if (p.walk) { p.x += p.v * p.dir * dt; if (p.x > 1.08) p.x = -0.08; if (p.x < -0.08) p.x = 1.08; } });
+  [...crowd].sort((a, b) => a.y - b.y).forEach((p) => { const y = hz + (H - hz) * ((p.y - 0.6) / 0.4) * 0.95, s = (narrow ? 0.75 : 1) * (0.55 + (p.y - 0.6) * 2.4); person(g, p, p.x * W, y, s, t); });
+}
+
+// Team > carousel with procedural portraits
+const TEAM = [['Amara Okafor', 'Chief Executive'], ['Lucas Moreau', 'Head of Design'], ['Mei Tanaka', 'Sustainability Lead'], ['Diego Alvarez', 'Partner Success'], ['Fatima Rahman', 'Engineering'], ['Noah Becker', 'Operations'], ['Priya Sharma', 'Research'], ['Kofi Mensah', 'Community']];
+TEAM.forEach(([n, r]) => { const el = document.createElement('div'); el.className = 'member'; el.innerHTML = `<canvas width="240" height="240"></canvas><h4>${n}</h4><small>${r}</small>`; $('#track').append(el); const c = el.querySelector('canvas').getContext('2d'); c.scale(2, 2); person(c, makePerson({ prop: null, pose: 'stand' }), 60, 205, 1.9, 0); });
+let tI = 0;
+function next(d = 1) { const vis = Math.max(1, Math.floor($('#team').clientWidth / 218)); tI = (tI + d + (TEAM.length - vis + 1)) % (TEAM.length - vis + 1); $('#track').style.transform = `translateX(${-tI * 218}px)`; }
+$('#next').onclick = () => { input(); next(1); }; $('#prev').onclick = () => { input(); next(-1); };
+
+// Quotes > rotating testimonial bubbles
+const Q = [['Working with Lumina felt like joining one big, global family.', 'Sofia L., Partner, Coral Bay'], ['Their people-first approach transformed how our teams connect.', 'James K., Director, Harbour City'], ['Sustainable, innovative and always smiling. Highly recommended!', 'Aiko S., Founder, Pine Valley']];
+Q.forEach(([q, w], i) => $('#quotes').insertAdjacentHTML('beforeend', `<div class="q${i ? '' : ' on'}">"${q}"<small>${w}</small></div>`));
+let qI = 0; setInterval(() => { const qs = document.querySelectorAll('.q'); qs[qI].classList.remove('on'); qI = (qI + 1) % qs.length; qs[qI].classList.add('on'); }, 4500);
+
+// Stats > count up when visible
+const countUp = (b) => { const n = +b.dataset.n, t0 = performance.now(); const f = (now) => { const k = Math.min(1, (now - t0) / 1600); b.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))).toLocaleString('en-US'); if (k < 1) requestAnimationFrame(f); }; requestAnimationFrame(f); };
+const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { io.unobserve(e.target); countUp(e.target); } }));
+document.querySelectorAll('.stats b').forEach((b) => io.observe(b));
+
+// Nav > highlight section in view
+const secs = ['top', 'solutions', 'about', 'team', 'contact'].map((id) => document.getElementById(id));
+addEventListener('scroll', () => { let cur = 0; secs.forEach((s, i) => { if (s.getBoundingClientRect().top < 140) cur = i; }); document.querySelectorAll('nav a').forEach((a, i) => a.classList.toggle('on', i === cur)); });
+
+// Attract > slow tour of the page while idle
+let lastInput = -1e9, tourI = 0, nextTour = 9000, nextCar = 5000;
+function input() { lastInput = performance.now(); }
+['pointerdown', 'wheel', 'keydown', 'touchstart'].forEach((ev) => addEventListener(ev, input, { passive: true }));
+function go(i) { const el = secs[(i + secs.length) % secs.length]; scrollTo({ top: el.id === 'top' ? 0 : el.offsetTop - 80, behavior: 'smooth' }); }
+
+setup(); resize(); addEventListener('resize', resize);
+function loop(now) {
+  hero(now / 1000);
+  if (now - lastInput > 9000) {
+    if (now > nextTour) { nextTour = now + 4500; go(++tourI % secs.length); }
+    if (now > nextCar) { nextCar = now + 3000; next(1); }
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__humanity = { go, next, people: () => crowd.length };
+</script>
+</body>
+</html>

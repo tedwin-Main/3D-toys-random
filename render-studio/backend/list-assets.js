@@ -24,11 +24,31 @@ export const CATEGORIES = [
   { id: 'generators', label: 'Generators', group: 'live' },
   { id: 'apps', label: 'Apps & UI', group: 'live' },
   { id: 'algorithms', label: 'Algorithms', group: 'live' },
+  { id: 'aero', label: 'Frutiger Aero', group: 'live', subs: [
+    { id: 'core', label: 'Core Aero' }, { id: 'eco', label: 'Eco Aero' }, { id: 'dark', label: 'Dark Aero' }, { id: 'aquatic', label: 'Aquatic Aero' },
+    { id: 'humanity', label: 'Humanity Aero' }, { id: 'technozen', label: 'Technozen' }, { id: 'space', label: 'Space Aero' }, { id: 'metro', label: 'Frutiger Metro' },
+    { id: 'console', label: 'Console Menus' }, { id: 'y2k', label: 'Y2K Futurism' }, { id: 'mcbling', label: 'McBling' }, { id: 'vectorheart', label: 'Web 2.0 & Vectorheart' },
+    { id: 'skeuo', label: 'Skeuomorphism' }, { id: 'retro', label: '90s Desktop & Web' },
+  ] },
   { id: 'models', label: '3D Models', group: 'rendered', exts: MODEL },
   { id: 'blender-renders', label: 'Blender', group: 'rendered', exts: [...VIDEO, ...IMAGE] },
   { id: 'remotion-videos', label: 'Remotion', group: 'rendered', exts: VIDEO },
   { id: 'videos', label: 'Videos', group: 'rendered', exts: VIDEO },
   { id: 'images', label: 'Images', group: 'rendered', exts: IMAGE },
+];
+
+// Studio > Tab bar: parent tabs over categories; chips = cats, or aero eras then styles
+export const TABS = [
+  { id: '3d', label: '3D & Physics', cats: ['scenes', 'physics'] },
+  { id: 'shaders', label: 'Shaders', cats: ['shaders'] },
+  { id: 'creative', label: 'Creative Code', cats: ['generative', 'motion', 'audio', 'generators'] },
+  { id: 'apps', label: 'Apps & Algorithms', cats: ['apps', 'algorithms'] },
+  { id: 'aero', label: 'Retro Aesthetics', cats: ['aero'], families: [
+    { id: 'frutiger', label: 'Frutiger Aero', styles: ['core', 'eco', 'dark', 'aquatic', 'humanity', 'technozen', 'space', 'metro'] },
+    { id: '2000s', label: '2000s', styles: ['y2k', 'mcbling', 'vectorheart', 'skeuo', 'console'] },
+    { id: '90s', label: '90s', styles: ['retro'] },
+  ] },
+  { id: 'rendered', label: 'Rendered', cats: ['models', 'blender-renders', 'remotion-videos', 'videos', 'images'] },
 ];
 
 // Studio > Sim cards: prompts for sims that started as frontier-model tests; others show description only
@@ -68,6 +88,7 @@ export async function listDemos(demosRoot) {
       title: html.match(/<title>([^<]*)<\/title>/i)?.[1] ?? titleOf(f),
       desc: meta(html, 'description'),
       prompt: meta(html, 'prompt'),
+      style: meta(html, 'style'),
       tags: meta(html, 'tags').split(',').map((t) => t.trim()).filter(Boolean),
       order: Number(meta(html, 'order')) || 99,
       capture: Number(meta(html, 'capture')) || 0,

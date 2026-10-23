@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cover Carousel</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="22" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="2006 album browser, CSS 3D, wet-floor reflection, procedural album art, inertial drag" />
+<meta name="description" content="The 2006-era album 'cover flow' browser, with no brand: 24 procedurally painted album covers in CSS 3D, the centre one facing you and the rest angled into two stacks, all standing on a black glossy floor that reflects them. Drag with inertia, scroll, use the arrow keys or the glossy scrollbar; clicking the centre cover flips it over to show its tracklist, and the tracks play short synth previews. Hard because the position is one continuous float, so every cover's angle, offset and depth are interpolated mid-swipe instead of snapping between states." />
+<meta name="prompt" content="Build a 2006-style album cover-flow browser in one HTML file with no brand: 24 procedural canvas album covers in CSS 3D (centre faces forward, others rotate about 70 degrees into stacks), a black glossy floor with reflections, and a glossy scrollbar. Drive everything from one continuous float with inertial drag, wheel and arrow keys; clicking the centre cover flips it to a tracklist whose rows play short synth previews. Add an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/cover-carousel.html
+ * PURPOSE: album cover flow: CSS 3D covers from a continuous float, inertial drag, reflections, flip to tracklist, synth previews
+ * UI: Render Studio > Frutiger Aero > Cover Carousel
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__covers (go, flip)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: "Lucida Grande", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+body { background: linear-gradient(#000 0%, #0b0d10 55%, #000 56%, #000); }
+#stage { position: fixed; left: 0; right: 0; top: 0; height: 64%; perspective: 900px; perspective-origin: 50% 60%; cursor: grab; touch-action: none; }
+#stage.drag { cursor: grabbing; }
+.cv { position: absolute; left: 50%; bottom: 0; width: var(--s); height: var(--s); margin-left: calc(var(--s) / -2); transform-style: preserve-3d; transition: none; }
+.cv .face, .cv .back { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.6s cubic-bezier(.3, .8, .3, 1); }
+.cv canvas { width: 100%; height: 100%; display: block; }
+.cv .refl { position: absolute; left: 0; right: 0; top: 100%; height: 100%; transform: scaleY(-1); opacity: 0.28; -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 55%); mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent 55%); pointer-events: none; }
+.cv .back { transform: rotateY(180deg); background: linear-gradient(#2a2e35, #111418); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15); padding: 12px; overflow: hidden; }
+.cv.flip .face { transform: rotateY(-180deg); } .cv.flip .back { transform: rotateY(0deg); }
+.back h4 { margin: 0 0 8px; font-size: 13px; } .back h4 small { display: block; opacity: 0.6; font-weight: 400; }
+.back ol { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.back li { display: flex; gap: 8px; padding: 5px 6px; border-radius: 4px; cursor: pointer; }
+.back li:nth-child(odd) { background: rgba(255, 255, 255, 0.05); }
+.back li:hover, .back li.on { background: linear-gradient(#5fb0ff, #1a6fd0); }
+.back li span { margin-left: auto; opacity: 0.6; }
+#info { position: fixed; left: 0; right: 0; top: 70%; text-align: center; }
+#info b { display: block; font-size: 16px; } #info span { font-size: 13px; opacity: 0.6; }
+#sb { position: fixed; left: 50%; bottom: 8%; width: min(520px, 80vw); height: 16px; transform: translateX(-50%); border-radius: 8px; background: linear-gradient(#0d0f12, #262a30); box-shadow: inset 0 1px 3px #000, 0 1px 0 rgba(255, 255, 255, 0.1); touch-action: none; }
+#knob { position: absolute; top: 1px; height: 14px; width: 60px; border-radius: 7px; background: linear-gradient(#e8ecf0, #9aa3ad 50%, #858e98 51%, #c4cbd2); box-shadow: inset 0 1px 0 #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="info"><b id="ti"></b><span id="ar"></span></div>
+<div id="sb"><div id="knob"></div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const N = 24;
+const W1 = ['Glass', 'Aqua', 'Sky', 'Bubble', 'Neon', 'Velvet', 'Silver', 'Crystal', 'Summer', 'Paper', 'Ocean', 'Cherry'];
+const W2 = ['Gardens', 'Hearts', 'Lights', 'Radio', 'Dreams', 'Avenue', 'Echoes', 'Parade', 'Sessions', 'Skies', 'Motion', 'Hotel'];
+const ART = ['The Ripples', 'Kite Theory', 'Mono Lake', 'Sunday Arcade', 'Lumen', 'Pocket Orchestra', 'Owl & Kite', 'The Glassworks', 'Seafoam', 'Bright Static'];
+let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+const albums = Array.from({ length: N }, (_, i) => ({ t: `${W1[Math.floor(rnd() * 12)]} ${W2[Math.floor(rnd() * 12)]}`, a: ART[Math.floor(rnd() * 10)], h: Math.floor(rnd() * 360), k: i % 6, tr: Array.from({ length: 6 }, (_, j) => [`${W2[(i + j * 5) % 12]} ${['Song', 'Waltz', 'Reprise', 'Theme', 'Interlude', 'Dance'][j]}`, `${2 + ((i + j) % 3)}:${String(10 + ((i * 7 + j * 13) % 49)).padStart(2, '0')}`]) }));
+
+// Art > six procedural styles per hue
+function paint(c, al) {
+  const x = c.getContext('2d'), S = 300, h = al.h; seed = al.h * 31 + al.k + 1;
+  const g = x.createLinearGradient(0, 0, S, S); g.addColorStop(0, `hsl(${h},70%,60%)`); g.addColorStop(1, `hsl(${h + 50},70%,22%)`); x.fillStyle = g; x.fillRect(0, 0, S, S);
+  if (al.k === 0) for (let i = 0; i < 14; i++) { x.fillStyle = `hsla(${h + i * 12},90%,75%,0.35)`; x.beginPath(); x.arc(rnd() * S, rnd() * S, 10 + rnd() * 60, 0, 7); x.fill(); }
+  if (al.k === 1) for (let i = 0; i < 12; i++) { x.strokeStyle = `hsla(${h + 180},80%,85%,${0.15 + i * 0.05})`; x.lineWidth = 4; x.beginPath(); for (let px = 0; px <= S; px += 6) x.lineTo(px, 40 + i * 20 + Math.sin(px * 0.03 + i) * 14); x.stroke(); }
+  if (al.k === 2) { x.fillStyle = `hsl(${h + 30},90%,85%)`; x.beginPath(); x.arc(S * 0.5, S * 0.42, 70, 0, 7); x.fill(); for (let i = 0; i < 6; i++) { x.fillStyle = `rgba(0,0,0,${0.12 + i * 0.03})`; x.fillRect(0, S * 0.55 + i * 22, S, 10); } }
+  if (al.k === 3) for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { x.fillStyle = `hsla(${h + (i + j) * 10},80%,${40 + ((i * j) % 5) * 10}%,0.8)`; x.fillRect(i * 37.5 + 3, j * 37.5 + 3, 31, 31); }
+  if (al.k === 4) { x.save(); x.translate(S / 2, S / 2); for (let i = 0; i < 24; i++) { x.rotate(Math.PI / 12); x.fillStyle = i % 2 ? `hsla(${h},90%,80%,0.4)` : 'rgba(255,255,255,0.15)'; x.beginPath(); x.moveTo(0, 0); x.lineTo(-20, -220); x.lineTo(20, -220); x.fill(); } x.restore(); }
+  if (al.k === 5) { for (let i = 0; i < 40; i++) { const r = 2 + rnd() * 8; x.fillStyle = 'rgba(255,255,255,0.6)'; x.beginPath(); x.arc(rnd() * S, rnd() * S, r, 0, 7); x.fill(); } x.strokeStyle = '#fff'; x.lineWidth = 3; x.strokeRect(30, 30, S - 60, S - 60); }
+  x.fillStyle = 'rgba(255,255,255,0.92)'; x.font = '700 22px "Helvetica Neue", sans-serif'; x.fillText(al.a.toUpperCase(), 18, S - 44); x.font = '16px "Helvetica Neue", sans-serif'; x.fillText(al.t, 18, S - 20);
+  const hl = x.createLinearGradient(0, 0, 0, S * 0.5); hl.addColorStop(0, 'rgba(255,255,255,0.18)'); hl.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = hl; x.fillRect(0, 0, S, S * 0.5);
+}
+const stage = $('#stage');
+const covers = albums.map((al, i) => {
+  const el = document.createElement('div'); el.className = 'cv';
+  el.innerHTML = `<div class="face"><canvas width="300" height="300"></canvas><canvas class="refl" width="300" height="300"></canvas></div><div class="back"><h4>${al.t}<small>${al.a}</small></h4><ol>${al.tr.map(([n, d], j) => `<li data-j="${j}">${j + 1}. ${n}<span>${d}</span></li>`).join('')}</ol></div>`;
+  const [c, r] = el.querySelectorAll('canvas'); paint(c, al); r.getContext('2d').drawImage(c, 0, 0);
+  el.querySelectorAll('li').forEach((li) => (li.onclick = (e) => { e.stopPropagation(); el.querySelectorAll('li').forEach((l) => l.classList.toggle('on', l === li)); preview(i, +li.dataset.j); }));
+  stage.append(el); return el;
+});
+
+// Layout > continuous pos drives angle, offset, depth
+let pos = 6, vel = 0, target = 6, flipped = -1;
+function layout() {
+  const sm = innerWidth < 700, s = sm ? 170 : Math.min(300, innerHeight * 0.4);
+  stage.style.setProperty('--s', s + 'px');
+  covers.forEach((el, i) => {
+    const d = i - pos, a = Math.abs(d), sg = Math.sign(d), k = Math.min(1, a);
+    const tx = d === 0 ? 0 : sg * (k * s * 0.62 + Math.max(0, a - 1) * s * (sm ? 0.18 : 0.22));
+    el.style.transform = `translateX(${tx}px) translateZ(${-k * s * 0.55}px) rotateY(${-sg * k * 70}deg)`;
+    el.style.zIndex = 1000 - Math.round(a * 10); el.style.display = a > 14 ? 'none' : '';
+    el.style.filter = a > 0.5 ? `brightness(${Math.max(0.45, 1 - a * 0.08)})` : '';
+  });
+  const c = Math.round(pos); $('#ti').textContent = albums[c].t; $('#ar').textContent = albums[c].a;
+  const sb = $('#sb').clientWidth - 60; $('#knob').style.left = (pos / (N - 1)) * sb + 'px';
+}
+
+// Input > inertial drag, wheel, keys, scrollbar, click
+let drag = null, moved = 0;
+stage.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, p: pos, t: performance.now() }; moved = 0; vel = 0; stage.classList.add('drag'); stage.setPointerCapture(e.pointerId); });
+stage.addEventListener('pointermove', (e) => { if (!drag) return; const s = parseFloat(getComputedStyle(stage).getPropertyValue('--s')) || 300; const np = drag.p - (e.clientX - drag.x) / (s * 0.45); const now = performance.now(); vel = (np - pos) / Math.max(0.008, (now - drag.t) / 1000); drag.t = now; moved += Math.abs(np - pos); pos = Math.max(-0.4, Math.min(N - 0.6, np)); });
+stage.addEventListener('pointerup', (e) => {
+  stage.classList.remove('drag'); if (!drag) return; drag = null;
+  if (moved < 0.05) { const hitEl = document.elementFromPoint(e.clientX, e.clientY), el = hitEl && hitEl.closest('.cv'); if (el) { const i = covers.indexOf(el); if (i === Math.round(pos)) flip(i); else go(i); } vel = 0; target = Math.round(pos); return; }
+  target = Math.round(Math.max(0, Math.min(N - 1, pos + vel * 0.25))); unflip();
+});
+function go(i) { target = Math.max(0, Math.min(N - 1, i)); unflip(); }
+function unflip() { if (flipped >= 0) { covers[flipped].classList.remove('flip'); flipped = -1; } }
+function flip(i) { if (flipped === i) { unflip(); return; } unflip(); covers[i].classList.add('flip'); flipped = i; preview(i, 0); }
+addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(target + 1); if (e.key === 'ArrowLeft') go(target - 1); if (e.key === 'Enter' || e.key === ' ') flip(Math.round(pos)); });
+let wacc = 0; addEventListener('wheel', (e) => { wacc += e.deltaX || e.deltaY; if (Math.abs(wacc) > 50) { go(target + Math.sign(wacc)); wacc = 0; } }, { passive: true });
+let sbDrag = false;
+const sbSet = (e) => { const r = $('#sb').getBoundingClientRect(); go(Math.round(((e.clientX - r.left - 30) / (r.width - 60)) * (N - 1))); };
+$('#sb').addEventListener('pointerdown', (e) => { sbDrag = true; $('#sb').setPointerCapture(e.pointerId); sbSet(e); });
+$('#sb').addEventListener('pointermove', (e) => { if (sbDrag) sbSet(e); });
+$('#sb').addEventListener('pointerup', () => (sbDrag = false));
+
+// Audio > per-album arpeggio preview, page tick
+let ac = null, lastC = Math.round(pos);
+function preview(i, j) {
+  try { ac = ac || new AudioContext(); } catch { return; }
+  const t = ac.currentTime, root = 220 * Math.pow(2, ((albums[i].h + j * 40) % 12) / 12), steps = [0, 4, 7, 12, 7, 4, 0, 5];
+  steps.forEach((st, k) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = k % 2 ? 'triangle' : 'sine'; o.frequency.value = root * Math.pow(2, st / 12); g.gain.setValueAtTime(0.05, t + k * 0.14); g.gain.exponentialRampToValueAtTime(0.0001, t + k * 0.14 + 0.3); o.connect(g).connect(ac.destination); o.start(t + k * 0.14); o.stop(t + k * 0.14 + 0.32); });
+}
+const tick = () => { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 2400; g.gain.setValueAtTime(0.015, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.02); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.03); };
+
+// Loop > spring to target, attract browse
+let lastInput = -1e9, aT = 0, dir = 1, last = performance.now();
+['pointerdown', 'keydown', 'wheel'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true, passive: true }));
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!drag) { vel += (target - pos) * 60 * dt; vel *= Math.pow(0.0004, dt); pos += vel * dt; if (Math.abs(target - pos) < 0.0005 && Math.abs(vel) < 0.001) { pos = target; vel = 0; } }
+  const c = Math.round(pos); if (c !== lastC) { lastC = c; tick(); }
+  layout();
+  if (now - lastInput > 6000) { aT += dt; if (aT > 1.6) { aT = 0; if (target + dir >= N || target + dir < 0) dir = -dir; go(target + dir * (Math.random() < 0.3 ? 2 : 1)); if (Math.random() < 0.15) setTimeout(() => flip(target), 700); } }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__covers = { go, flip: () => flip(Math.round(pos)) };
+</script>
+</body>
+</html>

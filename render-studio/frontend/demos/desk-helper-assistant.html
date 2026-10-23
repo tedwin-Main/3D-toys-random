@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Desk Helper Assistant</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="58" />
+<meta name="capture" content="1500" />
+<meta name="tags" content="SVG character rig with CSS state animations, pattern detection on typed text, keyword-scored help search, letter wizard edits via setRangeText, draggable helper with flipping balloon, WebAudio chirps" />
+<meta name="description" content="A 1998 word processor with an eager little helper: Orbit, a satellite robot with solar panel arms, floats over the page, follows your pointer with its eyes and fills idle moments by waving, spinning, scanning, thinking and dozing off. Start a document with Dear and it pops up with a balloon asking if you are writing a letter, and the letter wizard really drops in the date and a formal or friendly closing; start a numbered list or type three exclamation marks and it has opinions about that too. Ask it a question in the search box and it ranks its local help topics by keyword, drag it anywhere and the balloon flips to stay on screen, or hide it and watch it jet away. Hard because the character is an SVG rig driven by layered CSS state animations, and the tips come from live pattern matching on what you type."/>
+<meta name="prompt" content="Build a late-90s word processor window in one HTML file with an original animated helper character (a small satellite robot, not a paperclip): it floats over the document, its eyes follow the pointer, it has idle animations (wave, spin, scan, think, doze), and a speech balloon with tips, clickable options and a search box. Detect what the user types: a letter starting with Dear (offer a letter wizard that inserts the date and a formal or friendly closing), a numbered list, lots of exclamation marks. The search box ranks local help topics by keyword match. The helper is draggable, the balloon flips to stay on screen, it can be hidden and summoned from the Help menu, and it chirps with synthesized sounds. Attract mode types a letter, uses the wizard and searches help; works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/desk-helper-assistant.html
+ * PURPOSE: 1998 word processor with original robot helper: typed-text tips, letter wizard, help search, idle animations
+ * UI: Render Studio > Retro Aesthetics > 90s > Retro Desktop > Desk Helper Assistant
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__helper (type, search, anim, show, hide, pick, state)
+ */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 12px Tahoma, "MS Sans Serif", Verdana, sans-serif; background: #3a8a8c radial-gradient(ellipse at 50% 40%, #4aa6a6, #20676a 80%); user-select: none; }
+.win { position: absolute; left: 50%; top: 50%; width: min(900px, calc(100vw - 40px)); height: min(620px, calc(100vh - 40px)); transform: translate(-50%, -50%); display: flex; flex-direction: column; background: #c3c3c3; border: 2px solid; border-color: #fff #404040 #404040 #fff; box-shadow: 1px 1px 0 #000, 6px 8px 24px rgba(0, 0, 0, 0.35); }
+.tb { display: flex; align-items: center; gap: 4px; height: 22px; padding: 0 3px; color: #fff; font-weight: bold; background: linear-gradient(90deg, #0a246a, #3a6ea5); }
+.tb .ic { width: 16px; height: 16px; background: #fff; border: 1px solid #000; box-shadow: inset -3px 0 0 #5a8ad8; }
+.tb span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.cb { width: 16px; height: 14px; font: bold 10px/10px Arial; color: #000; text-align: center; background: #c3c3c3; border: 1px solid; border-color: #fff #404040 #404040 #fff; }
+.menu { display: flex; padding: 2px 2px; }
+.menu b { font-weight: normal; padding: 2px 7px; cursor: default; }
+.menu b:hover, .menu b.on { background: #0a246a; color: #fff; }
+.tools { display: flex; align-items: center; gap: 3px; padding: 3px 4px; border-top: 1px solid #fff; border-bottom: 1px solid #808080; flex-wrap: wrap; }
+.tbtn { min-width: 23px; height: 22px; padding: 0 4px; font: inherit; background: #c3c3c3; border: 1px solid transparent; cursor: pointer; display: grid; place-items: center; }
+.tbtn:hover { border-color: #fff #404040 #404040 #fff; }
+.tbtn.on { border-color: #404040 #fff #fff #404040; background: #e0e0e0; }
+.tbtn svg { width: 16px; height: 16px; }
+.sep { width: 2px; height: 20px; border-left: 1px solid #808080; border-right: 1px solid #fff; margin: 0 3px; }
+select { font: inherit; height: 21px; border: 2px solid; border-color: #808080 #fff #fff #808080; background: #fff; }
+.ruler { height: 18px; margin: 2px 0; background: #fff repeating-linear-gradient(90deg, transparent 0 9px, #555 9px 10px) 0 12px / 100% 6px no-repeat; border: 1px solid #808080; position: relative; }
+.ruler::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 8px; background: repeating-linear-gradient(90deg, transparent 0 47px, #222 47px 48px); }
+.area { flex: 1; overflow: hidden; background: #808080; border: 2px solid; border-color: #808080 #fff #fff #808080; display: flex; justify-content: center; padding: 14px 10px 0; }
+#doc { width: 100%; max-width: 620px; height: 100%; resize: none; border: 0; outline: 0; padding: 40px 54px; font: 16px/1.45 "Times New Roman", Georgia, serif; color: #000; background: #fff; box-shadow: 2px 2px 0 #404040; user-select: text; }
+.status { display: flex; gap: 2px; padding: 2px; }
+.status span { padding: 1px 6px; border: 1px solid; border-color: #808080 #fff #fff #808080; }
+.status span:last-child { flex: 1; }
+#stage { position: fixed; inset: 0; z-index: 10; overflow: hidden; pointer-events: none; }
+#helper { position: absolute; pointer-events: auto; width: 110px; height: 120px; touch-action: none; transition: transform 0.6s cubic-bezier(.5, -0.4, .6, 1), opacity 0.6s; }
+#helper.gone { pointer-events: none; transform: translate(260px, -420px) scale(0.2) rotate(30deg); opacity: 0; }
+#helper.arrive { animation: arrive 0.7s cubic-bezier(.2, 1.6, .5, 1); }
+@keyframes arrive { from { transform: scale(0.1) rotate(-90deg); opacity: 0; } }
+#bot { width: 100%; height: 100%; cursor: grab; animation: bob 2.6s ease-in-out infinite; filter: drop-shadow(3px 6px 4px rgba(0, 0, 0, 0.35)); }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+#bot .flame { transform-box: fill-box; transform-origin: 50% 0; animation: flame 0.12s steps(2) infinite alternate; }
+@keyframes flame { to { transform: scaleY(0.6); opacity: 0.7; } }
+#bot .lid { transform-box: fill-box; transform-origin: center; transition: transform 0.08s; }
+#bot.blink .lid, #helper.doze .lid { transform: scaleY(0.1); }
+#bot .arm { transform-box: fill-box; }
+#bot .arm.L { transform-origin: right center; } #bot .arm.R { transform-origin: left center; }
+#helper.wave .arm.R { animation: wave 0.35s ease-in-out 4 alternate; }
+@keyframes wave { from { transform: rotate(10deg); } to { transform: rotate(-40deg); } }
+#helper.wave .arm.L, #helper.greet .arm { animation: flap 0.25s ease-in-out 4 alternate; }
+@keyframes flap { to { transform: scaleY(0.4); } }
+#helper.spin #rig { transform-box: fill-box; transform-origin: center; animation: spin 0.9s cubic-bezier(.5, 0, .5, 1); }
+@keyframes spin { to { transform: rotate(360deg); } }
+#helper.greet #bot { animation: hop 0.45s ease-out 2; }
+@keyframes hop { 50% { transform: translateY(-18px) scale(1.04, 0.96); } }
+#helper.think .tip { animation: tip 0.4s steps(2) infinite; }
+@keyframes tip { to { fill: #ffe14a; } }
+.fx { position: absolute; font: bold 18px Arial; color: #0a246a; pointer-events: none; opacity: 0; }
+#q { left: 78px; top: -4px; }
+#helper.think #q { animation: qm 1.8s ease-out; }
+@keyframes qm { 20%, 80% { opacity: 1; transform: translateY(-8px); } }
+#z { left: 74px; top: 0; color: #3a6ea5; }
+#helper.doze #z { animation: zz 2s linear infinite; }
+@keyframes zz { from { opacity: 1; transform: translate(0, 10px) scale(0.6); } to { opacity: 0; transform: translate(14px, -20px) scale(1.2); } }
+#ball { position: absolute; right: 18px; bottom: calc(100% + 4px); width: 270px; padding: 10px 12px 10px; background: #ffffe1; border: 1px solid #000; border-radius: 10px; box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.25); font-size: 12px; color: #000; user-select: none; }
+#ball::after { content: ""; position: absolute; right: 26px; bottom: -14px; border: 7px solid transparent; border-top: 8px solid #ffffe1; filter: drop-shadow(0 1px 0 #000); }
+#helper.below #ball { bottom: auto; top: calc(100% + 4px); }
+#helper.below #ball::after { bottom: auto; top: -15px; border-top-color: transparent; border-bottom: 8px solid #ffffe1; filter: drop-shadow(0 -1px 0 #000); }
+#ball h4 { margin: 0 0 6px; font-size: 12px; }
+#ball p { margin: 0 0 8px; line-height: 1.4; }
+#ball ul { list-style: none; margin: 0 0 8px; padding: 0; }
+#ball li { display: flex; gap: 6px; align-items: flex-start; padding: 2px 3px; cursor: pointer; }
+#ball li::before { content: ""; flex: none; width: 10px; height: 10px; margin-top: 2px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #9cf, #0a4ad0); }
+#ball li:hover, #ball li.hi { color: #0a246a; text-decoration: underline; background: #fff6b0; }
+#ball form { display: flex; gap: 4px; margin: 0 0 8px; }
+#ball input { flex: 1; min-width: 0; font: inherit; padding: 2px 4px; border: 2px solid; border-color: #808080 #fff #fff #808080; }
+#ball .row { display: flex; gap: 6px; justify-content: flex-end; }
+.btn { font: inherit; min-width: 64px; padding: 3px 8px; background: #c3c3c3; border: 2px solid; border-color: #fff #404040 #404040 #fff; cursor: pointer; }
+.btn:active { border-color: #404040 #fff #fff #404040; }
+@media (min-width: 1200px) and (min-height: 760px) { #helper { width: 132px; height: 144px; } }
+@media (max-width: 600px) {
+  .win { left: 0; top: 0; width: 100%; height: 100%; transform: none; border: 0; }
+  .tools .wide { display: none; }
+  .area { padding: 8px 6px 0; }
+  #doc { padding: 22px 18px; font-size: 15px; }
+  .status span:nth-child(2), .status span:nth-child(3) { display: none; }
+  #helper { width: 92px; height: 100px; }
+  #ball { width: min(260px, calc(100vw - 30px)); right: 6px; }
+}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="tb"><i class="ic"></i><span id="ttl">Letter - Quillpad 98</span><i class="cb">_</i><i class="cb">&#9633;</i><i class="cb">&#215;</i></div>
+  <div class="menu"><b>File</b><b>Edit</b><b>View</b><b class="wide">Insert</b><b>Format</b><b>Tools</b><b id="mHelp">Help</b></div>
+  <div class="tools">
+    <button class="tbtn wide" title="New"><svg viewBox="0 0 16 16"><path d="M3 1h7l3 3v11H3z" fill="#fff" stroke="#000" /></svg></button>
+    <button class="tbtn wide" title="Open"><svg viewBox="0 0 16 16"><path d="M1 4h5l1 2h8v8H1z" fill="#ffd94a" stroke="#000" /></svg></button>
+    <button class="tbtn" id="bSave" title="Save"><svg viewBox="0 0 16 16"><rect x="1" y="1" width="14" height="14" fill="#3a5aa8" stroke="#000" /><rect x="4" y="1" width="8" height="5" fill="#fff" /><rect x="3" y="9" width="10" height="6" fill="#ddd" /></svg></button>
+    <span class="sep wide"></span>
+    <select id="font" class="wide"><option>Times New Roman</option><option>Arial</option><option>Courier New</option></select>
+    <select id="size"><option>10</option><option>12</option><option selected>16</option><option>20</option><option>28</option></select>
+    <span class="sep"></span>
+    <button class="tbtn" id="bB" style="font-weight:bold">B</button><button class="tbtn" id="bI" style="font-style:italic;font-family:serif">I</button><button class="tbtn" id="bU" style="text-decoration:underline">U</button>
+    <span class="sep wide"></span>
+    <button class="tbtn" id="bHelp" title="Show the helper"><svg viewBox="0 0 16 16"><circle cx="8" cy="9" r="6" fill="#cfe4f7" stroke="#2c4e74" /><rect x="4" y="7" width="8" height="4" rx="2" fill="#1b2a44" /><line x1="8" y1="3" x2="10" y2="0" stroke="#2c4e74" /></svg></button>
+  </div>
+  <div class="ruler"></div>
+  <div class="area"><textarea id="doc" spellcheck="false" placeholder=""></textarea></div>
+  <div class="status"><span>Page 1</span><span>Sec 1</span><span>1/1</span><span id="pos">Ln 1 Col 1</span><span id="wc">0 words</span></div>
+</div>
+<div id="stage"><div id="helper" class="gone">
+  <div id="ball" hidden></div>
+  <svg id="bot" viewBox="-14 0 128 110">
+    <defs>
+      <radialGradient id="gBody" cx="38%" cy="30%" r="72%"><stop offset="0" stop-color="#fff" /><stop offset=".35" stop-color="#d4e8fa" /><stop offset=".8" stop-color="#6f9cc8" /><stop offset="1" stop-color="#3d6894" /></radialGradient>
+      <linearGradient id="gPanel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a82e8" /><stop offset="1" stop-color="#14307e" /></linearGradient>
+      <pattern id="cells" width="6" height="6" patternUnits="userSpaceOnUse"><path d="M6 0H0V6" fill="none" stroke="#9cf" stroke-width=".6" opacity=".7" /></pattern>
+    </defs>
+    <g id="rig">
+      <ellipse class="flame" cx="50" cy="86" rx="6" ry="10" fill="#ffb84a" /><ellipse class="flame" cx="50" cy="85" rx="3" ry="6" fill="#fff6c8" />
+      <g class="arm L"><line x1="12" y1="56" x2="25" y2="56" stroke="#5a7898" stroke-width="3" /><rect x="-10" y="43" width="22" height="26" rx="2" fill="url(#gPanel)" stroke="#9cf" /><rect x="-10" y="43" width="22" height="26" fill="url(#cells)" /></g>
+      <g class="arm R"><line x1="75" y1="56" x2="88" y2="56" stroke="#5a7898" stroke-width="3" /><rect x="88" y="43" width="22" height="26" rx="2" fill="url(#gPanel)" stroke="#9cf" /><rect x="88" y="43" width="22" height="26" fill="url(#cells)" /></g>
+      <line x1="50" y1="30" x2="57" y2="12" stroke="#4a6482" stroke-width="2.5" /><circle class="tip" cx="57" cy="11" r="4.5" fill="#ff5a5a" stroke="#7a1a1a" />
+      <circle cx="50" cy="56" r="27" fill="url(#gBody)" stroke="#2c4e74" stroke-width="1.5" />
+      <rect x="29" y="45" width="42" height="21" rx="10.5" fill="#1b2a44" />
+      <g transform="translate(41 55.5)"><g class="lid"><ellipse rx="6" ry="6.5" fill="#bff" /><circle class="pupil" r="3" fill="#0a3a6a" /><circle cx="-1" cy="-1.5" r="1" fill="#fff" class="pupil" /></g></g>
+      <g transform="translate(59 55.5)"><g class="lid"><ellipse rx="6" ry="6.5" fill="#bff" /><circle class="pupil" r="3" fill="#0a3a6a" /><circle cx="-1" cy="-1.5" r="1" fill="#fff" class="pupil" /></g></g>
+      <path d="M43 72 Q50 77 57 72" stroke="#2c4e74" stroke-width="2" fill="none" stroke-linecap="round" />
+    </g>
+  </svg>
+  <span class="fx" id="q">?</span><span class="fx" id="z">z</span>
+</div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const doc = $('#doc'), helper = $('#helper'), ball = $('#ball'), bot = $('#bot');
+const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
+
+// Help topics > local search index
+const TIPS = [
+  { t: 'Change the font size', k: 'font size bigger smaller larger text points huge tiny', a: 'Pick a number from the Size box on the toolbar. 12 points is the usual size for letters; headings look good at 20 or more.' },
+  { t: 'Make text bold, italic or underlined', k: 'bold italic underline emphasis style heavy slanted', a: 'Press the B, I or U button on the toolbar. Press it again to switch the style off.' },
+  { t: 'Save your document', k: 'save keep file disk store floppy', a: 'Press Ctrl+S or choose File, Save. Give the file a name you will remember, like "Letter to Ms Okafor".' },
+  { t: 'Print a letter', k: 'print printer paper copy page', a: 'Choose File, Print. Check that the printer is switched on and loaded with paper, then press OK.' },
+  { t: 'Count the words', k: 'count words length how many characters long', a: () => `Look at the status bar at the bottom. Right now your document has ${words()} words.` },
+  { t: 'Write a letter', k: 'letter dear write address sincerely regards mail', a: 'Start with "Dear" and the name, and I will offer the letter wizard. It adds the date and a closing for you.' },
+  { t: 'Make a numbered list', k: 'list bullet numbered points items steps', a: 'Type 1. and a space at the start of a line, then your first item. Press Enter and type 2. for the next one.' },
+  { t: 'Check your spelling', k: 'spelling spell check typo mistakes dictionary', a: 'Choose Tools, Spelling. Words I do not know are shown one at a time with suggestions.' },
+  { t: 'Undo a mistake', k: 'undo mistake back oops revert wrong', a: 'Press Ctrl+Z to take back the last thing you did. You can press it several times.' },
+  { t: 'Change the font', k: 'font typeface family arial times courier look', a: 'Choose a font from the Font box on the toolbar. Times New Roman is classic for letters.' },
+];
+const STOP = new Set('how make the can what want you does with this that please into for and get'.split(' '));
+function rank(q) {
+  const ws = q.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 2 && !STOP.has(w));
+  return TIPS.map((t) => ({ t, s: ws.reduce((n, w) => n + `${t.t} ${t.k}`.toLowerCase().split(/\s+/).filter((k) => k.startsWith(w.slice(0, 4)) || w.startsWith(k)).length, 0) })).filter((r) => r.s > 0).sort((a, b) => b.s - a.s).slice(0, 3).map((r) => r.t);
+}
+
+// Balloon > title, text, options, search, buttons
+let onPick = null;
+function say({ title = '', text = '', opts = [], search = false, buttons = ['Close'] }) {
+  onPick = null; ball.innerHTML = `${title ? `<h4>${title}</h4>` : ''}${text ? `<p>${text}</p>` : ''}${opts.length ? `<ul>${opts.map(([k, l]) => `<li data-k="${k}">${l}</li>`).join('')}</ul>` : ''}${search ? '<form><input id="sq" placeholder="Type your question here" /><button class="btn" style="min-width:0">Search</button></form>' : ''}<div class="row">${buttons.map((b) => `<button class="btn" data-k="${b}">${b}</button>`).join('')}</div>`;
+  ball.hidden = false; pop(); place();
+  if (search) ball.querySelector('form').onsubmit = (e) => { e.preventDefault(); answerSearch(ball.querySelector('#sq').value); };
+}
+function close() { ball.hidden = true; onPick = null; }
+ball.addEventListener('mousedown', (e) => { if (!e.target.closest('input')) e.preventDefault(); }); // keep caret in doc
+ball.addEventListener('click', (e) => { const el = e.target.closest('[data-k]'); if (!el) return; const k = el.dataset.k, f = onPick; blip(); if (k === 'Close' || k === 'OK') close(); else if (k === 'Hide') hide(); if (f) f(k); });
+function ask() { onPick = null; anim('think'); say({ title: 'What would you like to do?', search: true, opts: [['t:Write a letter', 'Write a letter'], ['t:Save your document', 'Save your document'], ['tips', 'See tips about what I noticed']], buttons: ['Options', 'Close'] }); onPick = pickTopic; }
+function pickTopic(k) { if (k === 'tips') return say({ title: 'Tip of the day', text: 'Press Ctrl+Z to undo. I am also very good at waving. Want to see?', buttons: ['OK'] }); if (k === 'Options') return say({ title: 'Helper options', opts: [['wave', 'Show me a wave'], ['spin', 'Do a spin'], ['hideme', 'Hide the helper']], buttons: ['Close'] }), (onPick = (o) => (o === 'hideme' ? hide() : (close(), anim(o)))); if (!k.startsWith('t:')) return; const t = TIPS.find((x) => x.t === k.slice(2)); say({ title: t.t, text: typeof t.a === 'function' ? t.a() : t.a, buttons: ['OK'] }); anim('greet'); }
+function answerSearch(q) { const r = rank(q); anim('think'); if (!r.length) { say({ title: 'Hmm.', text: `I could not find anything about "${q.replace(/[<&]/g, '')}". Try words like print, bold or letter.`, search: true, buttons: ['Close'] }); onPick = pickTopic; return; } say({ title: 'What would you like to do?', opts: r.map((t) => [`t:${t.t}`, t.t]), search: true, buttons: ['Close'] }); onPick = pickTopic; ball.querySelector('#sq').value = q; }
+function place() { const r = helper.getBoundingClientRect(); helper.classList.remove('below'); if (r.top < ball.offsetHeight + 16) helper.classList.add('below'); }
+
+// Watcher > notice letters, lists, shouting
+let tipped = {};
+function words() { return (doc.value.match(/\S+/g) || []).length; }
+function onInput() {
+  const v = doc.value, lines = v.slice(0, doc.selectionStart).split('\n'); $('#wc').textContent = `${words()} words`; $('#pos').textContent = `Ln ${lines.length} Col ${lines[lines.length - 1].length + 1}`;
+  if (helper.classList.contains('gone')) return;
+  if (!tipped.letter && /^\s*dear\s+\S[^\n]*(,|\n)/i.test(v)) { tipped.letter = 1; anim('greet'); chirp(); say({ title: 'It looks like you\'re writing a letter.', text: 'Would you like help?', opts: [['help', 'Get help with writing the letter'], ['no', 'Just type the letter without help'], ['never', 'Don\'t show me this tip again']], buttons: [] }); onPick = letterPick; }
+  else if (!tipped.list && /(^|\n)\s*1[.)]\s+\S[^\n]*\n\s*2[.)]\s/.test(v)) { tipped.list = 1; anim('wave'); chirp(); say({ title: 'It looks like you\'re making a list.', text: 'Lists are great. I can keep numbering them for you, or you can carry on by hand.', opts: [['ok', 'Number them for me'], ['no', 'I will do it myself']], buttons: [] }); onPick = () => close(); }
+  else if (!tipped.shout && /!!!/.test(v)) { tipped.shout = 1; anim('spin'); chirp(); say({ title: 'Wow, three exclamation marks!', text: 'Feeling excited? One is usually enough in a letter, but I like your energy.', buttons: ['OK'] }); }
+}
+doc.addEventListener('input', onInput); doc.addEventListener('keyup', onInput); doc.addEventListener('click', onInput);
+function letterPick(k) {
+  if (k === 'no' || k === 'never') return close();
+  anim('think'); say({ title: 'Letter Wizard', text: 'Which style of letter are you writing?', opts: [['formal', 'Formal: date at the top, "Yours sincerely"'], ['friendly', 'Friendly: "Best wishes" and your first name']], buttons: ['Cancel'] });
+  onPick = (s) => { if (s === 'Cancel') return close(); const v = doc.value.replace(/\n+$/, ''); doc.value = `23 October 1998\n\n${v}\n\n\n\n${s === 'formal' ? 'Yours sincerely,\n\n\nAlex Rivera' : 'Best wishes,\nAlex'}`; const p = doc.value.indexOf(v) + v.length + 2; doc.setSelectionRange(p, p); onInput(); ok(); anim('greet'); say({ title: 'All done!', text: 'I added the date and a closing. Type the body of your letter between the greeting and the sign-off.', buttons: ['OK'] }); };
+}
+
+// Character > show, hide, idle animations, eyes
+let lastAct = performance.now(), busyAnim = false;
+function anim(name) { helper.classList.remove('wave', 'spin', 'greet', 'think', 'doze'); void helper.offsetWidth; helper.classList.add(name); lastAct = performance.now(); clearTimeout(anim.t); anim.t = setTimeout(() => helper.classList.remove(name), name === 'doze' ? 1e9 : 1800); if (name === 'spin') whoosh(); }
+function show() { if (!helper.classList.contains('gone')) return ask(); helper.classList.remove('gone'); helper.classList.add('arrive'); setTimeout(() => helper.classList.remove('arrive'), 800); chirp(); setTimeout(ask, 500); }
+function hide() { close(); helper.classList.add('gone'); whoosh(); }
+$('#mHelp').onclick = $('#bHelp').onclick = () => show();
+function setPos(x, y) { const w = helper.offsetWidth, h = helper.offsetHeight; helper.style.left = `${Math.max(0, Math.min(innerWidth - w, x))}px`; helper.style.top = `${Math.max(0, Math.min(innerHeight - h, y))}px`; if (!ball.hidden) place(); }
+function home() { setPos(innerWidth < 600 ? innerWidth - 104 : innerWidth / 2 + Math.min(450, innerWidth / 2 - 20) - helper.offsetWidth - 40, innerHeight - (innerWidth < 600 ? 140 : helper.offsetHeight + 90)); }
+addEventListener('resize', home); home();
+let drag = null;
+bot.addEventListener('pointerdown', (e) => { bot.setPointerCapture(e.pointerId); const r = helper.getBoundingClientRect(); drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, x: e.clientX, y: e.clientY, moved: false }; helper.classList.remove('doze'); });
+bot.addEventListener('pointermove', (e) => { if (!drag) return; if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) drag.moved = true; if (drag.moved) setPos(e.clientX - drag.dx, e.clientY - drag.dy); });
+bot.addEventListener('pointerup', () => { if (drag && !drag.moved) { if (ball.hidden) ask(); else anim('greet'); } drag = null; lastAct = performance.now(); });
+const pupils = [...document.querySelectorAll('.pupil')];
+function look(dx, dy) { const d = Math.hypot(dx, dy) || 1, k = Math.min(1, d / 200) * 2.6; pupils.forEach((p) => p.setAttribute('transform', `translate(${(dx / d) * k} ${(dy / d) * k})`)); }
+addEventListener('pointermove', (e) => { const r = helper.getBoundingClientRect(); look(e.clientX - r.left - r.width / 2, e.clientY - r.top - r.height / 2); if (helper.classList.contains('doze')) helper.classList.remove('doze'); lastAct = performance.now(); });
+(function blink() { bot.classList.add('blink'); setTimeout(() => bot.classList.remove('blink'), 130); setTimeout(blink, 2200 + Math.random() * 3000); })();
+async function scan() { for (const x of [-1, 1, -1, 0]) { look(x * 200, 0); await wait(0.35); } }
+setInterval(() => { if (helper.classList.contains('gone') || drag) return; const idle = (performance.now() - lastAct) / 1000; if (idle > 30) { if (!helper.classList.contains('doze')) { anim('doze'); close(); } return; } if (idle > 6 && ball.hidden && Math.random() < 0.5) { const a = ['wave', 'spin', 'think', 'scan'][Math.floor(Math.random() * 4)]; a === 'scan' ? scan() : anim(a); lastAct = performance.now() - 2000; } }, 2500);
+doc.addEventListener('keydown', () => { lastAct = performance.now(); helper.classList.remove('doze'); });
+
+// Toolbar > style the page, save tip
+$('#size').onchange = () => (doc.style.fontSize = `${$('#size').value}px`);
+$('#font').onchange = () => (doc.style.fontFamily = $('#font').value);
+[['#bB', 'fontWeight', 'bold'], ['#bI', 'fontStyle', 'italic'], ['#bU', 'textDecoration', 'underline']].forEach(([id, p, v]) => ($(id).onclick = () => { const on = doc.style[p] !== v; doc.style[p] = on ? v : ''; $(id).classList.toggle('on', on); }));
+function saved() { if (helper.classList.contains('gone')) return; anim('greet'); ok(); say({ title: 'Saved!', text: 'Your letter is safe on the disk. Did you know Ctrl+S does this in one keystroke?', buttons: ['OK'] }); }
+$('#bSave').onclick = saved;
+addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saved(); } if (e.key === 'F1') { e.preventDefault(); show(); } });
+
+// Audio > chirps, pops, whoosh
+let ac; let touched = false;
+addEventListener('pointerdown', (e) => { if (!ac) ac = new AudioContext(); ac.resume(); if (e.isTrusted) touched = true; }, { capture: true });
+addEventListener('keydown', (e) => { if (!ac) ac = new AudioContext(); ac.resume(); if (e.isTrusted) touched = true; }, { capture: true });
+const live = () => ac && ac.state === 'running';
+function tone(f, t0, d, f2, type = 'sine', v = 0.07) { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + t0; o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + 0.02); }
+function chirp() { if (live()) [[1200, 1800], [1500, 900], [1000, 2200]].forEach(([a, b], i) => tone(a, i * 0.09, 0.08, b, 'square', 0.03)); }
+function pop() { if (live()) tone(500, 0, 0.09, 1100, 'sine', 0.06); }
+function blip() { if (live()) tone(1400, 0, 0.04); }
+function ok() { if (live()) { tone(660, 0, 0.12); tone(990, 0.08, 0.2); } }
+function whoosh() { if (live()) tone(200, 0, 0.5, 1600, 'triangle', 0.05); }
+function tick() { if (live()) tone(2600 + Math.random() * 600, 0, 0.015, 0, 'square', 0.012); }
+
+// Attract > type a letter, use the wizard, search help
+async function typeIn(text, el = doc) { for (const ch of text) { if (touched) throw 0; if (el === doc) { const s = doc.selectionStart; doc.setRangeText(ch, s, s, 'end'); onInput(); } else el.value += ch; tick(); await wait(capture ? 0 : 0.05 + Math.random() * 0.07); } }
+async function step(s, fn) { await wait(s); if (touched) throw 0; return fn(); }
+const pick = (k) => ball.querySelector(`[data-k="${k}"]`)?.click();
+async function attract() {
+  try {
+    await step(0.6, show); await step(1.6, close);
+    for (;;) {
+      await step(0.6, () => { doc.value = ''; tipped = {}; onInput(); });
+      await typeIn('Dear Ms Okafor,\n'); await step(2.4, () => pick('help')); await step(2.2, () => pick('formal')); await step(1.4, () => pick('OK'));
+      await typeIn('Thank you for the lovely pottery class on Saturday. My bowl survived the kiln and now lives on the kitchen table!!!');
+      await step(2.6, () => pick('OK')); await step(2, () => anim('wave')); await step(2.4, scan);
+      await step(1.6, ask); await typeIn('make the text bigger', ball.querySelector('#sq')); await step(0.5, () => ball.querySelector('form').requestSubmit());
+      await step(2, () => pick('t:Change the font size')); await step(1.2, () => { $('#size').value = '20'; $('#size').onchange(); });
+      await step(2.4, () => pick('OK')); await step(1, () => { $('#size').value = '16'; $('#size').onchange(); }); await wait(2);
+    }
+  } catch { /* user took over */ }
+}
+if (capture) { helper.classList.remove('gone'); doc.value = 'Dear Ms Okafor,\n'; doc.setSelectionRange(16, 16); onInput(); } else attract();
+
+window.__helper = { type: (t) => { typeIn(t).catch(() => {}); }, search: (q) => { if (ball.hidden || !ball.querySelector('#sq')) ask(); answerSearch(q); }, rank: (q) => rank(q).map((t) => t.t), anim, show, hide, pick, state: () => ({ shown: !helper.classList.contains('gone'), balloon: ball.hidden ? null : ball.querySelector('h4')?.textContent, opts: [...ball.querySelectorAll('li')].map((l) => l.textContent), doc: doc.value, below: helper.classList.contains('below'), cls: helper.className }) };
+</script>
+</body>
+</html>

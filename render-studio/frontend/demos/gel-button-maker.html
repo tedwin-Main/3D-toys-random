@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gel Button Maker</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="15" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="Web 2.0 tool, CSS generator, gel buttons, HSL, clipboard export" />
+<meta name="description" content="A 2006-style Web 2.0 'glossy button generator', the kind every design blog linked to. Pick a hue, shape, gloss, size, icon and reflection, or a preset (Aqua, Lime, Cherry, Grape, Graphite, Sunset), and a live gel button updates on a pinstripe stage while the exact CSS is written out for copying. Hard because the preview is styled by the same generated stylesheet it exports, so what you copy is guaranteed to match what you see, including the split-gradient gel, the gloss highlight pseudo-element, hover and pressed states." />
+<meta name="prompt" content="Make a 2006-style glossy 'gel button generator' in one HTML file: controls for label, hue, shape (pill, rounded, square), gloss strength, size, icon and reflection, plus presets (Aqua, Lime, Cherry, Grape, Graphite, Sunset). Generate real CSS (split gradient gel, ::before gloss highlight, hover and pressed states), inject it to style the live preview on a pinstripe stage, and show it in a code box with a Copy button. Add a beta badge, a click blip and an attract mode that cycles presets." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/gel-button-maker.html
+ * PURPOSE: Web 2.0 gel button generator: controls and presets write CSS that styles the live preview and exports via Copy
+ * UI: Render Studio > Frutiger Aero > Gel Button Maker
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__gelmaker (set, preset, css)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; font-family: "Lucida Grande", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; color: #2b3a4a; }
+body { background: repeating-linear-gradient(90deg, #eef4f9 0 2px, #f8fbfd 2px 4px); overflow: hidden; }
+header { height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 28px; background: linear-gradient(#ffffff, #dfeaf3 50%, #d2e1ed 51%, #e9f1f7); border-bottom: 1px solid #a9bfd2; box-shadow: 0 2px 6px rgba(40, 80, 120, 0.15); }
+header h1 { margin: 0; font-size: 24px; letter-spacing: -0.5px; color: #1d5fa5; text-shadow: 0 1px 0 #fff; }
+header h1 span { color: #59ab2a; }
+.beta { font-size: 11px; font-weight: 700; color: #fff; padding: 3px 8px; border-radius: 10px; background: linear-gradient(#ff9b3d, #f06b00); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); transform: rotate(-6deg); }
+header small { margin-left: auto; color: #6b8299; }
+main { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 22px; padding: 22px 28px; height: calc(100% - 64px); }
+.panel { background: rgba(255, 255, 255, 0.85); border: 1px solid #b8cad9; border-radius: 10px; box-shadow: 0 4px 14px rgba(40, 80, 120, 0.12), inset 0 1px 0 #fff; padding: 16px; overflow: auto; }
+.panel h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #6b8299; }
+label { display: block; font-size: 13px; margin: 12px 0 5px; font-weight: 600; }
+input[type=text], select { width: 100%; font: inherit; font-size: 14px; padding: 6px 8px; border: 1px solid #a9bfd2; border-radius: 5px; background: linear-gradient(#f3f7fa, #fff 30%); }
+input[type=range] { width: 100%; }
+.hue { height: 10px; border-radius: 5px; background: linear-gradient(90deg, hsl(0,80%,50%), hsl(60,80%,50%), hsl(120,80%,50%), hsl(180,80%,50%), hsl(240,80%,50%), hsl(300,80%,50%), hsl(360,80%,50%)); margin-bottom: 2px; }
+.seg { display: flex; border: 1px solid #a9bfd2; border-radius: 6px; overflow: hidden; }
+.seg button { flex: 1; font: inherit; font-size: 12px; border: 0; padding: 6px 0; cursor: pointer; background: linear-gradient(#fff, #e3ecf3 50%, #d6e3ee 51%, #edf3f8); color: #2b3a4a; }
+.seg button + button { border-left: 1px solid #b8cad9; }
+.seg button.on { background: linear-gradient(#7cc4ff, #2a8ee6 50%, #1877d2 51%, #4aa8f5); color: #fff; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3); }
+.presets { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.presets i { height: 30px; border-radius: 15px; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 3px rgba(0, 0, 0, 0.25); position: relative; }
+.presets i::after { content: ''; position: absolute; left: 3px; right: 3px; top: 2px; height: 45%; border-radius: 12px; background: linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.1)); }
+.chk { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; font-weight: 600; }
+.right { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto; gap: 18px; min-height: 0; min-width: 0; }
+#stage { position: relative; display: grid; place-items: center; border-radius: 10px; border: 1px solid #b8cad9; background: radial-gradient(ellipse at 50% 40%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%), repeating-linear-gradient(0deg, #e6eef5 0 2px, #f6f9fb 2px 4px); box-shadow: inset 0 2px 8px rgba(40, 80, 120, 0.12); min-height: 0; overflow: hidden; }
+#demo { zoom: 1.8; }
+#stage .bgs { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
+#stage .bgs i { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+#code { position: relative; }
+#code pre { margin: 0; height: 190px; overflow: auto; font: 12px/1.45 "Monaco", "Consolas", ui-monospace, monospace; background: #1d2733; color: #cfe3f5; border-radius: 10px; padding: 14px 16px; box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5); white-space: pre; }
+#code pre .p { color: #8fd36a; } #code pre .v { color: #ffd479; }
+#copy { position: absolute; right: 12px; top: 10px; font: inherit; font-size: 12px; font-weight: 600; color: #fff; border: 1px solid #2a6db0; border-radius: 12px; padding: 4px 14px; cursor: pointer; background: linear-gradient(#7cc4ff, #2a8ee6 50%, #1877d2 51%, #4aa8f5); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  header { padding: 0 14px; } header small { display: none; } header h1 { font-size: 20px; }
+  main { grid-template-columns: minmax(0, 1fr); height: auto; padding: 14px; }
+  #demo { zoom: 1.25; }
+  .right { order: -1; grid-template-rows: 220px auto; }
+  #code pre { height: 160px; }
+}
+</style>
+<style id="live"></style>
+</head>
+<body>
+<header><h1>gel<span>Buttonr</span></h1><span class="beta">BETA</span><small>make shiny buttons in seconds · free!</small></header>
+<main>
+  <div class="panel">
+    <h2>Presets</h2>
+    <div class="presets" id="presets"></div>
+    <label for="txt">Label</label><input type="text" id="txt" value="Download Now" maxlength="24" />
+    <label for="hue">Hue</label><div class="hue"></div><input type="range" id="hue" min="0" max="360" value="205" />
+    <label for="sat">Saturation</label><input type="range" id="sat" min="0" max="100" value="85" />
+    <label>Shape</label><div class="seg" id="shape"><button data-v="pill" class="on">Pill</button><button data-v="round">Rounded</button><button data-v="square">Square</button></div>
+    <label for="gloss">Gloss</label><input type="range" id="gloss" min="0" max="100" value="80" />
+    <label>Size</label><div class="seg" id="size"><button data-v="s">S</button><button data-v="m" class="on">M</button><button data-v="l">L</button></div>
+    <label for="icon">Icon</label><select id="icon"><option value="">None</option><option value="arrow" selected>Arrow</option><option value="star">Star</option><option value="check">Check</option><option value="plus">Plus</option></select>
+    <div class="chk"><input type="checkbox" id="refl" checked /><label for="refl" style="margin:0">Wet-floor reflection</label></div>
+  </div>
+  <div class="right">
+    <div id="stage"><div class="bgs" id="bgs"></div><button class="gel-button" id="demo"><span class="ic"></span><span id="lbl">Download Now</span></button></div>
+    <div id="code"><pre id="out"></pre><button id="copy">Copy CSS</button></div>
+  </div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const PRESETS = { Aqua: [205, 85], Lime: [95, 75], Cherry: [352, 80], Grape: [275, 60], Graphite: [210, 8], Sunset: [28, 95] };
+const ICONS = { arrow: '➜', star: '★', check: '✔', plus: '+' };
+const st = { text: 'Download Now', hue: 205, sat: 85, shape: 'pill', gloss: 80, size: 'm', icon: 'arrow', refl: true };
+
+// Presets > swatches built from hue/sat
+const pre = $('#presets');
+Object.entries(PRESETS).forEach(([n, [h, s]]) => {
+  const i = document.createElement('i'); i.title = n; i.style.background = `linear-gradient(hsl(${h},${s}%,70%), hsl(${h},${s}%,45%) 50%, hsl(${h},${s}%,38%) 51%, hsl(${h},${s}%,58%))`;
+  i.onclick = () => preset(n); pre.append(i);
+});
+
+// CSS generator > one string used by preview and export
+function css() {
+  const { hue: h, sat: s, gloss } = st, g = gloss / 100;
+  const sz = { s: [6, 16, 13], m: [10, 26, 16], l: [14, 36, 20] }[st.size];
+  const rad = { pill: 999, round: 8, square: 2 }[st.shape];
+  const c = (l, a) => (a == null ? `hsl(${h}, ${s}%, ${l}%)` : `hsla(${h}, ${s}%, ${l}%, ${a})`);
+  return `.gel-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: ${sz[0]}px ${sz[1]}px;
+  border: 1px solid ${c(28)};
+  border-radius: ${rad}px;
+  font: 700 ${sz[2]}px/1.2 "Lucida Grande", "Segoe UI", sans-serif;
+  color: #fff;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  background: linear-gradient(${c(72)}, ${c(52)} 50%, ${c(42)} 51%, ${c(62)});
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -6px 12px ${c(80, 0.55)}, 0 2px 5px rgba(0, 0, 0, 0.3);${st.refl ? `
+  -webkit-box-reflect: below 3px linear-gradient(transparent 55%, rgba(255, 255, 255, 0.35));` : ''}
+}
+.gel-button::before {
+  content: "";
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 1px;
+  height: 48%;
+  border-radius: ${rad}px ${rad}px ${Math.round(rad / 3)}px ${Math.round(rad / 3)}px;
+  background: linear-gradient(rgba(255, 255, 255, ${g.toFixed(2)}), rgba(255, 255, 255, ${(g * 0.12).toFixed(2)}));
+  pointer-events: none;
+}
+.gel-button:hover { filter: brightness(1.08) saturate(1.1); }
+.gel-button:active {
+  background: linear-gradient(${c(42)}, ${c(50)} 50%, ${c(45)} 51%, ${c(58)});
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.35);
+}`;
+}
+function render() {
+  const text = css();
+  $('#live').textContent = text;
+  $('#lbl').textContent = st.text;
+  $('#demo .ic').textContent = st.icon ? ICONS[st.icon] : '';
+  $('#demo .ic').style.display = st.icon ? '' : 'none';
+  $('#out').innerHTML = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/^(\s+)([a-z-]+):(.*);$/gm, '$1<span class="p">$2</span>:<span class="v">$3</span>;');
+  $('#hue').value = st.hue; $('#sat').value = st.sat; $('#gloss').value = st.gloss; $('#txt').value = st.text; $('#icon').value = st.icon; $('#refl').checked = st.refl;
+  document.querySelectorAll('#shape button').forEach((b) => b.classList.toggle('on', b.dataset.v === st.shape));
+  document.querySelectorAll('#size button').forEach((b) => b.classList.toggle('on', b.dataset.v === st.size));
+}
+function set(o) { Object.assign(st, o); render(); }
+function preset(n) { const [hue, sat] = PRESETS[n]; set({ hue, sat }); }
+
+// Controls
+$('#txt').oninput = (e) => set({ text: e.target.value || ' ' });
+$('#hue').oninput = (e) => set({ hue: +e.target.value });
+$('#sat').oninput = (e) => set({ sat: +e.target.value });
+$('#gloss').oninput = (e) => set({ gloss: +e.target.value });
+$('#icon').onchange = (e) => set({ icon: e.target.value });
+$('#refl').onchange = (e) => set({ refl: e.target.checked });
+document.querySelectorAll('#shape button').forEach((b) => (b.onclick = () => set({ shape: b.dataset.v })));
+document.querySelectorAll('#size button').forEach((b) => (b.onclick = () => set({ size: b.dataset.v })));
+
+// Stage backdrops
+const BGS = ['repeating-linear-gradient(0deg, #e6eef5 0 2px, #f6f9fb 2px 4px)', 'linear-gradient(#bfe6ff, #fff)', 'linear-gradient(#cdeeb0, #fff)', 'linear-gradient(#2b2f36, #11141a)'];
+BGS.forEach((b) => { const i = document.createElement('i'); i.style.background = b; i.onclick = () => ($('#stage').style.background = `radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.5), rgba(255,255,255,0) 70%), ${b}`); $('#bgs').append(i); });
+
+// Copy > clipboard, fallback selects text
+$('#copy').onclick = async () => {
+  const b = $('#copy');
+  try { await navigator.clipboard.writeText(css()); b.textContent = 'Copied!'; }
+  catch { const r = document.createRange(); r.selectNodeContents($('#out')); getSelection().removeAllRanges(); getSelection().addRange(r); b.textContent = 'Selected'; }
+  setTimeout(() => (b.textContent = 'Copy CSS'), 1400);
+};
+
+// Blip on preview press
+let ac = null;
+$('#demo').addEventListener('pointerdown', () => {
+  try { ac = ac || new AudioContext(); const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(1200, t); o.frequency.exponentialRampToValueAtTime(600, t + 0.08); g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.13); } catch {}
+});
+
+// Attract > cycle presets, shapes, labels
+const LABELS = ['Download Now', 'Sign Up Free', 'Get Started', 'Add to Cart', 'Join the Beta', 'Learn More'];
+let lastInput = -1e9, k = 0;
+['pointerdown', 'keydown', 'input'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+setInterval(() => {
+  if (performance.now() - lastInput < 8000) return;
+  k++; const names = Object.keys(PRESETS);
+  const [hue, sat] = PRESETS[names[k % names.length]];
+  set({ hue, sat, text: LABELS[k % LABELS.length], shape: ['pill', 'round', 'pill', 'square'][k % 4], icon: ['arrow', 'star', 'check', 'plus', ''][k % 5], gloss: 60 + (k * 13) % 40 });
+}, 1400);
+render();
+window.__gelmaker = { set, preset, css };
+</script>
+</body>
+</html>

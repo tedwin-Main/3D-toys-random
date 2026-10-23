@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gel Desktop</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="4" />
+<meta name="capture" content="4600" />
+<meta name="tags" content="Aqua, gel buttons, pinstripes, brushed metal, CSS clip-path" />
+<meta name="description" content="An early-2000s 'lickable' gel desktop in the Aqua style, with no images and no logos. Windows have pinstripes and red/amber/green gel buttons, there is a brushed-metal jukebox with an LCD, and a sheet dialog slides down with a pulsing blue default button. A translucent dock magnifies under the cursor, bounces apps as they launch, and minimizes windows with a genie-style warp. Hard because every gel bead (gradient body, caustic glow at the bottom, specular cap at the top) is pure CSS, and the genie warp is a clip-path morph synced with a transform." />
+<meta name="prompt" content="Recreate an early-2000s Aqua-style desktop in one HTML file with no images and no real logos. Pinstriped windows with glossy red/yellow/green gel buttons, a brushed-metal music player with an LCD, gel scrollbars and a sheet dialog with a pulsing blue default button. Add a translucent dock that magnifies icons under the cursor, bounces an app on launch and minimizes windows with a genie effect, plus an aqua wave wallpaper. Synthesize UI sounds and add an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/aqua-gel-desktop.html
+ * PURPOSE: early-2000s gel desktop: pinstripe windows, gel buttons, brushed-metal jukebox, sheet dialog, magnifying dock, genie minimize
+ * UI: Render Studio > Frutiger Aero > Gel Desktop
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__aqua (open, minimize, sheet, magnify)
+ */
+:root { --font: "Lucida Grande", "Lucida Sans Unicode", "Helvetica Neue", system-ui, sans-serif; --gel: #2b7fe0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font: 12px var(--font); color: #111; user-select: none; -webkit-user-select: none; background: #1d6fd6; }
+#wall { position: fixed; inset: 0; width: 100%; height: 100%; }
+
+/* Menu bar > translucent pinstripe strip */
+#menubar { position: fixed; left: 0; right: 0; top: 0; height: 22px; z-index: 900; display: flex; align-items: center; gap: 18px; padding: 0 14px; font-size: 13px; background: repeating-linear-gradient(rgba(255, 255, 255, 0.92) 0 1px, rgba(238, 238, 238, 0.92) 1px 2px); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.25); }
+#menubar b { font-weight: 700; }
+.drop { width: 14px; height: 16px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: radial-gradient(circle at 50% 75%, #9fe2ff, #2b7fe0 55%, #0c3f8f); box-shadow: inset 0 -2px 3px rgba(160, 230, 255, 0.8); position: relative; }
+.drop::after { content: ''; position: absolute; left: 3px; right: 3px; top: 2px; height: 5px; border-radius: 50%; background: linear-gradient(#fff, rgba(255, 255, 255, 0)); }
+#mclock { margin-left: auto; }
+
+/* Windows > pinstripe body, gel lights */
+.win { position: absolute; min-width: 260px; min-height: 160px; border-radius: 6px 6px 4px 4px; box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; overflow: hidden; z-index: 10; background: repeating-linear-gradient(#fff 0 2px, #f1f1f1 2px 4px); transform-origin: 50% 100%; }
+.win.inactive .tbar { opacity: 0.85; }
+.win.inactive .lights i { background: radial-gradient(circle at 50% 70%, #e8e8e8, #b9b9b9 60%, #8d8d8d) !important; }
+.tbar { height: 24px; flex: none; display: flex; align-items: center; justify-content: center; position: relative; background: repeating-linear-gradient(#f7f7f7 0 1px, #e3e3e3 1px 2px); border-bottom: 1px solid #9a9a9a; font-size: 13px; touch-action: none; color: #222; }
+.lights { position: absolute; left: 8px; top: 4px; display: flex; gap: 7px; }
+.lights i { width: 15px; height: 15px; border-radius: 50%; position: relative; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.3); display: grid; place-items: center; font: 700 10px/1 sans-serif; font-style: normal; color: transparent; }
+.lights i::before { content: ''; position: absolute; left: 3px; right: 3px; top: 1px; height: 6px; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.15)); }
+.lights:hover i { color: rgba(60, 0, 0, 0.7); }
+.lights .r { background: radial-gradient(circle at 50% 80%, #ffb0a0, #f0402c 55%, #a01608); }
+.lights .y { background: radial-gradient(circle at 50% 80%, #ffe9a0, #f5b623 55%, #a86a05); }
+.lights .g { background: radial-gradient(circle at 50% 80%, #c9f7a6, #4cc22b 55%, #1d7409); }
+.wbody { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+
+/* Home window > gel toolbar + folder grid */
+.tools { display: flex; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #b5b5b5; background: repeating-linear-gradient(#f7f7f7 0 1px, #e8e8e8 1px 2px); overflow: hidden; }
+.tool { text-align: center; font-size: 11px; color: #333; }
+.tool span { display: block; width: 34px; height: 34px; margin: 0 auto 2px; border-radius: 50%; background: radial-gradient(circle at 50% 80%, #c6e9ff, #4b9be8 55%, #134f9f); box-shadow: inset 0 0 0 1px rgba(0, 30, 80, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3); position: relative; color: #fff; font-size: 15px; line-height: 34px; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4); }
+.tool span::before { content: ''; position: absolute; left: 6px; right: 6px; top: 2px; height: 13px; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.1)); }
+.grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 12px; padding: 14px; align-content: start; background: #fff; overflow: auto; }
+.fold { text-align: center; font-size: 11.5px; }
+.fold .f { width: 56px; height: 44px; margin: 0 auto 4px; position: relative; border-radius: 3px 6px 5px 5px; background: linear-gradient(#bfe2fb, #6aaee8 50%, #4b92d6 51%, #7bbcf0); box-shadow: inset 0 0 0 1px rgba(20, 70, 140, 0.45), 0 2px 3px rgba(0, 0, 0, 0.25); }
+.fold .f::before { content: ''; position: absolute; left: 0; top: -6px; width: 22px; height: 8px; border-radius: 3px 3px 0 0; background: #8ec4f0; box-shadow: inset 0 0 0 1px rgba(20, 70, 140, 0.35); }
+.fold .f::after { content: attr(data-g); position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, 0.85); font-size: 18px; text-shadow: 0 -1px 0 rgba(0, 40, 100, 0.4); }
+.fold.sel .f { filter: brightness(0.82); }
+.fold.sel em { background: #3875d7; color: #fff; border-radius: 8px; padding: 0 6px; }
+.fold em { font-style: normal; }
+.wstatus { padding: 3px 10px; font-size: 11px; color: #444; border-top: 1px solid #c4c4c4; background: repeating-linear-gradient(#f7f7f7 0 1px, #e8e8e8 1px 2px); text-align: center; }
+
+/* Sheet > slides from under the title bar */
+.sheet { position: absolute; left: 50%; top: 0; width: min(340px, 92%); transform: translate(-50%, -105%); transition: transform 0.35s cubic-bezier(.3, .9, .3, 1); z-index: 5; padding: 16px 18px 14px 74px; background: repeating-linear-gradient(rgba(255, 255, 255, 0.97) 0 2px, rgba(240, 240, 240, 0.97) 2px 4px); border: 1px solid #999; border-top: 0; border-radius: 0 0 6px 6px; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35); font-size: 12px; }
+.sheet.on { transform: translate(-50%, 0); }
+.sheet .ic { position: absolute; left: 16px; top: 14px; width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(#ffe39a, #f5b623); box-shadow: inset 0 0 0 1px rgba(120, 70, 0, 0.4); display: grid; place-items: center; font-size: 26px; font-weight: 700; color: #7a4a00; }
+.sheet b { display: block; font-size: 13px; margin-bottom: 4px; }
+.btnrow { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
+.gb { min-width: 74px; height: 22px; border-radius: 11px; padding: 0 14px; display: grid; place-items: center; position: relative; font-size: 12.5px; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25); background: linear-gradient(#fff, #e8e8e8 50%, #d4d4d4 51%, #f6f6f6); cursor: default; }
+.gb::before { content: ''; position: absolute; left: 6px; right: 6px; top: 1px; height: 9px; border-radius: 9px; background: linear-gradient(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.2)); }
+.gb.def { color: #fff; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3); background: linear-gradient(#a8d7ff, #4a98ee 50%, #1f6fd1 51%, #7fc2ff); box-shadow: inset 0 0 0 1px rgba(0, 30, 90, 0.6), 0 1px 3px rgba(0, 0, 0, 0.3); animation: throb 1.1s ease-in-out infinite; }
+@keyframes throb { 50% { filter: brightness(1.18) saturate(0.8); } }
+
+/* Jukebox > brushed metal + LCD */
+.metal { background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, rgba(0, 0, 0, 0.04) 1px 2px, rgba(255, 255, 255, 0) 2px 3px), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.03) 0 7px, rgba(255, 255, 255, 0.05) 7px 11px), linear-gradient(#d6d6d6, #b3b3b3); }
+.metal .tbar { background: transparent; border-bottom: 0; }
+.jtop { display: flex; align-items: center; gap: 12px; padding: 6px 12px 10px; }
+.trans { display: flex; gap: 4px; align-items: center; }
+.trans span { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: #333; background: radial-gradient(circle at 50% 30%, #fff, #d9d9d9 60%, #a8a8a8); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(255, 255, 255, 0.7); }
+.trans span.big { width: 38px; height: 38px; font-size: 14px; }
+.lcd { flex: 1; min-width: 0; height: 46px; border-radius: 9px; padding: 5px 10px; text-align: center; font-size: 11.5px; color: #2d2d1a; background: linear-gradient(#f4f6d9, #dfe4b6); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255, 255, 255, 0.6); overflow: hidden; white-space: nowrap; }
+.lcd .bar { height: 6px; border-radius: 3px; margin-top: 5px; background: rgba(0, 0, 0, 0.12); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3); overflow: hidden; }
+.lcd .bar i { display: block; height: 100%; width: 0; background: linear-gradient(#9fb0c2, #4d5d6e); }
+.songs { flex: 1; margin: 0 12px 12px; background: #fff; border: 1px solid #7d7d7d; overflow: auto; font-size: 12px; }
+.songs div { display: flex; padding: 2px 8px; gap: 10px; }
+.songs div:nth-child(even) { background: #edf3fe; }
+.songs div.on { background: #3875d7; color: #fff; }
+.songs span:first-child { flex: 1; }
+
+/* Gel scrollbars */
+.songs::-webkit-scrollbar, .grid::-webkit-scrollbar { width: 15px; }
+.songs::-webkit-scrollbar-track, .grid::-webkit-scrollbar-track { background: repeating-linear-gradient(90deg, #e9e9e9 0 1px, #fafafa 1px 2px); box-shadow: inset 1px 0 2px rgba(0, 0, 0, 0.2); }
+.songs::-webkit-scrollbar-thumb, .grid::-webkit-scrollbar-thumb { border-radius: 8px; border: 1px solid #1e57a8; background: linear-gradient(90deg, #6fb2f5, #c5e5ff 40%, #3d8ae6 60%, #79c0ff); }
+
+/* Sticky note */
+.sticky { background: linear-gradient(#fffbb0, #fff38a); }
+.sticky .tbar { background: linear-gradient(#fff6a0, #f2e46e); border-bottom-color: #d8c95a; }
+.sticky textarea { flex: 1; border: 0; background: transparent; resize: none; outline: none; padding: 8px 10px; font: 13px/1.4 "Marker Felt", "Comic Sans MS", var(--font); }
+
+/* Dock > translucent shelf, magnifying icons */
+#dock { position: fixed; left: 50%; bottom: 4px; transform: translateX(-50%); z-index: 800; display: flex; align-items: flex-end; gap: 2px; padding: 6px 10px 4px; border-radius: 12px 12px 4px 4px; background: rgba(255, 255, 255, 0.28); border: 1px solid rgba(255, 255, 255, 0.55); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 6px 20px rgba(0, 0, 0, 0.3); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); height: 66px; }
+.dk { width: 52px; height: 52px; flex: none; position: relative; transform-origin: 50% 100%; transition: width 0.08s, height 0.08s; }
+.dk svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.35)); }
+.dk.run::after { content: ''; position: absolute; left: 50%; bottom: -5px; transform: translateX(-50%); border: 4px solid transparent; border-bottom: 5px solid #111; border-top: 0; filter: drop-shadow(0 0 2px #fff); }
+.dk .tip { position: absolute; left: 50%; bottom: calc(100% + 10px); transform: translateX(-50%); padding: 2px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 12px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.dk.hot .tip { opacity: 1; }
+.dk.bounce { animation: bounce 0.55s ease-out 2; }
+@keyframes bounce { 40% { transform: translateY(-26px); } 70% { transform: translateY(-6px); } }
+.dsep { width: 1px; height: 46px; margin: 0 6px; align-self: center; background: linear-gradient(transparent, rgba(0, 0, 0, 0.35), transparent); }
+
+/* Genie > clip-path funnel toward the dock icon */
+.win.genie { animation: genie 0.55s cubic-bezier(.5, 0, .75, .3) forwards; pointer-events: none; }
+.win.ungenie { animation: genie 0.5s cubic-bezier(.25, .7, .5, 1) reverse; }
+@keyframes genie {
+  0% { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); transform: translate(0, 0) scale(1); opacity: 1; }
+  45% { clip-path: polygon(0 0, 100% 0, calc(50% + var(--gx) * 1% + 12%) 100%, calc(50% + var(--gx) * 1% - 12%) 100%); transform: translate(0, 10%) scale(1, 0.9); opacity: 1; }
+  100% { clip-path: polygon(calc(50% + var(--gx) * 1% - 4%) 85%, calc(50% + var(--gx) * 1% + 4%) 85%, calc(50% + var(--gx) * 1% + 3%) 100%, calc(50% + var(--gx) * 1% - 3%) 100%); transform: translate(var(--tx), var(--ty)) scale(0.12); opacity: 0.2; }
+}
+
+@media (max-width: 700px) {
+  #menubar span.m { display: none; }
+  .dk { width: 40px; height: 40px; }
+  #dock { height: 52px; padding: 4px 6px 3px; }
+  .tool:nth-child(n+4) { display: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="wall"></canvas>
+<div id="menubar"><div class="drop"></div><b>Desktop</b><span class="m">File</span><span class="m">Edit</span><span class="m">View</span><span class="m">Go</span><span class="m">Window</span><span class="m">Help</span><span id="mclock"></span></div>
+<div id="desk"></div>
+<div id="dock"></div>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const W = () => innerWidth, H = () => innerHeight, mobile = () => W() < 700;
+
+// Wallpaper > aqua wave bands, half-res canvas
+const wall = $('#wall'), wx = wall.getContext('2d');
+let ww, wh;
+const sizeWall = () => { ww = wall.width = Math.ceil(W() / 2); wh = wall.height = Math.ceil(H() / 2); };
+sizeWall(); addEventListener('resize', sizeWall);
+function drawWall(t) {
+  const g = wx.createLinearGradient(0, 0, ww, wh); g.addColorStop(0, '#0e4fb8'); g.addColorStop(0.5, '#2a86e8'); g.addColorStop(1, '#0a3d93');
+  wx.fillStyle = g; wx.fillRect(0, 0, ww, wh);
+  for (let k = 0; k < 6; k++) {
+    wx.beginPath();
+    const y0 = wh * (0.2 + k * 0.13), amp = wh * 0.12, ph = t * 0.00012 * (k % 2 ? 1 : -1) + k;
+    wx.moveTo(0, wh);
+    for (let x = 0; x <= ww; x += 10) wx.lineTo(x, y0 + Math.sin(x / ww * 4 + ph) * amp + Math.sin(x / ww * 9 - ph * 1.4) * amp * 0.25);
+    wx.lineTo(ww, wh); wx.closePath();
+    const lg = wx.createLinearGradient(0, y0 - amp, 0, y0 + amp * 2);
+    lg.addColorStop(0, `rgba(170,225,255,${0.16 - k * 0.015})`); lg.addColorStop(1, 'rgba(20,80,180,0)');
+    wx.fillStyle = lg; wx.fill();
+  }
+}
+
+// Icons > SVG glyphs for the dock (generic, no vendor marks)
+const SV = (inner) => `<svg viewBox="0 0 64 64">${inner}</svg>`;
+const DEFS = '<defs><linearGradient id="gA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c8ecff"/><stop offset=".5" stop-color="#5aa8ee"/><stop offset=".51" stop-color="#3b8ce0"/><stop offset="1" stop-color="#8fd0ff"/></linearGradient><linearGradient id="gS" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient><radialGradient id="gC" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#fff"/><stop offset=".25" stop-color="#e6f0ff"/><stop offset=".7" stop-color="#b8d3f0"/><stop offset="1" stop-color="#8db1d9"/></radialGradient></defs>';
+const ICON = {
+  home: SV(`${DEFS}<path d="M6 16h18l4 5h30v33a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4z" fill="url(#gA)" stroke="#1d5aa8"/><path d="M32 26l-12 10h4v12h16V36h4z" fill="#fff" opacity=".85"/><path d="M8 22h48v12H8z" fill="url(#gS)" opacity=".6"/>`),
+  web: SV(`${DEFS}<circle cx="32" cy="32" r="27" fill="url(#gA)" stroke="#1d5aa8" stroke-width="1.5"/><circle cx="32" cy="32" r="21" fill="none" stroke="#fff" stroke-opacity=".7"/><path d="M32 11l5 21-5 21-5-21z" fill="#fff"/><path d="M32 11l5 21H27z" fill="#e8402c"/><ellipse cx="32" cy="20" rx="18" ry="9" fill="url(#gS)"/>`),
+  mail: SV(`${DEFS}<rect x="6" y="14" width="52" height="36" rx="3" fill="#f4f7fb" stroke="#7b8ea3"/><path d="M7 15l25 20 25-20" fill="none" stroke="#7b8ea3" stroke-width="2"/><rect x="40" y="18" width="13" height="15" fill="url(#gA)" stroke="#1d5aa8" stroke-dasharray="2 1"/>`),
+  music: SV(`${DEFS}<circle cx="32" cy="32" r="27" fill="url(#gC)" stroke="#8aa4c4"/><circle cx="32" cy="32" r="6" fill="#fff" stroke="#8aa4c4"/><path d="M28 16v22a6 5 0 1 1-3-4V20l16-4v17a6 5 0 1 1-3-4V12z" fill="#2b7fe0" transform="translate(2 6) scale(.85)"/><ellipse cx="26" cy="18" rx="16" ry="7" fill="url(#gS)" opacity=".7"/>`),
+  notes: SV(`<rect x="10" y="8" width="44" height="48" rx="2" fill="#fff38a" stroke="#c9b84a"/><path d="M10 18h44" stroke="#e8d86a" stroke-width="6"/><path d="M16 28h32M16 36h32M16 44h22" stroke="#b9a640" stroke-width="2"/>`),
+  prefs: SV(`${DEFS}<rect x="6" y="6" width="52" height="52" rx="10" fill="#bfc6ce" stroke="#6f7984"/><circle cx="32" cy="32" r="15" fill="none" stroke="#5d6670" stroke-width="7" stroke-dasharray="6 4"/><circle cx="32" cy="32" r="9" fill="#e9edf1" stroke="#5d6670" stroke-width="2"/><rect x="6" y="6" width="52" height="22" rx="10" fill="url(#gS)" opacity=".7"/>`),
+  trash: SV(`${DEFS}<path d="M14 14h36l-4 44H18z" fill="rgba(200,225,255,.45)" stroke="#6d8bad"/><path d="M16 22l30 30M24 16l22 30M14 30l20 26M48 22l-30 30M40 16l-22 30M50 30l-20 26" stroke="#9db6d2" stroke-width=".8"/><ellipse cx="32" cy="14" rx="19" ry="4" fill="#dce9f7" stroke="#6d8bad"/>`),
+};
+
+// Windows > factory: home / jukebox / notes
+const FOLDERS = [['Documents', '✎'], ['Pictures', '◐'], ['Music', '♪'], ['Movies', '▶'], ['Public', '☺'], ['Sites', '◎'], ['Library', '❖'], ['Desktop', '▭']];
+const SONGS = [['Glass Lagoon', '3:12'], ['Bubble Season', '2:58'], ['Aqua Sunrise', '4:05'], ['Pinstripe Lounge', '3:40'], ['Brushed Steel Blues', '3:21'], ['Gel Button Funk', '2:44'], ['Translucent Skies', '5:02'], ['Drop Shadow', '3:09']];
+const APPS = {
+  home: { title: 'Home', w: 520, h: 360, cls: '', body: () => `<div class="tools">${[['◀', 'Back'], ['▦', 'View'], ['⌂', 'Home'], ['★', 'Favorites'], ['▤', 'Apps']].map(([g, n]) => `<div class="tool"><span>${g}</span>${n}</div>`).join('')}</div>
+      <div class="grid">${FOLDERS.map(([n, g]) => `<div class="fold"><div class="f" data-g="${g}"></div><em>${n}</em></div>`).join('')}</div><div class="wstatus">8 items, 12.4 GB available</div>
+      <div class="sheet"><div class="ic">!</div><b>Empty the Trash?</b>Items in the Trash will be removed for good. This is only a demo, nothing is deleted.<div class="btnrow"><div class="gb" data-x="no">Cancel</div><div class="gb def" data-x="ok">OK</div></div></div>`,
+    init(o) {
+      $$('.fold', o.el).forEach((f) => (f.onclick = () => { $$('.fold', o.el).forEach((x) => x.classList.toggle('sel', x === f)); click(); }));
+      $$('.gb', o.el).forEach((b) => (b.onclick = () => { sheet(o, false); click(); }));
+    } },
+  music: { title: 'Jukebox', w: 460, h: 330, cls: 'metal', body: () => `<div class="jtop"><div class="trans"><span>◀◀</span><span class="big" data-play>▶</span><span>▶▶</span></div><div class="lcd"><div class="lt">Glass Lagoon</div><div class="ls">Demo Band · Frutiger Hits</div><div class="bar"><i></i></div></div></div>
+      <div class="songs">${SONGS.map(([n, d], i) => `<div data-i="${i}"><span>${n}</span><span>${d}</span></div>`).join('')}</div>`,
+    init(o) {
+      $('[data-play]', o.el).onclick = () => togglePlay(o);
+      $$('.songs div', o.el).forEach((r) => (r.ondblclick = () => { track = +r.dataset.i; if (!playing) togglePlay(o); else showTrack(o); }));
+      showTrack(o);
+    } },
+  notes: { title: 'Note', w: 230, h: 190, cls: 'sticky', body: () => `<textarea spellcheck="false">Hover the dock to magnify.
+Yellow light = genie into the dock.
+Click a dock icon to bounce + open.</textarea>` },
+};
+const wins = [];
+let zTop = 20;
+const focusWin = (o) => { wins.forEach((w) => w.el.classList.toggle('inactive', w !== o)); if (o) o.el.style.zIndex = ++zTop; };
+function openApp(kind) {
+  const ex = wins.find((w) => w.kind === kind);
+  if (ex) { if (ex.min) restore(ex); focusWin(ex); return ex; }
+  const a = APPS[kind], el = document.createElement('div');
+  el.className = 'win ' + a.cls;
+  const w = Math.min(a.w, W() - 16), h = Math.min(a.h, H() - 130);
+  const pos = { home: [0.08, 60], music: [0.42, 110], notes: [0.7, 300] }[kind];
+  const x = mobile() ? (W() - w) / 2 : Math.min(W() - w - 10, W() * pos[0]), y = mobile() ? 40 + wins.length * 40 : pos[1];
+  Object.assign(el.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+  el.innerHTML = `<div class="tbar"><div class="lights"><i class="r">×</i><i class="y">−</i><i class="g">+</i></div>${a.title}</div><div class="wbody">${a.body()}</div>`;
+  $('#desk').append(el);
+  const o = { el, kind, min: false };
+  wins.push(o);
+  a.init?.(o);
+  wire(o);
+  focusWin(o);
+  dockState();
+  return o;
+}
+function wire(o) {
+  const { el } = o, bar = $('.tbar', el);
+  el.addEventListener('pointerdown', () => focusWin(o));
+  $('.r', el).onclick = (e) => { e.stopPropagation(); if (o.kind === 'music' && playing) togglePlay(o); el.remove(); wins.splice(wins.indexOf(o), 1); dockState(); click(); };
+  $('.y', el).onclick = (e) => { e.stopPropagation(); minimize(o); };
+  $('.g', el).onclick = (e) => { e.stopPropagation(); const big = el.dataset.big !== '1'; el.dataset.big = big ? '1' : ''; el.style.height = big ? H() - 120 + 'px' : APPS[o.kind].h + 'px'; };
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.lights')) return;
+    const sx = e.clientX - el.offsetLeft, sy = e.clientY - el.offsetTop;
+    bar.setPointerCapture(e.pointerId);
+    bar.onpointermove = (ev) => { el.style.left = Math.max(-el.offsetWidth + 80, Math.min(W() - 80, ev.clientX - sx)) + 'px'; el.style.top = Math.max(22, Math.min(H() - 90, ev.clientY - sy)) + 'px'; };
+    bar.onpointerup = () => (bar.onpointermove = null);
+  });
+}
+
+// Genie > aim the funnel at this app's dock icon, then hide
+function genieVars(o) {
+  const r = o.el.getBoundingClientRect(), d = dockEl[o.kind].getBoundingClientRect();
+  const dx = d.left + d.width / 2 - (r.left + r.width / 2);
+  o.el.style.setProperty('--gx', Math.max(-40, Math.min(40, (dx / r.width) * 100)));
+  o.el.style.setProperty('--tx', dx + 'px');
+  o.el.style.setProperty('--ty', d.top - r.bottom + 'px');
+}
+function minimize(o) {
+  if (o.min) return;
+  genieVars(o); o.min = true; whoosh(false);
+  o.el.classList.add('genie');
+  o.el.addEventListener('animationend', () => { if (o.min) o.el.style.visibility = 'hidden'; }, { once: true });
+  focusWin(wins.filter((w) => !w.min).at(-1));
+}
+function restore(o) {
+  genieVars(o); o.min = false; whoosh(true);
+  o.el.style.visibility = ''; o.el.classList.remove('genie'); o.el.classList.add('ungenie');
+  o.el.addEventListener('animationend', () => o.el.classList.remove('ungenie'), { once: true });
+}
+function sheet(o, on = true) { $('.sheet', o.el)?.classList.toggle('on', on); }
+
+// Dock > magnification by cosine falloff of distance to pointer
+const DOCK = [['home', 'Home'], ['web', 'Browser'], ['mail', 'Mail'], ['music', 'Jukebox'], ['notes', 'Notes'], ['prefs', 'Settings'], null, ['trash', 'Trash']];
+const dockEl = {};
+for (const it of DOCK) {
+  if (!it) { const s = document.createElement('div'); s.className = 'dsep'; $('#dock').append(s); continue; }
+  const d = document.createElement('div');
+  d.className = 'dk'; d.innerHTML = ICON[it[0]] + `<div class="tip">${it[1]}</div>`;
+  d.onclick = () => launch(it[0]);
+  $('#dock').append(d); dockEl[it[0]] = d;
+}
+const base = () => (mobile() ? 40 : 52);
+function magnify(mx) {
+  const b = base();
+  for (const [k, d] of Object.entries(dockEl)) {
+    let s = 1;
+    if (mx != null) { const r = d.getBoundingClientRect(), c = r.left + r.width / 2, dist = Math.abs(mx - c); s = 1 + 0.9 * Math.max(0, Math.cos(Math.min(Math.PI / 2, dist / (b * 2.6)))) ** 2; }
+    d.style.width = d.style.height = b * s + 'px';
+    d.classList.toggle('hot', mx != null && s > 1.75);
+  }
+}
+$('#dock').addEventListener('pointermove', (e) => magnify(e.clientX));
+$('#dock').addEventListener('pointerleave', () => magnify(null));
+function dockState() { for (const [k, d] of Object.entries(dockEl)) d.classList.toggle('run', wins.some((w) => w.kind === k)); }
+function launch(k) {
+  click();
+  const d = dockEl[k];
+  if (k === 'trash') { const h = wins.find((w) => w.kind === 'home') ?? openApp('home'); if (h.min) restore(h); focusWin(h); sheet(h); return; }
+  if (!APPS[k]) { d.classList.remove('bounce'); void d.offsetWidth; d.classList.add('bounce'); return; }
+  if (wins.some((w) => w.kind === k)) { openApp(k); return; }
+  d.classList.remove('bounce'); void d.offsetWidth; d.classList.add('bounce');
+  setTimeout(() => openApp(k), 650);
+}
+
+// Audio > click, genie whoosh, jukebox arpeggio
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) try { ac = new AudioContext(); } catch {} });
+function click() {
+  if (!ac) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(1800, t); o.frequency.exponentialRampToValueAtTime(600, t + 0.03);
+  g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.06);
+}
+function whoosh(up) {
+  if (!ac) return;
+  const t = ac.currentTime, n = ac.sampleRate * 0.5, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / n) * Math.PI);
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'bandpass'; f.Q.value = 3;
+  f.frequency.setValueAtTime(up ? 400 : 2600, t); f.frequency.exponentialRampToValueAtTime(up ? 2600 : 400, t + 0.45); g.gain.value = 0.25;
+  s.connect(f).connect(g).connect(ac.destination); s.start(t);
+}
+let playing = false, track = 0, pos = 0, nextNote = 0, step = 0;
+const ARP = [[60, 64, 67, 71], [57, 60, 64, 67], [62, 65, 69, 72], [55, 59, 62, 65]];
+function showTrack(o) {
+  $('.lt', o.el).textContent = SONGS[track][0];
+  $$('.songs div', o.el).forEach((r, i) => r.classList.toggle('on', i === track));
+}
+function togglePlay(o) {
+  playing = !playing; click();
+  $('[data-play]', o.el).textContent = playing ? '❚❚' : '▶';
+  if (ac) nextNote = ac.currentTime + 0.05;
+  showTrack(o);
+}
+function tickMusic(dt) {
+  const o = wins.find((w) => w.kind === 'music');
+  if (!o || !playing) return;
+  pos += dt;
+  const len = 30;
+  if (pos > len) { pos = 0; track = (track + 1) % SONGS.length; showTrack(o); }
+  $('.lcd .bar i', o.el).style.width = (pos / len) * 100 + '%';
+  if (!ac) return;
+  while (nextNote < ac.currentTime + 0.2) {
+    const ch = ARP[(Math.floor(step / 8) + track) % 4], m = ch[step % 4] + (step % 8 > 3 ? 12 : 0), t = nextNote;
+    const os = ac.createOscillator(), g = ac.createGain(); os.type = 'triangle'; os.frequency.value = 440 * 2 ** ((m - 69) / 12);
+    g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35); os.connect(g).connect(ac.destination); os.start(t); os.stop(t + 0.4);
+    nextNote += 0.16; step++;
+  }
+}
+
+// Attract > sweep the dock, launch, sheet, genie, restore
+let lastInput = -1e9, aT = 0;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+$('#dock').addEventListener('pointermove', (e) => { if (e.isTrusted) lastInput = performance.now(); });
+const TOUR = [[0.5, 'sweep'], [3.2, 'unsweep'], [3.6, 'sheet'], [6, 'unsheet'], [6.8, 'genie'], [8.6, 'restore'], [10, 'select']];
+function tour(name) {
+  const home = wins.find((w) => w.kind === 'home'), mus = wins.find((w) => w.kind === 'music');
+  if (name === 'unsweep') magnify(null);
+  if (name === 'sheet' && home) { focusWin(home); sheet(home); }
+  if (name === 'unsheet' && home) sheet(home, false);
+  if (name === 'genie' && mus) minimize(mus);
+  if (name === 'restore' && mus) { restore(mus); focusWin(mus); }
+  if (name === 'select' && home) { const f = $$('.fold', home.el); const k = Math.floor(Math.random() * f.length); f.forEach((x, i) => x.classList.toggle('sel', i === k)); }
+}
+
+// Run engine > boot desktop, frame loop
+openApp('home'); openApp('music'); if (!mobile()) openApp('notes');
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  drawWall(now);
+  tickMusic(dt);
+  if (now - lastInput > 9000) {
+    const prev = aT; aT = (aT + dt) % 12;
+    for (const [at, n] of TOUR) if (prev < at && aT >= at) tour(n);
+    if (aT > 0.5 && aT < 3.2) { const r = $('#dock').getBoundingClientRect(); magnify(r.left + r.width * (0.5 + 0.45 * Math.sin((aT - 0.5) * 1.6 - 1.4))); }
+  }
+  const d = new Date();
+  $('#mclock').textContent = d.toLocaleTimeString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  requestAnimationFrame(frame);
+}
+magnify(null);
+requestAnimationFrame(frame);
+window.__aqua = { open: openApp, minimize: (k) => minimize(wins.find((w) => w.kind === k)), restore: (k) => restore(wins.find((w) => w.kind === k)), sheet: (on = true) => sheet(wins.find((w) => w.kind === 'home'), on), magnify, wins };
+</script>
+</body>
+</html>

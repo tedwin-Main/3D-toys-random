@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Y2K Countdown</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="50" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="canvas 7-segment LCD, wireframe globe, glitch effects, firework particles, virtual timeline, WebAudio ticks glitch buzz fanfare" />
+<meta name="description" content="New Year's Eve 1999 at a Y2K readiness centre: glowing seven-segment digits count down the last ten seconds of the millennium over a spinning wireframe globe, a checklist reports every system compliant and world clocks show who has already crossed into 2000. At midnight the millennium bug bites: the date rolls over to 1900, digits scramble, the screen tears and shakes, checks flip to FAIL and an error box demands a patch. Hit PATCH NOW (or wait) and the fix installs, everything turns green and fireworks fill the sky for the new millennium, then the clock resets for another go. Hard because the LCD digits, globe, glitch tearing and fireworks are all canvas-drawn on one seekable timeline with synthesized ticks, glitch buzz and fanfare."/>
+<meta name="prompt" content="Build a Y2K New Year's Eve countdown in one HTML file: a millennium-watch control room with large canvas-drawn seven-segment digits counting 23:59:50 to midnight on 12.31.1999 over a rotating wireframe globe, a system-compliance checklist, analog world clocks marking which cities are already in 2000, and a news ticker. At midnight the millennium bug glitch hits: date shows 1900, digits scramble, slice tearing, RGB split and shake, checks flip to FAIL and an error dialog offers PATCH NOW. Patching shows a progress bar, restores everything and launches a firework show with HAPPY NEW MILLENNIUM, then loops. WebAudio second ticks, glitch buzz, patch arpeggio, fanfare and firework pops." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/y2k-countdown.html
+ * PURPOSE: NYE 1999 Y2K countdown: 7-seg clock, globe, compliance checks, millennium bug glitch, patch, fireworks
+ * UI: Render Studio > Frutiger Aero > Y2K Futurism > Y2K Countdown
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__y2kclock (patch, restart, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: radial-gradient(ellipse at 50% 40%, #12306a, #050b1f 70%); color: #bfe4ff; font: 12px Verdana, Geneva, sans-serif; }
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+.room { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; }
+.room.glitch { animation: shake 0.12s steps(2) infinite; }
+@keyframes shake { 0% { transform: translate(3px, -2px) skewX(1deg); } 50% { transform: translate(-4px, 2px) skewX(-2deg); } 100% { transform: translate(2px, 1px); } }
+header { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid rgba(120, 190, 255, 0.35); background: linear-gradient(180deg, rgba(160, 210, 255, 0.18), rgba(160, 210, 255, 0.02)); }
+header b { font: italic 900 20px "Arial Black", sans-serif; letter-spacing: 0.04em; background: linear-gradient(180deg, #fff, #9cc4ee 50%, #3a5f8f 52%, #dff0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.live { padding: 2px 8px; border-radius: 3px; background: #e01b2a; color: #fff; font-weight: bold; animation: bl 1s steps(2) infinite; }
+@keyframes bl { 50% { opacity: 0.3; } }
+header span:last-child { margin-left: auto; opacity: 0.7; }
+.main { display: grid; grid-template-columns: 250px 1fr 270px; gap: 18px; padding: 16px 20px; min-height: 0; }
+.glass { background: linear-gradient(180deg, rgba(160, 210, 255, 0.16), rgba(60, 120, 200, 0.06)); border: 1px solid rgba(160, 210, 255, 0.4); border-radius: 12px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35); padding: 12px 14px; backdrop-filter: blur(6px); align-self: start; }
+.glass h3 { margin: 0 0 10px; font-size: 10px; letter-spacing: 0.3em; color: #8fc8ff; }
+.check { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed rgba(160, 210, 255, 0.2); }
+.check em { font-style: normal; font-weight: bold; color: #6dff9a; font-family: "Courier New", monospace; }
+.check.fail em { color: #ff4a5a; } .check.wait em { color: #ffd34a; }
+.center { position: relative; display: grid; place-items: center; align-content: center; gap: 6px; min-height: 0; }
+#globe { position: absolute; width: min(56vh, 100%); aspect-ratio: 1; opacity: 0.55; }
+#digits { position: relative; width: min(100%, 720px); aspect-ratio: 720 / 190; }
+.date { position: relative; font: bold 26px "Courier New", monospace; letter-spacing: 0.2em; color: #e8f6ff; text-shadow: 0 0 10px #4fb4ff; }
+.label { position: relative; font-size: 11px; letter-spacing: 0.4em; color: #8fc8ff; }
+.room.glitch .date, .room.glitch .label { text-shadow: 3px 0 #ff2a6a, -3px 0 #2affe0; }
+.cel { position: absolute; left: 50%; top: 9%; line-height: 1; transform: translateX(-50%) scale(0.6); opacity: 0; transition: 0.6s cubic-bezier(0.2, 1.5, 0.4, 1); text-align: center; white-space: nowrap; font: italic 900 clamp(26px, 4.6vw, 54px) "Arial Black", sans-serif; background: linear-gradient(180deg, #fff 0%, #ffe9a8 40%, #b07a1a 52%, #5a3a08 55%, #ffd76a 75%, #fff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 16px rgba(255, 200, 80, 0.6)); z-index: 6; pointer-events: none; }
+.cel.show { opacity: 1; transform: translateX(-50%) scale(1); }
+.clock { display: grid; grid-template-columns: 54px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px dashed rgba(160, 210, 255, 0.2); }
+.clock canvas { width: 54px; height: 54px; }
+.clock small { display: block; opacity: 0.7; }
+.yr { font: bold 12px "Courier New", monospace; padding: 2px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); }
+.yr.new { background: linear-gradient(180deg, #ffe9a8, #c89020); color: #3a2400; }
+.ticker { overflow: hidden; white-space: nowrap; padding: 7px 0; background: rgba(0, 10, 30, 0.7); border-top: 1px solid rgba(160, 210, 255, 0.35); font-weight: bold; }
+.ticker span { display: inline-block; padding-left: 100%; animation: tk 32s linear infinite; }
+@keyframes tk { to { transform: translateX(-100%); } }
+.err { position: fixed; left: 50%; top: 50%; z-index: 8; width: 330px; transform: translate(-50%, -50%); background: #c0c0c0; color: #000; font: 11px Tahoma, sans-serif; padding: 3px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080, inset 2px 2px #fff, 6px 6px 0 rgba(0, 0, 0, 0.4); display: none; }
+.err.show { display: block; }
+.err .t { padding: 3px 5px; color: #fff; font-weight: bold; background: linear-gradient(90deg, #800000, #d03030); }
+.err .b { display: grid; grid-template-columns: 34px 1fr; gap: 10px; padding: 14px 12px 8px; line-height: 1.5; }
+.err .x { width: 32px; height: 32px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #ff8080, #c00000); color: #fff; font: bold 20px Arial; display: grid; place-items: center; }
+.err .bar { height: 16px; margin: 6px 12px; padding: 2px; background: #fff; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff; display: none; }
+.err .bar i { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px); }
+.err .a { display: flex; justify-content: center; gap: 8px; padding: 6px 0 8px; }
+.err button { min-width: 90px; height: 24px; border: 0; background: #c0c0c0; font: bold 11px Tahoma, sans-serif; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf; cursor: pointer; }
+#patch { animation: bl 0.5s steps(2) infinite; }
+.again { position: fixed; right: 18px; bottom: 44px; z-index: 7; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(160, 210, 255, 0.6); color: #dff0ff; font: bold 11px Verdana, sans-serif; letter-spacing: 0.12em; background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(60, 140, 255, 0.25)); cursor: pointer; }
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 10px; padding: 10px 12px; overflow: hidden; }
+  .center { order: -1; min-height: 240px; }
+  .glass { padding: 8px 12px; }
+  .glass.checks .check:nth-child(n + 5) { display: none; }
+  .glass.clocks { display: none; }
+  header span:last-child { display: none; }
+  .date { font-size: 18px; }
+}
+</style>
+</head>
+<body>
+<div class="room" id="room">
+  <header><b>MILLENNIUM WATCH</b><span class="live">LIVE</span><span>Y2K Readiness Center · Channel 2000</span></header>
+  <div class="main">
+    <div class="glass checks"><h3>SYSTEM CHECK</h3><div id="checks"></div></div>
+    <div class="center"><canvas id="globe" width="600" height="600"></canvas><div class="label" id="label">COUNTDOWN TO 2000</div><canvas id="digits" width="1440" height="380"></canvas><div class="date" id="date">FRI 12.31.1999</div></div>
+    <div class="glass clocks"><h3>WORLD CLOCKS</h3><div id="clocks"></div></div>
+  </div>
+  <div class="ticker"><span>LIVE: Celebrations sweep the Pacific as the first cities welcome the year 2000 · Officials urge calm: "We have tested everything twice" · Shoppers report record sales of bottled water, flashlights and canned beans · Banks say ATMs are fully compliant · Reminder: set your VCR clock after midnight ·</span></div>
+</div>
+<div class="cel" id="cel">HAPPY NEW<br />MILLENNIUM!</div>
+<div class="err" id="err"><div class="t">MILLENNIUM.SYS - Critical Error</div><div class="b"><div class="x">X</div><div id="errText">SYSTEM DATE OVERFLOW<br />Year rolled over to 19100.<br />Date fields read 01/01/1900.</div></div><div class="bar" id="pbar"><i id="pfill"></i></div><div class="a"><button id="patch">PATCH NOW</button><button id="ignore">Ignore</button></div></div>
+<button class="again" id="again">RUN MIDNIGHT AGAIN</button>
+<canvas id="fx"></canvas>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// Timeline > 10s countdown, glitch, patch, party, loop
+const COUNT = 10, AUTO_PATCH = 4.2, PATCH_D = 1.6, PARTY = 9;
+let vt = 0, patchAt = null, last = performance.now();
+const CHECKS = ['Bank mainframes', 'Power grid', 'Air traffic control', 'Elevators', 'Hospital records', 'VCR clocks', 'Toaster firmware', 'Office coffee machine'];
+$('#checks').innerHTML = CHECKS.map((c, i) => `<div class="check" id="ck${i}"><span>${c}</span><em>OK</em></div>`).join('');
+const CITIES = [['Auckland', 18], ['Tokyo', 14], ['London', 5], ['New York', 0], ['Los Angeles', -3]];
+$('#clocks').innerHTML = CITIES.map(([n], i) => `<div class="clock"><canvas id="cl${i}" width="108" height="108"></canvas><div>${n}<small id="ct${i}"></small></div><span class="yr" id="cy${i}"></span></div>`).join('');
+function phase() {
+  if (vt < COUNT) return 'count';
+  if (patchAt === null) return 'glitch';
+  if (vt < patchAt + PATCH_D) return 'patching';
+  return 'party';
+}
+
+// Digits > 7-segment LCD with ghost segments
+const SEG = { 0: 'abcdef', 1: 'bc', 2: 'abdeg', 3: 'abcdg', 4: 'bcfg', 5: 'acdfg', 6: 'acdefg', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg' };
+const dc = $('#digits').getContext('2d');
+function seg(x, y, w, h, on, glitch) {
+  const t = w * 0.16, g = t * 0.25, P = { a: [x + g, y, w - 2 * g, t, 0], g: [x + g, y + h / 2 - t / 2, w - 2 * g, t, 0], d: [x + g, y + h - t, w - 2 * g, t, 0], f: [x, y + g, t, h / 2 - g, 1], b: [x + w - t, y + g, t, h / 2 - g, 1], e: [x, y + h / 2, t, h / 2 - g, 1], c: [x + w - t, y + h / 2, t, h / 2 - g, 1] };
+  for (const [k, [sx, sy, sw, sh, v]] of Object.entries(P)) {
+    const lit = glitch ? Math.random() < 0.5 : on.includes(k); dc.fillStyle = lit ? (glitch ? (Math.random() < 0.5 ? '#ff3a6a' : '#3affe0') : '#bff4ff') : 'rgba(120,190,255,0.08)';
+    dc.shadowColor = lit ? '#2aa8ff' : 'transparent'; dc.shadowBlur = lit ? 22 : 0; dc.beginPath();
+    if (v) { dc.moveTo(sx + sw / 2, sy); dc.lineTo(sx + sw, sy + sw / 2); dc.lineTo(sx + sw, sy + sh - sw / 2); dc.lineTo(sx + sw / 2, sy + sh); dc.lineTo(sx, sy + sh - sw / 2); dc.lineTo(sx, sy + sw / 2); }
+    else { dc.moveTo(sx, sy + sh / 2); dc.lineTo(sx + sh / 2, sy); dc.lineTo(sx + sw - sh / 2, sy); dc.lineTo(sx + sw, sy + sh / 2); dc.lineTo(sx + sw - sh / 2, sy + sh); dc.lineTo(sx + sh / 2, sy + sh); }
+    dc.fill();
+  }
+  dc.shadowBlur = 0;
+}
+function drawDigits(str, glitch) {
+  dc.clearRect(0, 0, 1440, 380); let x = 40; const w = 150, h = 300, y = 40;
+  for (const ch of str) {
+    if (ch === ':') { dc.fillStyle = Math.floor(vt * 2) % 2 && !glitch ? 'rgba(120,190,255,0.12)' : '#bff4ff'; dc.shadowColor = '#2aa8ff'; dc.shadowBlur = 18; dc.fillRect(x + 14, y + 80, 24, 24); dc.fillRect(x + 14, y + 200, 24, 24); dc.shadowBlur = 0; x += 66; continue; }
+    dc.save(); dc.translate(x + 20, 0); dc.transform(1, 0, -0.08, 1, 0, 0); seg(0, y, w, h, SEG[ch] || '', glitch && Math.random() < 0.6); dc.restore(); x += w + 40;
+  }
+}
+
+// Globe > rotating wireframe sphere
+const gc = $('#globe').getContext('2d');
+function drawGlobe(t, hot) {
+  gc.clearRect(0, 0, 600, 600); const R = 250, cx = 300, cy = 300, rot = t * 0.3, tilt = 0.35;
+  gc.lineWidth = 1.2; gc.strokeStyle = hot ? 'rgba(255,90,120,0.7)' : 'rgba(110,200,255,0.65)';
+  const P = (lat, lon) => { const x = Math.cos(lat) * Math.sin(lon + rot), y = Math.sin(lat), z = Math.cos(lat) * Math.cos(lon + rot); const y2 = y * Math.cos(tilt) - z * Math.sin(tilt), z2 = y * Math.sin(tilt) + z * Math.cos(tilt); return [cx + x * R, cy - y2 * R, z2]; };
+  const line = (pts) => { gc.beginPath(); let pen = false; for (const [x, y, z] of pts) { if (z < -0.05) { pen = false; continue; } pen ? gc.lineTo(x, y) : gc.moveTo(x, y); pen = true; } gc.stroke(); };
+  for (let la = -75; la <= 75; la += 15) line(Array.from({ length: 73 }, (_, i) => P((la * Math.PI) / 180, (i * 5 * Math.PI) / 180)));
+  for (let lo = 0; lo < 360; lo += 20) line(Array.from({ length: 37 }, (_, i) => P(((i * 5 - 90) * Math.PI) / 180, (lo * Math.PI) / 180)));
+  gc.strokeStyle = 'rgba(200,235,255,0.4)'; gc.beginPath(); gc.arc(cx, cy, R, 0, 7); gc.stroke();
+}
+
+// Clocks > analog faces, year badges
+function drawClocks(mins) {
+  CITIES.forEach(([, off], i) => {
+    const m = ((mins + off * 60) % 1440 + 1440) % 1440, total = mins + off * 60, newYear = total >= 0, x = $(`#cl${i}`).getContext('2d');
+    x.clearRect(0, 0, 108, 108); x.fillStyle = 'rgba(200,230,255,0.12)'; x.strokeStyle = '#8fc8ff'; x.lineWidth = 3; x.beginPath(); x.arc(54, 54, 48, 0, 7); x.fill(); x.stroke();
+    for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; x.fillStyle = '#bfe4ff'; x.fillRect(54 + Math.sin(a) * 40 - 2, 54 - Math.cos(a) * 40 - 2, 4, 4); }
+    const hand = (a, l, w, c) => { x.strokeStyle = c; x.lineWidth = w; x.lineCap = 'round'; x.beginPath(); x.moveTo(54, 54); x.lineTo(54 + Math.sin(a) * l, 54 - Math.cos(a) * l); x.stroke(); };
+    hand(((m / 60) % 12) / 12 * Math.PI * 2, 24, 5, '#fff'); hand((m % 60) / 60 * Math.PI * 2, 36, 3, '#bff4ff'); hand(((vt % 60) / 60) * Math.PI * 2, 40, 1.5, '#ff6a7a');
+    const hh = Math.floor(m / 60), mm = Math.floor(m % 60); $(`#ct${i}`).textContent = `${(hh % 12) || 12}:${String(mm).padStart(2, '0')} ${hh < 12 ? 'AM' : 'PM'}`;
+    const y = $(`#cy${i}`); y.textContent = newYear ? '2000' : '1999'; y.classList.toggle('new', newYear);
+  });
+}
+
+// Fireworks > rockets + sparks
+const fx = $('#fx'), fc = fx.getContext('2d'); let parts = [];
+function size() { const d = Math.min(2, devicePixelRatio); fx.width = innerWidth * d; fx.height = innerHeight * d; fc.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+function rocket() { parts.push({ x: rnd(0.15, 0.85) * innerWidth, y: innerHeight, vx: rnd(-1, 1), vy: -rnd(9, 13), rocket: true, life: 1, c: `hsl(${rnd(0, 360)},100%,65%)` }); }
+function burst(x, y, c) { const n = 70, hue = rnd(0, 360); for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2, v = rnd(2, 6); parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, c: Math.random() < 0.2 ? '#fff' : `hsl(${hue + rnd(-20, 20)},100%,${rnd(55, 75)}%)` }); } pop(); }
+function drawFx(ph) {
+  fc.globalCompositeOperation = 'destination-out'; fc.fillStyle = 'rgba(0,0,0,0.22)'; fc.fillRect(0, 0, innerWidth, innerHeight); fc.globalCompositeOperation = 'lighter';
+  parts = parts.filter((p) => p.life > 0);
+  for (const p of parts) {
+    p.x += p.vx; p.y += p.vy; p.vy += p.rocket ? 0.15 : 0.06; p.vx *= 0.985; p.life -= p.rocket ? 0 : 0.012;
+    if (p.rocket && p.vy > -1.5) { p.life = 0; burst(p.x, p.y, p.c); continue; }
+    fc.fillStyle = p.c; fc.globalAlpha = Math.max(0, p.life); fc.beginPath(); fc.arc(p.x, p.y, p.rocket ? 2.5 : 2, 0, 7); fc.fill();
+  }
+  fc.globalAlpha = 1; fc.globalCompositeOperation = 'source-over';
+  if (ph === 'glitch') for (let i = 0; i < 6; i++) { const y = rnd(0, innerHeight), h = rnd(2, 26); fc.fillStyle = `rgba(${Math.random() < 0.5 ? '255,40,100' : '40,255,220'},${rnd(0.1, 0.35)})`; fc.fillRect(rnd(-50, 0), y, innerWidth + 100, h); }
+}
+
+// Audio > ticks, glitch buzz, patch arp, fanfare, pops
+let ac, buzz = null;
+function audio() { if (!ac) ac = new AudioContext(); ac.resume(); }
+addEventListener('pointerdown', audio, { capture: true });
+const ok = () => ac && ac.state === 'running';
+function tone(f, t, d, v, type = 'sine') { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + 0.05); return o; }
+function tick(big) { if (ok()) tone(big ? 1320 : 880, ac.currentTime, big ? 0.3 : 0.12, big ? 0.25 : 0.12); }
+function startBuzz() { if (!ok() || buzz) return; const o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; g.gain.value = 0.07; o.connect(g).connect(ac.destination); o.start(); buzz = { o, g, iv: setInterval(() => (o.frequency.value = [55, 110, 220, 440, 1760, 3520][Math.floor(Math.random() * 6)] * rnd(0.9, 1.1)), 45) }; }
+function stopBuzz() { if (!buzz) return; clearInterval(buzz.iv); buzz.o.stop(); buzz = null; }
+function arp() { if (!ok()) return; const t = ac.currentTime; [262, 330, 392, 523, 659, 784, 1047].forEach((f, i) => tone(f, t + i * 0.12, 0.2, 0.08, 'square')); }
+function fanfare() { if (!ok()) return; const t = ac.currentTime; [[523, 0], [659, 0.15], [784, 0.3], [1047, 0.45]].forEach(([f, d]) => tone(f, t + d, 1.6, 0.08, 'sawtooth')); [262, 330, 392].forEach((f) => tone(f, t + 0.45, 2, 0.06, 'triangle')); }
+function pop() { if (!ok()) return; const t = ac.currentTime, b = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3) * (Math.random() < 0.1 ? 1 : 0.4); const s = ac.createBufferSource(), g = ac.createGain(); s.buffer = b; g.gain.value = 0.2; s.connect(g).connect(ac.destination); s.start(t); }
+
+// Control > patch, restart
+function patch() { if (phase() !== 'glitch') return; patchAt = vt; $('#pbar').style.display = 'block'; $('#errText').innerHTML = 'Applying Y2KFIX.EXE...<br />Expanding date fields to 4 digits.'; stopBuzz(); arp(); }
+function restart() { vt = 0; patchAt = null; lastSec = -1; stopBuzz(); parts = []; }
+$('#patch').onclick = patch; $('#ignore').onclick = () => { $('#errText').innerHTML = 'Ignoring is not an option.<br />Please press PATCH NOW.'; };
+$('#again').onclick = restart;
+
+// Frame > sync everything to vt
+let lastSec = -1, partyBurst = 0, wasPhase = '';
+function frame(dt) {
+  vt += dt; const ph = phase();
+  if (ph === 'glitch' && vt > COUNT + AUTO_PATCH && !touched) patch();
+  if (ph === 'party' && vt > patchAt + PATCH_D + PARTY) restart();
+  const left = Math.max(0, COUNT - vt), secs = ph === 'count' ? 59 - Math.ceil(left) + 50 : Math.floor(vt - COUNT);
+  const clock = ph === 'count' ? `23:59:${String(Math.min(59, 50 + Math.floor(vt))).padStart(2, '0')}` : `00:00:${String(secs).padStart(2, '0')}`;
+  const s = Math.floor(vt); if (s !== lastSec) { lastSec = s; if (ph === 'count') tick(left <= 3.01); }
+  if (ph !== wasPhase) { if (ph === 'glitch') { tick(true); startBuzz(); } if (ph === 'party') fanfare(); wasPhase = ph; }
+  const g = ph === 'glitch';
+  drawDigits(g ? clock.replace(/\d/g, () => (Math.random() < 0.3 ? String(Math.floor(Math.random() * 10)) : '0')) : clock, g);
+  $('#date').textContent = ph === 'count' ? 'FRI 12.31.1999' : g ? (Math.random() < 0.5 ? 'MON 01.01.1900' : 'ERR 01.01.19100') : 'SAT 01.01.2000';
+  $('#label').textContent = ph === 'count' ? `COUNTDOWN TO 2000 · T-${Math.ceil(left)}` : g ? 'ABEND 0x2000 · DATE OVERFLOW' : ph === 'patching' ? 'APPLYING PATCH...' : 'WELCOME TO THE YEAR 2000';
+  $('#room').classList.toggle('glitch', g); $('#err').classList.toggle('show', g || ph === 'patching');
+  if (ph === 'patching') $('#pfill').style.width = `${Math.min(1, (vt - patchAt) / PATCH_D) * 100}%`;
+  if (ph === 'count') { $('#pbar').style.display = 'none'; $('#errText').innerHTML = 'SYSTEM DATE OVERFLOW<br />Year rolled over to 19100.<br />Date fields read 01/01/1900.'; }
+  CHECKS.forEach((_, i) => { const el = $(`#ck${i}`), em = el.firstElementChild.nextElementSibling;
+    const st = ph === 'count' ? 'ok' : g ? (vt - COUNT > i * 0.35 ? 'fail' : 'ok') : ph === 'patching' ? (vt - patchAt > (i / CHECKS.length) * PATCH_D ? 'ok' : 'wait') : 'ok';
+    el.className = `check ${st === 'ok' ? '' : st}`; em.textContent = st === 'ok' ? (ph === 'party' ? '2000 OK' : 'OK') : st === 'fail' ? 'FAIL' : '....'; });
+  $('#cel').classList.toggle('show', ph === 'party');
+  if (ph === 'party' && vt > partyBurst) { rocket(); if (Math.random() < 0.5) rocket(); partyBurst = vt + rnd(0.25, 0.7); }
+  drawClocks(ph === 'count' ? -Math.ceil(left) / 60 : (vt - COUNT) / 60);
+  drawGlobe(vt, g); drawFx(ph);
+}
+
+let touched = false; addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+if (capture) { vt = COUNT + 1.2; patchAt = COUNT + 1.2; vt = patchAt + PATCH_D + 0.2; partyBurst = 0; for (let i = 0; i < 3; i++) rocket(); }
+function loop(now) { const dt = Math.min(0.1, (now - last) / 1000); last = now; frame(dt); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+window.__y2kclock = { patch, restart, state: () => ({ phase: phase(), t: +vt.toFixed(2), date: $('#date').textContent, fails: document.querySelectorAll('.check.fail').length }) };
+</script>
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Defrag Visualizer</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="53" />
+<meta name="capture" content="2400" />
+<meta name="tags" content="real compaction defragmenter with eviction, cluster map canvas with read and write flashes, simulated file system aging, WebAudio drive seek clicks and spindle hum" />
+<meta name="description" content="A late-90s disk defragmenter you can actually watch: pick a drive, it reads the drive information while the cluster map fills in, then a real compaction algorithm walks the disk moving every file into one contiguous run, evicting blocks out of the way, flashing each cluster it reads and writes while red fragmented files turn blue. Click any cluster to see which file and fragment lives there, open the legend, pause, stop or hide the details, and listen to synthesized seek clicks over the spindle hum until the defragmentation complete dialog. Hard because the disk is a simulated aged file system (files written, deleted and rewritten into holes) and the defragmenter is a step-by-step generator that keeps file maps, fragmentation state and progress consistent on every move."/>
+<meta name="prompt" content="Build a Windows 98 style disk defragmenter visualizer in one HTML file: a Select Drive dialog, then a Defragmenting Drive C window with a cluster grid canvas sized to fit, a simulated aged disk (files written sequentially, a third deleted, new files first-fit into the holes so they fragment, unmovable system clusters), and a real compaction defragmenter that moves blocks one at a time with eviction to free space, flashing read and write clusters, recolouring files from fragmented red to contiguous blue, a blocky progress bar with percent complete, Stop, Pause, Legend and Hide Details buttons, click a cluster for a tooltip with file and fragment, WebAudio seek clicks and hum, a completion dialog, and attract mode that loops. Works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/defrag-visualizer.html
+ * PURPOSE: 90s disk defragmenter: aged simulated disk, compaction algorithm, cluster map, seek sounds
+ * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Defrag Visualizer
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__defrag (start, pause, stop, step, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; background: #008080; color: #000; user-select: none; }
+.icons { position: fixed; left: 12px; top: 12px; display: grid; gap: 18px; color: #fff; text-align: center; width: 70px; }
+.icons div { display: grid; justify-items: center; gap: 4px; }
+.icons svg { width: 34px; height: 34px; }
+.win { position: fixed; display: flex; flex-direction: column; background: #c0c0c0; padding: 3px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080, inset 2px 2px #fff, 4px 4px 0 rgba(0, 0, 0, 0.3); }
+.bar { height: 20px; display: flex; align-items: center; gap: 4px; padding: 0 2px 0 4px; color: #fff; font-weight: bold; background: linear-gradient(90deg, #000080, #1084d0); }
+.bar.off { background: linear-gradient(90deg, #808080, #b5b5b5); color: #d4d0c8; }
+.bar svg { width: 14px; height: 14px; }
+.bar b { margin-left: auto; width: 16px; height: 14px; display: grid; place-items: center; font: bold 10px Arial; color: #000; background: #c0c0c0; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080; }
+button.b98 { min-width: 75px; height: 23px; font: inherit; background: #c0c0c0; border: 0; padding: 0 10px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf; cursor: pointer; }
+button.b98:active, button.b98.down { box-shadow: inset -1px -1px #fff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf, inset 2px 2px #808080; }
+button.b98:focus-visible { outline: 1px dotted #000; outline-offset: -5px; }
+.sunk { background: #fff; box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a; }
+#main { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(860px, calc(100vw - 120px)); height: min(640px, calc(100vh - 40px)); }
+#main.small { height: auto; }
+.mapwrap { flex: 1; min-height: 0; margin: 8px 8px 4px; padding: 4px; position: relative; }
+#main.small .mapwrap { display: none; }
+#map { width: 100%; height: 100%; display: block; }
+.foot { padding: 8px 10px 10px; display: grid; gap: 8px; }
+.status { display: flex; justify-content: space-between; gap: 10px; }
+#file { color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prog { height: 20px; padding: 3px; display: flex; gap: 2px; overflow: hidden; }
+.prog i { width: 9px; flex: none; background: #000080; }
+.btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#tip { position: fixed; z-index: 20; display: none; padding: 3px 6px; background: #ffffe1; border: 1px solid #000; white-space: pre; pointer-events: none; }
+#pick { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(360px, calc(100vw - 24px)); z-index: 5; }
+#pick .bd { padding: 12px; display: grid; gap: 10px; }
+#drives { height: 92px; padding: 2px; overflow: auto; }
+#drives div { display: flex; align-items: center; gap: 6px; padding: 2px 4px; cursor: pointer; }
+#drives div.sel { background: #000080; color: #fff; }
+#drives svg { width: 18px; height: 18px; flex: none; }
+.row { display: flex; justify-content: flex-end; gap: 8px; }
+#legend { right: 24px; bottom: 24px; width: 290px; z-index: 6; display: none; }
+#legend .bd { padding: 10px 12px; display: grid; gap: 6px; }
+#legend span { display: inline-block; width: 12px; height: 12px; margin-right: 8px; vertical-align: -2px; border: 1px solid #555; }
+#done { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 24px)); z-index: 8; display: none; }
+#done .bd { padding: 14px; display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
+#done .row { grid-column: 1 / -1; justify-content: center; }
+.hidden { display: none !important; }
+@media (max-width: 700px) {
+  .icons { display: none; }
+  #main { width: calc(100vw - 16px); height: calc(100vh - 16px); }
+  .mapwrap { margin: 6px 6px 2px; }
+  .foot { padding: 6px 8px 8px; }
+  button.b98 { min-width: 64px; padding: 0 6px; }
+  #legend { right: 8px; left: 8px; width: auto; bottom: 120px; }
+}
+</style>
+</head>
+<body>
+<div class="icons">
+  <div><svg viewBox="0 0 32 32"><rect x="3" y="4" width="26" height="18" fill="#c0c0c0" stroke="#000" /><rect x="6" y="7" width="20" height="12" fill="#008080" /><rect x="10" y="23" width="12" height="3" fill="#808080" /><rect x="6" y="26" width="20" height="3" fill="#c0c0c0" stroke="#000" /></svg>My Computer</div>
+  <div><svg viewBox="0 0 32 32"><path d="M8 8h16l-2 21H10z" fill="#dfdfdf" stroke="#000" /><rect x="6" y="5" width="20" height="3" fill="#c0c0c0" stroke="#000" /></svg>Recycle Bin</div>
+</div>
+
+<div class="win" id="main">
+  <div class="bar" id="mainBar"><svg viewBox="0 0 16 16"><rect x="1" y="3" width="14" height="10" fill="#c0c0c0" stroke="#000" /><rect x="3" y="5" width="3" height="3" fill="#f00" /><rect x="7" y="5" width="3" height="3" fill="#00f" /><rect x="11" y="5" width="2" height="3" fill="#0a0" /><rect x="3" y="9" width="5" height="2" fill="#00f" /></svg><span id="title">Defragmenting Drive C</span><b>&#10005;</b></div>
+  <div class="mapwrap sunk"><canvas id="map"></canvas></div>
+  <div class="foot">
+    <div class="status"><span id="phase">Reading drive information...</span><span id="pct">0% Complete</span></div>
+    <div id="file">&nbsp;</div>
+    <div class="prog sunk" id="prog"></div>
+    <div class="btns"><button class="b98" id="stop">Stop</button><button class="b98" id="pause">Pause</button><button class="b98" id="leg">Legend</button><button class="b98" id="det">Hide Details</button></div>
+  </div>
+</div>
+
+<div class="win" id="pick">
+  <div class="bar"><svg viewBox="0 0 16 16"><rect x="1" y="5" width="14" height="7" fill="#c0c0c0" stroke="#000" /><rect x="11" y="8" width="2" height="2" fill="#0f0" /></svg>Select Drive<b>&#10005;</b></div>
+  <div class="bd">
+    <div>Which drive do you want to defragment?</div>
+    <div id="drives" class="sunk"></div>
+    <div id="driveInfo">Copyright notice: fictional disk utility. Drive C is 23% fragmented.</div>
+    <div class="row"><button class="b98" id="ok">OK</button><button class="b98" id="exit">Exit</button></div>
+  </div>
+</div>
+
+<div class="win" id="legend">
+  <div class="bar">Defrag Legend<b id="legX">&#10005;</b></div>
+  <div class="bd">
+    <div><span style="background:#e03030"></span>Fragmented file</div>
+    <div><span style="background:#2050d0"></span>Contiguous (optimized) file</div>
+    <div><span style="background:#109010"></span>Unmovable system data</div>
+    <div><span style="background:#fff"></span>Free space</div>
+    <div><span style="background:#00e0e0"></span>Data being read</div>
+    <div><span style="background:#ffd800"></span>Data being written</div>
+    <div>Each box represents one disk cluster.</div>
+  </div>
+</div>
+
+<div class="win" id="done">
+  <div class="bar">Disk Defragmenter<b>&#10005;</b></div>
+  <div class="bd"><svg viewBox="0 0 32 32" width="32" height="32"><circle cx="16" cy="16" r="14" fill="#fff" stroke="#000" /><text x="16" y="23" text-anchor="middle" font-size="20" font-weight="bold" fill="#00f" font-family="Times New Roman">i</text></svg><div>Defragmentation of Drive C is complete.<br />Do you want to quit Disk Defragmenter?</div><div class="row"><button class="b98" id="yes">Yes</button><button class="b98" id="no">No</button></div></div>
+</div>
+<div id="tip"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+function seeded(s) { return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+
+// Drives > two simulated disks
+const DRIVES = { C: { label: 'Hard disk', n: 2400, seed: 7, fill: 0.8, del: 0.36 }, D: { label: 'Hard disk', n: 1300, seed: 29, fill: 0.62, del: 0.22 } };
+const DIRS = ['WINDOWS', 'WINDOWS\\SYSTEM', 'WINDOWS\\FONTS', 'PROGRA~1\\SKETCHPD', 'PROGRA~1\\TUNEBOX', 'MYDOCU~1', 'GAMES\\ORBITER', 'GAMES\\TILEJUMP', 'TEMP', 'MUSIC'];
+const WORDS = ['readme', 'setup', 'sound', 'vector', 'table', 'report', 'photo', 'track01', 'letter', 'budget', 'splash', 'lib32', 'engine', 'help', 'tune', 'level3', 'scores', 'clouds', 'notes', 'invoice'];
+const EXTS = ['.DLL', '.EXE', '.DOC', '.BMP', '.WAV', '.TXT', '.DAT', '.MID', '.TTF', '.HLP'];
+let drive = 'C', N = 0, owner, part, files = [], byId = [], run = 0;
+function makeDisk(letter) {
+  const d = DRIVES[letter], r = seeded(d.seed + run * 131); N = d.n; owner = new Int16Array(N).fill(-1); part = new Int16Array(N); files = []; byId = [];
+  for (let i = 0; i < 14; i++) owner[i] = -2;
+  for (let k = 0; k < 3; k++) { const s = 200 + Math.floor(r() * (N - 260)); for (let i = s; i < s + 6 + k * 3; i++) owner[i] = -2; }
+  const mk = () => { const f = { id: byId.length, name: `${letter}:\\${DIRS[Math.floor(r() * DIRS.length)]}\\${WORDS[Math.floor(r() * WORDS.length)].toUpperCase()}${EXTS[Math.floor(r() * EXTS.length)]}`, size: 2 + Math.floor(Math.pow(r(), 2.2) * 46), pos: [] }; byId.push(f); return f; };
+  const alloc = (f, from) => { let i = from; for (let k = 0; k < f.size; k++) { while (i < N && owner[i] !== -1) i++; if (i >= N) { for (let j = 0; j < k; j++) owner[f.pos[j]] = -1; return -1; } owner[i] = f.id; part[i] = k; f.pos[k] = i; i++; } files.push(f); return i; };
+  let cur = 14; while (cur < N * d.fill) { const c = alloc(mk(), cur); if (c < 0) break; cur = c; }
+  for (const f of files.slice()) if (r() < d.del) { f.pos.forEach((p) => (owner[p] = -1)); files.splice(files.indexOf(f), 1); }
+  let used = files.reduce((a, f) => a + f.size, 0);
+  while (used < N * (d.fill - 0.08)) { const f = mk(); if (alloc(f, 14) < 0) break; used += f.size; }
+  files.forEach((f) => (f.frag = isFrag(f)));
+}
+function isFrag(f) { for (let k = 1; k < f.size; k++) { let j = f.pos[k - 1] + 1; while (j < N && owner[j] === -2) j++; if (f.pos[k] !== j) return true; } return false; }
+const fragPct = () => Math.round((files.filter((f) => f.frag).length / Math.max(1, files.length)) * 100);
+
+// Defragmenter > compaction with eviction, one move per step
+function findFree(from) { for (let i = N - 1; i >= from; i--) if (owner[i] === -1) return i; return -1; }
+function move(f, k, from, to) { owner[to] = f.id; part[to] = k; f.pos[k] = to; owner[from] = -1; }
+let gen = null, doneBlocks = 0, totalBlocks = 1, curFile = '';
+function* defrag() {
+  const order = files.slice().sort((a, b) => a.pos[0] - b.pos[0]); let w = 0;
+  totalBlocks = order.reduce((a, f) => a + f.size, 0); doneBlocks = 0;
+  for (const f of order) {
+    curFile = f.name;
+    for (let k = 0; k < f.size; k++) {
+      while (owner[w] === -2) w++;
+      const src = f.pos[k];
+      if (src !== w) {
+        if (owner[w] >= 0) { const g = byId[owner[w]], gk = part[w], fr = findFree(w + 1); move(g, gk, w, fr); g.frag = isFrag(g); yield [w, fr, g]; }
+        move(f, k, f.pos[k], w); yield [src, w, f];
+      }
+      w++; doneBlocks++;
+    }
+    f.frag = isFrag(f); yield null;
+  }
+}
+
+// Map > cluster grid sized to fit
+const cv = $('#map'), cx = cv.getContext('2d');
+let cell = 8, cols = 1, ox = 0, oy = 0, reveal = 1;
+const flash = new Map();
+function layout() {
+  const d = Math.min(2, devicePixelRatio), W = cv.clientWidth, H = cv.clientHeight; if (!W || !H) return;
+  cv.width = W * d; cv.height = H * d; cx.setTransform(d, 0, 0, d, 0, 0);
+  cell = Math.max(3, Math.floor(Math.sqrt((W * H) / N))); for (;;) { cols = Math.floor(W / cell); if (Math.ceil(N / cols) * cell <= H || cell <= 3) break; cell--; }
+  ox = Math.floor((W - cols * cell) / 2); oy = Math.floor((H - Math.ceil(N / cols) * cell) / 2);
+}
+new ResizeObserver(layout).observe(cv);
+const COL = { frag: '#e03030', ok: '#2050d0', sys: '#109010', free: '#ffffff' };
+function draw(now) {
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.clientWidth, cv.clientHeight);
+  const shown = Math.floor(N * reveal), g = cell > 5 ? 1 : 0;
+  for (let i = 0; i < shown; i++) {
+    const o = owner[i], x = ox + (i % cols) * cell, y = oy + Math.floor(i / cols) * cell;
+    let c = o === -1 ? null : o === -2 ? COL.sys : byId[o].frag ? COL.frag : COL.ok;
+    const fl = flash.get(i);
+    if (fl) { const a = (now - fl.t) / 380; if (a > 1) flash.delete(i); else c = fl.w ? '#ffd800' : '#00e0e0'; }
+    if (!c) { cx.fillStyle = '#e8e8e8'; cx.fillRect(x + g, y + g, cell - g * 2, cell - g * 2); cx.fillStyle = '#fff'; cx.fillRect(x + g + 1, y + g + 1, cell - g * 2 - 1, cell - g * 2 - 1); continue; }
+    cx.fillStyle = c; cx.fillRect(x + g, y + g, cell - g, cell - g);
+    if (cell > 6) { cx.fillStyle = 'rgba(255,255,255,0.35)'; cx.fillRect(x + g, y + g, cell - g, 1); cx.fillRect(x + g, y + g, 1, cell - g); cx.fillStyle = 'rgba(0,0,0,0.3)'; cx.fillRect(x + g, y + cell - 1, cell - g, 1); cx.fillRect(x + cell - 1, y + g, 1, cell - g); }
+  }
+}
+
+// Status > progress blocks, text
+function status() {
+  const pct = phase === 'run' || phase === 'paused' ? Math.floor((doneBlocks / totalBlocks) * 100) : phase === 'done' ? 100 : 0;
+  $('#pct').textContent = `${pct}% Complete`;
+  const n = Math.floor(($('#prog').clientWidth - 6) / 11 * pct / 100); const p = $('#prog'); if (p.children.length !== n) p.innerHTML = '<i></i>'.repeat(n);
+  $('#phase').textContent = phase === 'read' ? 'Reading drive information...' : phase === 'paused' ? 'Defragmentation paused.' : phase === 'done' ? 'Defragmentation complete.' : 'Defragmenting file system...';
+  $('#file').textContent = phase === 'run' || phase === 'paused' ? curFile : `Drive ${drive} is ${fragPct()}% fragmented.`;
+}
+
+// Audio > seek clicks and spindle hum
+let ac, hum = null, lastClick = 0, noise;
+addEventListener('pointerdown', () => { if (!ac) ac = new AudioContext(); ac.resume(); }, { capture: true });
+const ok = () => ac && ac.state === 'running';
+function seek(dist) {
+  if (!ok()) return; const now = ac.currentTime; if (now - lastClick < 0.045) return; lastClick = now;
+  if (!noise) { noise = ac.createBuffer(1, 800, ac.sampleRate); const d = noise.getChannelData(0); for (let i = 0; i < 800; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (60 + Math.random() * 40)); }
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = noise; f.type = 'bandpass'; f.frequency.value = 900 + Math.min(1, dist / N) * 2600; f.Q.value = 2.5; g.gain.value = 0.12 + Math.min(1, dist / N) * 0.35; s.connect(f).connect(g).connect(ac.destination); s.start();
+}
+function humOn(on) {
+  if (!ok()) return; if (on && !hum) { const o = ac.createOscillator(), o2 = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = 90; o2.type = 'sine'; o2.frequency.value = 7200; lp.type = 'lowpass'; lp.frequency.value = 300; g.gain.value = 0; g.gain.setTargetAtTime(0.03, ac.currentTime, 0.4); o.connect(lp).connect(g); const g2 = ac.createGain(); g2.gain.value = 0.004; o2.connect(g2).connect(g); g.connect(ac.destination); o.start(); o2.start(); hum = { o, o2, g }; }
+  if (!on && hum) { const h = hum; h.g.gain.setTargetAtTime(0, ac.currentTime, 0.3); setTimeout(() => { h.o.stop(); h.o2.stop(); }, 1500); hum = null; }
+}
+function ding() { if (!ok()) return; [880, 1320].forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + i * 0.12; o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.7); }); }
+
+// Flow > pick, read, run, done
+let phase = 'pick', t0 = 0, rate = 34, acc = 0, last = performance.now();
+function pickDialog() {
+  phase = 'pick'; $('#pick').classList.remove('hidden'); $('#done').style.display = 'none';
+  $('#drives').innerHTML = Object.entries(DRIVES).map(([k, d]) => `<div data-k="${k}" class="${k === drive ? 'sel' : ''}"><svg viewBox="0 0 18 18"><rect x="1" y="5" width="16" height="8" fill="#c0c0c0" stroke="#000" /><rect x="13" y="9" width="2" height="2" fill="#0c0" /></svg>Drive ${k} (${d.label})</div>`).join('') + '<div data-k="all"><svg viewBox="0 0 18 18"><rect x="1" y="3" width="10" height="8" fill="#c0c0c0" stroke="#000" /><rect x="6" y="7" width="10" height="8" fill="#c0c0c0" stroke="#000" /></svg>All Hard Drives</div>';
+  $('#mainBar').classList.add('off'); info();
+}
+function info() { makeDisk(drive === 'all' ? 'C' : drive); $('#driveInfo').textContent = `Drive ${drive === 'all' ? 'C' : drive} is ${fragPct()}% fragmented. You do need to defragment this drive now.`; }
+$('#drives').onclick = (e) => { const d = e.target.closest('[data-k]'); if (!d) return; drive = d.dataset.k; document.querySelectorAll('#drives div').forEach((x) => x.classList.toggle('sel', x === d)); info(); };
+function start(letter) {
+  if (letter) drive = letter; if (drive === 'all') drive = 'C'; makeDisk(drive); layout();
+  $('#pick').classList.add('hidden'); $('#mainBar').classList.remove('off'); $('#title').textContent = `Defragmenting Drive ${drive}`;
+  phase = 'read'; t0 = performance.now(); reveal = 0; gen = defrag(); doneBlocks = 0; humOn(true);
+}
+function stepN(n) { for (let k = 0; k < n; k++) { const r = gen.next(); if (r.done) { finish(); return false; } if (r.value) { const [a, b] = r.value, now = performance.now(); flash.set(a, { t: now, w: false }); flash.set(b, { t: now, w: true }); seek(Math.abs(b - a)); } } return true; }
+function finish() { phase = 'done'; run++; humOn(false); ding(); $('#done').style.display = 'block'; $('#done .bd div').innerHTML = `Defragmentation of Drive ${drive} is complete.<br />Do you want to quit Disk Defragmenter?`; if (!touched) setTimeout(() => { if (!touched && phase === 'done') $('#no').click(); }, 2600); }
+function pause() { if (phase === 'run') phase = 'paused'; else if (phase === 'paused') phase = 'run'; $('#pause').textContent = phase === 'paused' ? 'Resume' : 'Pause'; humOn(phase === 'run'); }
+function stop() { humOn(false); $('#pause').textContent = 'Pause'; pickDialog(); }
+$('#ok').onclick = () => start(); $('#exit').onclick = () => { stop(); };
+$('#stop').onclick = stop; $('#pause').onclick = pause;
+$('#leg').onclick = () => { const l = $('#legend'); l.style.display = l.style.display === 'block' ? 'none' : 'block'; }; $('#legX').onclick = () => ($('#legend').style.display = 'none');
+$('#det').onclick = () => { const s = $('#main').classList.toggle('small'); $('#det').textContent = s ? 'Show Details' : 'Hide Details'; if (!s) requestAnimationFrame(layout); };
+$('#yes').onclick = () => { $('#done').style.display = 'none'; pickDialog(); };
+$('#no').onclick = () => { $('#done').style.display = 'none'; start(drive); };
+
+// Tooltip > cluster info on click
+cv.onpointerdown = (e) => {
+  const b = cv.getBoundingClientRect(), c = Math.floor((e.clientX - b.left - ox) / cell), r = Math.floor((e.clientY - b.top - oy) / cell), i = r * cols + c, tip = $('#tip');
+  if (c < 0 || c >= cols || i < 0 || i >= N) { tip.style.display = 'none'; return; }
+  const o = owner[i]; tip.textContent = o === -1 ? `Cluster ${i}\nFree space` : o === -2 ? `Cluster ${i}\nUnmovable system data` : `Cluster ${i}\n${byId[o].name}\nFragment ${part[i] + 1} of ${byId[o].size} · ${byId[o].frag ? 'fragmented' : 'contiguous'}`;
+  tip.style.display = 'block'; tip.style.left = `${Math.min(innerWidth - 240, e.clientX + 12)}px`; tip.style.top = `${e.clientY + 14}px`; clearTimeout(tip._t); tip._t = setTimeout(() => (tip.style.display = 'none'), 2600);
+};
+
+// Loop > attract presses OK, speed by drive size
+let touched = false; addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (phase === 'pick' && !touched && now - t0 > 1400 && !capture) start();
+  if (phase === 'read') { reveal = Math.min(1, (now - t0) / 1600); if (reveal >= 1) phase = 'run'; }
+  if (phase === 'run') { acc += dt * rate * (N / 1600); const n = Math.floor(acc); acc -= n; if (n) stepN(n); }
+  draw(now); status(); requestAnimationFrame(loop);
+}
+pickDialog(); t0 = performance.now();
+if (capture) { start('C'); reveal = 1; phase = 'run'; let m = 0; while (doneBlocks / totalBlocks < 0.42 && m++ < 20000) stepN(1); flash.clear(); }
+requestAnimationFrame(loop);
+
+window.__defrag = { start, pause, stop, step: (n) => stepN(n), state: () => ({ phase, drive, n: N, frag: fragPct(), pct: Math.floor((doneBlocks / totalBlocks) * 100), files: files.length, used: files.reduce((a, f) => a + f.size, 0) }) };
+</script>
+</body>
+</html>

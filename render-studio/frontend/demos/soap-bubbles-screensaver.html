@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bubbles Screensaver</title>
+<meta name="category" content="aero" />
+<meta name="style" content="aquatic" />
+<meta name="order" content="10" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="WebGL, refraction shader, thin film, elastic collisions, 2007 screensaver" />
+<meta name="description" content="The 2007-era bubbles screensaver, rebuilt. Glassy soap bubbles drift across a desktop and bounce off the screen edges and each other, refracting the windows and icons behind them like little lenses, with swirling thin-film colour and a sharp window highlight. Switch between clear and tinted metallic bubbles, click one to pop it, or move the mouse to 'wake' the desktop. Hard because each bubble samples the same desktop texture by screen position with a normal-based lens offset, so the background has to line up pixel-for-pixel behind the 3D spheres." />
+<meta name="prompt" content="Recreate the classic 2007 bubbles screensaver in three.js in one HTML file: draw a fake glass desktop (wallpaper, icons, a window, a taskbar) to a canvas texture as the backdrop, then float 3D soap bubbles over it that refract the desktop through a screen-space lens offset, with thin-film iridescence, Fresnel rim and a window-shaped specular highlight. Bubbles bounce off the edges and each other elastically; click pops them; add a clear / tinted toggle." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/soap-bubbles-screensaver.html
+ * PURPOSE: 2007 bubbles screensaver: desktop canvas backdrop, refracting thin-film bubbles, elastic bounces, pop, tint toggle
+ * UI: Render Studio > Frutiger Aero > Bubbles Screensaver
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__bubblesaver (tint, pop, count)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b3a5a; }
+canvas { display: block; }
+#ui { position: fixed; right: 14px; top: 14px; display: flex; gap: 6px; font: 12px "Segoe UI", system-ui, sans-serif; }
+#ui button { border: 0; border-radius: 14px; padding: 6px 12px; color: #fff; cursor: pointer; background: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+#ui button.on { background: rgba(120, 200, 255, 0.45); }
+</style>
+</head>
+<body>
+<div id="ui"><button id="clear" class="on">Clear</button><button id="tinted">Tinted</button></div>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+// ortho-like framing: perspective with a world rect of the screen at z=0
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 1, 200);
+camera.position.z = 40;
+let viewH = 0, viewW = 0;
+function fit() { viewH = 2 * Math.tan(THREE.MathUtils.degToRad(15)) * 40; viewW = viewH * camera.aspect; }
+fit();
+
+// Desktop > painted once per resize, used as backdrop + refraction source
+const desk = document.createElement('canvas'), dx = desk.getContext('2d');
+const deskTex = new THREE.CanvasTexture(desk); deskTex.colorSpace = THREE.SRGBColorSpace;
+function paintDesk() {
+  const w = desk.width = Math.min(2048, innerWidth * Math.min(2, devicePixelRatio)), h = desk.height = Math.round(w * innerHeight / innerWidth), s = w / 1280;
+  const g = dx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#05305a'); g.addColorStop(0.6, '#0a6a8a'); g.addColorStop(1, '#0c8a6a'); dx.fillStyle = g; dx.fillRect(0, 0, w, h);
+  dx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 5; k++) { dx.beginPath(); for (let x = 0; x <= w; x += 10) { const y = h * (0.35 + k * 0.08) + Math.sin(x / w * 5 + k) * h * 0.08; x ? dx.lineTo(x, y) : dx.moveTo(x, y); } dx.lineWidth = 30 * s; dx.strokeStyle = `hsla(${150 + k * 20},90%,60%,0.12)`; dx.shadowBlur = 40 * s; dx.shadowColor = `hsla(${150 + k * 20},90%,60%,0.6)`; dx.stroke(); }
+  dx.shadowBlur = 0; dx.globalCompositeOperation = 'source-over';
+  // icons column
+  [['#5fb5f0', 'Computer'], ['#f2c14a', 'Documents'], ['#7fd0ff', 'Pictures'], ['#9fe08c', 'Network'], ['#cfe6f7', 'Recycle Bin']].forEach(([c, n], i) => {
+    const x = 30 * s, y = (30 + i * 100) * s; dx.fillStyle = c; dx.beginPath(); dx.roundRect(x + 8 * s, y, 48 * s, 42 * s, 6 * s); dx.fill();
+    dx.fillStyle = 'rgba(255,255,255,0.4)'; dx.fillRect(x + 8 * s, y, 48 * s, 16 * s);
+    dx.fillStyle = '#fff'; dx.font = `${12 * s}px "Segoe UI", sans-serif`; dx.textAlign = 'center'; dx.shadowColor = '#000'; dx.shadowBlur = 3 * s; dx.fillText(n, x + 32 * s, y + 60 * s); dx.shadowBlur = 0;
+  });
+  // a glass window with text lines
+  const wx = w * 0.42, wy = h * 0.16, ww = w * 0.42, wh = h * 0.48;
+  dx.fillStyle = 'rgba(140,190,230,0.55)'; dx.beginPath(); dx.roundRect(wx, wy, ww, wh, 8 * s); dx.fill();
+  dx.strokeStyle = 'rgba(255,255,255,0.7)'; dx.lineWidth = 1.5 * s; dx.stroke();
+  dx.fillStyle = '#fff'; dx.fillRect(wx + 8 * s, wy + 30 * s, ww - 16 * s, wh - 38 * s);
+  dx.fillStyle = '#0d1a26'; dx.textAlign = 'left'; dx.font = `${13 * s}px "Segoe UI", sans-serif`; dx.fillText('Document - Notes', wx + 12 * s, wy + 20 * s);
+  dx.fillStyle = '#c2412b'; dx.fillRect(wx + ww - 50 * s, wy, 42 * s, 18 * s);
+  dx.fillStyle = '#334'; dx.font = `${14 * s}px Consolas, monospace`;
+  ['Bubbles drift and bounce.', 'Each one bends the screen', 'behind it like a lens.', '', 'Click a bubble to pop it.', 'Move the mouse to wake up.'].forEach((l, i) => dx.fillText(l, wx + 20 * s, wy + (60 + i * 24) * s));
+  // taskbar
+  dx.fillStyle = 'rgba(10,20,30,0.75)'; dx.fillRect(0, h - 40 * s, w, 40 * s);
+  dx.fillStyle = 'rgba(255,255,255,0.15)'; dx.fillRect(0, h - 40 * s, w, 1.5 * s);
+  const og = dx.createRadialGradient(28 * s, h - 20 * s, 2 * s, 28 * s, h - 20 * s, 20 * s); og.addColorStop(0, '#9fffd0'); og.addColorStop(0.5, '#1e96d2'); og.addColorStop(1, '#0b2f5c');
+  dx.fillStyle = og; dx.beginPath(); dx.arc(28 * s, h - 20 * s, 18 * s, 0, 7); dx.fill();
+  deskTex.needsUpdate = true;
+}
+paintDesk();
+const back = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: deskTex }));
+back.position.z = -20; scene.add(back);
+function sizeBack() { const k = (40 + 20) / 40; back.scale.set(viewW * k, viewH * k, 1); }
+sizeBack();
+
+// Bubble > screen-space refraction of the desktop + thin film + window highlight
+const U = { desk: { value: deskTex }, res: { value: new THREE.Vector2() }, time: { value: 0 }, tinted: { value: 0 } };
+const mat = new THREE.ShaderMaterial({
+  transparent: true, uniforms: U,
+  vertexShader: `varying vec3 vN; varying vec3 vV; varying vec3 vL; void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vL = position; gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `uniform sampler2D desk; uniform vec2 res; uniform float time; uniform float tinted; uniform vec3 hue; varying vec3 vN; varying vec3 vV; varying vec3 vL;
+    void main() {
+      vec3 n = normalize(vN); float c = max(dot(n, vV), 0.0); float fr = pow(1.0 - c, 2.2);
+      vec2 uv = gl_FragCoord.xy / res;
+      // lens: pull sample toward centre near the rim, slight chroma split
+      vec2 off = -n.xy * (0.05 + 0.08 * fr);
+      vec3 refr = vec3(texture2D(desk, uv + off * 1.04).r, texture2D(desk, uv + off).g, texture2D(desk, uv + off * 0.96).b);
+      float th = 0.4 + 0.3 * sin(vL.y * 3.0 + time * 0.8 + vL.x * 2.0) + 0.2 * sin(vL.x * 5.0 - time * 1.1);
+      vec3 film = 0.5 + 0.5 * cos(6.2832 * (th * (1.5 + c) + vec3(0.0, 0.33, 0.67)));
+      vec3 col = mix(refr, refr * film * 1.35, 0.35 + fr * 0.5);
+      col = mix(col, hue * (0.4 + 0.8 * c) + film * 0.25, tinted * 0.75);
+      vec3 r = reflect(-vV, n);
+      // soft studio-window highlight: plain rounded patch, no panes (avoids any logo look)
+      float pane = smoothstep(0.5, 0.56, r.y) * smoothstep(0.95, 0.88, r.y) * smoothstep(-0.72, -0.62, r.x) * smoothstep(-0.02, -0.14, r.x);
+      col += vec3(1.0) * pane * 0.75 + pow(max(dot(r, normalize(vec3(0.5, -0.4, 0.8))), 0.0), 80.0) * 0.6;
+      col += film * fr * 0.6;
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+mat.uniforms.hue = { value: new THREE.Color() };
+const geo = new THREE.SphereGeometry(1, 48, 32);
+const bubbles = [];
+const HUES = ['#4fa8ff', '#5fe0a0', '#ff7ab8', '#ffd35a', '#9f7aff'];
+function add(x, y) {
+  const r = 1.6 + Math.random() * 1.8;
+  const m = new THREE.Mesh(geo, mat.clone());
+  m.material.uniforms = { ...U, time: { value: 0 }, hue: { value: new THREE.Color(HUES[bubbles.length % HUES.length]) } };
+  m.scale.setScalar(r);
+  m.position.set(x ?? (Math.random() - 0.5) * (viewW - 2 * r), y ?? (Math.random() - 0.5) * (viewH - 2 * r), (Math.random() - 0.5) * 4);
+  const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 3;
+  m.userData = { r, v: new THREE.Vector2(Math.cos(a) * sp, Math.sin(a) * sp), grow: x == null ? 1 : 0 };
+  scene.add(m); bubbles.push(m);
+}
+const COUNT = innerWidth < 700 ? 7 : 12;
+for (let i = 0; i < COUNT; i++) add();
+
+// Pop > ring of droplets + soft pop sound
+const drops = [];
+const dropMat = new THREE.MeshBasicMaterial({ color: '#e8f6ff', transparent: true, opacity: 0.85 });
+const dropGeo = new THREE.SphereGeometry(0.08, 8, 6);
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) try { ac = new AudioContext(); } catch {} });
+function pop(m) {
+  scene.remove(m); bubbles.splice(bubbles.indexOf(m), 1);
+  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI * 2, d = new THREE.Mesh(dropGeo, dropMat); d.position.copy(m.position).add(new THREE.Vector3(Math.cos(a) * m.userData.r, Math.sin(a) * m.userData.r, 0)); d.userData = { v: new THREE.Vector3(Math.cos(a), Math.sin(a), 0).multiplyScalar(6 + Math.random() * 4), life: 0.5 }; scene.add(d); drops.push(d); }
+  if (ac) { const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(700 / m.userData.r * 2, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.09); g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.13); }
+  setTimeout(() => add(), 1500);
+}
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(bubbles)[0]; if (hit) pop(hit.object);
+});
+function tint(on) { U.tinted.value = on ? 1 : 0; bubbles.forEach((b) => (b.material.uniforms.tinted.value = U.tinted.value)); document.getElementById('clear').classList.toggle('on', !on); document.getElementById('tinted').classList.toggle('on', on); }
+document.getElementById('clear').onclick = () => tint(false);
+document.getElementById('tinted').onclick = () => tint(true);
+
+// Physics > walls + elastic sphere-sphere in the screen plane
+const tmp = new THREE.Vector2();
+function physics(dt) {
+  const hw = viewW / 2, hh = viewH / 2;
+  for (const b of bubbles) {
+    const u = b.userData; u.grow = Math.min(1, u.grow + dt * 2); b.scale.setScalar(u.r * u.grow);
+    b.position.x += u.v.x * dt; b.position.y += u.v.y * dt;
+    if (b.position.x < -hw + u.r) { b.position.x = -hw + u.r; u.v.x = Math.abs(u.v.x); }
+    if (b.position.x > hw - u.r) { b.position.x = hw - u.r; u.v.x = -Math.abs(u.v.x); }
+    if (b.position.y < -hh + u.r) { b.position.y = -hh + u.r; u.v.y = Math.abs(u.v.y); }
+    if (b.position.y > hh - u.r) { b.position.y = hh - u.r; u.v.y = -Math.abs(u.v.y); }
+  }
+  for (let i = 0; i < bubbles.length; i++) for (let j = i + 1; j < bubbles.length; j++) {
+    const a = bubbles[i], b = bubbles[j], ua = a.userData, ub = b.userData;
+    tmp.set(b.position.x - a.position.x, b.position.y - a.position.y);
+    const d = tmp.length(), min = ua.r + ub.r;
+    if (d > 0 && d < min) {
+      tmp.divideScalar(d);
+      const push = (min - d) / 2; a.position.x -= tmp.x * push; a.position.y -= tmp.y * push; b.position.x += tmp.x * push; b.position.y += tmp.y * push;
+      // mass ~ r^3, exchange velocity along the normal
+      const ma = ua.r ** 3, mb = ub.r ** 3, va = ua.v.dot(tmp), vb = ub.v.dot(tmp);
+      if (va - vb > 0) { const na = (va * (ma - mb) + 2 * mb * vb) / (ma + mb), nb = (vb * (mb - ma) + 2 * ma * va) / (ma + mb); ua.v.addScaledVector(tmp, na - va); ub.v.addScaledVector(tmp, nb - vb); }
+    }
+  }
+}
+
+// Run engine
+const clock = new THREE.Clock();
+let attractT = 0, lastInput = -1e9;
+addEventListener('pointerdown', (e) => { if (e.isTrusted) lastInput = performance.now(); });
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta()); U.time.value = clock.elapsedTime;
+  physics(dt);
+  for (const d of [...drops]) { d.userData.life -= dt; d.position.addScaledVector(d.userData.v, dt); d.userData.v.y -= 20 * dt; if (d.userData.life <= 0) { scene.remove(d); drops.splice(drops.indexOf(d), 1); } }
+  for (const b of bubbles) b.material.uniforms.time.value = clock.elapsedTime + b.id;
+  // attract: flip tint every 9 s, pop one every 4 s
+  if (performance.now() - lastInput > 8000) { attractT += dt; if (attractT % 4 < dt && bubbles.length > 3) pop(bubbles[0]); if (attractT > 9) { attractT = 0; tint(!U.tinted.value); } }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+function resize() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+  renderer.getDrawingBufferSize(U.res.value); fit(); paintDesk(); sizeBack();
+}
+addEventListener('resize', resize);
+renderer.getDrawingBufferSize(U.res.value);
+requestAnimationFrame(frame);
+window.__bubblesaver = { tint, pop: () => bubbles[0] && pop(bubbles[0]), count: () => bubbles.length };
+</script>
+</body>
+</html>

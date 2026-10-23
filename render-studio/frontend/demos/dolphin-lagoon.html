@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dolphin Lagoon</title>
+<meta name="category" content="aero" />
+<meta name="style" content="aquatic" />
+<meta name="order" content="28" />
+<meta name="capture" content="3200" />
+<meta name="tags" content="three.js, wave shader, procedural lathe dolphins, splash particles, palm island, raycasting" />
+<meta name="description" content="The tropical Frutiger Aero stock image come to life: a turquoise lagoon with a palm island, glossy dolphins leaping in arcs, white splashes and foam rings, gulls circling and a sun-glitter path on the water. Click the water and a dolphin leaps right there; drag to orbit. Hard because the ocean is a multi-wave vertex shader with analytic normals, Fresnel sky reflection, shallow-water tint around the island and foam rings fed live from splash events, while each dolphin is built from a lathe profile with extruded fins and flies a ballistic arc that it faces along."/>
+<meta name="prompt" content="Build a Frutiger Aero tropical lagoon in three.js, one HTML file: a gradient sky dome with a sun, an ocean plane with summed sine waves and analytic normals, Fresnel reflection, sun glitter, turquoise shallows and a foam shoreline around a palm island (stacked-cylinder trunks, bent frond strips, coconuts), and glossy procedural dolphins (lathe body, extruded fins and flapping flukes) that leap in ballistic arcs facing their velocity, with splash particles and foam rings drawn into the water shader. Click the water to make a dolphin jump there, orbit with drag, add circling gulls, cloud sprites, synthesized waves, splashes and chirps, and an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/dolphin-lagoon.html
+ * PURPOSE: tropical lagoon: wave shader with splash foam, palm island, procedural dolphins leaping on click
+ * UI: Render Studio > Frutiger Aero > Dolphin Lagoon
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__lagoon (jump, airborne, count)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd6f5; }
+canvas { display: block; touch-action: none; }
+#hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: #fff; font: 13px "Segoe UI", system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0, 40, 80, 0.7); white-space: nowrap; pointer-events: none; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="hint">click the water · drag to look around</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 1200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2, 0); controls.enableDamping = true; controls.enablePan = false; controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+controls.minDistance = 16; controls.maxDistance = 90; controls.maxPolarAngle = 1.45;
+function fit() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+  const k = camera.aspect < 0.8 ? 1.7 : 1; camera.position.set(26 * k, 8 * k, 30 * k);
+}
+fit(); addEventListener('resize', () => { const d = camera.position.clone(); fit(); camera.position.copy(d); });
+const SUN = new THREE.Vector3(-0.55, 0.32, -0.77).normalize();
+const R = Math.random, TAU = Math.PI * 2;
+
+// Sky > gradient dome + sun glow
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(500, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, uniforms: { uSun: { value: SUN } },
+  vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: `uniform vec3 uSun; varying vec3 vD;
+    void main(){ float h = vD.y; vec3 hor = vec3(0.78,0.94,1.0), zen = vec3(0.1,0.48,0.9);
+      vec3 c = mix(hor, zen, pow(clamp(h, 0.0, 1.0), 0.5)); c = mix(c, vec3(0.55,0.85,0.92), clamp(-h * 4.0, 0.0, 1.0));
+      float s = max(dot(vD, uSun), 0.0); c += vec3(1.0,0.96,0.82) * (pow(s, 900.0) * 6.0 + pow(s, 40.0) * 0.4 + pow(s, 6.0) * 0.18);
+      gl_FragColor = vec4(c, 1.0); }`,
+})));
+
+// Clouds > canvas sprites ringed far out
+{
+  const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 20, 0, 120); g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#c9dcec'); x.fillStyle = g; x.beginPath();
+  for (const [cx, cy, r] of [[70, 78, 30], [116, 58, 42], [166, 66, 36], [204, 84, 24], [126, 86, 36]]) { x.moveTo(cx + r, cy); x.arc(cx, cy, r, 0, TAU); }
+  x.fill(); x.fillStyle = 'rgba(255,255,255,0.7)'; x.beginPath(); x.ellipse(110, 34, 28, 12, 0, 0, TAU); x.fill();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  for (let i = 0; i < 12; i++) {
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false })), a = (i / 12) * TAU + R() * 0.3, k = 60 + R() * 50;
+    s.position.set(Math.cos(a) * 330, 40 + R() * 70, Math.sin(a) * 330); s.scale.set(k * 2, k, 1); scene.add(s);
+  }
+}
+
+// Water > summed sine waves, Fresnel, shallows, foam from splashes
+const NSP = 8, spl = Array.from({ length: NSP }, () => new THREE.Vector4(0, 0, 99, 0));
+const water = new THREE.Mesh(new THREE.PlaneGeometry(700, 700, 300, 300).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
+  uniforms: { uT: { value: 0 }, uSun: { value: SUN }, uSpl: { value: spl } },
+  vertexShader: `uniform float uT; varying vec3 vW; varying vec3 vN;
+    void wave(vec2 p, vec2 d, float A, float k, float w, inout float h, inout vec2 g){ float ph = k * dot(normalize(d), p) + w * uT; h += A * sin(ph); g += A * k * normalize(d) * cos(ph); }
+    void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vec2 p = w.xz; float h = 0.0; vec2 g = vec2(0.0);
+      float damp = 0.25 + 0.75 * smoothstep(9.0, 16.0, length(p));
+      wave(p, vec2(1.0, 0.3), 0.22, 0.25, 1.1, h, g); wave(p, vec2(-0.4, 1.0), 0.15, 0.4, 1.5, h, g); wave(p, vec2(0.7, -0.8), 0.08, 0.9, 2.3, h, g); wave(p, vec2(-1.0, -0.2), 0.05, 1.4, 2.9, h, g);
+      w.y += h * damp; vN = normalize(vec3(-g.x * damp, 1.0, -g.y * damp)); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform float uT; uniform vec3 uSun; uniform vec4 uSpl[${NSP}]; varying vec3 vW; varying vec3 vN;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main(){ vec2 p = vW.xz; vec3 N = vN;
+      N.xz += 0.05 * vec2(sin(p.x * 1.7 + uT * 2.0) + sin(p.y * 2.9 - uT * 1.3), sin(p.y * 2.3 - uT * 1.6) + sin(p.x * 3.1 + uT * 1.1)); N = normalize(N);
+      vec3 V = normalize(cameraPosition - vW); float ndv = max(dot(N, V), 0.0);
+      float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+      vec3 Rf = reflect(-V, N); float ry = max(Rf.y, 0.0);
+      vec3 sky = mix(vec3(0.78,0.94,1.0), vec3(0.1,0.48,0.9), pow(ry, 0.5));
+      float d = length(p), sh = 1.0 - smoothstep(9.5, 26.0, d);
+      vec3 body = mix(vec3(0.0, 0.33, 0.56), vec3(0.08, 0.82, 0.8), sh); body = mix(body, vec3(0.86, 0.95, 0.78), (1.0 - smoothstep(9.2, 11.5, d)) * 0.7);
+      vec3 c = mix(body, sky, fres * 0.85);
+      float sd = max(dot(Rf, uSun), 0.0); c += vec3(1.0, 0.95, 0.8) * (pow(sd, 300.0) * 3.0 + pow(sd, 30.0) * 0.25);
+      c += step(0.993, hash(floor(p * 6.0) + floor(uT * 8.0))) * pow(sd, 40.0) * 2.0;
+      float ang = atan(p.y, p.x), shore = 9.7 + 0.35 * sin(ang * 6.0 + uT * 1.2) + 0.25 * sin(uT * 0.9);
+      float foam = (1.0 - smoothstep(0.0, 0.9, abs(d - shore))) * (0.6 + 0.4 * sin(ang * 23.0 + uT * 2.0));
+      for (int i = 0; i < ${NSP}; i++) { vec4 s = uSpl[i]; float a = s.z; if (a > 3.0) continue; float r = length(p - s.xy), f = 1.0 - clamp(a / 3.0, 0.0, 1.0);
+        foam += (1.0 - smoothstep(0.0, 0.35 + a * 0.2, abs(r - a * 2.6 * s.w))) * f + (1.0 - smoothstep(0.0, 0.8 + a * 0.5, r)) * f * f * f * 0.6; }
+      c = mix(c, vec3(0.96, 0.99, 1.0), clamp(foam, 0.0, 1.0) * 0.85);
+      c = mix(c, vec3(0.78, 0.94, 1.0), smoothstep(80.0, 300.0, length(vW - cameraPosition)));
+      gl_FragColor = vec4(c, 1.0); }`,
+}));
+scene.add(water);
+
+// Lights > hemi fill + sun with island shadows
+scene.add(new THREE.HemisphereLight('#d9f4ff', '#3a9fae', 1.3));
+const sunL = new THREE.DirectionalLight('#fff4dc', 2.4); sunL.position.copy(SUN).multiplyScalar(40); sunL.castShadow = true;
+sunL.shadow.mapSize.set(1024, 1024); Object.assign(sunL.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 90 }); scene.add(sunL);
+
+// Island > sand mound, grass cap, rocks, palms
+const island = new THREE.Group(); scene.add(island);
+const sand = new THREE.Mesh(new THREE.SphereGeometry(10, 64, 24), new THREE.MeshStandardMaterial({ color: '#f6e4b4', roughness: 0.95 }));
+sand.scale.y = 0.22; sand.position.y = -0.6; sand.receiveShadow = true; island.add(sand);
+const grass = new THREE.Mesh(new THREE.SphereGeometry(6.5, 48, 18), new THREE.MeshStandardMaterial({ color: '#6fd04a', roughness: 0.7 }));
+grass.scale.y = 0.3; grass.receiveShadow = true; island.add(grass);
+for (let i = 0; i < 6; i++) { const a = R() * TAU, r = 7.5 + R() * 1.8, m = new THREE.Mesh(new THREE.DodecahedronGeometry(0.4 + R() * 0.5), new THREE.MeshStandardMaterial({ color: '#9aa2a8', roughness: 0.6 })); m.position.set(Math.cos(a) * r, 0.5, Math.sin(a) * r); m.rotation.set(R(), R(), R()); m.castShadow = true; island.add(m); }
+const surfY = (x, z) => Math.max(-0.6 + 2.2 * Math.sqrt(Math.max(0, 1 - (x * x + z * z) / 100)), 1.95 * Math.sqrt(Math.max(0, 1 - (x * x + z * z) / 42.25)));
+const trunkM = new THREE.MeshStandardMaterial({ color: '#a2703f', roughness: 0.85 }), frondM = new THREE.MeshStandardMaterial({ color: '#3cb83a', roughness: 0.55, side: THREE.DoubleSide }), nutM = new THREE.MeshStandardMaterial({ color: '#6a4320', roughness: 0.6 });
+function frondGeo() {
+  const g = new THREE.PlaneGeometry(1, 1, 2, 12), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) { const t = p.getY(i) + 0.5, w = 0.5 * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.05)), 0.7), X = p.getX(i) * 2 * w; p.setXYZ(i, X, -t * t * 1.7 + Math.abs(X) * 0.35, t * 3.4); }
+  g.computeVertexNormals(); return g;
+}
+const FG = frondGeo(), crowns = [];
+for (const [px, pz, lean, h] of [[1.6, -1.2, 0.5, 7], [-2.2, 1.4, -0.6, 6], [0.6, 2.9, 0.3, 5.2]]) {
+  const y0 = surfY(px, pz), curve = new THREE.CatmullRomCurve3([new THREE.Vector3(px, y0 - 0.2, pz), new THREE.Vector3(px + lean * 0.6, y0 + h * 0.5, pz + lean * 0.3), new THREE.Vector3(px + lean * 2, y0 + h, pz + lean * 0.9)]);
+  const N = 16;
+  for (let i = 0; i < N; i++) {
+    const t = (i + 0.5) / N, m = new THREE.Mesh(new THREE.CylinderGeometry(0.17 - t * 0.05, 0.22 - t * 0.05, h / N * 1.05, 10), trunkM);
+    m.position.copy(curve.getPointAt(t)); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), curve.getTangentAt(t)); m.castShadow = true; island.add(m);
+  }
+  const crown = new THREE.Group(); crown.position.copy(curve.getPointAt(1)); island.add(crown); crowns.push(crown);
+  for (let i = 0; i < 9; i++) { const f = new THREE.Mesh(FG, frondM); f.rotation.set(-0.3 - R() * 0.25, (i / 9) * TAU + R() * 0.3, 0, 'YXZ'); f.castShadow = true; crown.add(f); }
+  for (let i = 0; i < 3; i++) { const n = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8), nutM); n.position.set(Math.cos(i * 2.1) * 0.25, -0.25, Math.sin(i * 2.1) * 0.25); crown.add(n); }
+}
+
+// Dolphins > lathe body, extruded fins, flapping flukes
+const dolM = new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.28, clearcoat: 1, clearcoatRoughness: 0.08, envMapIntensity: 0.7 });
+const finM = new THREE.MeshPhysicalMaterial({ color: '#4d6d8e', roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1, envMapIntensity: 0.7 });
+const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const bodyGeo = (() => {
+  const prof = [[-1.56, 0], [-1.5, 0.05], [-1.2, 0.11], [-0.8, 0.2], [-0.35, 0.31], [0.1, 0.37], [0.45, 0.36], [0.8, 0.31], [1.05, 0.25], [1.2, 0.18], [1.3, 0.12], [1.45, 0.075], [1.62, 0.055], [1.7, 0.03], [1.72, 0]];
+  const g = new THREE.LatheGeometry(prof.map(([y, r]) => new THREE.Vector2(r, y)), 28); g.rotateX(Math.PI / 2); g.scale(0.85, 1, 1);
+  const p = g.attributes.position, col = new Float32Array(p.count * 3), back = new THREE.Color('#47698c'), belly = new THREE.Color('#e4eef6'), c = new THREE.Color();
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), t = ss(-0.3, 0.25, y / Math.max(0.001, Math.hypot(x, y))); c.copy(belly).lerp(back, t); col.set([c.r, c.g, c.b], i * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.computeVertexNormals(); return g;
+})();
+const ext = (shape, d) => new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: true, bevelThickness: 0.015, bevelSize: 0.015, bevelSegments: 2, curveSegments: 10 }).translate(0, 0, -d / 2);
+const finGeo = (() => { const s = new THREE.Shape(); s.moveTo(0.35, 0); s.quadraticCurveTo(0.1, 0.28, -0.28, 0.55); s.quadraticCurveTo(-0.18, 0.25, -0.35, 0); s.lineTo(0.35, 0); return ext(s, 0.05).rotateY(-Math.PI / 2); })();
+const flipGeo = (() => { const s = new THREE.Shape(); s.moveTo(0.15, 0); s.quadraticCurveTo(-0.05, -0.25, -0.35, -0.42); s.quadraticCurveTo(-0.2, -0.12, -0.15, 0); s.lineTo(0.15, 0); return ext(s, 0.035).rotateY(-Math.PI / 2); })();
+const flukeGeo = (() => { const s = new THREE.Shape(); s.moveTo(0, 0.05); s.quadraticCurveTo(0.3, 0, 0.6, -0.3); s.quadraticCurveTo(0.3, -0.2, 0, -0.12); s.quadraticCurveTo(-0.3, -0.2, -0.6, -0.3); s.quadraticCurveTo(-0.3, 0, 0, 0.05); return ext(s, 0.04).rotateX(Math.PI / 2); })();
+const eyeGeo = new THREE.SphereGeometry(0.04, 8, 6), eyeM = new THREE.MeshBasicMaterial({ color: '#0b1520' });
+function makeDolphin() {
+  const g = new THREE.Group(), body = new THREE.Mesh(bodyGeo, dolM); g.add(body);
+  const fin = new THREE.Mesh(finGeo, finM); fin.position.set(0, 0.28, -0.1); g.add(fin);
+  for (const sgn of [-1, 1]) { const f = new THREE.Mesh(flipGeo, finM); f.position.set(sgn * 0.24, -0.16, 0.6); f.rotation.z = sgn * 0.9; g.add(f); const e = new THREE.Mesh(eyeGeo, eyeM); e.position.set(sgn * 0.19, 0.06, 1.12); g.add(e); }
+  const tail = new THREE.Group(); tail.position.z = -1.42; tail.add(new THREE.Mesh(flukeGeo, finM)); g.add(tail);
+  g.traverse((o) => (o.castShadow = true)); g.position.y = -20; scene.add(g);
+  return { g, tail, on: false, t0: 0, T: 2, a: new THREE.Vector3(), b: new THREE.Vector3(), H: 4, spin: 0, wet: [false, false] };
+}
+const pod = [makeDolphin(), makeDolphin(), makeDolphin(), makeDolphin()];
+
+// Splash > particle pool + foam ring slots
+const NP = 900, pPos = new Float32Array(NP * 3), pVel = new Float32Array(NP * 3), pLife = new Float32Array(NP), pSize = new Float32Array(NP), pMax = new Float32Array(NP).fill(1);
+const pGeo = new THREE.BufferGeometry(); pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3)); pGeo.setAttribute('aLife', new THREE.BufferAttribute(pLife, 1)); pGeo.setAttribute('aSize', new THREE.BufferAttribute(pSize, 1));
+const pts = new THREE.Points(pGeo, new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, uniforms: { uPR: { value: renderer.getPixelRatio() } },
+  vertexShader: 'attribute float aLife; attribute float aSize; uniform float uPR; varying float vA; void main(){ vA = aLife; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = min(48.0 * uPR, aSize * uPR * (260.0 / max(-mv.z, 1.0)) * (0.4 + 0.6 * aLife)); gl_Position = projectionMatrix * mv; }',
+  fragmentShader: 'varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5 || vA <= 0.0) discard; gl_FragColor = vec4(0.96, 0.99, 1.0, (1.0 - smoothstep(0.2, 0.5, d)) * min(1.0, vA * 1.5) * 0.9); }',
+}));
+pts.frustumCulled = false; scene.add(pts);
+let pNext = 0, sNext = 0;
+function splash(x, z, k) {
+  for (let i = 0; i < 100 * k; i++) {
+    const j = pNext++ % NP, a = R() * TAU, s = 0.6 + R() * 2.4;
+    pPos.set([x + Math.cos(a) * 0.4, 0.1, z + Math.sin(a) * 0.4], j * 3); pVel.set([Math.cos(a) * s, (3 + R() * 6) * k, Math.sin(a) * s], j * 3);
+    pMax[j] = pLife[j] = 0.8 + R() * 0.8; pSize[j] = 0.2 + R() * 0.35;
+  }
+  spl[sNext++ % NSP].set(x, z, 0, 0.7 + k * 0.4); sfx.splash(k);
+}
+
+// Jumps > ballistic arc, facing velocity
+const tmp = new THREE.Vector3(), vel = new THREE.Vector3();
+function jump(x, z, at) {
+  const d = pod.find((p) => !p.on); if (!d) return false;
+  const r = Math.hypot(x, z); if (r < 13) { const k = 13 / Math.max(r, 0.01); x *= k; z *= k; if (r < 0.01) x = 13; }
+  const ang = Math.atan2(z, x) + Math.PI / 2 + (R() - 0.5) * 1.2, L = 7 + R() * 3;
+  d.a.set(x - Math.cos(ang) * L / 2, 0, z - Math.sin(ang) * L / 2); d.b.set(x + Math.cos(ang) * L / 2, 0, z + Math.sin(ang) * L / 2);
+  d.H = 3 + R() * 2; d.T = 1.8 + R() * 0.5; d.spin = R() < 0.3 ? (R() < 0.5 ? 1 : -1) : 0; d.t0 = at ?? clock; d.on = true; d.wet = [false, false];
+  return true;
+}
+function stepDolphin(d, t) {
+  if (!d.on || t < d.t0) return;
+  const s = -0.25 + (1.5 * (t - d.t0)) / d.T;
+  if (s > 1.25) { d.on = false; d.g.position.y = -20; return; }
+  d.g.position.lerpVectors(d.a, d.b, s); d.g.position.y = 4 * d.H * s * (1 - s) - 0.15;
+  vel.subVectors(d.b, d.a); vel.y = 4 * d.H * (1 - 2 * s); tmp.copy(d.g.position).add(vel); d.g.lookAt(tmp);
+  if (d.spin) d.g.rotateZ(d.spin * TAU * ss(0.15, 0.85, s));
+  d.tail.rotation.x = Math.sin(t * (s > 0 && s < 1 ? 7 : 14)) * (s > 0 && s < 1 ? 0.2 : 0.45);
+  if (!d.wet[0] && s >= 0) { d.wet[0] = true; splash(d.g.position.x, d.g.position.z, 0.7); sfx.chirp(); }
+  if (!d.wet[1] && s >= 1) { d.wet[1] = true; splash(d.g.position.x, d.g.position.z, 1); }
+}
+
+// Gulls > flapping V wings circling island
+const gulls = [];
+{
+  const s = new THREE.Shape(); s.moveTo(0, 0.18); s.lineTo(0.7, 0.1); s.lineTo(1.25, -0.15); s.lineTo(0.6, -0.08); s.lineTo(0, -0.16);
+  const wg = new THREE.ShapeGeometry(s).rotateX(Math.PI / 2), gm = new THREE.MeshStandardMaterial({ color: '#ffffff', side: THREE.DoubleSide, roughness: 0.6 });
+  for (let i = 0; i < 5; i++) {
+    const g = new THREE.Group(), l = new THREE.Mesh(wg, gm), r = new THREE.Mesh(wg, gm); r.scale.x = -1;
+    g.add(l, r, new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.45, 4, 8).rotateX(Math.PI / 2), gm)); scene.add(g);
+    gulls.push({ g, l, r, a: R() * TAU, R: 16 + R() * 16, h: 11 + R() * 6, v: (0.12 + R() * 0.1) * (i % 2 ? 1 : -1), ph: R() * TAU });
+  }
+}
+
+// Audio > waves, splash noise, chirp sweeps
+const sfx = (() => {
+  let ac = null, nb;
+  const init = () => {
+    if (ac) return; ac = new AudioContext(); nb = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate); const d = nb.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = R() * 2 - 1;
+    const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain();
+    s.buffer = nb; s.loop = true; f.type = 'lowpass'; f.frequency.value = 520; g.gain.value = 0.05; lfo.frequency.value = 0.13; lg.gain.value = 0.035;
+    lfo.connect(lg).connect(g.gain); s.connect(f).connect(g).connect(ac.destination); s.start(); lfo.start();
+  };
+  addEventListener('pointerdown', init); addEventListener('keydown', init);
+  return {
+    splash(k) {
+      if (!ac) return; const t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+      s.buffer = nb; f.type = 'bandpass'; f.Q.value = 0.8; f.frequency.setValueAtTime(1800, t); f.frequency.exponentialRampToValueAtTime(350, t + 0.5);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35 * k, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+      s.connect(f).connect(g).connect(ac.destination); s.start(t, R()); s.stop(t + 0.75);
+    },
+    chirp() {
+      if (!ac) return; const t0 = ac.currentTime;
+      for (let i = 0; i < 3; i++) { const t = t0 + i * 0.13, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(2400 + R() * 600, t); o.frequency.exponentialRampToValueAtTime(4800 + R() * 900, t + 0.06); o.frequency.exponentialRampToValueAtTime(2900, t + 0.11); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.13); }
+    },
+  };
+})();
+
+// Input > click water (not drag) to jump
+const ray = new THREE.Raycaster(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), ndc = new THREE.Vector2(), hit = new THREE.Vector3();
+let down = null, lastInput = -1e9;
+renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY, performance.now()]; lastInput = clock; controls.autoRotate = false; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  lastInput = clock; if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6 || performance.now() - down[2] > 500) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  if (ray.ray.intersectPlane(plane, hit) && hit.length() < 120) jump(hit.x, hit.z);
+});
+
+// Attract > jumps toward camera side
+let clock = 0, nextAuto = 0;
+function autoJump() {
+  const az = Math.atan2(camera.position.z, camera.position.x) + (R() - 0.5) * 1.6, r = 14 + R() * 12;
+  jump(Math.cos(az) * r, Math.sin(az) * r);
+}
+{ const az = Math.atan2(30, 26); [[1.6, -0.35, 17], [2.1, 0.25, 21], [2.6, 0.05, 15]].forEach(([at, o, r]) => jump(Math.cos(az + o) * r, Math.sin(az + o) * r, at)); nextAuto = 3.4; }
+
+let last = performance.now();
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; clock += dt;
+  water.material.uniforms.uT.value = clock;
+  for (const s of spl) s.z += dt;
+  for (let i = 0; i < NP; i++) {
+    if (pLife[i] <= 0) continue; pLife[i] -= dt; pVel[i * 3 + 1] -= 13 * dt;
+    pPos[i * 3] += pVel[i * 3] * dt; pPos[i * 3 + 1] += pVel[i * 3 + 1] * dt; pPos[i * 3 + 2] += pVel[i * 3 + 2] * dt;
+    if (pPos[i * 3 + 1] < -0.2) pLife[i] = 0;
+  }
+  for (let i = 0; i < NP; i++) pGeo.attributes.aLife.array[i] = Math.max(0, pLife[i] / pMax[i]);
+  pGeo.attributes.position.needsUpdate = true; pGeo.attributes.aLife.needsUpdate = true; pGeo.attributes.aSize.needsUpdate = true;
+  for (const d of pod) stepDolphin(d, clock);
+  crowns.forEach((c, i) => { c.rotation.z = Math.sin(clock * 0.9 + i) * 0.05; c.rotation.x = Math.sin(clock * 0.7 + i * 2) * 0.04; });
+  for (const g of gulls) {
+    g.a += g.v * dt; const p = g.g.position; p.set(Math.cos(g.a) * g.R, g.h + Math.sin(g.a * 3) * 0.6, Math.sin(g.a) * g.R);
+    tmp.set(Math.cos(g.a + Math.sign(g.v) * 0.05) * g.R, p.y, Math.sin(g.a + Math.sign(g.v) * 0.05) * g.R); g.g.lookAt(tmp); g.g.rotateZ(-Math.sign(g.v) * 0.25);
+    const f = Math.sin(clock * 5 + g.ph) * 0.45; g.l.rotation.z = f; g.r.rotation.z = -f;
+  }
+  if (clock - lastInput > 6) controls.autoRotate = true;
+  if (clock > nextAuto && clock - lastInput > 3) { autoJump(); nextAuto = clock + 1.4 + R() * 2.2; }
+  controls.update(); renderer.render(scene, camera);
+});
+
+window.__lagoon = { jump: (x, z) => jump(x, z), airborne: () => pod.filter((d) => d.on && d.g.position.y > 0).length, count: () => pod.length };
+</script>
+</body>
+</html>

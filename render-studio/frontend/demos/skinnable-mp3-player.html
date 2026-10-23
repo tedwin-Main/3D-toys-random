@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Skinnable MP3 Player</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="55" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="lookahead WebAudio sequencer with six procedural tracks, real 10-band biquad equalizer and balance, AnalyserNode spectrum and scope, snapping and docking draggable windows, three CSS-variable skins" />
+<meta name="description" content="A late-90s skinnable MP3 player with its main window, ten-band equalizer and playlist docked together: a seven-segment time display, scrolling song marquee, spectrum analyser with falling peaks (click it for the oscilloscope), seek, volume and balance sliders, shuffle and repeat, and six original synth tracks generated live by a lookahead sequencer with kick, snare, hats, bass, arps and pads. The equalizer is real: preamp and ten peaking filters with presets and a drawn response curve, so dragging a band changes the sound. Swap between Chrome, Aqua Gel and Dark skins, drag windows to snap them to each other and drag the main window to carry its docked windows along, double-click a title bar to shade it."/>
+<meta name="prompt" content="Build a Y2K-era skinnable MP3 player in one HTML file with three docked windows (main, 10-band equalizer, playlist): seven-segment time, scrolling title marquee, spectrum analyser with peaks and oscilloscope mode, transport buttons, seek, volume and balance sliders, shuffle and repeat. Generate six original tracks live with a WebAudio lookahead sequencer (drums, bass, arps, pads). Make the EQ real with a preamp and ten BiquadFilter peaking bands, presets and a response curve. Three skins via CSS variables (chrome, aqua gel, dark), windows that snap to each other and move together when docked, title double-click shades a window. Attract mode plays and cycles skins; works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/skinnable-mp3-player.html
+ * PURPOSE: Y2K skinnable MP3 player: docked main, EQ and playlist windows, live synth tracks, real EQ, three skins
+ * UI: Render Studio > Retro Aesthetics > 2000s > Skinnable MP3 Player
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__mp3 (play, pause, stop, next, prev, skin, preset, seek, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 8px Tahoma, Verdana, sans-serif; user-select: none; background: radial-gradient(ellipse at 30% 20%, #3d6fd8, transparent 55%), radial-gradient(ellipse at 80% 90%, #7b3fd8, transparent 50%), linear-gradient(160deg, #0b1d4a, #06102a); }
+body::before { content: ""; position: fixed; inset: 0; background: linear-gradient(transparent 96%, rgba(120, 180, 255, 0.12) 96%) 0 0 / 100% 40px, linear-gradient(90deg, transparent 96%, rgba(120, 180, 255, 0.12) 96%) 0 0 / 40px 100%; }
+.skin-chrome { --face: repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0 1px, transparent 1px 3px), linear-gradient(180deg, #f5f7f9, #c3cad2 48%, #a4adb7 52%, #dfe4ea); --edge: #5d6670; --title: linear-gradient(180deg, #fdfdfd, #9aa4ae 50%, #7c8792 51%, #c9d0d7); --tt: #1d2a3a; --lcd: linear-gradient(180deg, #0a1520, #13283a); --lt: #7fd8ff; --lo: rgba(127, 216, 255, 0.1); --btn: linear-gradient(180deg, #ffffff, #c9d0d8 50%, #aab3bd 51%, #e2e7ec); --bt: #23303e; --acc: #2f78d8; --v1: #b8ecff; --v2: #3aa0ff; --v3: #1040a0; --pb: #0a1520; --pt: #7fd8ff; --ps: #2f78d8; }
+.skin-aqua { --face: radial-gradient(ellipse at 50% -40%, rgba(255,255,255,0.7), transparent 60%), linear-gradient(180deg, rgba(150, 215, 255, 0.72), rgba(40, 130, 220, 0.62)); --edge: rgba(10, 60, 130, 0.8); --title: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(140, 210, 255, 0.7) 50%, rgba(40, 140, 230, 0.75) 51%, rgba(120, 210, 255, 0.8)); --tt: #052a5a; --lcd: linear-gradient(180deg, rgba(0, 30, 70, 0.82), rgba(0, 60, 120, 0.75)); --lt: #a8ffff; --lo: rgba(168, 255, 255, 0.1); --btn: radial-gradient(ellipse at 50% 20%, #fff, rgba(255,255,255,0) 60%), linear-gradient(180deg, #8fd8ff, #2a8ae8 55%, #5fc0ff); --bt: #fff; --acc: #5cf0ff; --v1: #e8ffff; --v2: #5cf0ff; --v3: #1a70e0; --pb: rgba(0, 30, 70, 0.82); --pt: #c8ffff; --ps: #1a70e0; }
+.skin-dark { --face: linear-gradient(180deg, #34343f, #23232c); --edge: #0c0c10; --title: linear-gradient(180deg, #3b3b48, #2a2a34); --tt: #e8c860; --lcd: #000; --lt: #33ff4a; --lo: rgba(51, 255, 74, 0.08); --btn: linear-gradient(180deg, #5a5a68, #3a3a46 50%, #2c2c36 51%, #44444f); --bt: #d8d8e0; --acc: #e8c860; --v1: #ff3a2a; --v2: #ffe02a; --v3: #2ad83a; --pb: #000; --pt: #33ff4a; --ps: #1a3aa8; }
+#stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.win { position: absolute; width: 275px; overflow: hidden; background: var(--face); border: 1px solid var(--edge); border-radius: 4px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 6px 18px rgba(0, 0, 0, 0.45); backdrop-filter: blur(6px); transition: height 0.2s; }
+.skin-dark .win { border-radius: 0; }
+.tb { height: 14px; display: flex; align-items: center; justify-content: center; gap: 4px; background: var(--title); color: var(--tt); font-weight: bold; letter-spacing: 0.2em; cursor: grab; position: relative; border-bottom: 1px solid var(--edge); }
+.tb .x, .tb .sk { position: absolute; top: 2px; width: 9px; height: 9px; border: 1px solid var(--edge); border-radius: 2px; background: var(--btn); font-size: 6px; line-height: 7px; text-align: center; color: var(--bt); cursor: pointer; letter-spacing: 0; }
+.tb .x { right: 3px; } .tb .sk { left: 3px; width: auto; padding: 0 3px; }
+.tb::before, .tb::after { content: ""; flex: 1; height: 3px; margin: 0 14px; border-top: 1px solid var(--edge); border-bottom: 1px solid var(--edge); opacity: 0.35; }
+.lcd { background: var(--lcd); border: 1px solid var(--edge); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7); color: var(--lt); }
+.btn { position: absolute; height: 18px; border: 1px solid var(--edge); border-radius: 3px; background: var(--btn); color: var(--bt); display: grid; place-items: center; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5); }
+.skin-aqua .btn { border-radius: 9px; }
+.btn:active, .btn.on { filter: brightness(0.85); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5); }
+.btn svg { width: 9px; height: 9px; fill: currentColor; }
+.tog { height: 12px; font-size: 7px; font-weight: bold; }
+.tog.on { color: var(--acc); text-shadow: 0 0 3px var(--acc); }
+.sl { position: absolute; border: 1px solid var(--edge); border-radius: 3px; background: linear-gradient(90deg, var(--acc) calc(var(--k, 0.5) * 100%), rgba(0, 0, 0, 0.35) 0); cursor: pointer; touch-action: none; }
+.sl.v { background: linear-gradient(0deg, var(--acc) calc(var(--k, 0.5) * 100%), rgba(0, 0, 0, 0.35) 0); }
+.sl.seek { background: linear-gradient(90deg, var(--acc) calc(var(--k, 0) * 100%), rgba(0, 0, 0, 0.35) 0); }
+.sl i { position: absolute; width: 12px; height: calc(100% + 2px); top: -2px; border: 1px solid var(--edge); border-radius: 3px; background: var(--btn); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); }
+.sl.v i { width: calc(100% + 4px); height: 8px; left: -3px; top: auto; }
+#main { height: 116px; } #eq { height: 116px; } #pl { height: 150px; }
+.win.shade { height: 15px !important; }
+#time { position: absolute; left: 9px; top: 20px; width: 106px; height: 42px; }
+#seg { position: absolute; left: 22px; top: 3px; }
+#vis { position: absolute; left: 4px; top: 22px; cursor: pointer; }
+#pstate { position: absolute; left: 5px; top: 5px; width: 0; height: 0; border-left: 7px solid var(--lt); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+#pstate.pause { width: 7px; height: 8px; border: 0; border-left: 2px solid var(--lt); border-right: 2px solid var(--lt); }
+#pstate.stop { width: 7px; height: 7px; border: 0; background: var(--lt); }
+#mq { position: absolute; left: 121px; top: 20px; width: 146px; height: 14px; overflow: hidden; white-space: nowrap; font: bold 8px Tahoma, sans-serif; line-height: 12px; }
+#mq span { display: inline-block; padding-left: 4px; }
+.info { position: absolute; top: 38px; height: 12px; line-height: 10px; padding: 0 3px; font-weight: bold; }
+.ind { position: absolute; top: 38px; font-weight: bold; opacity: 0.3; color: var(--tt); }
+.ind.on { opacity: 1; color: var(--acc); text-shadow: 0 0 3px var(--acc); }
+.lbl { position: absolute; color: var(--tt); font-size: 6px; font-weight: bold; opacity: 0.8; }
+#eqgraph { position: absolute; left: 86px; top: 18px; }
+.bandl { position: absolute; top: 103px; width: 20px; text-align: center; font-size: 6px; color: var(--tt); font-weight: bold; }
+#presets { position: absolute; right: 6px; top: 17px; width: 62px; height: 70px; display: none; z-index: 3; background: var(--pb); color: var(--pt); border: 1px solid var(--edge); padding: 2px 0; }
+#presets div { padding: 1px 5px; cursor: pointer; } #presets div:hover { background: var(--ps); color: #fff; }
+#list { position: absolute; left: 6px; top: 19px; right: 6px; bottom: 26px; background: var(--pb); color: var(--pt); border: 1px solid var(--edge); overflow: hidden; padding: 2px 0; }
+#list div { display: flex; justify-content: space-between; padding: 0 4px; height: 11px; line-height: 11px; cursor: pointer; white-space: nowrap; }
+#list div.cur { color: #fff; font-weight: bold; } #list div.sel { background: var(--ps); }
+#list div span:first-child { overflow: hidden; text-overflow: ellipsis; margin-right: 6px; }
+.plbar { position: absolute; left: 6px; right: 6px; bottom: 5px; height: 16px; display: flex; gap: 3px; align-items: center; }
+.plbar .btn { position: static; height: 14px; padding: 0 5px; font-size: 6.5px; font-weight: bold; }
+.plbar .lcd { margin-left: auto; padding: 1px 4px; font-weight: bold; }
+#skins { position: absolute; z-index: 5; width: 92px; display: none; background: var(--pb); color: var(--pt); border: 1px solid var(--edge); padding: 2px 0; }
+#skins div { padding: 2px 6px; cursor: pointer; } #skins div:hover, #skins div.on { background: var(--ps); color: #fff; }
+@media (max-width: 600px) { .hint { white-space: normal !important; width: 92%; text-align: center; font-size: 11px !important; } }
+.hint { position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); color: rgba(200, 225, 255, 0.7); font: 12px Tahoma, sans-serif; white-space: nowrap; }
+</style>
+</head>
+<body class="skin-chrome">
+<div id="stage">
+  <div class="win" id="main">
+    <div class="tb" data-w="main"><span class="sk" id="skBtn">SKIN</span>SONICDECK<span class="x">&#215;</span></div>
+    <div class="lcd" id="time"><span id="pstate"></span><canvas id="seg" width="160" height="32" style="width:80px;height:16px"></canvas><canvas id="vis" width="196" height="34" style="width:98px;height:17px"></canvas></div>
+    <div class="lcd" id="mq"><span id="mqt"></span></div>
+    <div class="lcd info" style="left:121px;width:24px" id="kbps">128</div><span class="lbl" style="left:147px;top:41px">kbps</span>
+    <div class="lcd info" style="left:166px;width:17px">44</div><span class="lbl" style="left:185px;top:41px">kHz</span>
+    <span class="ind" style="left:212px">mono</span><span class="ind on" style="left:236px">stereo</span>
+    <div class="sl" id="vol" style="left:121px;top:56px;width:70px;height:9px"></div>
+    <div class="sl" id="bal" style="left:195px;top:56px;width:34px;height:9px"></div>
+    <div class="btn tog on" id="tEq" style="left:233px;top:55px;width:16px">EQ</div><div class="btn tog on" id="tPl" style="left:250px;top:55px;width:17px">PL</div>
+    <div class="sl seek" id="seek" style="left:9px;top:72px;width:258px;height:9px"></div>
+    <div class="btn" id="bPrev" style="left:9px;top:88px;width:23px"><svg viewBox="0 0 10 10"><path d="M1 1h2v8H1zM9 1v8L3 5z" /></svg></div>
+    <div class="btn" id="bPlay" style="left:32px;top:88px;width:23px"><svg viewBox="0 0 10 10"><path d="M2 1l7 4-7 4z" /></svg></div>
+    <div class="btn" id="bPause" style="left:55px;top:88px;width:23px"><svg viewBox="0 0 10 10"><path d="M2 1h2v8H2zM6 1h2v8H6z" /></svg></div>
+    <div class="btn" id="bStop" style="left:78px;top:88px;width:23px"><svg viewBox="0 0 10 10"><path d="M2 2h6v6H2z" /></svg></div>
+    <div class="btn" id="bNext" style="left:101px;top:88px;width:23px"><svg viewBox="0 0 10 10"><path d="M7 1h2v8H7zM1 1v8l6-4z" /></svg></div>
+    <div class="btn" id="bEject" style="left:130px;top:88px;width:22px"><svg viewBox="0 0 10 10"><path d="M5 1l4 5H1zM1 7h8v2H1z" /></svg></div>
+    <div class="btn tog" id="tShuf" style="left:164px;top:91px;width:46px">SHUFFLE</div><div class="btn tog" id="tRep" style="left:213px;top:91px;width:42px">REPEAT</div>
+  </div>
+  <div class="win" id="eq">
+    <div class="tb" data-w="eq">EQUALIZER<span class="x">&#215;</span></div>
+    <div class="btn tog on" id="eqOn" style="left:14px;top:18px;width:26px">ON</div><div class="btn tog" id="eqAuto" style="left:41px;top:18px;width:32px">AUTO</div>
+    <canvas id="eqgraph" width="226" height="38" style="width:113px;height:19px" class="lcd"></canvas>
+    <div class="btn tog" id="eqPre" style="left:207px;top:18px;width:58px">PRESETS &#9662;</div>
+    <div id="presets"></div>
+    <div class="sl v" id="pre" style="left:20px;top:40px;width:10px;height:60px"></div><span class="lbl" style="left:12px;top:104px">PREAMP</span>
+    <span class="lbl" style="left:46px;top:40px">+12</span><span class="lbl" style="left:50px;top:67px">0</span><span class="lbl" style="left:47px;top:94px">-12</span>
+    <div id="bands"></div>
+  </div>
+  <div class="win" id="pl">
+    <div class="tb" data-w="pl">PLAYLIST<span class="x">&#215;</span></div>
+    <div id="list"></div>
+    <div class="plbar"><span class="btn">ADD</span><span class="btn">REM</span><span class="btn">SEL</span><span class="btn">MISC</span><span class="lcd" id="tot">0:00/0:00</span></div>
+  </div>
+  <div id="skins"><div data-s="chrome">Chrome Deluxe</div><div data-s="aqua">Aqua Gel</div><div data-s="dark">Classic Dark</div></div>
+</div>
+<div class="hint" id="hint">drag title bars to dock windows &#183; double-click to shade &#183; click the analyser</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Tracks > six original procedural songs
+const TRACKS = [
+  { a: 'Polygon Sunrise', t: 'Chrome Horizon', bpm: 128, root: 45, minor: 1, prog: [0, 5, 3, 4], k: 'x...x...x...x...', s: '....x.......x...', h: '..x...x...x...x.', b: 'x.xx..x.x.xx..x.', lead: 'saw', seed: 3, pad: 1 },
+  { a: 'Neon Lagoon', t: 'Liquid Mainframe', bpm: 160, root: 41, minor: 1, prog: [0, 3, 5, 4], k: 'x.........x.....', s: '....x.......x...', h: 'x.x.x.x.x.x.x.xx', b: 'x...x..x..x.....', lead: 'square', seed: 11, pad: 1 },
+  { a: 'DJ Kilobyte', t: 'Dial Tone Disco', bpm: 120, root: 48, minor: 0, prog: [0, 3, 4, 3], k: 'x...x...x...x...', s: '....x.......x...', h: '..x...x...x...x.', b: '.x.x.x.x.x.x.x.x', lead: 'square', seed: 7, pad: 0 },
+  { a: 'Aqua Pixel', t: 'Bubblegum Server', bpm: 124, root: 50, minor: 0, prog: [0, 4, 5, 3], k: 'x...x...x...x..x', s: '....x.......x...', h: 'xxx.xxx.xxx.xxx.', b: 'x..x..x...x..x..', lead: 'triangle', seed: 19, pad: 1 },
+  { a: 'The Gel Buttons', t: 'Crystal Interface', bpm: 96, root: 43, minor: 1, prog: [0, 5, 2, 6], k: 'x.....x...x.....', s: '....x.......x..x', h: 'x.x.x.x.x.x.x.x.', b: 'x.....x...x.....', lead: 'triangle', seed: 23, pad: 1 },
+  { a: 'Millennium Bug', t: 'Countdown (Club Mix)', bpm: 136, root: 46, minor: 1, prog: [0, 0, 5, 4], k: 'x...x...x...x...', s: '....x...x...x...', h: '..x...x...x...xx', b: 'xxx.xxx.xxx.xxx.', lead: 'saw', seed: 31, pad: 0 },
+].map((tr) => ({ ...tr, bars: 36, dur: (36 * 4 * 60) / tr.bpm }));
+const SCALE = [[0, 2, 4, 5, 7, 9, 11], [0, 2, 3, 5, 7, 8, 10]];
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function seeded(s) { return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+// Lead > seeded 2-bar motif per track
+TRACKS.forEach((tr) => { const r = seeded(tr.seed * 977); tr.mot = Array.from({ length: 32 }, (_, i) => (r() < (i % 4 === 0 ? 0.8 : 0.4) ? Math.floor(r() * 7) + (r() < 0.25 ? 7 : 0) : -1)); });
+
+// Audio > graph: synth bus, preamp, 10 peaking bands, balance, volume, analyser
+const FREQ = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000], FLBL = ['60', '170', '310', '600', '1K', '3K', '6K', '12K', '14K', '16K'];
+let ac = null, bus, preG, bands = [], pan, volG, an, delay, noiseBuf;
+const eqv = { pre: 0, g: FREQ.map(() => 0), on: true };
+function initAudio() {
+  if (ac) return; ac = new AudioContext();
+  bus = ac.createGain(); preG = ac.createGain(); pan = ac.createStereoPanner(); volG = ac.createGain(); an = ac.createAnalyser(); an.fftSize = 1024; an.smoothingTimeConstant = 0.7;
+  let node = bus.connect(preG); bands = FREQ.map((f, i) => { const b = ac.createBiquadFilter(); b.type = i === 0 ? 'lowshelf' : i === 9 ? 'highshelf' : 'peaking'; b.frequency.value = f; b.Q.value = 1.1; node = node.connect(b); return b; });
+  node.connect(pan).connect(volG).connect(an).connect(ac.destination);
+  delay = ac.createDelay(1); const fb = ac.createGain(), dw = ac.createGain(); fb.gain.value = 0.32; dw.gain.value = 0.3; delay.connect(fb).connect(delay); delay.connect(dw).connect(bus);
+  noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  applyEq(); applyMix();
+}
+addEventListener('pointerdown', () => { initAudio(); ac.resume(); touched = true; }, { capture: true });
+const ok = () => ac && ac.state === 'running';
+function applyEq() { if (!ac) return; preG.gain.value = Math.pow(10, (eqv.on ? eqv.pre : 0) / 20) * 0.7; bands.forEach((b, i) => (b.gain.value = eqv.on ? eqv.g[i] : 0)); }
+function applyMix() { if (!ac) return; volG.gain.value = mix.vol * mix.vol; pan.pan.value = mix.bal; }
+
+// Voices > drums, bass, lead, pad
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function env(g, t, a, peak, d) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); }
+function kick(t) { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12); env(g, t, 0.002, 0.9, 0.32); o.connect(g).connect(bus); o.start(t); o.stop(t + 0.4); }
+function noise(t, type, f, peak, d) { const n = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain(); n.buffer = noiseBuf; fl.type = type; fl.frequency.value = f; env(g, t, 0.002, peak, d); n.connect(fl).connect(g).connect(bus); n.start(t, Math.random()); n.stop(t + d + 0.05); }
+function snare(t) { noise(t, 'bandpass', 1800, 0.45, 0.16); const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 190; env(g, t, 0.002, 0.25, 0.08); o.connect(g).connect(bus); o.start(t); o.stop(t + 0.12); }
+function synth(t, m, type, peak, d, cut, send) { const o = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain(); o.type = type; o.frequency.value = mtof(m); f.type = 'lowpass'; f.frequency.setValueAtTime(cut, t); f.frequency.exponentialRampToValueAtTime(cut * 0.35, t + d); env(g, t, 0.005, peak, d); o.connect(f).connect(g).connect(bus); if (send) g.connect(delay); o.start(t); o.stop(t + d + 0.05); }
+function pad(t, notes, d) { notes.forEach((m) => [-6, 6].forEach((det) => { const o = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det; f.type = 'lowpass'; f.frequency.value = 900; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.03, t + d * 0.4); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(f).connect(g).connect(bus); o.start(t); o.stop(t + d + 0.05); })); }
+function note(tr, deg, oct) { const sc = SCALE[tr.minor], o = Math.floor(deg / 7); return tr.root + sc[((deg % 7) + 7) % 7] + 12 * (o + oct); }
+function playStep(tr, i, t) {
+  const st = i % 16, bar = Math.floor(i / 16), ch = tr.prog[bar % 4], sd = 60 / tr.bpm / 4, intro = bar < 2;
+  if (tr.k[st] === 'x') kick(t);
+  if (!intro && tr.s[st] === 'x') snare(t);
+  if (tr.h[st] === 'x') noise(t, 'highpass', 7500, 0.12, st % 4 === 2 ? 0.1 : 0.035);
+  if (!intro && tr.b[st] === 'x') synth(t, note(tr, ch, 0), 'sawtooth', 0.32, sd * 1.6, 700, false);
+  const m = tr.mot[(bar % 2) * 16 + st]; if (bar >= 4 && m >= 0) synth(t, note(tr, ch + m, 2), tr.lead === 'saw' ? 'sawtooth' : tr.lead, 0.09, sd * 1.8, 3200, true);
+  if (tr.pad && st === 0 && bar >= 2) pad(t, [note(tr, ch, 1), note(tr, ch + 2, 1), note(tr, ch + 4, 1)], sd * 16);
+}
+
+// Transport > song clock independent of audio, lookahead scheduler
+let cur = 0, state = 'stop', offset = 0, t0 = 0, nextStep = 0, touched = false;
+const mix = { vol: 0.8, bal: 0, shuf: false, rep: true };
+const nowS = () => performance.now() / 1000;
+const pos = () => (state === 'play' ? offset + nowS() - t0 : offset);
+function play(i) { if (i !== undefined && i !== cur) { cur = i; offset = 0; } if (state !== 'play') { t0 = nowS(); state = 'play'; } nextStep = Math.ceil(pos() / (60 / TRACKS[cur].bpm / 4)); ui(); }
+function pause() { if (state === 'play') { offset = pos(); state = 'pause'; } else if (state === 'pause') play(); ui(); }
+function stop() { state = 'stop'; offset = 0; ui(); }
+function next(d = 1) { const n = mix.shuf ? (cur + 1 + Math.floor(Math.random() * (TRACKS.length - 1))) % TRACKS.length : (cur + d + TRACKS.length) % TRACKS.length; const was = state; cur = n; offset = 0; t0 = nowS(); nextStep = 0; if (was !== 'play') state = 'stop'; ui(); }
+function seek(k) { offset = clamp(k, 0, 0.999) * TRACKS[cur].dur; t0 = nowS(); nextStep = Math.ceil(offset / (60 / TRACKS[cur].bpm / 4)); }
+setInterval(() => {
+  if (state !== 'play') return; const tr = TRACKS[cur], sd = 60 / tr.bpm / 4, p = pos();
+  if (p >= tr.dur) { if (cur === TRACKS.length - 1 && !mix.rep && !mix.shuf) stop(); else next(1); return; }
+  while (nextStep * sd < p + 0.12) { const at = nextStep * sd; if (ok() && at >= p - 0.02) playStep(tr, nextStep, ac.currentTime + Math.max(0, at - p)); hitVis(tr, nextStep); nextStep++; }
+}, 25);
+
+// Visuals > seven segment time, spectrum with peaks, scope
+const SEG = { 0: 'abcdef', 1: 'bc', 2: 'abdeg', 3: 'abcdg', 4: 'bcfg', 5: 'acdfg', 6: 'acdefg', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg', '-': 'g' };
+function seg7(x, ch, ox, oy, w, h, on, off) {
+  const t = 2.6, L = { a: [ox + t, oy, w - 2 * t, t], b: [ox + w - t, oy + t, t, h / 2 - t * 1.5], c: [ox + w - t, oy + h / 2 + t / 2, t, h / 2 - t * 1.5], d: [ox + t, oy + h - t, w - 2 * t, t], e: [ox, oy + h / 2 + t / 2, t, h / 2 - t * 1.5], f: [ox, oy + t, t, h / 2 - t * 1.5], g: [ox + t, oy + h / 2 - t / 2, w - 2 * t, t] };
+  for (const k in L) { x.fillStyle = (SEG[ch] || '').includes(k) ? on : off; x.fillRect(...L[k]); }
+}
+let css = {};
+function readSkin() { const s = getComputedStyle(document.body); css = { lt: s.getPropertyValue('--lt').trim(), lo: s.getPropertyValue('--lo').trim(), v1: s.getPropertyValue('--v1').trim(), v2: s.getPropertyValue('--v2').trim(), v3: s.getPropertyValue('--v3').trim() }; drawEqGraph(); }
+const NB = 19, energy = new Float32Array(NB), peaks = new Float32Array(NB), fake = new Float32Array(NB);
+let scope = false, fbuf, tbuf;
+function hitVis(tr, i) { const st = i % 16; if (tr.k[st] === 'x') for (let b = 0; b < 5; b++) fake[b] = Math.max(fake[b], 0.95 - b * 0.08); if (tr.s[st] === 'x' && i >= 32) for (let b = 6; b < 13; b++) fake[b] = Math.max(fake[b], 0.7 + Math.random() * 0.2); if (tr.h[st] === 'x') for (let b = 13; b < NB; b++) fake[b] = Math.max(fake[b], 0.45 + Math.random() * 0.3); if (tr.mot[(Math.floor(i / 16) % 2) * 16 + st] >= 0 && i >= 64) { const b = 7 + Math.floor(Math.random() * 6); fake[b] = Math.max(fake[b], 0.85); } }
+function drawVis(dt) {
+  const c = $('#vis'), x = c.getContext('2d'), W = c.width, H = c.height; x.clearRect(0, 0, W, H);
+  if (scope) {
+    x.strokeStyle = css.v2; x.lineWidth = 2; x.beginPath();
+    if (ok() && state === 'play') { tbuf = tbuf || new Uint8Array(an.fftSize); an.getByteTimeDomainData(tbuf); for (let i = 0; i < 98; i++) { const v = tbuf[Math.floor(i * tbuf.length / 98)] / 255; x.lineTo(i * 2, v * H); } }
+    else for (let i = 0; i < 98; i++) x.lineTo(i * 2, H / 2 + (state === 'play' ? Math.sin(i * 0.4 + performance.now() / 60) * fake[2] * H * 0.4 * Math.sin(i * 0.07) : 0));
+    x.stroke(); return;
+  }
+  if (ok() && state === 'play') { fbuf = fbuf || new Uint8Array(an.frequencyBinCount); an.getByteFrequencyData(fbuf); for (let b = 0; b < NB; b++) { const lo = Math.floor(Math.pow(2, b * 0.48) * 1.2), hi = Math.max(lo + 1, Math.floor(Math.pow(2, (b + 1) * 0.48) * 1.2)); let m = 0; for (let j = lo; j < hi && j < fbuf.length; j++) m = Math.max(m, fbuf[j]); energy[b] = m / 255; } }
+  else for (let b = 0; b < NB; b++) { fake[b] *= Math.pow(0.12, dt); energy[b] = state === 'play' ? Math.max(fake[b], 0.08 + Math.random() * 0.06) : Math.max(0, energy[b] - dt * 2); }
+  const g = x.createLinearGradient(0, H, 0, 0); g.addColorStop(0, css.v3); g.addColorStop(0.6, css.v2); g.addColorStop(1, css.v1);
+  for (let b = 0; b < NB; b++) { const h = Math.round(energy[b] * H); peaks[b] = Math.max(peaks[b] - dt * 0.9, energy[b]); x.fillStyle = g; x.fillRect(b * 10 + 2, H - h, 8, h); x.fillStyle = css.v1; x.fillRect(b * 10 + 2, H - Math.round(peaks[b] * H) - 2, 8, 2); }
+}
+function drawTime() {
+  const c = $('#seg'), x = c.getContext('2d'); x.clearRect(0, 0, 160, 32); const s = state === 'stop' ? 0 : pos(), blink = state === 'pause' && Math.floor(performance.now() / 500) % 2;
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60), ch = [Math.floor(m / 10) % 10, m % 10, Math.floor(sec / 10), sec % 10];
+  ch.forEach((d, i) => seg7(x, blink ? ' ' : d, 8 + i * 30 + (i > 1 ? 14 : 0), 2, 22, 28, css.lt, css.lo));
+  if (!blink) { x.fillStyle = css.lt; x.fillRect(70, 9, 3, 3); x.fillRect(70, 20, 3, 3); }
+}
+let mqX = 0;
+function drawMarquee(dt) { const sp = $('#mqt'); mqX -= dt * 26; const w = sp.offsetWidth / 2; if (-mqX > w) mqX += w; sp.style.transform = `translateX(${mqX}px)`; }
+
+// EQ > sliders, curve, presets
+const PRESETS = { Flat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], Rock: [5, 3, -3, -5, -2, 2, 5, 6, 6, 6], Dance: [7, 5, 2, 0, 0, -3, -4, -4, 0, 0], Classical: [0, 0, 0, 0, 0, 0, -4, -4, -4, -6], 'Bass Boost': [9, 7, 4, 1, 0, 0, 0, 0, 0, 0], Treble: [-3, -3, -2, 0, 2, 4, 7, 8, 8, 9], Techno: [6, 5, 0, -4, -3, 0, 6, 7, 7, 6] };
+function slider(el, min, max, v, onChange, vertical) {
+  if (vertical) el.classList.add('v'); const th = document.createElement('i'); el.append(th);
+  const api = { v, set(nv, quiet) { api.v = clamp(nv, min, max); const k = (api.v - min) / (max - min); el.style.setProperty('--k', k); if (vertical) th.style.top = `${(1 - k) * (el.clientHeight - 8) - 1}px`; else th.style.left = `${k * (el.clientWidth - 12)}px`; if (!quiet) onChange(api.v); } };
+  const at = (e) => { const r = el.getBoundingClientRect(); const k = vertical ? 1 - (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width; api.set(min + clamp(k, 0, 1) * (max - min)); };
+  el.onpointerdown = (e) => { el.setPointerCapture(e.pointerId); at(e); el.onpointermove = at; el.onpointerup = () => (el.onpointermove = null); };
+  api.set(v, true); return api;
+}
+$('#bands').innerHTML = FREQ.map((_, i) => `<div class="sl" id="b${i}" style="left:${78 + i * 18}px;top:40px;width:10px;height:60px"></div><span class="bandl" style="left:${73 + i * 18}px">${FLBL[i]}</span>`).join('');
+const bandS = FREQ.map((_, i) => slider($(`#b${i}`), -12, 12, 0, (v) => { eqv.g[i] = v; applyEq(); drawEqGraph(); }, true));
+const preS = slider($('#pre'), -12, 12, 0, (v) => { eqv.pre = v; applyEq(); drawEqGraph(); }, true);
+const volS = slider($('#vol'), 0, 1, 0.8, (v) => { mix.vol = v; applyMix(); flash(`Volume: ${Math.round(v * 100)}%`); });
+const balS = slider($('#bal'), -1, 1, 0, (v) => { mix.bal = Math.abs(v) < 0.08 ? 0 : v; applyMix(); flash(`Balance: ${mix.bal === 0 ? 'Center' : `${Math.round(Math.abs(mix.bal) * 100)}% ${mix.bal < 0 ? 'Left' : 'Right'}`}`); });
+const seekS = slider($('#seek'), 0, 1, 0, (v) => { seek(v); flash(`Seek to: ${fmt(v * TRACKS[cur].dur)}/${fmt(TRACKS[cur].dur)}`); });
+function drawEqGraph() {
+  const c = $('#eqgraph'), x = c.getContext('2d'), W = c.width, H = c.height; x.clearRect(0, 0, W, H);
+  x.strokeStyle = css.lo || 'rgba(255,255,255,0.1)'; x.lineWidth = 1; x.beginPath(); x.moveTo(0, H / 2); x.lineTo(W, H / 2); x.stroke();
+  const pts = eqv.g.map((g, i) => [(i / 9) * (W - 8) + 4, H / 2 - (g / 12) * (H / 2 - 3)]);
+  x.strokeStyle = css.v2 || '#3af'; x.lineWidth = 2; x.beginPath(); x.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) { const [px, py] = pts[i - 1], [qx, qy] = pts[i]; x.bezierCurveTo((px + qx) / 2, py, (px + qx) / 2, qy, qx, qy); }
+  x.stroke(); x.fillStyle = css.v1 || '#fff'; x.fillRect(0, H / 2 - (eqv.pre / 12) * (H / 2 - 3) - 1, 6, 2);
+}
+function preset(name) { const p = PRESETS[name]; if (!p) return; const from = eqv.g.slice(), s = performance.now(); const step = (now) => { const k = Math.min(1, (now - s) / 400); p.forEach((g, i) => { eqv.g[i] = from[i] + (g - from[i]) * k; bandS[i].set(eqv.g[i], true); }); applyEq(); drawEqGraph(); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); $('#presets').style.display = 'none'; flash(`EQ preset: ${name}`); }
+$('#presets').innerHTML = Object.keys(PRESETS).map((n) => `<div data-p="${n}">${n}</div>`).join('');
+$('#presets').onclick = (e) => { const d = e.target.closest('[data-p]'); if (d) preset(d.dataset.p); };
+$('#eqPre').onclick = () => { const p = $('#presets'); p.style.display = p.style.display === 'block' ? 'none' : 'block'; };
+$('#eqOn').onclick = () => { eqv.on = !eqv.on; $('#eqOn').classList.toggle('on', eqv.on); applyEq(); };
+$('#eqAuto').onclick = () => $('#eqAuto').classList.toggle('on');
+
+// Playlist > tracks, current, totals
+function buildList() { $('#list').innerHTML = TRACKS.map((t, i) => `<div data-i="${i}" class="${i === cur ? 'cur sel' : ''}"><span>${i + 1}. ${t.a} - ${t.t}</span><span>${fmt(t.dur)}</span></div>`).join(''); }
+$('#list').onclick = (e) => { const d = e.target.closest('[data-i]'); if (!d) return; cur = +d.dataset.i; offset = 0; t0 = nowS(); nextStep = 0; play(); };
+
+// Windows > drag with snapping, docked group moves together, shade
+const W = { main: $('#main'), eq: $('#eq'), pl: $('#pl') }, pos2 = {};
+const rect = (k) => ({ x: pos2[k].x, y: pos2[k].y, w: 275, h: W[k].offsetHeight });
+function place(k) { W[k].style.left = `${pos2[k].x}px`; W[k].style.top = `${pos2[k].y}px`; }
+function docked(k) {
+  const out = new Set([k]), q = [k];
+  while (q.length) { const a = rect(q.pop()); for (const o of Object.keys(W)) { if (out.has(o)) continue; const b = rect(o), hx = a.x < b.x + b.w && b.x < a.x + a.w, vy = a.y < b.y + b.h && b.y < a.y + a.h; if ((hx && (Math.abs(a.y + a.h - b.y) < 2 || Math.abs(b.y + b.h - a.y) < 2)) || (vy && (Math.abs(a.x + a.w - b.x) < 2 || Math.abs(b.x + b.w - a.x) < 2))) { out.add(o); q.push(o); } } }
+  return [...out];
+}
+let drag = null, scale = 1, SW = 0, SH = 0;
+document.querySelectorAll('.tb').forEach((tb) => {
+  tb.onpointerdown = (e) => { if (e.target.closest('.x, .sk')) return; const k = tb.dataset.w; tb.setPointerCapture(e.pointerId); drag = { k, sx: e.clientX, sy: e.clientY, group: k === 'main' ? docked(k) : [k], start: Object.fromEntries(Object.keys(W).map((o) => [o, { ...pos2[o] }])) }; };
+  tb.onpointermove = (e) => {
+    if (!drag) return; let dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale; const s = drag.start[drag.k], h = W[drag.k].offsetHeight; let x = s.x + dx, y = s.y + dy;
+    for (const o of Object.keys(W)) { if (drag.group.includes(o)) continue; const b = rect(o); for (const [cand, tgt] of [[x, b.x + 275], [x + 275, b.x], [x, b.x]]) if (Math.abs(cand - tgt) < 8) x += tgt - cand; for (const [cand, tgt] of [[y, b.y + b.h], [y + h, b.y], [y, b.y]]) if (Math.abs(cand - tgt) < 8) y += tgt - cand; }
+    x = clamp(x, 0, SW - 275); y = clamp(y, 0, SH - 15); dx = x - s.x; dy = y - s.y;
+    drag.group.forEach((o) => { pos2[o] = { x: drag.start[o].x + dx, y: drag.start[o].y + dy }; place(o); });
+  };
+  tb.onpointerup = () => (drag = null);
+  tb.ondblclick = () => W[tb.dataset.w].classList.toggle('shade');
+});
+document.querySelectorAll('.tb .x').forEach((x) => (x.onclick = () => { const k = x.closest('.tb').dataset.w; if (k !== 'main') toggleWin(k, false); }));
+function toggleWin(k, v) { W[k].style.display = v ? '' : 'none'; $(k === 'eq' ? '#tEq' : '#tPl').classList.toggle('on', v); }
+$('#tEq').onclick = () => toggleWin('eq', W.eq.style.display === 'none'); $('#tPl').onclick = () => toggleWin('pl', W.pl.style.display === 'none');
+function fit() {
+  const mob = innerWidth < 600; scale = mob ? (innerWidth - 12) / 275 : Math.min(2.2, (innerHeight - 60) / 390, (innerWidth - 40) / 275);
+  SW = innerWidth / scale; SH = innerHeight / scale; $('#stage').style.transform = `scale(${scale})`; $('#stage').style.width = `${SW}px`; $('#stage').style.height = `${SH}px`;
+  const x0 = Math.round((SW - 275) / 2), y0 = Math.max(4, Math.round((SH - 382 - (mob ? 20 : 10)) / 2));
+  pos2.main = { x: x0, y: y0 }; pos2.eq = { x: x0, y: y0 + 116 }; pos2.pl = { x: x0, y: y0 + 232 }; Object.keys(W).forEach(place);
+  [volS, balS, seekS, preS, ...bandS].forEach((s) => s.set(s.v, true));
+}
+addEventListener('resize', fit);
+
+// Skins > CSS variable sets
+function skin(name) { document.body.className = `skin-${name}`; document.querySelectorAll('#skins div').forEach((d) => d.classList.toggle('on', d.dataset.s === name)); $('#skins').style.display = 'none'; readSkin(); flash(`Skin: ${$(`#skins [data-s="${name}"]`).textContent}`); }
+$('#skBtn').onclick = (e) => { const s = $('#skins'), r = $('#skBtn').getBoundingClientRect(); s.style.left = `${(r.left) / scale}px`; s.style.top = `${(r.bottom) / scale}px`; s.style.display = s.style.display === 'block' ? 'none' : 'block'; e.stopPropagation(); };
+$('#skins').onclick = (e) => { const d = e.target.closest('[data-s]'); if (d) skin(d.dataset.s); };
+
+// Buttons > transport, toggles, analyser mode
+$('#bPlay').onclick = () => { if (state === 'play') { offset = 0; t0 = nowS(); nextStep = 0; } play(); };
+$('#bPause').onclick = pause; $('#bStop').onclick = stop; $('#bNext').onclick = () => next(1); $('#bPrev').onclick = () => next(-1);
+$('#bEject').onclick = () => toggleWin('pl', true);
+$('#tShuf').onclick = () => { mix.shuf = !mix.shuf; $('#tShuf').classList.toggle('on', mix.shuf); };
+$('#tRep').onclick = () => { mix.rep = !mix.rep; $('#tRep').classList.toggle('on', mix.rep); };
+$('#tRep').classList.toggle('on', mix.rep);
+$('#vis').onclick = () => { scope = !scope; };
+let flashT = 0, flashMsg = '';
+function flash(m) { flashMsg = m; flashT = performance.now(); setMq(); }
+function setMq() { const tr = TRACKS[cur], txt = performance.now() - flashT < 1400 ? flashMsg : `${cur + 1}. ${tr.a} - ${tr.t} (${fmt(tr.dur)})  ***  `; if ($('#mqt').dataset.t !== txt) { $('#mqt').dataset.t = txt; $('#mqt').textContent = flashT && performance.now() - flashT < 1400 ? txt : txt + txt; mqX = 0; } }
+function ui() { $('#pstate').className = state === 'play' ? '' : state; buildList(); const tot = TRACKS.reduce((a, t) => a + t.dur, 0); $('#tot').textContent = `${fmt(TRACKS[cur].dur)}/${fmt(tot)}`; $('#kbps').textContent = [128, 192, 160, 128, 256, 192][cur]; setMq(); }
+
+// Attract > play, swap skins, presets, next track
+const ATTRACT = [[2, () => play()], [5, () => skin('aqua')], [3, () => preset('Dance')], [5, () => skin('dark')], [3, () => { scope = true; }], [3, () => { scope = false; next(1); }], [5, () => preset('Rock')], [4, () => skin('chrome')], [4, () => preset('Flat')]];
+let ai = 0;
+function attract() { if (touched) return; const [d, fn] = ATTRACT[ai++ % ATTRACT.length]; setTimeout(() => { if (touched) return; fn(); attract(); }, (ai === 1 ? 0.6 : d) * 1000); }
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  drawVis(dt); drawTime(); drawMarquee(dt); setMq();
+  if (state !== 'stop') seekS.set(pos() / TRACKS[cur].dur, true); else seekS.set(0, true);
+  requestAnimationFrame(loop);
+}
+readSkin(); fit(); ui();
+if (capture) { preset('Dance'); cur = 0; offset = 41; play(); for (let i = 0; i < NB; i++) fake[i] = 0.4 + Math.sin(i * 0.7) * 0.25; } else attract();
+requestAnimationFrame(loop);
+
+window.__mp3 = { play, pause, stop, next: () => next(1), prev: () => next(-1), skin, preset, seek, state: () => ({ state, cur, pos: +pos().toFixed(2), skin: document.body.className, eq: eqv.g.map((g) => Math.round(g)), pre: eqv.pre, vol: mix.vol, bal: mix.bal, scope, audio: !!ac && ac.state, win: Object.fromEntries(Object.keys(W).map((k) => [k, pos2[k]])) }) };
+</script>
+</body>
+</html>

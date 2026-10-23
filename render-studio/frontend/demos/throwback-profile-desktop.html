@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Throwback Profile Desktop</title>
+<meta name="category" content="aero" />
+<meta name="style" content="mcbling" />
+<meta name="order" content="7" />
+<meta name="capture" content="4400" />
+<meta name="tags" content="2007 social profile, messenger, YouTube IFrame API, Aqua mini player, glitter text" />
+<meta name="description" content="A 2007 afternoon on one screen, with no logos. A pinstriped browser holds a social profile page (glitter name, Mood, a blinking Online Now!, a Top 8, a comment wall and a profile song). A buddy list shows '♫ now playing', and a glossy Aqua mini player streams real era songs (Fireflies, 1234, New Soul, Bubbly, Electric Feel...) from their official YouTube uploads via a hidden IFrame API player. Hard because the one player drives three UIs (the LCD, the profile song box and the messenger status), and the YouTube script loads only on the first hover or tap, so the page stays offline-clean until you press play." />
+<meta name="prompt" content="Build a 2007 throwback desktop in one HTML file with no real logos. A blue-sky Aqua wallpaper; a glossy mini music player (prev / play / next, LCD with title and artist) that streams era songs from official YouTube uploads through a hidden YouTube IFrame API player; a pinstripe browser window showing a MySpace-style profile with glitter name, mood, blinking Online Now, Top 8 friends, comments and a profile-song box; an MSN-style buddy list whose personal message shows the current song; sign-in toasts, nudge and a glossy dock. Load the YouTube API lazily on first hover or tap." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/throwback-profile-desktop.html
+ * PURPOSE: 2007 throwback desktop: Aqua mini player (real songs via YouTube IFrame API), social profile page, buddy list now-playing, dock
+ * UI: Render Studio > Frutiger Aero > Throwback Profile Desktop
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__throwback (play, next, prev, track, nudge)
+ */
+:root { --font: "Lucida Grande", "Segoe UI", Tahoma, "Helvetica Neue", system-ui, sans-serif; --sp: #003399; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font: 12px var(--font); color: #222; user-select: none; -webkit-user-select: none; }
+body { background: radial-gradient(ellipse 40% 12% at 18% 72%, rgba(255, 255, 255, 0.55), transparent), radial-gradient(ellipse 30% 9% at 80% 30%, rgba(255, 255, 255, 0.5), transparent), radial-gradient(ellipse 50% 14% at 60% 88%, rgba(255, 255, 255, 0.45), transparent), linear-gradient(#2c5fb8, #3b78cf 35%, #6aa6e6 70%, #a9d2f7); }
+body::before { content: ''; position: fixed; inset: 0; background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.12) 45%, transparent 60%); pointer-events: none; }
+
+/* Mini player > Aqua pill, gel buttons, LCD */
+#player { position: fixed; left: 18px; top: 12px; z-index: 50; display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 8px; border-radius: 28px; background: linear-gradient(#f4f4f4, #d9d9d9 50%, #c8c8c8 51%, #e6e6e6); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 0 1px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 20, 60, 0.35); }
+.pb { width: 34px; height: 34px; border-radius: 50%; border: 0; padding: 0; display: grid; place-items: center; color: #333; cursor: pointer; background: radial-gradient(circle at 50% 30%, #fff, #e3e3e3 55%, #a9a9a9); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35), 0 1px 1px rgba(255, 255, 255, 0.8); }
+.pb svg { width: 13px; height: 13px; }
+.pb.big { width: 42px; height: 42px; }
+.pb.big svg { width: 16px; height: 16px; }
+.pb:active { background: radial-gradient(circle at 50% 30%, #d9ecff, #9fc6ef 55%, #5b8fc8); }
+.lcd { width: 250px; height: 40px; border-radius: 20px; padding: 3px 14px; display: flex; flex-direction: column; justify-content: center; align-items: center; position: relative; overflow: hidden; background: linear-gradient(#eef1d8, #dfe5bd); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.8); color: #2d2d1a; }
+.lcd .t { font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+.lcd .a { font-size: 11px; opacity: 0.85; white-space: nowrap; }
+.lcd .time { position: absolute; right: 12px; top: 13px; font: 10px monospace; opacity: 0.7; }
+.eq { position: absolute; left: 12px; bottom: 7px; display: flex; gap: 2px; align-items: flex-end; height: 22px; }
+.eq i { width: 3px; background: rgba(45, 45, 26, 0.55); border-radius: 1px; height: 2px; }
+.list { width: 26px; height: 26px; }
+#pl { position: fixed; left: 18px; top: 68px; z-index: 60; width: 300px; border-radius: 10px; padding: 6px 0; display: none; background: rgba(250, 250, 250, 0.97); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3), 0 10px 24px rgba(0, 20, 60, 0.35); }
+#pl.on { display: block; }
+#pl div { display: flex; justify-content: space-between; padding: 4px 14px; cursor: pointer; }
+#pl div:nth-child(even) { background: #edf3fe; }
+#pl div.on { background: #3875d7; color: #fff; }
+#pl small { opacity: 0.7; }
+#pl .note { cursor: default; background: none !important; color: #789; font-size: 10.5px; padding-top: 6px; }
+#ytHost { position: fixed; left: -400px; top: 0; width: 200px; height: 200px; opacity: 0; pointer-events: none; }
+
+/* Top right > account pill */
+#acct { position: fixed; right: 18px; top: 12px; z-index: 50; display: flex; align-items: center; gap: 10px; padding: 9px 18px; border-radius: 24px; font-size: 14px; background: linear-gradient(#fff, #eef2f6); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 20, 60, 0.3); }
+#acct svg { width: 22px; height: 22px; }
+
+/* Windows > Aqua pinstripe chrome */
+.win { position: absolute; display: flex; flex-direction: column; border-radius: 7px 7px 5px 5px; overflow: hidden; background: repeating-linear-gradient(#fff 0 2px, #f2f2f2 2px 4px); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35), 0 16px 40px rgba(0, 20, 60, 0.45); z-index: 10; }
+.win.hide { display: none; }
+.tbar { height: 24px; flex: none; position: relative; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #333; background: linear-gradient(#f2f2f2, #d6d6d6); border-bottom: 1px solid #a6a6a6; touch-action: none; }
+.lights { position: absolute; left: 9px; top: 5px; display: flex; gap: 7px; }
+.lights i { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); position: relative; }
+.lights i::after { content: ''; position: absolute; left: 3px; right: 3px; top: 1px; height: 5px; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.1)); }
+.lights .r { background: radial-gradient(circle at 50% 80%, #ffb0a0, #f0402c 55%, #a01608); }
+.lights .y { background: radial-gradient(circle at 50% 80%, #ffe9a0, #f5b623 55%, #a86a05); }
+.lights .g { background: radial-gradient(circle at 50% 80%, #c9f7a6, #4cc22b 55%, #1d7409); }
+.addr { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid #b5b5b5; background: linear-gradient(#ececec, #d9d9d9); }
+.addr span { flex: 1; height: 20px; border-radius: 10px; background: #fff; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35); padding: 0 10px; font-size: 11.5px; line-height: 20px; color: #444; white-space: nowrap; overflow: hidden; }
+.addr b { width: 24px; height: 20px; border-radius: 10px; background: linear-gradient(#fff, #d4d4d4); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3); font-size: 11px; display: grid; place-items: center; font-weight: 400; }
+
+/* Profile page > sparkle tiled background, blue box tables */
+#browser { left: calc(50% - 460px); top: 72px; width: 920px; height: calc(100% - 160px); }
+.page { flex: 1; overflow: auto; padding: 14px; background: radial-gradient(circle at 10px 10px, #fff 0 1.5px, transparent 2px) 0 0 / 40px 40px, radial-gradient(circle at 30px 30px, #ffd6f5 0 1.5px, transparent 2px) 0 0 / 40px 40px, linear-gradient(#bfe3ff, #e9d6ff); user-select: text; -webkit-user-select: text; }
+.topnav { max-width: 860px; margin: 0 auto 10px; padding: 6px 12px; border-radius: 4px; background: linear-gradient(#5b8de6, #2f5fc0); color: #fff; font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; }
+.cols { max-width: 860px; margin: 0 auto; display: grid; grid-template-columns: 300px 1fr; gap: 14px; }
+.panel { background: rgba(255, 255, 255, 0.92); border: 1px solid #6699cc; margin-bottom: 12px; }
+.ph { background: #6699cc; color: #fff; font-weight: 700; padding: 3px 8px; font-size: 11.5px; }
+.ph.or { background: #ffcc99; color: #cc6600; }
+.pbody { padding: 8px; }
+.glitter { font: 700 26px/1.1 "Comic Sans MS", "Chalkboard SE", var(--font); background: linear-gradient(90deg, #ff4fb8, #ffd23c, #4fd1ff, #b06bff, #ff4fb8); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: glit 3s linear infinite; position: relative; display: inline-block; filter: drop-shadow(0 1px 0 #fff); }
+@keyframes glit { to { background-position: 200% 0; } }
+.spark { position: absolute; width: 10px; height: 10px; pointer-events: none; background: radial-gradient(circle, #fff 0 20%, transparent 22%), linear-gradient(transparent 45%, #fff 45% 55%, transparent 55%), linear-gradient(90deg, transparent 45%, #fff 45% 55%, transparent 55%); animation: tw 1.2s ease-in-out infinite; }
+@keyframes tw { 0%, 100% { transform: scale(0.2) rotate(0); opacity: 0; } 50% { transform: scale(1) rotate(45deg); opacity: 1; } }
+.who { display: flex; gap: 10px; }
+.pp { width: 110px; height: 130px; flex: none; border: 1px solid #999; background: radial-gradient(circle at 50% 36%, #ffe3c8 0 20%, transparent 21%), radial-gradient(ellipse at 50% 25%, #4a2c1a 0 30%, transparent 31%), radial-gradient(ellipse at 50% 100%, #ff7ec7 0 42%, transparent 43%), linear-gradient(160deg, #9fe7ff, #ffd6f5); position: relative; }
+.pp::after { content: '\201C peace \201D'; position: absolute; left: 4px; bottom: 3px; font: 10px "Comic Sans MS", cursive; color: #fff; text-shadow: 0 0 2px #c0007a; }
+.meta { font-size: 11px; line-height: 1.55; }
+.online { display: inline-flex; gap: 4px; align-items: center; font-weight: 700; color: #ff6600; animation: blink 1s steps(1) infinite; }
+.online i { width: 14px; height: 10px; border-radius: 2px; background: linear-gradient(#ffe066, #ff9a00); box-shadow: inset 0 0 0 1px #cc6600; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.contact { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11px; }
+.contact a { color: var(--sp); text-decoration: none; display: flex; gap: 5px; align-items: center; cursor: pointer; }
+.contact a::before { content: ''; width: 12px; height: 12px; border-radius: 2px; background: linear-gradient(#ffd27f, #ff9a00); box-shadow: inset 0 0 0 1px #c86a00; flex: none; }
+.song { display: flex; gap: 8px; align-items: center; padding: 6px; background: #111; color: #9fe08c; font: 11px monospace; border-radius: 3px; }
+.song .pb { width: 26px; height: 26px; flex: none; }
+.song .pb svg { width: 10px; height: 10px; }
+.marq { flex: 1; overflow: hidden; white-space: nowrap; }
+.marq span { display: inline-block; padding-left: 100%; animation: marq 9s linear infinite; }
+@keyframes marq { to { transform: translateX(-100%); } }
+table.int { width: 100%; border-collapse: collapse; font-size: 11px; }
+table.int td { padding: 4px 6px; border-bottom: 1px solid #d7e4f2; vertical-align: top; }
+table.int td:first-child { width: 72px; background: #b1d0f0; color: var(--sp); font-weight: 700; }
+.ext { padding: 10px; border: 1px solid #6699cc; background: rgba(255, 255, 255, 0.92); font-weight: 700; font-size: 15px; color: #333; margin-bottom: 12px; text-align: center; }
+.top8 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; font-size: 11px; }
+.top8 a { color: var(--sp); text-decoration: none; transition: transform 0.15s; }
+.top8 a.hot, .top8 a:hover { transform: scale(1.06); }
+.top8 .av { aspect-ratio: 1; border: 1px solid #999; margin-bottom: 3px; }
+.cm { display: grid; grid-template-columns: 70px 1fr; border-bottom: 1px solid #d7e4f2; animation: yf 2s ease-out; }
+@keyframes yf { from { background: #fff6a6; } }
+.cm .l { background: #b1d0f0; padding: 6px; text-align: center; font-size: 10.5px; color: var(--sp); }
+.cm .l .av { width: 44px; height: 44px; margin: 0 auto 3px; border: 1px solid #888; }
+.cm .r { padding: 6px 8px; font-size: 11.5px; }
+.cm .r small { color: #888; display: block; margin-bottom: 3px; }
+.cm .r b { font: 700 13px "Comic Sans MS", cursive; }
+
+/* Buddy list > now-playing personal message */
+#buddy { right: 18px; bottom: 90px; width: 250px; height: 330px; background: #fff; }
+#buddy .tbar { background: linear-gradient(#8cc8f7, #3d8ee0 50%, #2a78cc 51%, #5fb0f2); color: #fff; text-shadow: 0 1px 1px rgba(0, 30, 70, 0.6); border-bottom-color: #2a5f9e; }
+.mehead { display: flex; gap: 8px; padding: 8px; background: linear-gradient(#e9f5ff, #fff); border-bottom: 1px solid #d3e5f4; }
+.mehead .pic { width: 46px; height: 46px; border-radius: 6px; border: 2px solid #3bb84a; box-shadow: 0 0 6px rgba(59, 184, 74, 0.6); background: radial-gradient(circle at 50% 38%, #ffe3c8 0 22%, transparent 23%), radial-gradient(ellipse at 50% 100%, #ff7ec7 0 40%, transparent 41%), linear-gradient(#9fe7ff, #fff); flex: none; }
+.mehead .pm { color: #3d6fa8; font-size: 11px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+.bl { padding: 6px 4px; overflow: auto; flex: 1; }
+.grp { color: #1a5f99; font-weight: 700; padding: 3px 6px; }
+.bud { display: flex; gap: 7px; align-items: center; padding: 3px 6px 3px 14px; border-radius: 4px; }
+.bud:hover { background: #e3f1fc; }
+.bud .pm { color: #7d8b98; font-size: 10.5px; font-style: italic; }
+.gem { width: 12px; height: 12px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); position: relative; }
+.gem::after { content: ''; position: absolute; left: 2px; right: 3px; top: 1px; height: 4px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); }
+.s-on { background: radial-gradient(circle at 50% 70%, #b7f7a5, #3bb84a 60%, #1c7a26); }
+.s-aw { background: radial-gradient(circle at 50% 70%, #ffe7a0, #f2a516 60%, #a96a00); }
+.s-of { background: radial-gradient(circle at 50% 70%, #eee, #a7b1bb 60%, #6c7781); }
+.bud.off { color: #9aa7b3; }
+.nudgebtn { margin: 6px 8px 8px; height: 24px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; color: #c0392b; background: linear-gradient(#fff, #ffe9e5); box-shadow: inset 0 0 0 1px #e8a79c; cursor: pointer; }
+.shake { animation: shake 0.6s linear; }
+@keyframes shake { 10%, 50%, 90% { transform: translate(-12px, 3px); } 30%, 70% { transform: translate(12px, -3px); } }
+
+/* Toast + dock */
+#toasts { position: fixed; right: 18px; bottom: 430px; z-index: 40; display: flex; flex-direction: column; gap: 6px; }
+.toast { width: 220px; border-radius: 8px; padding: 8px 10px; background: linear-gradient(#fff, #e9f4fd); box-shadow: 0 0 0 1px #5f8fbd, inset 0 0 0 3px #b8d6f0, 0 8px 20px rgba(0, 30, 70, 0.35); animation: up 0.4s ease-out; }
+.toast.out { animation: down 0.4s ease-in forwards; }
+@keyframes up { from { transform: translateY(30px); opacity: 0; } }
+@keyframes down { to { transform: translateY(30px); opacity: 0; } }
+#dock { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 45; display: flex; gap: 12px; padding: 10px 14px; border-radius: 22px; background: rgba(255, 255, 255, 0.82); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 20, 60, 0.3); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#dock .d { width: 50px; height: 50px; border-radius: 12px; display: grid; place-items: center; color: #222; cursor: pointer; background: linear-gradient(#fff, #e6e6e6); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18), 0 2px 4px rgba(0, 0, 0, 0.18); transition: transform 0.15s; position: relative; }
+#dock .d:hover { transform: translateY(-6px) scale(1.08); }
+#dock .d svg { width: 26px; height: 26px; }
+#dock .d.run::after { content: ''; position: absolute; bottom: -7px; width: 5px; height: 5px; border-radius: 50%; background: #333; }
+#dock .sep { width: 1px; background: rgba(0, 0, 0, 0.15); }
+
+/* keep the buddy list clear of the profile on laptop widths */
+@media (max-width: 1400px) { #browser { left: 20px; width: calc(100% - 300px); } }
+@media (max-width: 700px) {
+  #player { left: 8px; right: 8px; top: 8px; }
+  .lcd { flex: 1; width: auto; }
+  #acct, #toasts { display: none; }
+  #buddy { right: 8px; bottom: 76px; width: calc(100% - 16px); height: 300px; }
+  #pl { left: 8px; right: 8px; width: auto; top: 64px; }
+  #browser { left: 6px; top: 66px; width: calc(100% - 12px); height: calc(100% - 140px); }
+  .cols { grid-template-columns: 1fr; }
+  #dock { gap: 6px; padding: 7px 9px; }
+  #dock .d { width: 40px; height: 40px; }
+  #dock .d svg { width: 21px; height: 21px; }
+  .top8 { grid-template-columns: repeat(4, 1fr); }
+}
+</style>
+</head>
+<body>
+<div id="player">
+  <button class="pb" id="prev" aria-label="Previous track"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+  <button class="pb big" id="play" aria-label="Play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></button>
+  <button class="pb" id="next" aria-label="Next track"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+  <div class="lcd" aria-live="polite"><div class="eq" id="eq"></div><span class="t" id="lt"></span><span class="a" id="la"></span><span class="time" id="ltime"></span></div>
+  <button class="pb list" id="listb" aria-label="Playlist"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zM4 11h16v2H4zM4 16h10v2H4z"/></svg></button>
+</div>
+<div id="pl"></div>
+<div id="ytHost" aria-hidden="true"><div id="yt"></div></div>
+<div id="acct"><svg viewBox="0 0 24 24"><defs><linearGradient id="ug" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fd3ff"/><stop offset="1" stop-color="#2a73c8"/></linearGradient></defs><circle cx="12" cy="8" r="5" fill="url(#ug)"/><path d="M3 22c0-5 4-8 9-8s9 3 9 8z" fill="url(#ug)"/></svg>visitor <span style="color:#3bb84a">● online</span></div>
+
+<div class="win" id="browser">
+  <div class="tbar"><div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>Visitor's Space</div>
+  <div class="addr"><b>◀</b><b>▶</b><span>http://profiles.example.com/visitor</span><b>⟳</b></div>
+  <div class="page">
+    <div class="topnav"><span>Home</span><span>Browse</span><span>Search</span><span>Invite</span><span>Mail</span><span>Blog</span><span>Favorites</span><span>Forum</span><span>Groups</span><span>Music</span></div>
+    <div class="cols">
+      <div>
+        <div class="panel"><div class="pbody">
+          <div class="glitter" id="gname">~*xX Visitor Xx*~</div>
+          <div class="who" style="margin-top:8px"><div class="pp"></div>
+            <div class="meta">"rawr means i love u in dinosaur"<br><br>Female / Male / Whatever<br>19 years old<br>Bubble City<br>Planet Earth<br><br><span class="online"><i></i>Online Now!</span><br><br>Mood: <b>nostalgic</b> :)</div></div>
+        </div></div>
+        <div class="panel"><div class="ph">Contacting Visitor</div><div class="pbody contact"><a>Send Message</a><a>Forward to Friend</a><a id="addf">Add to Friends</a><a>Add to Favorites</a><a id="imb">Instant Message</a><a>Block User</a></div></div>
+        <div class="panel"><div class="ph">Profile Song</div><div class="pbody"><div class="song"><button class="pb" id="sp" aria-label="Play profile song"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg></button><div class="marq"><span id="smarq"></span></div></div></div></div>
+        <div class="panel"><div class="ph">Visitor's Interests</div><table class="int">
+          <tr><td>General</td><td>glossy buttons, lens flares, bubbles, rounded corners, staying up late customizing my profile</td></tr>
+          <tr><td>Music</td><td id="imusic"></td></tr>
+          <tr><td>Movies</td><td>anything with a soundtrack that sounds like the sky</td></tr>
+          <tr><td>Heroes</td><td>whoever invented the gel button</td></tr></table></div>
+      </div>
+      <div>
+        <div class="ext">Visitor is in your extended network</div>
+        <div class="panel"><div class="ph or">Visitor's Blurbs</div><div class="pbody" style="font-size:12px;line-height:1.5"><b style="color:#cc6600">About me:</b><br>hiii!! welcome 2 my page :D i spent like 6 hours on this layout so leave a comment!! i like blue skies, green hills, glossy everything and making playlists for every mood. press play on the song up top &lt;3</div></div>
+        <div class="panel"><div class="ph or">Visitor's Friend Space</div><div class="pbody"><div style="font-weight:700;margin-bottom:6px">Visitor has <span style="color:#cc0000">1,337</span> friends.</div><div class="top8" id="top8"></div></div></div>
+        <div class="panel"><div class="ph or">Visitor's Friends Comments</div><div id="comments"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="win" id="buddy">
+  <div class="tbar"><div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div>Messenger</div>
+  <div class="mehead"><div class="pic"></div><div><b>Visitor ✿</b> <span style="color:#3bb84a">(Online)</span><div class="pm" id="mypm"></div></div></div>
+  <div class="bl" id="bl"></div>
+  <div class="nudgebtn" id="nudge">⚡ Send a Nudge</div>
+</div>
+<div id="toasts"></div>
+
+<div id="dock">
+  <div class="d" data-w="browser" title="Profile"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9H3z"/><path d="M10 20v-6h4v6"/></svg></div>
+  <div class="d" data-w="buddy" title="Messenger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H9l-5 4z"/></svg></div>
+  <div class="d" data-w="pl" title="Playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg></div>
+  <div class="sep"></div>
+  <div class="d" data-w="nudge" title="Nudge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div>
+  <div class="d" data-w="mail" title="Mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// Playlist > same era hits as the portfolio player, official YouTube uploads (streamed, never stored)
+const PLAYLIST = [
+  { title: 'Fireflies', artist: 'Owl City', videoId: 'psuRGfAaju4' },
+  { title: '1234', artist: 'Feist', videoId: 'ABYnqp-bxvg' },
+  { title: 'New Soul', artist: 'Yael Naim', videoId: 'hhE7QMXRE1g' },
+  { title: 'Shut Up and Let Me Go', artist: 'The Ting Tings', videoId: 'tolm-07if3c' },
+  { title: 'Bubbly', artist: 'Colbie Caillat', videoId: 'AWGqoCNbsvM' },
+  { title: 'Electric Feel', artist: 'MGMT', videoId: 'MmZexg8sxyk' },
+  { title: 'Are You Gonna Be My Girl', artist: 'Jet', videoId: 'tuK6n2Lkza0' },
+  { title: 'Bruises', artist: 'Chairlift', videoId: 'ZQ9hLOHj8ag' },
+];
+
+// Player > YouTube IFrame API, loaded lazily on first hover / tap / focus
+const API_SRC = 'https://www.youtube.com/iframe_api';
+let yt = null, ready = false, starting = false, wantPlay = false, playing = false, idx = 0, errors = 0, userTouched = false;
+function loadApi() {
+  return new Promise((res) => {
+    if (window.YT?.Player) return res();
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { prev?.(); res(); };
+    if (!document.querySelector(`script[src="${API_SRC}"]`)) { const s = document.createElement('script'); s.src = API_SRC; document.head.append(s); }
+  });
+}
+async function warmUp() {
+  userTouched = true;
+  if (starting) return;
+  starting = true;
+  await loadApi();
+  yt = new YT.Player($('#yt'), {
+    width: 200, height: 200, videoId: PLAYLIST[idx].videoId, playerVars: { playsinline: 1, controls: 0 },
+    events: {
+      onReady: (e) => { ready = true; if (wantPlay) e.target.playVideo(); },
+      onStateChange: (e) => { playing = e.data === 1; if (playing) errors = 0; render(); if (e.data === 0) step(1, true); },
+      // blocked or removed upload: skip, give up after a full lap
+      onError: () => { errors++; if (errors < PLAYLIST.length) step(1, true); },
+    },
+  });
+}
+function step(d, autoplay = playing) {
+  idx = (idx + d + PLAYLIST.length) % PLAYLIST.length;
+  render();
+  if (!ready) return;
+  autoplay ? yt.loadVideoById(PLAYLIST[idx].videoId) : yt.cueVideoById(PLAYLIST[idx].videoId);
+}
+function togglePlay() {
+  if (!ready) { wantPlay = true; warmUp(); return; }
+  playing ? yt.pauseVideo() : yt.playVideo();
+}
+function pick(i) { idx = i; render(); if (ready) yt.loadVideoById(PLAYLIST[i].videoId); else { wantPlay = true; warmUp(); } }
+['pointerenter', 'pointerdown', 'focusin'].forEach((ev) => { $('#player').addEventListener(ev, warmUp); $('#sp').addEventListener(ev, warmUp); });
+$('#play').onclick = togglePlay; $('#sp').onclick = togglePlay;
+$('#prev').onclick = () => step(-1); $('#next').onclick = () => step(1);
+$('#listb').onclick = (e) => { e.stopPropagation(); warmUp(); $('#pl').classList.toggle('on'); };
+$('#pl').onclick = (e) => { e.stopPropagation(); const r = e.target.closest('[data-i]'); if (r) pick(+r.dataset.i); };
+addEventListener('pointerdown', (e) => { if (!e.target.closest('#pl,#listb,[data-w="pl"]')) $('#pl').classList.remove('on'); });
+
+// Render > one track state feeds LCD, profile song box, buddy list status
+const PLAY_SVG = '<path d="M7 4v16l13-8z"/>', PAUSE_SVG = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+function render() {
+  const t = PLAYLIST[idx];
+  $('#lt').textContent = t.title; $('#la').textContent = t.artist;
+  $('#play svg').innerHTML = $('#sp svg').innerHTML = playing ? PAUSE_SVG : PLAY_SVG;
+  $('#play').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  $('#smarq').textContent = `♫ ${t.artist} - ${t.title} ♫ ${playing ? 'now playing' : 'press play'} ♫`;
+  $('#mypm').textContent = `♫ ${t.title} - ${t.artist}`;
+  $('#pl').innerHTML = PLAYLIST.map((p, i) => `<div data-i="${i}" class="${i === idx ? 'on' : ''}"><span>${esc(p.title)}</span><small>${esc(p.artist)}</small></div>`).join('') + '<div class="note">Streams official uploads via YouTube</div>';
+}
+$('#imusic').textContent = PLAYLIST.map((p) => p.artist).join(', ') + ', anything that sounds like a sunny screensaver';
+$('#eq').innerHTML = '<i></i>'.repeat(7);
+
+// Glitter > sparkles respawn around the name
+const gname = $('#gname');
+for (let i = 0; i < 6; i++) { const s = document.createElement('i'); s.className = 'spark'; s.style.animationDelay = i * 0.2 + 's'; gname.append(s); }
+setInterval(() => $$('.spark').forEach((s) => { if (Math.random() < 0.4) { s.style.left = Math.random() * 100 + '%'; s.style.top = Math.random() * 100 + '%'; } }), 600);
+
+// Friends > Top 8 + comment wall
+const av = (a, b, hair = '#4a2c1a') => `background:radial-gradient(circle at 50% 40%,#ffe3c8 0 22%,transparent 23%),radial-gradient(ellipse at 50% 26%,${hair} 0 32%,transparent 33%),radial-gradient(ellipse at 50% 100%,${a} 0 40%,transparent 41%),linear-gradient(${b},#fff)`;
+const FRIENDS = [['Tom (your first friend)', '#6c8cd5', '#dbe6ff', '#222'], ['xo_mandy_xo', '#ff8fc7', '#ffe0f0', '#d4a017'], ['joel ☆', '#4dabf7', '#d0ebff'], ['kat', '#69db7c', '#d3f9d8', '#111'], ['~lisa~', '#c77dff', '#f0e0ff', '#7a3b1a'], ['dev_ed', '#ffa94d', '#fff0dd'], ['emo_kid_99', '#343a40', '#ced4da', '#000'], ['bubblegirl', '#f783ac', '#fff0f6', '#ff6600']];
+$('#top8').innerHTML = FRIENDS.map(([n, a, b, h]) => `<a><div class="av" style="${av(a, b, h)}"></div>${esc(n)}</a>`).join('');
+const COMMENTS = ['thanks for the add!! :D', 'omg ur layout is so cute', 'PC4PC? <3', 'hey!! saw u at the mall lol', 'that song on ur profile is stuck in my head', 'happy friday!!! ☆ ~ ☆', 'u should totally put me in ur top 8', 'luv the glitter name rawr'];
+function comment(i = Math.floor(Math.random() * COMMENTS.length)) {
+  const f = FRIENDS[(i + 1) % FRIENDS.length];
+  const el = document.createElement('div'); el.className = 'cm';
+  el.innerHTML = `<div class="l"><div class="av" style="${av(f[1], f[2], f[3])}"></div>${esc(f[0])}</div><div class="r"><small>${new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</small><b>${esc(COMMENTS[i])}</b></div>`;
+  $('#comments').prepend(el);
+  while ($('#comments').children.length > 4) $('#comments').lastChild.remove();
+}
+[0, 2, 4].forEach((i) => comment(i));
+$('#addf').onclick = () => toast('Friend request sent!', 'Visitor will have to confirm.');
+
+// Buddy list + toasts + nudge
+const BUDS = [['Friends', [['kat', 'on', '♫ Bubbly - Colbie Caillat'], ['xo_mandy_xo', 'of', 'gone 2 the mall'], ['joel ☆', 'aw', 'brb'], ['~lisa~', 'on', 'summer 07 <3']]], ['School', [['dev_ed', 'on', 'homework... ugh'], ['bubblegirl', 'of', '']]]];
+function renderBuddies() { $('#bl').innerHTML = BUDS.map(([g, l]) => `<div class="grp">▾ ${g} (${l.filter((b) => b[1] !== 'of').length}/${l.length})</div>` + l.map(([n, s, pm]) => `<div class="bud ${s === 'of' ? 'off' : ''}"><span class="gem s-${s}"></span><div>${esc(n)}<div class="pm">${esc(pm)}</div></div></div>`).join('')).join(''); }
+renderBuddies();
+function toast(title, body) {
+  const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = `<b>${esc(title)}</b><br>${esc(body)}`;
+  $('#toasts').append(t); chime();
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 3200);
+}
+function signIn(name) { for (const [, l] of BUDS) for (const b of l) if (b[0] === name) b[1] = 'on'; renderBuddies(); toast(name, 'has just signed in.'); }
+function nudge() { const b = $('#buddy'); b.classList.remove('hide'); b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); buzz(); }
+$('#nudge').onclick = nudge; $('#imb').onclick = () => { $('#buddy').classList.remove('hide'); front($('#buddy')); };
+
+// Audio > UI chime + nudge buzz (synth); separate from the YouTube stream
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) try { ac = new AudioContext(); } catch {} });
+function chime() { if (!ac) return; const t = ac.currentTime; [784, 1046.5].forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(0.05, t + i * 0.09); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.09 + 0.4); o.connect(g).connect(ac.destination); o.start(t + i * 0.09); o.stop(t + i * 0.09 + 0.45); }); }
+function buzz() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.setValueAtTime(90, t); o.frequency.linearRampToValueAtTime(140, t + 0.5); g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.62); }
+
+// Windows > drag by title bar, traffic lights hide, dock toggles
+let zTop = 20;
+const front = (w) => (w.style.zIndex = ++zTop);
+$$('.win').forEach((w) => {
+  const bar = w.querySelector('.tbar');
+  w.addEventListener('pointerdown', () => front(w));
+  w.querySelector('.r').onclick = w.querySelector('.y').onclick = () => w.classList.add('hide');
+  bar.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.lights') || innerWidth < 700) return;
+    const sx = e.clientX - w.offsetLeft, sy = e.clientY - w.offsetTop; bar.setPointerCapture(e.pointerId);
+    bar.onpointermove = (ev) => { w.style.left = Math.max(-w.offsetWidth + 80, Math.min(innerWidth - 80, ev.clientX - sx)) + 'px'; w.style.top = Math.max(60, Math.min(innerHeight - 90, ev.clientY - sy)) + 'px'; w.style.right = 'auto'; w.style.bottom = 'auto'; };
+    bar.onpointerup = () => (bar.onpointermove = null);
+  });
+});
+$('#dock').onclick = (e) => {
+  const d = e.target.closest('.d'); if (!d) return;
+  const k = d.dataset.w;
+  if (k === 'pl') { warmUp(); $('#pl').classList.toggle('on'); }
+  else if (k === 'nudge') nudge();
+  else if (k === 'mail') toast('New mail!', 'You have 1 new message from Tom.');
+  else { const w = $('#' + k); w.classList.toggle('hide'); if (!w.classList.contains('hide')) front(w); }
+  dockState();
+};
+function dockState() { $$('#dock .d').forEach((d) => { const w = document.getElementById(d.dataset.w); d.classList.toggle('run', !!w?.classList.contains('win') && !w.classList.contains('hide')); }); }
+dockState();
+
+// phone: buddy list starts closed, dock opens it
+if (innerWidth < 700) { $('#buddy').classList.add('hide'); dockState(); }
+
+// Attract > comments, sign-ins, nudges, Top 8 hover; LCD EQ fakes motion until real play
+let lastInput = -1e9, aT = 0, fakeT = 0;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+const TOUR = [[1.5, () => comment()], [3, () => signIn('xo_mandy_xo')], [6, () => nudge()], [8, () => comment()], [10, () => toast('New comment!', 'kat commented on your profile.')], [13, () => signIn('bubblegirl')]];
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  const idle = now - lastInput > 9000;
+  if (idle) {
+    const prev = aT; aT = (aT + dt) % 16;
+    for (const [at, fn] of TOUR) if (prev < at && aT >= at) fn();
+    if (aT < prev) { BUDS[0][1][1][1] = 'of'; BUDS[1][1][1][1] = 'of'; renderBuddies(); }
+    $$('.top8 a').forEach((a, i) => a.classList.toggle('hot', i === Math.floor(aT * 1.5) % 8));
+  }
+  // EQ: real bounce when the stream plays, idle shimmer in attract so posters move
+  const live = playing || (idle && !userTouched);
+  $$('#eq i').forEach((b, i) => { b.style.height = live ? 3 + Math.abs(Math.sin(now / (140 + i * 37) + i)) * 18 + 'px' : '2px'; });
+  let secs = 0;
+  if (ready && yt.getCurrentTime) secs = yt.getCurrentTime() || 0;
+  else if (live) secs = (fakeT += dt);
+  $('#ltime').textContent = `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}`;
+  requestAnimationFrame(frame);
+}
+render();
+requestAnimationFrame(frame);
+window.__throwback = { play: togglePlay, next: () => step(1), prev: () => step(-1), track: () => ({ ...PLAYLIST[idx], playing, ready }), nudge, pick };
+</script>
+</body>
+</html>

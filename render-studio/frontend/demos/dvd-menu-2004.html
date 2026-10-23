@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DVD Menu 2004</title>
+<meta name="category" content="aero" />
+<meta name="style" content="console" />
+<meta name="order" content="26" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="2004 DVD menu, canvas motion loop, remote-style focus navigation, ambient synth pad" />
+<meta name="description" content="A 2004 DVD menu for a made-up summer film: a looping motion background of sunlit water and lens streaks with film grain, a glossy title, and a main menu (Play Movie, Scene Selection, Special Features, Set Up) with a glowing orb cursor. Scene Selection opens a grid of animated chapter thumbnails, Set Up toggles audio options, and Play fades into a fake film with a timecode. Hard because every page shares one focus graph navigated like a remote (arrows, Enter, Menu), the background loops seamlessly, and an ambient pad plays under it all." />
+<meta name="prompt" content="Build a 2004 DVD menu in one HTML file for a fictional summer film: a seamless canvas motion loop (sunlit water, lens streaks, film grain), a glossy title, a main menu (Play Movie, Scene Selection, Special Features, Set Up) with a glowing orb cursor, an animated chapter-thumbnail grid, a Set Up page with audio toggles and a fake playback screen with a timecode. Navigate like a remote (arrows, Enter, Escape for Menu) or with the mouse, play an ambient synth pad and select bloops, and add an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/dvd-menu-2004.html
+ * PURPOSE: 2004 DVD menu: seamless motion loop, remote focus graph across pages, chapter thumbnails, setup toggles, fake playback, ambient pad
+ * UI: Render Studio > Frutiger Aero > DVD Menu 2004
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__dvd (nav, page)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+#safe { position: fixed; inset: 6% 7%; }
+h1 { margin: 0; font-size: clamp(34px, 6.4vw, 78px); font-weight: 700; font-style: italic; letter-spacing: -1px; line-height: 0.95; background: linear-gradient(#ffffff, #fff4c2 45%, #ffb347 52%, #fff2a8); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 3px 6px rgba(0, 40, 90, 0.6)); }
+h1 small { display: block; font-size: 0.3em; font-style: normal; letter-spacing: 6px; font-weight: 400; color: #e8f7ff; -webkit-text-fill-color: #e8f7ff; margin-top: 8px; }
+.page { position: absolute; left: 0; right: 0; top: 34%; bottom: 0; opacity: 0; pointer-events: none; transition: opacity 0.35s; }
+.page.on { opacity: 1; pointer-events: auto; }
+.mi { display: flex; align-items: center; gap: 14px; font-size: clamp(20px, 2.6vw, 30px); padding: 8px 0; cursor: pointer; text-shadow: 0 2px 6px rgba(0, 30, 80, 0.8); width: max-content; }
+.mi::before { content: ''; width: 22px; height: 22px; border-radius: 50%; flex: none; opacity: 0; transform: scale(0.4); transition: 0.2s; background: radial-gradient(circle at 40% 30%, #fff, #ffd25a 40%, #e07800); box-shadow: 0 0 14px #ffcf5a, 0 0 30px rgba(255, 190, 80, 0.6); }
+.mi.f { color: #fff4c2; } .mi.f::before { opacity: 1; transform: scale(1); }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 220px)); gap: 18px 22px; }
+.ch { cursor: pointer; text-align: center; font-size: 15px; text-shadow: 0 1px 4px #000; }
+.ch canvas { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 4px; border: 2px solid rgba(255, 255, 255, 0.35); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); transition: 0.2s; }
+.ch.f canvas { border-color: #ffd25a; box-shadow: 0 0 0 2px #ffd25a, 0 0 22px rgba(255, 200, 80, 0.8); transform: scale(1.05); }
+.ch.f { color: #fff4c2; }
+.row { display: flex; gap: 30px; margin-top: 14px; }
+.opt { font-size: 18px; color: #bfe6ff; margin-left: 36px; margin-top: -4px; }
+#play { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.8s; }
+#play.on { opacity: 1; pointer-events: auto; }
+#play canvas { width: 100%; height: 100%; display: block; }
+#tc { position: absolute; left: 4%; bottom: 5%; font: 16px "Courier New", monospace; color: #8dff8d; text-shadow: 0 0 6px #3f3; }
+#osd { position: absolute; right: 4%; top: 5%; font-size: 18px; color: #8dff8d; font-family: "Courier New", monospace; }
+@media (max-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } .page { top: 30%; } }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="safe">
+  <h1>Summer Tide<small>A FILM ABOUT THE LONGEST HOLIDAY</small></h1>
+  <div class="page on" id="p-main"><div class="mi" data-go="play">Play Movie</div><div class="mi" data-go="p-scenes">Scene Selection</div><div class="mi" data-go="p-extras">Special Features</div><div class="mi" data-go="p-setup">Set Up</div></div>
+  <div class="page" id="p-scenes"><div class="grid" id="grid"></div><div class="row"><div class="mi" data-go="p-main">Main Menu</div><div class="mi" data-act="more">Chapters 7–12 ›</div></div></div>
+  <div class="page" id="p-extras"><div class="mi" data-act="bloop">Making Of “Summer Tide”</div><div class="mi" data-act="bloop">Deleted Scenes</div><div class="mi" data-act="bloop">Blooper Reel</div><div class="mi" data-act="bloop">Photo Gallery</div><div class="mi" data-go="p-main">Main Menu</div></div>
+  <div class="page" id="p-setup"><div class="mi" data-act="audio">Audio</div><div class="opt" id="o-audio">5.1 Surround</div><div class="mi" data-act="subs">Subtitles</div><div class="opt" id="o-subs">Off</div><div class="mi" data-act="comm">Director's Commentary</div><div class="opt" id="o-comm">Off</div><div class="mi" data-go="p-main">Main Menu</div></div>
+</div>
+<div id="play"><canvas id="pc"></canvas><div id="osd">&#9654; PLAY</div><div id="tc">00:00:00:00</div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+
+// Chapters > thumbnails with animated mini scenes
+const CH = ['Arrival', 'The Pier', 'Sea Glass', 'Night Swim', 'The Storm', 'Last Sunset'];
+let chBase = 0;
+const grid = $('#grid');
+const chs = CH.map((n, i) => { const d = document.createElement('div'); d.className = 'ch'; d.innerHTML = `<canvas width="224" height="126"></canvas><span></span>`; grid.append(d); return d; });
+function labelChs() { chs.forEach((d, i) => { d.querySelector('span').textContent = `${chBase + i + 1}. ${CH[(chBase + i) % CH.length]}${chBase ? ' II' : ''}`; d.dataset.act = 'chapter'; }); }
+labelChs();
+function paintScene(x, w, h, t, k) {
+  const hue = [195, 30, 170, 230, 260, 15][k % 6], night = k % 6 === 3 || k % 6 === 4;
+  const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, `hsl(${hue},${night ? 50 : 80}%,${night ? 18 : 62}%)`); g.addColorStop(0.55, `hsl(${hue + 20},70%,${night ? 10 : 80}%)`); g.addColorStop(0.56, `hsl(${hue - 10},70%,${night ? 12 : 40}%)`); g.addColorStop(1, `hsl(${hue - 20},70%,${night ? 6 : 24}%)`);
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  x.fillStyle = night ? '#f4f6ff' : '#fff6c8'; x.beginPath(); x.arc(w * (0.3 + 0.4 * ((k * 0.37) % 1)), h * 0.32, h * 0.1, 0, 7); x.fill();
+  x.strokeStyle = 'rgba(255,255,255,0.35)'; x.lineWidth = 1;
+  for (let i = 0; i < 6; i++) { x.beginPath(); for (let px = 0; px <= w; px += 6) x.lineTo(px, h * (0.6 + i * 0.07) + Math.sin(px * 0.05 + t * 2 + i + k) * 2); x.stroke(); }
+  if (k % 6 === 4) { x.fillStyle = `rgba(255,255,255,${Math.max(0, Math.sin(t * 5) - 0.9) * 8})`; x.fillRect(0, 0, w, h); }
+}
+
+// Focus graph > per page list of focusables
+let page = 'p-main', fi = 0, opts = { audio: 0, subs: 0, comm: 0 };
+const AUD = ['5.1 Surround', '2.0 Stereo', 'Français 5.1'], SUB = ['Off', 'English', 'Español', 'Français'], COM = ['Off', 'On'];
+const focusables = () => [...document.querySelectorAll(`#${page} .mi, #${page} .ch`)];
+function paintFocus() { document.querySelectorAll('.mi, .ch').forEach((e) => e.classList.remove('f')); const f = focusables()[fi]; if (f) f.classList.add('f'); }
+function show(p) { document.querySelectorAll('.page').forEach((e) => e.classList.toggle('on', e.id === p)); page = p; fi = 0; paintFocus(); }
+function nav(dir) {
+  const F = focusables(), cols = page === 'p-scenes' ? (innerWidth < 640 ? 2 : 3) : 1, nCh = page === 'p-scenes' ? 6 : 0;
+  let n = fi;
+  if (page === 'p-scenes') {
+    if (fi < nCh) { if (dir === 'left') n = fi - 1; if (dir === 'right') n = fi + 1; if (dir === 'up') n = fi - cols; if (dir === 'down') n = fi + cols >= nCh ? nCh : fi + cols; }
+    else { if (dir === 'left') n = fi - 1 < nCh ? nCh + 1 : fi - 1; if (dir === 'right') n = fi + 1 >= F.length ? nCh : fi + 1; if (dir === 'up') n = nCh - cols; }
+  } else { if (dir === 'up') n = fi - 1; if (dir === 'down') n = fi + 1; }
+  n = Math.max(0, Math.min(F.length - 1, n)); if (n !== fi) { fi = n; paintFocus(); tick(); }
+}
+function activate(el = focusables()[fi]) {
+  if (!el) return; bloop();
+  const go = el.dataset.go, act = el.dataset.act;
+  if (go === 'play') return startPlay(0);
+  if (go) return show(go);
+  if (act === 'chapter') return startPlay((chBase + chs.indexOf(el)) * 600);
+  if (act === 'more') { chBase = chBase ? 0 : 6; labelChs(); el.textContent = chBase ? '‹ Chapters 1–6' : 'Chapters 7–12 ›'; return; }
+  if (act === 'audio') { opts.audio = (opts.audio + 1) % AUD.length; $('#o-audio').textContent = AUD[opts.audio]; }
+  if (act === 'subs') { opts.subs = (opts.subs + 1) % SUB.length; $('#o-subs').textContent = SUB[opts.subs]; }
+  if (act === 'comm') { opts.comm = (opts.comm + 1) % COM.length; $('#o-comm').textContent = COM[opts.comm]; }
+}
+document.querySelectorAll('.mi, .ch').forEach((el) => {
+  el.addEventListener('pointerenter', () => { const F = focusables(), i = F.indexOf(el); if (i >= 0 && i !== fi) { fi = i; paintFocus(); tick(); } });
+  el.addEventListener('click', () => { const i = focusables().indexOf(el); if (i < 0) return; fi = i; paintFocus(); activate(el); });
+});
+
+// Playback > fake film with timecode, Menu returns
+let playing = false, playT0 = 0, playOff = 0;
+function startPlay(off) { playing = true; playOff = off; playT0 = performance.now(); $('#play').classList.add('on'); $('#osd').textContent = '▶ PLAY'; setTimeout(() => ($('#osd').textContent = ''), 2500); }
+function stopPlay() { playing = false; $('#play').classList.remove('on'); show('p-main'); }
+addEventListener('keydown', (e) => {
+  wake();
+  if (playing) { if (['Escape', 'Backspace', 'm', 'M', 'Enter'].includes(e.key)) stopPlay(); return; }
+  const m = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }[e.key];
+  if (m) { e.preventDefault(); nav(m); } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } else if (e.key === 'Escape' || e.key === 'm' || e.key === 'M') show('p-main');
+});
+$('#play').addEventListener('click', stopPlay);
+
+// Motion loop > sunlit water, streaks, grain; period 12s
+const bg = $('#bg'), bx = bg.getContext('2d'), pc = $('#pc'), px = pc.getContext('2d');
+function size() { const d = Math.min(1.5, devicePixelRatio || 1); [bg, pc].forEach((c) => { c.width = innerWidth * d; c.height = innerHeight * d; }); bx.setTransform(d, 0, 0, d, 0, 0); px.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+const grain = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'), im = x.createImageData(128, 128); for (let i = 0; i < im.data.length; i += 4) { const v = Math.random() * 255; im.data[i] = im.data[i + 1] = im.data[i + 2] = v; im.data[i + 3] = 22; } x.putImageData(im, 0, 0); return c; })();
+function loop(t) {
+  const W = innerWidth, H = innerHeight, L = 12, ph = ((t % L) / L) * Math.PI * 2;
+  const g = bx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0b5fa8'); g.addColorStop(0.45, '#4fc0e8'); g.addColorStop(0.46, '#1f8fc0'); g.addColorStop(1, '#03385e'); bx.fillStyle = g; bx.fillRect(0, 0, W, H);
+  const sx = W * 0.72, sy = H * 0.3, rg = bx.createRadialGradient(sx, sy, 0, sx, sy, H * 0.7); rg.addColorStop(0, 'rgba(255,250,220,0.95)'); rg.addColorStop(0.1, 'rgba(255,240,180,0.5)'); rg.addColorStop(1, 'rgba(255,255,255,0)'); bx.fillStyle = rg; bx.fillRect(0, 0, W, H);
+  bx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 40; i++) { const y = H * 0.47 + (i / 40) ** 1.6 * H * 0.55, wv = Math.sin(ph * 2 + i * 0.7) * 30; bx.fillStyle = `rgba(255,240,200,${0.18 * (1 - i / 40)})`; bx.fillRect(sx - 60 - i * 6 + wv, y, 120 + i * 12, 2 + i * 0.12); }
+  for (let k = 0; k < 5; k++) { const a = -0.35 + k * 0.17 + Math.sin(ph + k) * 0.03; bx.save(); bx.translate(sx, sy); bx.rotate(a); const lg = bx.createLinearGradient(0, 0, W, 0); lg.addColorStop(0, 'rgba(255,255,230,0.18)'); lg.addColorStop(1, 'rgba(255,255,255,0)'); bx.fillStyle = lg; bx.fillRect(0, -2 - k, W, 4 + k * 2); bx.rotate(Math.PI); bx.fillRect(0, -2 - k, W, 4 + k * 2); bx.restore(); }
+  for (let i = 0; i < 6; i++) { const ox = sx + Math.cos(ph + i) * 4 - (sx - W * 0.4) * (i / 6) * 1.5, oy = sy + (H * 0.6 - sy) * (i / 6) * 1.5; bx.strokeStyle = `rgba(160,220,255,${0.25 - i * 0.03})`; bx.lineWidth = 2; bx.beginPath(); bx.arc(ox, oy, 8 + i * 9, 0, 7); bx.stroke(); }
+  bx.globalCompositeOperation = 'source-over';
+  bx.fillStyle = bx.createPattern(grain, 'repeat'); bx.save(); bx.translate((t * 997) % 128, (t * 613) % 128); bx.fillRect(-128, -128, W + 256, H + 256); bx.restore();
+  const vg = bx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)'); bx.fillStyle = vg; bx.fillRect(0, 0, W, H);
+}
+
+// Audio > ambient pad, tick, bloop
+let ac = null, padOn = false;
+function wake() { if (!ac) try { ac = new AudioContext(); } catch { return; } if (!padOn && ac) { padOn = true; pad(); } }
+addEventListener('pointerdown', wake);
+function pad() {
+  const out = ac.createGain(), f = ac.createBiquadFilter(); out.gain.value = 0.05; f.type = 'lowpass'; f.frequency.value = 900; f.connect(out).connect(ac.destination);
+  const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 0.08; lg.gain.value = 400; lfo.connect(lg).connect(f.frequency); lfo.start();
+  const CH = [[261.6, 329.6, 392, 493.9], [220, 277.2, 329.6, 415.3], [174.6, 220, 261.6, 329.6], [196, 246.9, 293.7, 392]];
+  let step = 0;
+  const play = () => { const t = ac.currentTime; CH[step++ % 4].forEach((fr) => [0, 3].forEach((dt) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = fr * (1 + dt * 0.001); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.06, t + 1.5); g.gain.linearRampToValueAtTime(0, t + 4.2); o.connect(g).connect(f); o.start(t); o.stop(t + 4.3); })); };
+  play(); setInterval(play, 3000);
+}
+function tick() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 1500; g.gain.setValueAtTime(0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.07); }
+function bloop() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(400, t); o.frequency.exponentialRampToValueAtTime(900, t + 0.12); g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.32); }
+
+// Loop + attract
+const SCRIPT = ['down', 'enter', 'right', 'right', 'down', 'left', 'down', 'right', 'enter', 'menu', 'down', 'down', 'enter', 'down', 'down', 'enter', 'up', 'up', 'enter', 'menu', 'down', 'down', 'down', 'up', 'up', 'up'];
+let lastInput = -1e9, aT = 0, aI = 0;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+function frame(now) {
+  const t = now / 1000; loop(t);
+  if (page === 'p-scenes') chs.forEach((d, i) => { const c = d.querySelector('canvas'); paintScene(c.getContext('2d'), 224, 126, t, chBase + i); });
+  if (playing) { const e = Math.max(0, (now - playT0) / 1000) + playOff, W = innerWidth, H = innerHeight; paintScene(px, W, H, e * 0.4, Math.floor(e / 600)); px.fillStyle = '#000'; px.fillRect(0, 0, W, H * 0.1); px.fillRect(0, H * 0.9, W, H * 0.1); const fr = Math.floor((e % 1) * 25); $('#tc').textContent = [Math.floor(e / 3600), Math.floor(e / 60) % 60, Math.floor(e) % 60, fr].map((v) => String(v).padStart(2, '0')).join(':'); }
+  if (now - lastInput > 6000) { aT += (1 / 60); if (aT > 0.9) { aT = 0; const s = SCRIPT[aI++ % SCRIPT.length]; if (playing) stopPlay(); else if (s === 'enter') { const f = focusables()[fi]; if (f && f.dataset.go !== 'play' && f.dataset.act !== 'chapter') activate(f); } else if (s === 'menu') show('p-main'); else nav(s); } }
+  requestAnimationFrame(frame);
+}
+paintFocus(); requestAnimationFrame(frame);
+window.__dvd = { nav: (d) => (d === 'enter' ? activate() : nav(d)), page: () => (playing ? 'play' : page) };
+</script>
+</body>
+</html>

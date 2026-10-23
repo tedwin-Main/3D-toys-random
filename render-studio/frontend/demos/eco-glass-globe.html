@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Eco Glass Globe</title>
+<meta name="category" content="aero" />
+<meta name="style" content="eco" />
+<meta name="order" content="14" />
+<meta name="capture" content="3600" />
+<meta name="tags" content="three.js, transmission, procedural planet, caustics shader, instanced leaves, corporate eco" />
+<meta name="description" content="The late-2000s 'corporate eco' stock image, rebuilt live: a procedural planet inside a refracting glass orb on a chrome stand, circled by a ring of glossy green leaves and rising bubbles, standing in shallow water with animated caustics. Hard because the planet texture is generated from seamless 3D noise on the sphere (no seam at the date line), the glass refracts the planet through a transmission pass, and the caustic floor is a shader that fades into a sky-to-white backdrop." />
+<meta name="prompt" content="Build the 2000s 'corporate eco' stock image in three.js, one HTML file: a procedural Earth (seamless 3D-noise continents, ice caps) inside a refracting glass orb on a chrome lathe stand, a rotating ring of glossy instanced leaves, rising bubbles, and a shallow water floor with animated caustics under a soft sky-to-white backdrop. Orbit controls, Spin and Leaves toggles, and an auto-rotate attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/eco-glass-globe.html
+ * PURPOSE: corporate eco orb: procedural planet in transmission glass, chrome stand, leaf ring, bubbles, caustic water floor
+ * UI: Render Studio > Frutiger Aero > Eco Glass Globe
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__globe (spin, leaves)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #dff3ff; font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif; }
+canvas { display: block; }
+#cap { position: fixed; left: 50%; top: 22px; transform: translateX(-50%); font-size: 13px; letter-spacing: 3px; text-transform: uppercase; color: #3c7a3a; white-space: nowrap; }
+#cap b { color: #1f5fa8; }
+#ui { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 10px; }
+#ui button { font: inherit; font-size: 14px; color: #fff; border: 0; border-radius: 20px; padding: 8px 20px; cursor: pointer; background: linear-gradient(#8fe36a, #3fa62a 50%, #2f8f1e 51%, #57c13a); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 3px 8px rgba(30, 90, 20, 0.35); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3); }
+#ui button.off { filter: grayscale(0.8) brightness(1.1); }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="cap">clean <b>energy</b> · clear <b>future</b></div>
+<div id="ui"><button id="spin">Spin</button><button id="leafb">Leaves</button></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+
+// Backdrop > sky to white gradient
+{
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, '#6fc3ff'); g.addColorStop(0.55, '#d4efff'); g.addColorStop(1, '#ffffff'); x.fillStyle = g; x.fillRect(0, 0, 4, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scene.background = t;
+}
+const camera = new THREE.PerspectiveCamera(36, innerWidth / innerHeight, 0.1, 100);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.55, 0); controls.enableDamping = true; controls.minDistance = 3; controls.maxDistance = 12; controls.maxPolarAngle = 1.5; controls.enablePan = false;
+function fit() { const far = innerWidth / innerHeight < 0.8 ? 8.6 : 6.4; camera.position.set(0, 1.5, far); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+fit(); addEventListener('resize', fit);
+const sun = new THREE.DirectionalLight(0xfff4e0, 2.2); sun.position.set(4, 6, 3); scene.add(sun, new THREE.HemisphereLight(0xcfeaff, 0xe8ffe0, 0.8));
+
+// Planet > seamless 3D value noise baked to equirect canvas
+function hash(x, y, z) { let h = (x * 374761393 + y * 668265263 + z * 1274126177) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
+function vnoise(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = x - xi, yf = y - yi, zf = z - zi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const l = (a, b, t) => a + (b - a) * t;
+  return l(l(l(hash(xi, yi, zi), hash(xi + 1, yi, zi), u), l(hash(xi, yi + 1, zi), hash(xi + 1, yi + 1, zi), u), v),
+           l(l(hash(xi, yi, zi + 1), hash(xi + 1, yi, zi + 1), u), l(hash(xi, yi + 1, zi + 1), hash(xi + 1, yi + 1, zi + 1), u), v), w);
+}
+const fbm = (x, y, z, o = 5) => { let s = 0, a = 0.5, f = 1; for (let i = 0; i < o; i++) { s += a * vnoise(x * f, y * f, z * f); f *= 2.03; a *= 0.5; } return s; };
+const W = 768, H = 384, pc = document.createElement('canvas'); pc.width = W; pc.height = H;
+{
+  const x = pc.getContext('2d'), img = x.createImageData(W, H), d = img.data;
+  for (let j = 0; j < H; j++) {
+    const lat = (0.5 - j / H) * Math.PI, cy = Math.sin(lat), cr = Math.cos(lat);
+    for (let i = 0; i < W; i++) {
+      const lon = (i / W) * Math.PI * 2, px = cr * Math.cos(lon), pz = cr * Math.sin(lon);
+      const n = fbm(px * 1.6 + 7, cy * 1.6, pz * 1.6), cl = fbm(px * 3 + 20, cy * 5, pz * 3, 4);
+      let r, g, b;
+      if (n < 0.5) { const k = n / 0.5; r = 10 + 30 * k; g = 70 + 110 * k; b = 150 + 80 * k; }
+      else { const k = Math.min(1, (n - 0.5) / 0.22); r = 70 + 120 * k * k; g = 170 - 10 * k; b = 50 + 10 * k; if (n < 0.515) { r = 220; g = 215; b = 160; } }
+      const ice = Math.abs(cy) > 0.94 + (n - 0.5) * 0.12; if (ice) { r = g = b = 245; }
+      const c = Math.max(0, (cl - 0.55) * 3); r += (255 - r) * c * 0.85; g += (255 - g) * c * 0.85; b += (255 - b) * c * 0.85;
+      const o = (j * W + i) * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+  }
+  x.putImageData(img, 0, 0);
+}
+const planetTex = new THREE.CanvasTexture(pc); planetTex.colorSpace = THREE.SRGBColorSpace; planetTex.anisotropy = 4;
+const orb = new THREE.Group(); orb.position.y = 1.15; scene.add(orb);
+const planet = new THREE.Mesh(new THREE.SphereGeometry(0.62, 96, 64), new THREE.MeshStandardMaterial({ map: planetTex, roughness: 0.55, metalness: 0 }));
+planet.rotation.z = 0.41; orb.add(planet);
+const atmo = new THREE.Mesh(new THREE.SphereGeometry(0.66, 64, 48), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending,
+  vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }',
+  fragmentShader: 'varying vec3 vN; varying vec3 vV; void main(){ float f = pow(1.0 - abs(dot(vN, vV)), 3.0); gl_FragColor = vec4(vec3(0.45,0.8,1.0)*f*1.4, f); }',
+}));
+orb.add(atmo);
+const glass = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshPhysicalMaterial({ transmission: 1, thickness: 0.6, roughness: 0.03, ior: 1.35, clearcoat: 1, clearcoatRoughness: 0.02, iridescence: 0.35, iridescenceIOR: 1.3, color: 0xf2fbff, envMapIntensity: 1.2, specularIntensity: 1 }));
+orb.add(glass);
+
+// Stand > chrome lathe base plus cradle ring
+const chrome = new THREE.MeshStandardMaterial({ color: 0xf4f8fb, metalness: 0.85, roughness: 0.16, envMapIntensity: 1.8 });
+const prof = [[0, 0], [0.95, 0], [1.0, 0.03], [0.98, 0.08], [0.7, 0.14], [0.32, 0.2], [0.22, 0.32], [0.2, 0.5], [0.26, 0.55], [0, 0.56]].map(([a, b]) => new THREE.Vector2(a, b));
+scene.add(new THREE.Mesh(new THREE.LatheGeometry(prof, 96), chrome));
+const cradle = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.035, 20, 96), chrome); cradle.rotation.x = Math.PI / 2; cradle.position.y = 1.15 - Math.sqrt(1 - 0.42 * 0.42); scene.add(cradle);
+
+// Leaves > instanced glossy ring, tilted
+const leafShape = new THREE.Shape(); leafShape.moveTo(0, 0); leafShape.quadraticCurveTo(0.16, 0.18, 0, 0.42); leafShape.quadraticCurveTo(-0.16, 0.18, 0, 0);
+const leafGeo = new THREE.ExtrudeGeometry(leafShape, { depth: 0.01, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 3, curveSegments: 16 });
+leafGeo.translate(0, -0.21, 0);
+const NL = 16, leaves = new THREE.InstancedMesh(leafGeo, new THREE.MeshPhysicalMaterial({ color: 0x5ed13a, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.5, sheenColor: new THREE.Color(0xd8ff9a) }), NL);
+const leafRing = new THREE.Group(); leafRing.position.y = 1.15; leafRing.rotation.set(0.35, 0, 0.2); leafRing.add(leaves); scene.add(leafRing);
+const tmp = new THREE.Object3D(), lc = new THREE.Color();
+for (let i = 0; i < NL; i++) { lc.setHSL(0.26 + (i % 3) * 0.03, 0.7, 0.42 + (i % 2) * 0.08); leaves.setColorAt(i, lc); }
+
+// Bubbles > small glossy spheres rising from water
+const NB = 40, bubbles = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, transmission: 0.9, thickness: 0.05, ior: 1.2, iridescence: 1, iridescenceIOR: 1.33, transparent: true, opacity: 0.6, envMapIntensity: 2 }), NB);
+const bs = Array.from({ length: NB }, () => ({ a: Math.random() * 6.28, r: 1.3 + Math.random() * 1.6, y: Math.random() * 4, s: 0.03 + Math.random() * 0.07, v: 0.2 + Math.random() * 0.3 }));
+scene.add(bubbles);
+
+// Water > caustic shader plane fading to white
+const water = new THREE.Mesh(new THREE.CircleGeometry(9, 96), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, uniforms: { time: { value: 0 } },
+  vertexShader: 'varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: `
+uniform float time; varying vec2 vP;
+float caustic(vec2 p){ vec2 i = p; float c = 1.0, inten = 0.005;
+  for (int n = 0; n < 4; n++) { float t = time * (1.0 - (3.5 / float(n + 1))); i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x)); c += 1.0 / length(vec2(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten))); }
+  c /= 4.0; c = 1.17 - pow(c, 1.4); return pow(abs(c), 8.0); }
+void main(){
+  float r = length(vP); float fade = smoothstep(9.0, 2.5, r);
+  float c = clamp(caustic(mod(vP * 1.4, 6.2831853) - 250.0), 0.0, 1.0);
+  float shadow = smoothstep(0.4, 1.6, r);
+  vec3 col = mix(vec3(0.55, 0.85, 0.95), vec3(0.75, 0.95, 1.0), smoothstep(0.0, 6.0, r)) + vec3(0.9, 1.0, 1.0) * c * 0.55;
+  col *= mix(0.75, 1.0, shadow);
+  gl_FragColor = vec4(col, fade * 0.9);
+}`,
+}));
+water.rotation.x = -Math.PI / 2; water.position.y = 0.001; scene.add(water);
+
+// Sun glow sprite
+{
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,240,1)'); g.addColorStop(0.2, 'rgba(255,250,210,0.6)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false })); s.position.set(5, 6, -8); s.scale.setScalar(5); scene.add(s);
+}
+
+// UI + hook
+let spinOn = true, leavesOn = true;
+const spin = (v = !spinOn) => { spinOn = v; document.getElementById('spin').classList.toggle('off', !v); };
+const leavesSet = (v = !leavesOn) => { leavesOn = v; document.getElementById('leafb').classList.toggle('off', !v); };
+document.getElementById('spin').onclick = () => spin();
+document.getElementById('leafb').onclick = () => leavesSet();
+let lastInput = -1e9;
+['pointerdown', 'wheel'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true, passive: true }));
+
+const clock = new THREE.Clock(); let leafShow = 1, ringA = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
+  if (spinOn) planet.rotation.y += dt * 0.25;
+  orb.position.y = 1.15 + Math.sin(t * 1.2) * 0.02;
+  leafShow += ((leavesOn ? 1 : 0) - leafShow) * Math.min(1, dt * 4); ringA += dt * 0.35;
+  for (let i = 0; i < NL; i++) {
+    const a = ringA + (i / NL) * Math.PI * 2, rr = 1.32 + Math.sin(t * 2 + i) * 0.03;
+    tmp.position.set(Math.cos(a) * rr, Math.sin(t * 1.5 + i * 0.8) * 0.06, Math.sin(a) * rr);
+    tmp.rotation.set(0.9 + Math.sin(t + i) * 0.15, -a, Math.PI / 2, 'YXZ');
+    tmp.scale.setScalar((0.8 + (i % 3) * 0.15) * leafShow + 1e-4); tmp.updateMatrix(); leaves.setMatrixAt(i, tmp.matrix);
+  }
+  leaves.instanceMatrix.needsUpdate = true;
+  bs.forEach((b, i) => {
+    b.y += b.v * dt; if (b.y > 4.2) { b.y = 0; b.a = Math.random() * 6.28; }
+    tmp.position.set(Math.cos(b.a + b.y * 0.3) * b.r, b.y, Math.sin(b.a + b.y * 0.3) * b.r); tmp.rotation.set(0, 0, 0, 'XYZ');
+    tmp.scale.setScalar(b.s * Math.min(1, b.y * 3) * Math.min(1, (4.2 - b.y) * 2)); tmp.updateMatrix(); bubbles.setMatrixAt(i, tmp.matrix);
+  });
+  bubbles.instanceMatrix.needsUpdate = true;
+  water.material.uniforms.time.value = t * 0.6;
+  controls.autoRotate = performance.now() - lastInput > 6000; controls.autoRotateSpeed = 0.8;
+  controls.update(); renderer.render(scene, camera);
+});
+window.__globe = { spin, leaves: leavesSet };
+</script>
+</body>
+</html>

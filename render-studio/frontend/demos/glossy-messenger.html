@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glossy Messenger</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="6" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="2000s messenger, glossy UI, emoticons, WebAudio, chat UI" />
+<meta name="description" content="A mid-2000s instant messenger, with no logos. A glossy buddy list shows status gems, collapsible groups and 'now playing' personal messages, and a chat window has a typing indicator and inline emoticons that turn :) ;) :D 8) and <3 into glossy faces. A NUDGE button shakes the whole window with a synthesized buzz, and 'has just signed in' toasts slide up from the corner. You can type and the buddy answers; left alone it plays a scripted conversation. Hard because it all has to feel alive: queued typing delays, toasts, sounds and shakes run on one small timeline." />
+<meta name="prompt" content="Recreate a mid-2000s instant messenger in one HTML file with no images and no real logos. A glossy buddy list with avatar, status dropdown, status gems, collapsible groups and 'now playing' messages, and a chat window with a typing indicator, inline emoticons drawn as glossy SVG faces and a NUDGE button that shakes the window with a synthesized buzz. Add sign-in toasts that slide up from the corner, a buddy that replies to what you type, and a scripted attract conversation." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/glossy-messenger.html
+ * PURPOSE: 2000s instant messenger: buddy list with status gems, chat with typing + emoticons, nudge shake, sign-in toasts, synth sounds
+ * UI: Render Studio > Frutiger Aero > Glossy Messenger
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__messenger (send, reply, nudge, toast, status)
+ */
+:root { --font: "Segoe UI", Tahoma, "Lucida Grande", "Helvetica Neue", system-ui, sans-serif; --frame: #8fb8dd; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font: 12.5px var(--font); color: #1e2a36; user-select: none; -webkit-user-select: none; }
+body { background: radial-gradient(ellipse at 20% 110%, #9fe07a 0 22%, transparent 23%), radial-gradient(ellipse at 85% 120%, #7fd35a 0 30%, transparent 31%), linear-gradient(#3d9ce8, #a9dcff 70%, #e6f7ff); }
+body::before { content: ''; position: fixed; inset: 0; background: radial-gradient(circle at 80% 15%, rgba(255, 255, 255, 0.6), transparent 25%); pointer-events: none; }
+
+/* Window chrome > rounded white frame, glossy blue title */
+.mw { position: absolute; border-radius: 10px; background: #fff; border: 1px solid #5f8fbd; box-shadow: inset 0 0 0 3px var(--frame), 0 12px 32px rgba(0, 40, 90, 0.45); padding: 3px; display: flex; flex-direction: column; overflow: hidden; }
+.mt { height: 28px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 10px; color: #fff; font-weight: 600; text-shadow: 0 1px 1px rgba(0, 30, 70, 0.6); border-radius: 7px 7px 0 0; background: linear-gradient(#8cc8f7, #3d8ee0 50%, #2a78cc 51%, #5fb0f2); position: relative; }
+.mt::after { content: ''; position: absolute; left: 6px; right: 6px; top: 1px; height: 11px; border-radius: 6px; background: linear-gradient(rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.05)); pointer-events: none; }
+.mt .x { margin-left: auto; display: flex; gap: 3px; }
+.mt .x i { width: 20px; height: 18px; border-radius: 4px; background: linear-gradient(rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.15)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55); font: 700 10px/18px sans-serif; text-align: center; font-style: normal; }
+.mt .x i:last-child { background: linear-gradient(#f5a796, #d9482f); }
+.duo { width: 18px; height: 18px; position: relative; flex: none; }
+.duo::before, .duo::after { content: ''; position: absolute; width: 11px; height: 15px; border-radius: 50% 50% 40% 40%; bottom: 0; box-shadow: inset 0 2px 2px rgba(255, 255, 255, 0.7); }
+.duo::before { left: 0; background: radial-gradient(circle at 50% 25%, #fff 0 22%, #3bb84a 24%); }
+.duo::after { right: 0; background: radial-gradient(circle at 50% 25%, #fff 0 22%, #2a8bd8 24%); }
+
+/* Buddy list */
+#list { left: max(16px, calc(50% - 470px)); top: 24px; width: 280px; height: calc(100% - 48px); max-height: 640px; }
+.me { display: flex; gap: 10px; padding: 12px 10px; background: linear-gradient(#e9f5ff, #fff); border-bottom: 1px solid #d3e5f4; }
+.pic { width: 56px; height: 56px; border-radius: 8px; flex: none; padding: 3px; background: linear-gradient(#fff, #cfe5f8); box-shadow: inset 0 0 0 1px #8fb8dd, 0 2px 4px rgba(0, 40, 90, 0.2); position: relative; }
+.pic div { width: 100%; height: 100%; border-radius: 5px; }
+.pic::after { content: ''; position: absolute; left: 4px; right: 4px; top: 3px; height: 40%; border-radius: 5px 5px 20px 20px; background: linear-gradient(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0)); }
+.pic.st-online { box-shadow: inset 0 0 0 2px #3bb84a, 0 0 8px rgba(59, 184, 74, 0.6); }
+.pic.st-away { box-shadow: inset 0 0 0 2px #f2a516, 0 0 8px rgba(242, 165, 22, 0.6); }
+.pic.st-busy { box-shadow: inset 0 0 0 2px #e03a2a, 0 0 8px rgba(224, 58, 42, 0.6); }
+.me .nm { font-size: 14px; font-weight: 600; }
+.me select { margin-top: 2px; font: 11.5px var(--font); border: 1px solid #b6d0e6; border-radius: 4px; background: #fff; padding: 1px 4px; }
+.pm { margin-top: 3px; color: #6b7f92; font-style: italic; font-size: 11.5px; }
+.search { margin: 8px 10px; height: 24px; border-radius: 12px; border: 1px solid #b6d0e6; padding: 0 10px; display: flex; align-items: center; color: #9ab; font-style: italic; background: linear-gradient(#f4f9fd, #fff); }
+.groups { flex: 1; overflow: auto; padding: 0 4px 8px; }
+.grp { padding: 4px 6px; font-weight: 600; color: #1a5f99; cursor: default; }
+.grp::before { content: '▾ '; color: #6b9cc7; }
+.grp.closed::before { content: '▸ '; }
+.grp.closed + .bl { display: none; }
+.bud { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 16px; border-radius: 4px; border: 1px solid transparent; }
+.bud:hover, .bud.sel { background: linear-gradient(#f2f9ff, #d9ecfc); border-color: #a9cdea; }
+.bud.off { color: #9aa7b3; }
+.bud .pm { margin: 0; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bud > div { min-width: 0; }
+.gem { width: 13px; height: 13px; border-radius: 50%; flex: none; position: relative; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.gem::after { content: ''; position: absolute; left: 2px; right: 3px; top: 1px; height: 5px; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.2)); }
+.online { background: radial-gradient(circle at 50% 70%, #b7f7a5, #3bb84a 60%, #1c7a26); }
+.away { background: radial-gradient(circle at 50% 70%, #ffe7a0, #f2a516 60%, #a96a00); }
+.busy { background: radial-gradient(circle at 50% 70%, #ffb3a7, #e03a2a 60%, #8f150a); }
+.offline { background: radial-gradient(circle at 50% 70%, #eee, #a7b1bb 60%, #6c7781); }
+.ad { margin: 0 8px 6px; height: 46px; border-radius: 6px; display: grid; place-items: center; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); background: linear-gradient(120deg, #ff7eb3, #ff9a3c, #ffd23c); background-size: 200% 100%; animation: adshift 4s linear infinite; }
+@keyframes adshift { to { background-position: 200% 0; } }
+
+/* Chat window */
+#chat { left: calc(max(16px, calc(50% - 470px)) + 300px); top: 54px; width: min(620px, calc(100% - 340px)); height: calc(100% - 108px); max-height: 560px; }
+.chathead { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: linear-gradient(#eef7ff, #fff); border-bottom: 1px solid #d3e5f4; }
+.chathead .to { font-size: 13px; }
+.chathead .to b { font-size: 14px; }
+.cols { flex: 1; display: flex; min-height: 0; }
+.log { flex: 1; overflow: auto; padding: 10px 14px; font-size: 13px; line-height: 1.45; user-select: text; -webkit-user-select: text; }
+.log .who { color: #7d8b98; font-size: 11.5px; margin-top: 8px; }
+.log .msg { padding-left: 10px; word-wrap: break-word; }
+.log .msg.me { color: #1d4f91; }
+.log .msg.them { color: #6a2a8f; }
+.log .sys { color: #8b98a4; font-style: italic; font-size: 11.5px; margin: 8px 0; padding: 4px 8px; border-radius: 4px; background: #f3f8fc; }
+.log .sys.nudge { color: #c0392b; font-weight: 600; background: #fff1ee; }
+.side { width: 120px; padding: 10px; display: flex; flex-direction: column; gap: 12px; align-items: center; border-left: 1px solid #e3eef7; background: linear-gradient(90deg, #f6fbff, #fff); }
+.side .pic { width: 96px; height: 96px; }
+.typing { height: 20px; padding: 0 14px; color: #7d8b98; font-size: 11.5px; font-style: italic; display: flex; align-items: center; gap: 6px; }
+.typing .pen { display: inline-block; animation: write 0.6s ease-in-out infinite alternate; }
+@keyframes write { to { transform: translate(4px, -2px) rotate(-10deg); } }
+.tools { display: flex; gap: 4px; padding: 4px 8px; border-top: 1px solid #d3e5f4; background: linear-gradient(#f6fbff, #e7f2fb); }
+.tb { height: 24px; padding: 0 9px; border-radius: 5px; display: flex; align-items: center; gap: 4px; font-size: 11.5px; color: #234; border: 1px solid transparent; }
+.tb:hover { background: linear-gradient(#fff, #d9ecfc); border-color: #a9cdea; }
+.tb.nudge { color: #c0392b; font-weight: 700; }
+.compose { display: flex; gap: 6px; padding: 6px 8px 8px; }
+.compose textarea { flex: 1; height: 54px; resize: none; border: 1px solid #b6d0e6; border-radius: 6px; padding: 6px 8px; font: 13px var(--font); outline: none; }
+.compose textarea:focus { border-color: #4a98e0; box-shadow: 0 0 0 3px rgba(74, 152, 224, 0.2); }
+.send { width: 72px; border-radius: 6px; border: 1px solid #5f8fbd; font: 600 13px var(--font); color: #1a4a78; background: linear-gradient(#fff, #e2f0fc 50%, #cfe4f7 51%, #e9f4fd); box-shadow: inset 0 1px 0 #fff; cursor: pointer; }
+.send:hover { background: linear-gradient(#fff, #d7ecff 50%, #bcdcf8 51%, #e0f0ff); }
+.emo { width: 18px; height: 18px; vertical-align: -4px; display: inline-block; }
+.emopick { position: absolute; left: 8px; bottom: 100%; display: none; grid-template-columns: repeat(4, 26px); gap: 4px; padding: 6px; border-radius: 6px; background: #fff; border: 1px solid #a9cdea; box-shadow: 0 4px 10px rgba(0, 40, 90, 0.2); }
+.emopick.on { display: grid; }
+.emopick span { padding: 3px; border-radius: 4px; }
+.emopick span:hover { background: #e3f1fc; }
+.shake { animation: shake 0.6s linear; }
+@keyframes shake { 10%, 50%, 90% { transform: translate(-14px, 4px); } 30%, 70% { transform: translate(14px, -4px); } 20%, 60% { transform: translate(8px, 6px); } 40%, 80% { transform: translate(-8px, -6px); } }
+
+/* Toast > slides up from the bottom-right */
+#toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { width: 230px; border-radius: 8px; padding: 3px; background: #fff; border: 1px solid #5f8fbd; box-shadow: inset 0 0 0 3px var(--frame), 0 8px 20px rgba(0, 40, 90, 0.35); animation: up 0.4s ease-out; }
+.toast.out { animation: down 0.4s ease-in forwards; }
+.toast .mt { height: 20px; font-size: 11px; }
+.toast .tb2 { display: flex; gap: 10px; padding: 10px; align-items: center; background: linear-gradient(#eef7ff, #fff); }
+.toast .pic { width: 40px; height: 40px; }
+@keyframes up { from { transform: translateY(120%); opacity: 0; } }
+@keyframes down { to { transform: translateY(120%); opacity: 0; } }
+
+@media (max-width: 760px) {
+  #list { display: none; }
+  #chat { left: 8px; top: 8px; width: calc(100% - 16px); height: calc(100% - 16px); max-height: none; }
+  .side { display: none; }
+  #toasts { right: 8px; bottom: 150px; }
+  .tb .l { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="mw" id="list">
+  <div class="mt"><span class="duo"></span>Messenger<div class="x"><i>–</i><i>□</i><i>×</i></div></div>
+  <div class="me"><div class="pic st-online" id="mypic"><div style="background:radial-gradient(circle at 50% 40%,#fff6a8 0 18%,#ffb347 19% 34%,transparent 35%),linear-gradient(#8fd7ff,#3d93d6)"></div></div>
+    <div><div class="nm">Visitor ✿</div><select id="status"><option value="online">Online</option><option value="away">Away</option><option value="busy">Busy</option><option value="offline">Appear offline</option></select><div class="pm">♫ Glass Lagoon - Demo Band</div></div></div>
+  <div class="search">Search contacts...</div>
+  <div class="groups" id="groups"></div>
+  <div class="ad">✦ Get glossy winks today! ✦</div>
+</div>
+
+<div class="mw" id="chat">
+  <div class="mt"><span class="duo"></span><span id="ctitle">kat - Conversation</span><div class="x"><i>–</i><i>□</i><i>×</i></div></div>
+  <div class="chathead"><span class="gem online" id="cgem"></span><div class="to">To: <b id="cname">kat</b> &lt;kat@example.com&gt;<div class="pm" id="cpm"></div></div></div>
+  <div class="cols">
+    <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+      <div class="log" id="log"></div>
+      <div class="typing" id="typing"></div>
+      <div class="tools" style="position:relative"><div class="emopick" id="pick"></div><span class="tb" id="emob"><span class="emo" data-e=":)"></span><span class="l">Emoticons</span></span><span class="tb"><b>A</b><span class="l">Font</span></span><span class="tb"><span class="l">✦ Winks</span></span><span class="tb nudge" id="nudgeb">⚡ Nudge</span></div>
+      <div class="compose"><textarea id="in" placeholder="Type a message... try :) ;) :D 8) <3"></textarea><button class="send" id="send">Send</button></div>
+    </div>
+    <div class="side"><div class="pic st-online" id="theirpic"><div id="theirface"></div></div><div class="pic st-online"><div style="background:radial-gradient(circle at 50% 40%,#fff6a8 0 18%,#ffb347 19% 34%,transparent 35%),linear-gradient(#8fd7ff,#3d93d6)"></div></div></div>
+  </div>
+</div>
+<div id="toasts"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+// Emoticons > glossy SVG faces keyed by text code
+const FACE = (mouth, eyes = '<circle cx="12" cy="13" r="1.8"/><circle cx="20" cy="13" r="1.8"/>', fill = '#ffd23c', extra = '') => `<svg class="emo" viewBox="0 0 32 32"><defs><radialGradient id="fg" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#fff7c2"/><stop offset=".6" stop-color="${fill}"/><stop offset="1" stop-color="#e09a00"/></radialGradient></defs><circle cx="16" cy="16" r="14" fill="url(#fg)" stroke="#b07800"/><g fill="#5a3a00">${eyes}</g>${mouth}<ellipse cx="13" cy="8" rx="7" ry="3.5" fill="#fff" opacity=".6"/>${extra}</svg>`;
+const EMO = {
+  ':)': FACE('<path d="M10 19q6 6 12 0" stroke="#5a3a00" stroke-width="2" fill="none" stroke-linecap="round"/>'),
+  ';)': FACE('<path d="M10 19q6 6 12 0" stroke="#5a3a00" stroke-width="2" fill="none" stroke-linecap="round"/>', '<path d="M10 13h4" stroke="#5a3a00" stroke-width="2"/><circle cx="20" cy="13" r="1.8"/>'),
+  ':D': FACE('<path d="M9 18h14q-1 8-7 8t-7-8z" fill="#7a2a00"/><path d="M11 18h10v2H11z" fill="#fff"/>'),
+  ':(': FACE('<path d="M10 23q6-6 12 0" stroke="#5a3a00" stroke-width="2" fill="none" stroke-linecap="round"/>', undefined, '#ffc93c'),
+  '8)': FACE('<path d="M11 20q5 4 10 0" stroke="#5a3a00" stroke-width="2" fill="none" stroke-linecap="round"/>', '<path d="M6 11h20v2l-2 4h-5l-2-3h-2l-2 3H8l-2-4z" fill="#111"/>'),
+  ':P': FACE('<path d="M10 19h12" stroke="#5a3a00" stroke-width="2" stroke-linecap="round"/><path d="M14 19h6v4a3 3 0 0 1-6 0z" fill="#ff6f8a"/>'),
+  '<3': '<svg class="emo" viewBox="0 0 32 32"><defs><radialGradient id="hg" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ffc2d4"/><stop offset=".6" stop-color="#ef2a5c"/><stop offset="1" stop-color="#9d0a30"/></radialGradient></defs><path d="M16 28C6 20 2 15 2 10a7 7 0 0 1 14-2 7 7 0 0 1 14 2c0 5-4 10-14 18z" fill="url(#hg)" stroke="#8a0828"/><ellipse cx="10" cy="9" rx="4" ry="2.5" fill="#fff" opacity=".6"/></svg>',
+};
+const emoRe = /(:\)|;\)|:D|:\(|8\)|:P|&lt;3)/g;
+const withEmo = (s) => esc(s).replace(emoRe, (m) => EMO[m === '&lt;3' ? '<3' : m]);
+$$('[data-e]').forEach((e) => (e.outerHTML = EMO[e.dataset.e]));
+$('#pick').innerHTML = Object.keys(EMO).map((k) => `<span data-k="${esc(k)}">${EMO[k]}</span>`).join('');
+$('#emob').onclick = (e) => { e.stopPropagation(); $('#pick').classList.toggle('on'); };
+$('#pick').onclick = (e) => { const s = e.target.closest('[data-k]'); if (!s) return; $('#in').value += s.dataset.k + ' '; $('#in').focus(); $('#pick').classList.remove('on'); };
+addEventListener('pointerdown', (e) => { if (!e.target.closest('#pick,#emob')) $('#pick').classList.remove('on'); });
+
+// Buddies > groups, status gems, now-playing lines
+const face = (a, b) => `radial-gradient(circle at 50% 42%, #ffe3c8 0 22%, transparent 23%), radial-gradient(circle at 50% 100%, ${a} 0 38%, transparent 39%), linear-gradient(${b}, #fff)`;
+const BUD = {
+  Friends: [['kat', 'online', '♫ Bubble Season - Glass Hearts', '#69db7c', '#c3f5c9'], ['mandy', 'offline', 'brb, making a playlist', '#ff8fc7', '#ffd6ea'], ['joel', 'away', 'out for lunch :)', '#4dabf7', '#cde9ff'], ['dev_ed', 'busy', 'coding... do not nudge', '#ffa94d', '#ffe3c2'], ['lisa_b', 'online', '<3 summer 2006', '#c77dff', '#ecd9ff']],
+  Family: [['mum', 'online', 'call me!', '#f06595', '#ffd6e3'], ['bro', 'offline', '', '#20c997', '#c3fae8']],
+  Coworkers: [['the boss', 'away', 'in a meeting', '#868e96', '#e9ecef']],
+};
+const buddies = {};
+function renderList() {
+  $('#groups').innerHTML = Object.entries(BUD).map(([g, list]) => {
+    const on = list.filter((b) => buddies[b[0]].st !== 'offline').length;
+    return `<div class="grp">${g} (${on}/${list.length})</div><div class="bl">${list.map(([n]) => { const b = buddies[n]; return `<div class="bud ${b.st === 'offline' ? 'off' : ''} ${n === cur ? 'sel' : ''}" data-n="${esc(n)}"><span class="gem ${b.st}"></span><div><div>${esc(n)}${b.st !== 'online' && b.st !== 'offline' ? ` (${b.st})` : ''}</div><div class="pm">${withEmo(b.pm)}</div></div></div>`; }).join('')}</div>`;
+  }).join('');
+}
+for (const list of Object.values(BUD)) for (const [n, st, pm, a, b] of list) buddies[n] = { st, pm, a, b };
+let cur = 'kat';
+$('#groups').addEventListener('click', (e) => {
+  const g = e.target.closest('.grp'); if (g) { g.classList.toggle('closed'); return; }
+  const b = e.target.closest('.bud'); if (b) openChat(b.dataset.n);
+});
+function openChat(n) {
+  cur = n; const b = buddies[n];
+  $('#ctitle').textContent = `${n} - Conversation`; $('#cname').textContent = n; $('#cpm').innerHTML = withEmo(b.pm);
+  $('#cgem').className = 'gem ' + b.st; $('#theirface').style.cssText = `width:100%;height:100%;border-radius:5px;background:${face(b.a, b.b)}`;
+  $('#theirpic').className = 'pic st-' + b.st;
+  $('#log').innerHTML = `<div class="sys">Never give out your password or credit card number in an instant message conversation.</div>`;
+  renderList();
+}
+$('#status').onchange = (e) => { $('#mypic').className = 'pic st-' + e.target.value; };
+
+// Chat > append, typing indicator, canned replies
+const log = $('#log');
+function add(who, text) {
+  const me = who === 'me';
+  log.insertAdjacentHTML('beforeend', `<div class="who">${me ? 'Visitor ✿' : esc(cur)} says:</div><div class="msg ${me ? 'me' : 'them'}">${withEmo(text)}</div>`);
+  log.scrollTop = log.scrollHeight;
+}
+const sys = (html, cls = '') => { log.insertAdjacentHTML('beforeend', `<div class="sys ${cls}">${html}</div>`); log.scrollTop = log.scrollHeight; };
+let typingT = null;
+function reply(text, delay = 900 + text.length * 35) {
+  $('#typing').innerHTML = `<span class="pen">✎</span> ${esc(cur)} is typing a message...`;
+  clearTimeout(typingT);
+  typingT = setTimeout(() => { $('#typing').innerHTML = ''; add('them', text); bell(); }, delay);
+}
+const REPLIES = [[/hi|hey|hello|yo/i, 'heyyy :D how r u?'], [/nudge|shake/i, 'haha dont u dare 8)'], [/\?/, 'hmm good question... ;)'], [/love|<3/i, '<3 <3 <3'], [/bye|cya/i, 'cya l8r! :)'], [/sad|:\(/i, 'aww :( want me to send a wink?'], [/./, 'lol :P'], [/./, 'omg same'], [/./, 'brb changing my display pic 8)']];
+function send(text = $('#in').value.trim()) {
+  if (!text) return;
+  add('me', text); $('#in').value = ''; click();
+  const hits = REPLIES.filter(([re]) => re.test(text));
+  reply(hits[Math.floor(Math.random() * Math.min(hits.length, hits[0][0].source === '.' ? hits.length : 1))][1]);
+}
+$('#send').onclick = () => send();
+$('#in').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+
+// Nudge > shake chat window + buzz
+function nudge(from = 'me') {
+  const c = $('#chat'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+  sys(from === 'me' ? 'You have just sent a nudge.' : `${esc(cur)} has just sent you a nudge.`, 'nudge');
+  buzz();
+}
+$('#nudgeb').onclick = () => nudge('me');
+
+// Toasts > "has just signed in" from the corner
+function toast(n) {
+  const b = buddies[n]; b.st = 'online'; renderList();
+  const t = document.createElement('div'); t.className = 'toast';
+  t.innerHTML = `<div class="mt"><span class="duo"></span>Messenger</div><div class="tb2"><div class="pic st-online"><div style="background:${face(b.a, b.b)}"></div></div><div><b>${esc(n)}</b> has just signed in.</div></div>`;
+  $('#toasts').append(t); chimeUp();
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 3600);
+}
+
+// Audio > message bell, sign-in chime, nudge buzz, key click
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) try { ac = new AudioContext(); } catch {} });
+const tone = (f, t0, dur, v = 0.07, type = 'sine') => { if (!ac) return; const t = ac.currentTime + t0, o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur + 0.02); };
+const bell = () => { tone(1318.5, 0, 0.5); tone(987.8, 0.12, 0.6); };
+const chimeUp = () => { [523.3, 659.3, 784, 1046.5].forEach((f, i) => tone(f, i * 0.07, 0.5, 0.05)); };
+const click = () => tone(2200, 0, 0.03, 0.03, 'square');
+function buzz() {
+  if (!ac) return;
+  const t = ac.currentTime, o = ac.createOscillator(), lfo = ac.createOscillator(), lg = ac.createGain(), g = ac.createGain();
+  o.type = 'sawtooth'; o.frequency.value = 110; lfo.frequency.value = 28; lg.gain.value = 40; lfo.connect(lg).connect(o.frequency);
+  g.gain.setValueAtTime(0.09, t); g.gain.setValueAtTime(0.09, t + 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  o.connect(g).connect(ac.destination); o.start(t); lfo.start(t); o.stop(t + 0.62); lfo.stop(t + 0.62);
+}
+
+// Attract > scripted chat while idle
+const SCRIPT = [[0.6, () => add('them', 'heyyy are u there? :)')], [2.0, () => toast('mandy')], [3.0, () => { $('#in').value = 'hi! just set up my new glossy theme 8)'; }], [3.8, () => send()], [7.4, () => nudge('them')], [9.2, () => { $('#in').value = 'haha stop nudging me <3'; }], [10, () => send()], [14, () => toast('bro')], [16, () => reply('ok gotta go, cya l8r! ;)')]];
+let lastInput = -1e9, sT = -0.01, cycles = 0;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+openChat('kat');
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (now - lastInput > 9000) {
+    const prev = sT; sT += dt;
+    for (const [at, fn] of SCRIPT) if (prev < at && sT >= at) fn();
+    // loop: reset sign-ins and the log
+    if (sT > 21) { sT = -0.01; cycles++; buddies.mandy.st = 'offline'; buddies.bro.st = 'offline'; openChat('kat'); }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__messenger = { send, reply, nudge, toast, status: (s) => { $('#status').value = s; $('#status').onchange({ target: $('#status') }); } };
+</script>
+</body>
+</html>

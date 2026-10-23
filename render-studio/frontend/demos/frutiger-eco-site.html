@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Eco Energy Site</title>
+<meta name="category" content="aero" />
+<meta name="style" content="eco" />
+<meta name="order" content="17" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="2008 corporate site, canvas hero, wind turbines, lake reflection, savings calculator" />
+<meta name="description" content="A 2008 green-energy corporate homepage for a made-up utility: a live canvas hero of rolling hills, spinning wind turbines and a sun over a lake that mirrors it all, drifting leaves, a glossy nav bar, gel buttons, solution tabs (Solar, Wind, Water) and a savings calculator with counting numbers. The wind follows the pointer, so moving across the hero spins the turbines faster. Hard because the lake is a real per-frame reflection of the hero canvas with a ripple warp, and the page auto-scrolls in attract mode." />
+<meta name="prompt" content="Build a 2008 Frutiger-style green-energy corporate homepage in one HTML file for a fictional utility: a canvas hero with layered rolling hills, a sun, clouds, spinning wind turbines (speed follows the pointer as wind) and a lake that mirrors the scene with a ripple warp, plus drifting leaves. Add a glossy nav bar, gel buttons, Solar/Wind/Water tabs, three glossy feature icons, a savings slider whose numbers count up, a newsletter form and an attract mode that scrolls the page." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/frutiger-eco-site.html
+ * PURPOSE: 2008 eco utility homepage: canvas hero (hills, turbines, sun, lake mirror), glossy nav, tabs, savings calculator
+ * UI: Render Studio > Frutiger Aero > Eco Energy Site
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__eco (tab, wind, save)
+ */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; font-family: "Trebuchet MS", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; color: #24425a; background: linear-gradient(#eaf7ff, #ffffff 600px, #f1fbe9); }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 22px; }
+nav { position: sticky; top: 0; z-index: 10; background: linear-gradient(#ffffff, #e8f4fb 50%, #d9ecf7 51%, #f0f8fd); border-bottom: 1px solid #a9cbe0; box-shadow: 0 2px 10px rgba(30, 90, 140, 0.15); }
+nav .wrap { display: flex; align-items: center; height: 60px; gap: 6px; }
+.logo { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 700; color: #2f8f1e; letter-spacing: -0.5px; margin-right: auto; text-shadow: 0 1px 0 #fff; }
+.logo b { color: #1f6fb5; }
+.logo i { width: 30px; height: 30px; border-radius: 50% 0 50% 50%; transform: rotate(-45deg); background: radial-gradient(circle at 30% 30%, #c9ff9a, #4fae2e 60%, #2f7d1c); box-shadow: inset 0 1px 2px #fff, 0 2px 4px rgba(0, 0, 0, 0.2); }
+nav a { color: #24425a; text-decoration: none; font-size: 14px; padding: 8px 14px; border-radius: 16px; transition: background 0.2s, box-shadow 0.2s; }
+nav a:hover, nav a.on { background: linear-gradient(#9fe07a, #4fae2e 50%, #3f9a22 51%, #6cc94a); color: #fff; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+#hero { position: relative; height: min(560px, 72vh); overflow: hidden; }
+#hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#hero .copy { position: absolute; left: 0; right: 0; top: 13%; text-align: left; }
+#hero h1 { margin: 0; font-size: clamp(30px, 5vw, 56px); font-weight: 400; letter-spacing: -1.5px; color: #fff; text-shadow: 0 2px 12px rgba(0, 60, 120, 0.45); max-width: 560px; line-height: 1.05; }
+#hero p { margin: 14px 0 22px; font-size: 18px; color: #fff; text-shadow: 0 1px 6px rgba(0, 60, 120, 0.5); max-width: 460px; }
+.gel { display: inline-block; font: inherit; font-size: 16px; font-weight: 700; color: #fff; border: 1px solid #2f7d1c; border-radius: 22px; padding: 11px 26px; cursor: pointer; text-decoration: none; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3); background: linear-gradient(#a6ec7f, #55b934 50%, #40a020 51%, #77d652); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 3px 10px rgba(30, 90, 20, 0.35); position: relative; }
+.gel.blue { border-color: #1f5fa5; background: linear-gradient(#9fd6ff, #3d9be9 50%, #2a85d6 51%, #63b5f5); }
+.gel:hover { filter: brightness(1.07); }
+.gel:active { transform: translateY(1px); }
+section { padding: 46px 0; }
+h2 { font-size: 30px; font-weight: 400; letter-spacing: -0.5px; margin: 0 0 6px; color: #1f6fb5; }
+h2 + .sub { margin: 0 0 22px; color: #5d7a8f; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.card { background: linear-gradient(#ffffff, #f1f8fd); border: 1px solid #c6dceb; border-radius: 14px; padding: 22px; box-shadow: 0 6px 18px rgba(30, 90, 140, 0.1), inset 0 1px 0 #fff; transition: transform 0.2s; }
+.card:hover { transform: translateY(-4px); }
+.ic { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; margin-bottom: 12px; position: relative; box-shadow: inset 0 -4px 8px rgba(0, 0, 0, 0.15), 0 4px 10px rgba(0, 0, 0, 0.18); }
+.ic::after { content: ''; position: absolute; left: 10%; right: 10%; top: 4%; height: 46%; border-radius: 50% 50% 40% 40%; background: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.1)); }
+.ic svg { width: 34px; height: 34px; position: relative; z-index: 1; }
+.card h3 { margin: 0 0 6px; font-size: 19px; color: #2f8f1e; }
+.card p { margin: 0; font-size: 14px; line-height: 1.5; color: #4d6b80; }
+.tabs { display: flex; gap: 6px; border-bottom: 2px solid #9fcce8; }
+.tabs button { font: inherit; font-size: 15px; border: 1px solid #9fcce8; border-bottom: 0; border-radius: 10px 10px 0 0; padding: 9px 22px; cursor: pointer; color: #1f6fb5; background: linear-gradient(#ffffff, #e2f0f9); }
+.tabs button.on { color: #fff; background: linear-gradient(#7cc4ff, #2a8ee6 50%, #1877d2 51%, #4aa8f5); border-color: #2a85d6; }
+.pane { display: grid; grid-template-columns: 1.1fr 1fr; gap: 26px; padding: 22px; border: 1px solid #c6dceb; border-top: 0; border-radius: 0 0 14px 14px; background: #fff; transition: opacity 0.3s; }
+.pane.fade { opacity: 0; }
+.pane canvas { width: 100%; height: 200px; border-radius: 10px; display: block; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.pane h3 { margin: 0 0 8px; color: #2f8f1e; font-size: 22px; }
+.pane p { margin: 0 0 12px; line-height: 1.55; color: #4d6b80; }
+.calc { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 18px; }
+.stat { text-align: center; padding: 18px; border-radius: 14px; background: linear-gradient(#f3fff0, #ddf5d1); border: 1px solid #b7e2a3; }
+.stat b { display: block; font-size: 34px; color: #2f8f1e; letter-spacing: -1px; }
+.stat span { font-size: 13px; color: #4d6b80; }
+input[type=range] { width: 100%; accent-color: #4fae2e; }
+.news { display: flex; gap: 10px; flex-wrap: wrap; }
+.news input { flex: 1; min-width: 200px; font: inherit; font-size: 15px; padding: 10px 14px; border-radius: 22px; border: 1px solid #9fcce8; background: linear-gradient(#f3f9fd, #fff 40%); }
+#thanks { color: #2f8f1e; font-weight: 700; display: none; margin-top: 10px; }
+footer { padding: 26px 0 40px; background: linear-gradient(#d9f1c9, #b8e39f); color: #2d5a1f; font-size: 13px; }
+footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 760px) {
+  nav a:not(.on) { display: none; }
+  .cards, .calc, .pane { grid-template-columns: 1fr; }
+  #hero p { font-size: 15px; }
+}
+</style>
+</head>
+<body>
+<nav><div class="wrap"><div class="logo"><i></i>Aqua<b>Leaf</b></div><a href="#hero" class="on">Home</a><a href="#solutions">Solutions</a><a href="#calc">Savings</a><a href="#news">Newsletter</a></div></nav>
+<div id="hero"><canvas id="sky"></canvas><div class="copy"><div class="wrap"><h1>Powering a cleaner tomorrow.</h1><p>Wind, sun and water working together for your home. Switch in minutes, save for years.</p><a class="gel" href="#calc">Switch today</a> &nbsp; <a class="gel blue" href="#solutions">Learn more</a></div></div></div>
+<section><div class="wrap">
+  <h2>Why switch?</h2><p class="sub">Three good reasons, all of them green.</p>
+  <div class="cards">
+    <div class="card"><div class="ic" style="background:radial-gradient(circle at 50% 30%,#fff3a0,#ffc61a 55%,#f08c00)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5" fill="#fff"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg></div><h3>100% renewable</h3><p>Every unit we supply is matched by clean energy from our own wind and solar farms.</p></div>
+    <div class="card"><div class="ic" style="background:radial-gradient(circle at 50% 30%,#bfe8ff,#3d9be9 55%,#1a5fb0)"><svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2.5c3.5 4.6 6.5 8.4 6.5 11.7A6.5 6.5 0 0 1 5.5 14.2C5.5 10.9 8.5 7.1 12 2.5z"/></svg></div><h3>Clean water</h3><p>Our micro-hydro plants run on rivers without dams, so the fish stay happy too.</p></div>
+    <div class="card"><div class="ic" style="background:radial-gradient(circle at 50% 30%,#d6ffb8,#55b934 55%,#2f7d1c)"><svg viewBox="0 0 24 24" fill="#fff"><path d="M20 4C9 4 4 9.5 4 16c0 1.4.3 2.7.8 3.8C6 14 10 10 15 8c-4 3-7.2 6.6-8.6 11.6A8 8 0 0 0 20 12V4z"/></svg></div><h3>Planet positive</h3><p>We plant a tree for every new customer. 214,000 and counting.</p></div>
+  </div>
+</div></section>
+<section id="solutions"><div class="wrap">
+  <h2>Our solutions</h2><p class="sub">Pick the power that suits you.</p>
+  <div class="tabs" id="tabs"><button class="on">Solar</button><button>Wind</button><button>Water</button></div>
+  <div class="pane" id="pane"><canvas id="pc" width="480" height="200"></canvas><div><h3 id="pt"></h3><p id="pp"></p><a class="gel" href="#calc">Get a quote</a></div></div>
+</div></section>
+<section id="calc"><div class="wrap">
+  <h2>Savings calculator</h2><p class="sub">Your monthly bill: <b id="billv">£60</b></p>
+  <input type="range" id="bill" min="20" max="200" value="60" />
+  <div class="calc"><div class="stat"><b id="s1">0</b><span>£ saved per year</span></div><div class="stat"><b id="s2">0</b><span>kg CO₂ avoided</span></div><div class="stat"><b id="s3">0</b><span>trees' worth</span></div></div>
+</div></section>
+<section id="news"><div class="wrap">
+  <h2>Stay in the loop</h2><p class="sub">Monthly tips for a greener home. No spam, promise.</p>
+  <form class="news" id="nf"><input type="email" placeholder="you@example.com" required /><button class="gel" type="submit">Subscribe</button></form><div id="thanks">Thanks! Check your inbox for a leafy welcome.</div>
+</div></section>
+<footer><div class="wrap"><span>© 2008 AquaLeaf Energy (a fictional company) · Printed on recycled pixels</span><span>Privacy · Terms · Sitemap</span></div></footer>
+<script>
+const $ = (s) => document.querySelector(s);
+
+// Hero > hills, turbines, sun, clouds, lake mirror
+const cv = $('#sky'), x = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function size() { dpr = Math.min(2, devicePixelRatio || 1); W = cv.clientWidth; H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr; }
+size(); addEventListener('resize', size);
+const TURB = [[0.58, 0.8, 1], [0.68, 0.76, 0.8], [0.78, 0.82, 1.1], [0.88, 0.77, 0.7], [0.53, 0.84, 0.6]];
+const clouds = Array.from({ length: 6 }, (_, i) => ({ x: Math.random(), y: 0.08 + Math.random() * 0.22, s: 0.6 + Math.random() * 0.8, v: 0.004 + Math.random() * 0.006 }));
+const leaves = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 6, v: 0.03 + Math.random() * 0.05, s: 6 + Math.random() * 8 }));
+let wind = 1, windT = 1, ang = 0;
+const horizon = () => H * 0.7;
+function hill(y0, amp, f, ph, c1, c2) {
+  const hz = horizon(); x.beginPath(); x.moveTo(0, hz);
+  for (let i = 0; i <= W; i += 10) x.lineTo(i, y0 * hz - Math.sin(i * f / W * 6 + ph) * amp * hz - Math.sin(i * f / W * 13 + ph * 2) * amp * 0.3 * hz);
+  x.lineTo(W, hz); x.closePath(); const g = x.createLinearGradient(0, (y0 - amp) * hz, 0, hz); g.addColorStop(0, c1); g.addColorStop(1, c2); x.fillStyle = g; x.fill();
+}
+function turbine(px, py, s, a) {
+  const hz = horizon(), bx = px * W, by = py * hz, h = 0.3 * hz * s;
+  x.strokeStyle = '#f4f8fb'; x.lineWidth = 4 * s; x.lineCap = 'round'; x.beginPath(); x.moveTo(bx, by); x.lineTo(bx, by - h); x.stroke();
+  x.save(); x.translate(bx, by - h); x.rotate(a * s);
+  x.fillStyle = '#ffffff';
+  for (let k = 0; k < 3; k++) { x.rotate((Math.PI * 2) / 3); x.beginPath(); x.moveTo(-2.5 * s, 0); x.quadraticCurveTo(-4 * s, -h * 0.35, 0, -h * 0.62); x.quadraticCurveTo(3 * s, -h * 0.3, 2.5 * s, 0); x.fill(); }
+  x.fillStyle = '#dfe8ef'; x.beginPath(); x.arc(0, 0, 4 * s, 0, Math.PI * 2); x.fill(); x.restore();
+}
+function cloud(cx, cy, s) { x.fillStyle = 'rgba(255,255,255,0.92)'; [[0, 0, 30], [28, -12, 26], [56, 0, 30], [26, 8, 30]].forEach(([dx, dy, r]) => { x.beginPath(); x.arc(cx + dx * s, cy + dy * s, r * s, 0, Math.PI * 2); x.fill(); }); }
+function paintHero(t, dt) {
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const hz = horizon();
+  const g = x.createLinearGradient(0, 0, 0, hz); g.addColorStop(0, '#2c9cf0'); g.addColorStop(0.7, '#9fd9ff'); g.addColorStop(1, '#e8f8ff'); x.fillStyle = g; x.fillRect(0, 0, W, hz);
+  const sx = W * 0.82, sy = hz * 0.22, rg = x.createRadialGradient(sx, sy, 0, sx, sy, hz * 0.6); rg.addColorStop(0, 'rgba(255,255,230,1)'); rg.addColorStop(0.08, 'rgba(255,250,200,0.9)'); rg.addColorStop(0.3, 'rgba(255,255,255,0.25)'); rg.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = rg; x.fillRect(0, 0, W, hz);
+  x.save(); x.translate(sx, sy); x.rotate(t * 0.05); x.fillStyle = 'rgba(255,255,255,0.08)'; for (let k = 0; k < 12; k++) { x.rotate(Math.PI / 6); x.beginPath(); x.moveTo(0, 0); x.lineTo(-30, -W); x.lineTo(30, -W); x.fill(); } x.restore();
+  clouds.forEach((c) => { c.x += c.v * dt * wind; if (c.x > 1.15) c.x = -0.15; cloud(c.x * W, c.y * hz, c.s * Math.max(0.6, W / 1400)); });
+  hill(0.78, 0.1, 1.2, 0.5, '#9fe07a', '#5fbf3d');
+  wind += (windT - wind) * Math.min(1, dt * 2); ang += dt * wind * 1.6;
+  TURB.forEach(([px, py, s]) => turbine(px, py, s * Math.max(0.6, Math.min(1.2, W / 1100)), ang + px * 3));
+  hill(0.92, 0.07, 0.8, 2.1, '#7fd657', '#3f9f22');
+  hill(1.0, 0.05, 1.6, 4.0, '#62c23c', '#2f8a18');
+  // Lake > mirror of the band above horizon with ripple warp
+  const lakeH = H - hz, src = Math.min(lakeH, hz);
+  x.fillStyle = '#7cc0e6'; x.fillRect(0, hz, W, lakeH);
+  for (let y = 0; y < lakeH; y += 2) {
+    const sy2 = hz - 1 - (y / lakeH) * src, off = Math.sin(y * 0.15 - t * 3) * (1 + y * 0.03);
+    x.drawImage(cv, 0, sy2 * dpr, W * dpr, 2 * dpr, off - 6, hz + y, W + 12, 2);
+  }
+  const lg = x.createLinearGradient(0, hz, 0, H); lg.addColorStop(0, 'rgba(40,140,210,0.35)'); lg.addColorStop(1, 'rgba(20,90,170,0.6)'); x.fillStyle = lg; x.fillRect(0, hz, W, lakeH);
+  x.fillStyle = 'rgba(255,255,255,0.5)'; x.fillRect(0, hz, W, 1.5);
+  leaves.forEach((l) => {
+    l.x += l.v * dt * wind * 0.6; l.y += Math.sin(t + l.r) * 0.0008; l.r += dt * 2; if (l.x > 1.05) { l.x = -0.05; l.y = Math.random() * 0.8; }
+    x.save(); x.translate(l.x * W, l.y * hz); x.rotate(l.r); x.fillStyle = '#6fd04a'; x.beginPath(); x.ellipse(0, 0, l.s, l.s * 0.45, 0, 0, Math.PI * 2); x.fill(); x.strokeStyle = '#3f9f22'; x.lineWidth = 1; x.beginPath(); x.moveTo(-l.s, 0); x.lineTo(l.s, 0); x.stroke(); x.restore();
+  });
+}
+let lpX = null, lpT = 0;
+$('#hero').addEventListener('pointermove', (e) => { const n = performance.now(); if (lpX != null) windT = Math.min(6, 1 + Math.abs(e.clientX - lpX) / Math.max(1, n - lpT) * 3); lpX = e.clientX; lpT = n; });
+$('#hero').addEventListener('pointerleave', () => (windT = 1));
+
+// Tabs > pane text plus mini canvas
+const TABS = [
+  ['Solar', 'Rooftop panels, fitted in a day', 'Our glossy new panels turn even cloudy British daylight into power. We fit, you save, and any spare energy flows back to the grid.', 45],
+  ['Wind', 'Community wind farms', 'Own a share of a real turbine on the hills near you. When it is windy, your bill drops. Simple as that.', 200],
+  ['Water', 'River-friendly micro hydro', 'Small, quiet turbines in fast streams make steady power day and night, with fish ladders built in.', 190],
+];
+let tab = 0;
+const pc = $('#pc').getContext('2d');
+function setTab(i) {
+  tab = i; document.querySelectorAll('#tabs button').forEach((b, k) => b.classList.toggle('on', k === i));
+  const p = $('#pane'); p.classList.add('fade'); setTimeout(() => { $('#pt').textContent = TABS[i][1]; $('#pp').textContent = TABS[i][2]; p.classList.remove('fade'); }, 200);
+}
+document.querySelectorAll('#tabs button').forEach((b, i) => (b.onclick = () => setTab(i)));
+function paintPane(t) {
+  const w = 480, h = 200, hue = TABS[tab][3];
+  const g = pc.createLinearGradient(0, 0, 0, h); g.addColorStop(0, `hsl(${hue},85%,72%)`); g.addColorStop(1, '#ffffff'); pc.fillStyle = g; pc.fillRect(0, 0, w, h);
+  if (tab === 0) { for (let r = 0; r < 3; r++) for (let c = 0; c < 6; c++) { const px = 40 + c * 70, py = 70 + r * 40; const gg = pc.createLinearGradient(px, py, px + 60, py + 34); gg.addColorStop(0, '#2a6fd0'); gg.addColorStop(0.5 + Math.sin(t + c * 0.4 + r) * 0.3, '#bfe3ff'); gg.addColorStop(1, '#1a4f9a'); pc.fillStyle = gg; pc.fillRect(px, py, 60, 34); } }
+  if (tab === 1) { pc.fillStyle = '#7fd657'; pc.fillRect(0, 150, w, 50); for (let k = 0; k < 4; k++) { const bx = 70 + k * 110, by = 150; pc.strokeStyle = '#fff'; pc.lineWidth = 3; pc.beginPath(); pc.moveTo(bx, by); pc.lineTo(bx, by - 90); pc.stroke(); pc.save(); pc.translate(bx, by - 90); pc.rotate(t * 2 + k); pc.fillStyle = '#fff'; for (let b = 0; b < 3; b++) { pc.rotate(2.094); pc.beginPath(); pc.ellipse(0, -24, 4, 24, 0, 0, Math.PI * 2); pc.fill(); } pc.restore(); } }
+  if (tab === 2) { for (let k = 0; k < 6; k++) { pc.strokeStyle = `rgba(255,255,255,${0.7 - k * 0.1})`; pc.lineWidth = 3; pc.beginPath(); for (let i = 0; i <= w; i += 8) pc.lineTo(i, 90 + k * 18 + Math.sin(i * 0.03 + t * 2 + k) * 6); pc.stroke(); } }
+  pc.fillStyle = 'rgba(255,255,255,0.25)'; pc.fillRect(0, 0, w, h * 0.4);
+}
+
+// Calculator > numbers ease to target
+const cur = [0, 0, 0];
+let tgt = [0, 0, 0];
+function save(bill) { $('#bill').value = bill; $('#billv').textContent = '£' + bill; tgt = [Math.round(bill * 12 * 0.18), Math.round(bill * 12 * 2.1), Math.round(bill * 0.4)]; }
+$('#bill').oninput = (e) => save(+e.target.value);
+$('#nf').onsubmit = (e) => { e.preventDefault(); $('#thanks').style.display = 'block'; };
+
+// Attract > slow scroll down and back, tab cycle, slider sweep
+let lastInput = performance.now() - 7000, aT = 0, dir = 1;
+['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true, passive: true }));
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000;
+  paintHero(t, dt); paintPane(t);
+  for (let i = 0; i < 3; i++) { cur[i] += (tgt[i] - cur[i]) * Math.min(1, dt * 4); $('#s' + (i + 1)).textContent = Math.round(cur[i]).toLocaleString(); }
+  if (now - lastInput > 8000) {
+    aT += dt;
+    if (aT > 3) { aT = 0; setTab((tab + 1) % 3); save(20 + Math.round(Math.random() * 180)); }
+    if (now - lastInput > 11000) { const max = document.documentElement.scrollHeight - innerHeight; const y = scrollY + dir * dt * 60; if (y >= max) dir = -1; if (y <= 0) dir = 1; scrollTo({ top: y, behavior: 'instant' }); }
+  }
+  requestAnimationFrame(frame);
+}
+setTab(0); save(60); requestAnimationFrame(frame);
+window.__eco = { tab: setTab, wind: (v) => (windT = v), save };
+</script>
+</body>
+</html>

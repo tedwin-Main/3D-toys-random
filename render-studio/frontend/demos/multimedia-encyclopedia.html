@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multimedia Encyclopedia</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="59" />
+<meta name="capture" content="2200" />
+<meta name="tags" content="low-res procedural canvas video clips (orbits, eruption, aurora, comet), synthesized sound clips, full-text search with snippets, A-Z index, timeline, quiz, back and forward history, fake CD seek loader" />
+<meta name="description" content="A 1995 CD-ROM encyclopedia called Compendia: a spinning globe in the header, chunky toolbar buttons, an A to Z index with a find box, and cream article pages full of blue hyperlinks. Articles carry low-res video clips you can play, pause and scrub (planets on their orbits, a volcano throwing lava bombs, aurora curtains, a comet whose tail always points away from the Sun), still pictures and synthesized sound clips: a humpback whale song, a piano scale, an old telephone bell, Apollo radio beeps, a volcanic rumble. There is a media gallery, a timeline from the Great Pyramid to Halley's Comet, a quiz that links back to the article with the answer, full-text search with highlighted snippets, back and forward history, and a disc that spins while the page loads. Hard because every clip, picture and sound is generated live and the whole encyclopedia is one linked, searchable data set."/>
+<meta name="prompt" content="Build a mid-90s CD-ROM multimedia encyclopedia in one HTML file with an original name and look: header with a spinning canvas globe, toolbar (Contents, Index, Gallery, Timeline, Quiz, Back, Forward), A-Z index sidebar with a find box, articles with hyperlinks between them, low-res canvas video clips with play, pause and seek (planet orbits, volcano eruption, aurora, comet), still pictures drawn on canvas and synthesized audio clips (whale song, piano scale, telephone bell, radio beeps, rumble), a media gallery, a clickable timeline, a multiple-choice quiz that links to the article with the answer, full-text search with highlighted snippets, history, and a spinning-disc loading overlay. Attract mode browses on its own; works at phone width with the index as a drawer." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/multimedia-encyclopedia.html
+ * PURPOSE: 1995 CD-ROM encyclopedia: linked articles, canvas video clips, synth sound clips, gallery, timeline, quiz, search
+ * UI: Render Studio > Retro Aesthetics > 90s > Retro Desktop > Multimedia Encyclopedia
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__encyclo (open, view, search, answer, state)
+ */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 13px Arial, Helvetica, sans-serif; color: #e8f0ff; background: #050b1c radial-gradient(ellipse at 50% 0%, #1b3570, #050b1c 70%); user-select: none; }
+#app { position: absolute; left: 50%; top: 50%; width: min(1120px, calc(100vw - 32px)); height: min(720px, calc(100vh - 32px)); transform: translate(-50%, -50%); display: grid; grid-template-rows: auto auto 1fr auto; border: 2px solid; border-color: #9ab4dc #2a3a5a #2a3a5a #9ab4dc; background: #12224a; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); }
+header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: linear-gradient(180deg, #24407e, #0f1d42); border-bottom: 1px solid #5a78b0; }
+#globe { width: 42px; height: 42px; }
+.logo b { display: block; font: bold 26px/1 Georgia, "Times New Roman", serif; letter-spacing: 0.08em; background: linear-gradient(180deg, #fff6c8, #f0c040 45%, #a86a10 55%, #ffe080); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 0 #000); }
+.logo small { font-size: 10px; letter-spacing: 0.2em; color: #a8bce0; }
+#disc { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle, #12224a 0 3px, #ccd 4px 5px, transparent 6px), conic-gradient(#e6f0ff, #b0c4ff, #ffd0f0, #c0ffe8, #fff2b0, #e6f0ff); box-shadow: 0 0 0 1px #88a; opacity: 0.35; }
+#disc.spin { opacity: 1; animation: rot 0.5s linear infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+nav { display: flex; gap: 4px; padding: 5px 8px; background: linear-gradient(180deg, #1a2e60, #13234c); border-bottom: 1px solid #0a1430; overflow-x: auto; }
+nav button { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 66px; padding: 4px 8px; font: bold 11px Arial; color: #e8f0ff; cursor: pointer; border-radius: 5px; border: 1px solid; border-color: #8aa8e0 #0a1838 #0a1838 #8aa8e0; background: linear-gradient(180deg, #3a5aa0, #1c3470); }
+nav button:hover { background: linear-gradient(180deg, #4a6ac0, #24408a); }
+nav button.on { background: linear-gradient(180deg, #b08a20, #6a4a08); border-color: #ffe08a #3a2a00 #3a2a00 #ffe08a; }
+nav button:disabled { opacity: 0.4; pointer-events: none; }
+nav svg { width: 20px; height: 20px; }
+#idxBtn { display: none; }
+.body { display: grid; grid-template-columns: 230px 1fr; min-height: 0; }
+aside { display: flex; flex-direction: column; min-height: 0; background: linear-gradient(180deg, #172a58, #0e1a3c); border-right: 2px solid #0a1430; }
+aside input { margin: 8px; padding: 5px 7px; font: inherit; border: 2px solid; border-color: #0a1430 #6a88c0 #6a88c0 #0a1430; background: #fbf8ef; color: #111; user-select: text; }
+.az { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; padding: 0 8px 6px; }
+.az b { font-size: 10px; text-align: center; padding: 2px 0; border-radius: 2px; background: #24407e; cursor: pointer; }
+.az b.off { opacity: 0.25; pointer-events: none; }
+.az b.on { background: #f0c040; color: #2a1a00; }
+#list { flex: 1; overflow: auto; margin: 0; padding: 0 0 8px; list-style: none; }
+#list li { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; }
+#list li:hover, #list li.on { background: #f0c040; color: #2a1a00; }
+#list li i { margin-left: auto; font-style: normal; font-size: 10px; opacity: 0.8; }
+main { position: relative; overflow: auto; background: #fbf8ef; color: #1a1a1a; }
+.page { padding: 22px 30px 30px; font: 15px/1.6 Georgia, "Times New Roman", serif; }
+.kicker { font: bold 11px Arial; letter-spacing: 0.2em; text-transform: uppercase; color: #8a5a10; }
+h1 { margin: 2px 0 12px; font: bold 30px/1.15 Georgia, serif; color: #12224a; border-bottom: 3px double #c8b890; padding-bottom: 8px; }
+h2 { font: bold 18px Georgia, serif; color: #12224a; margin: 18px 0 8px; }
+.page p { margin: 0 0 12px; }
+a, .lnk { color: #1a4ab0; text-decoration: underline; text-decoration-style: dotted; cursor: pointer; }
+a:hover, .lnk:hover { color: #c03000; }
+figure { float: right; width: 320px; margin: 4px 0 12px 22px; padding: 6px; background: #12224a; border: 2px solid; border-color: #9ab4dc #2a3a5a #2a3a5a #9ab4dc; }
+.screen { position: relative; }
+.screen canvas { display: block; width: 100%; aspect-ratio: 200 / 130; image-rendering: pixelated; background: #000; }
+.screen::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px); }
+.ctl { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.ctl button { width: 28px; height: 22px; font: 12px Arial; color: #fff; cursor: pointer; border: 1px solid; border-color: #8aa8e0 #0a1838 #0a1838 #8aa8e0; background: linear-gradient(180deg, #3a5aa0, #1c3470); }
+.prog { flex: 1; height: 8px; background: #0a1430; border: 1px solid #5a78b0; cursor: pointer; }
+.prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f0c040, #ffe890); }
+.tc { font: 11px "Courier New", monospace; color: #cde; }
+figcaption { font: 11px/1.4 Arial; color: #cde; margin-top: 5px; }
+.snd { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 14px; padding: 6px 12px; font: bold 12px Arial; color: #fff; cursor: pointer; border-radius: 14px; border: 1px solid; border-color: #8aa8e0 #0a1838 #0a1838 #8aa8e0; background: linear-gradient(180deg, #3a5aa0, #1c3470); }
+.snd.on { background: linear-gradient(180deg, #b08a20, #6a4a08); }
+.snd .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 12px; } .snd .eq i { width: 3px; height: 4px; background: #ffe890; }
+.snd.on .eq i { animation: eq 0.4s ease-in-out infinite alternate; } .snd.on .eq i:nth-child(2) { animation-delay: 0.15s; } .snd.on .eq i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes eq { to { height: 12px; } }
+.see { clear: both; padding-top: 10px; border-top: 1px solid #d8ccb0; font: 13px Arial; }
+.cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.cat { padding: 10px 12px; background: #fff; border: 1px solid #d8ccb0; box-shadow: 2px 2px 0 #e8dcc0; }
+.cat h3 { margin: 0 0 6px; font: bold 13px Arial; letter-spacing: 0.1em; text-transform: uppercase; color: #8a5a10; }
+.cat div { font: 14px/1.7 Georgia, serif; }
+.dyk { margin: 16px 0 0; padding: 10px 14px; background: #12224a; color: #fff2c8; font: italic 14px Georgia, serif; border-left: 6px solid #f0c040; }
+.gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.gal div { cursor: pointer; padding: 5px; background: #12224a; border: 2px solid; border-color: #9ab4dc #2a3a5a #2a3a5a #9ab4dc; color: #fff; font: bold 12px Arial; }
+.gal div:hover { border-color: #ffe08a #6a4a08 #6a4a08 #ffe08a; }
+.gal canvas { display: block; width: 100%; aspect-ratio: 200 / 130; image-rendering: pixelated; margin-bottom: 4px; }
+.gal small { display: block; font-weight: normal; color: #a8bce0; }
+#tl { position: relative; overflow-x: auto; overflow-y: hidden; padding: 10px 0 20px; }
+.track { position: relative; height: 270px; }
+.track::before { content: ""; position: absolute; left: 0; right: 0; top: 140px; height: 6px; background: linear-gradient(90deg, #c8b890, #8a5a10, #c8b890); border-radius: 3px; }
+.ev { position: absolute; width: 150px; cursor: pointer; font: 12px/1.35 Arial; }
+.ev b { display: block; font: bold 18px Georgia; color: #8a5a10; }
+.ev span { color: #12224a; font-weight: bold; }
+.ev::after { content: ""; position: absolute; left: 10px; width: 12px; height: 12px; border-radius: 50%; background: #f0c040; border: 2px solid #12224a; }
+.ev.up { top: 22px; } .ev.up::after { top: 112px; }
+.ev.dn { top: 162px; } .ev.dn::after { top: -28px; }
+.ev:hover span { color: #c03000; text-decoration: underline; }
+.q { max-width: 620px; }
+.opts { display: grid; gap: 8px; margin: 12px 0; }
+.opts button { text-align: left; padding: 9px 12px; font: 15px Georgia, serif; cursor: pointer; background: #fff; border: 2px solid; border-color: #fff #a89870 #a89870 #fff; box-shadow: 1px 1px 0 #c8b890; }
+.opts button:hover { background: #fff6d8; }
+.opts button.right { background: #c8f0c0; border-color: #2a8a2a; }
+.opts button.wrong { background: #f8c8c0; border-color: #b03020; }
+.verdict { font: bold 15px Arial; } .score { font: bold 12px Arial; color: #8a5a10; letter-spacing: 0.1em; }
+.btn { display: inline-block; padding: 6px 16px; font: bold 12px Arial; color: #fff; cursor: pointer; border: 1px solid; border-color: #8aa8e0 #0a1838 #0a1838 #8aa8e0; background: linear-gradient(180deg, #3a5aa0, #1c3470); }
+.res { padding: 8px 0; border-bottom: 1px dotted #c8b890; }
+.res .lnk { font: bold 16px Georgia; }
+.res p { margin: 3px 0 0 !important; font-size: 13px; color: #444; }
+mark { background: #ffe890; }
+#load { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; align-content: center; gap: 10px; background: rgba(251, 248, 239, 0.92); font: bold 12px Arial; letter-spacing: 0.15em; color: #12224a; }
+#load i { width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle, #fbf8ef 0 8px, #aab 9px 12px, transparent 13px), conic-gradient(#e6f0ff, #b0c4ff, #ffd0f0, #c0ffe8, #fff2b0, #e6f0ff); box-shadow: 0 0 0 2px #889, 0 4px 10px rgba(0, 0, 0, 0.25); animation: rot 0.4s linear infinite; }
+footer { display: flex; justify-content: space-between; padding: 3px 10px; font-size: 11px; color: #a8bce0; background: #0a1430; border-top: 1px solid #2a3a5a; }
+@media (max-width: 700px) {
+  #app { left: 0; top: 0; width: 100%; height: 100%; transform: none; border: 0; }
+  header { padding: 6px 10px; } #globe { width: 32px; height: 32px; } .logo b { font-size: 19px; } .logo small { font-size: 8px; letter-spacing: 0.1em; }
+  nav button { min-width: 54px; padding: 3px 4px; font-size: 10px; } nav svg { width: 17px; height: 17px; }
+  #idxBtn { display: flex; }
+  .body { grid-template-columns: 1fr; position: relative; }
+  aside { position: absolute; z-index: 6; left: 0; top: 0; bottom: 0; width: 240px; transform: translateX(-105%); transition: transform 0.25s; box-shadow: 6px 0 20px rgba(0, 0, 0, 0.5); }
+  aside.open { transform: none; }
+  .page { padding: 14px 16px 24px; font-size: 14px; }
+  h1 { font-size: 24px; }
+  figure { float: none; width: auto; margin: 0 0 12px; }
+  footer span:last-child { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><canvas id="globe" width="84" height="84"></canvas><div class="logo"><b>COMPENDIA</b><small>MULTIMEDIA ENCYCLOPEDIA &#183; 1995 EDITION</small></div><i id="disc"></i></header>
+  <nav>
+    <button id="idxBtn" data-v="index"><svg viewBox="0 0 20 20"><path d="M3 4h14M3 10h14M3 16h14" stroke="#fff" stroke-width="2.4" /></svg>Index</button>
+    <button data-v="contents"><svg viewBox="0 0 20 20"><path d="M3 3h6l1 1v13l-1-1H3zM17 3h-6l-1 1v13l1-1h6z" fill="#ffe890" stroke="#7a5a10" /></svg>Contents</button>
+    <button data-v="gallery"><svg viewBox="0 0 20 20"><rect x="2" y="4" width="16" height="12" fill="#6ac" stroke="#fff" /><path d="M2 16l5-6 4 4 3-3 4 5z" fill="#2a6" /><circle cx="14" cy="7" r="1.6" fill="#ff6" /></svg>Gallery</button>
+    <button data-v="timeline"><svg viewBox="0 0 20 20"><path d="M1 10h18" stroke="#ffe890" stroke-width="2" /><circle cx="5" cy="10" r="2.4" fill="#fff" /><circle cx="11" cy="10" r="2.4" fill="#fff" /><circle cx="16" cy="10" r="2.4" fill="#fff" /></svg>Timeline</button>
+    <button data-v="quiz"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#f0c040" stroke="#7a5a10" /><text x="10" y="15" text-anchor="middle" font-size="13" font-weight="bold" fill="#12224a">?</text></svg>Quiz</button>
+    <button id="back"><svg viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6" stroke="#fff" stroke-width="3" fill="none" /></svg>Back</button>
+    <button id="fwd"><svg viewBox="0 0 20 20"><path d="M8 4l6 6-6 6" stroke="#fff" stroke-width="3" fill="none" /></svg>Forward</button>
+  </nav>
+  <div class="body">
+    <aside id="side"><input id="find" placeholder="Find an article..." autocomplete="off" /><div class="az" id="az"></div><ul id="list"></ul></aside>
+    <main id="main"><div id="load" hidden><i></i>READING DISC</div><div id="view"></div></main>
+  </div>
+  <footer><span id="stat"></span><span>Disc 1 of 1 &#183; Compendia Multimedia &#169; 1995</span></footer>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
+const rnd = ((a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; })(1995);
+const STARS = Array.from({ length: 70 }, () => [rnd() * 200, rnd() * 130, rnd()]);
+
+// Articles > the whole disc
+const A = [
+  { id: 'solar', t: 'Solar System', cat: 'Astronomy', vid: 'orbit', cap: 'Video: the planets on their orbits. Inner planets race around the Sun; the outer ones crawl.', body: ['The Solar System is the Sun and everything bound to it by gravity: eight planets, their moons, dwarf planets such as Pluto, and countless asteroids and [[comet|comets]]. It formed about 4.6 billion years ago from a collapsing cloud of gas and dust.', 'The four inner planets, Mercury, Venus, Earth and Mars, are small and rocky. The four outer planets are giants: [[jupiter|Jupiter]] and Saturn are made mostly of hydrogen and helium, while Uranus and Neptune hold more ice. Mercury\'s year lasts just 88 days, while Neptune takes 165 Earth years to go around once.', 'Charged particles streaming from the Sun reach Earth and light up the polar sky as the [[aurora]].'], see: ['jupiter', 'comet', 'moon'] },
+  { id: 'jupiter', t: 'Jupiter', cat: 'Astronomy', pic: 'jupiter', ev: [1610, 'Galileo spots four moons of Jupiter'], cap: 'Picture: Jupiter\'s cloud bands and the Great Red Spot.', body: ['Jupiter is the fifth planet from the Sun and the largest in the [[solar|Solar System]], more than twice as massive as all the other planets put together. It is a gas giant wrapped in bands of cloud.', 'The Great Red Spot is a storm wider than Earth that has been raging for at least 300 years. Jupiter has dozens of moons; the four largest, Io, Europa, Ganymede and Callisto, were discovered by Galileo Galilei in 1610. Io is the most volcanic body known, with eruptions far larger than any [[volcano]] on Earth.'], see: ['solar', 'volcano'] },
+  { id: 'comet', t: 'Comet', cat: 'Astronomy', vid: 'comet', ev: [1986, 'Halley\'s Comet returns'], cap: 'Video: a comet on its stretched orbit. The tail grows near the Sun and always points away from it.', body: ['A comet is a small icy body, often described as a dirty snowball, that travels around the Sun on a long, stretched orbit. Far from the Sun it is frozen and dark.', 'As it swings closer, sunlight warms the ice, which turns straight into gas and carries dust with it. This forms a glowing head called the coma and tails that can stretch for millions of kilometres. The tails always point away from the Sun, pushed by sunlight and the solar wind.', 'Halley\'s Comet returns about every 76 years. It was last seen from Earth in 1986 and will be back in 2061.'], see: ['solar', 'jupiter'] },
+  { id: 'moon', t: 'Moon Landing', cat: 'History', snd: ['beep', 'Apollo radio beeps', 7], ev: [1969, 'Apollo 11 lands on the Moon'], body: ['On 20 July 1969 the Apollo 11 lunar module landed on the Moon. Neil Armstrong and Buzz Aldrin became the first people to walk on its surface, while Michael Collins orbited above in the command module.', 'Radio messages between the astronauts and Mission Control were marked by short beeps that told each side when the other had finished talking. Six Apollo missions landed between 1969 and 1972, bringing back 382 kilograms of Moon rock.'], see: ['solar', 'telephone'] },
+  { id: 'aurora', t: 'Aurora', cat: 'Earth Science', vid: 'aurora', cap: 'Video: aurora curtains rippling over a northern forest.', body: ['An aurora is a natural display of light in the sky near the poles: the aurora borealis in the north and the aurora australis in the south.', 'It happens when charged particles from the Sun, carried by the solar wind, are steered by Earth\'s magnetic field toward the poles. They strike oxygen and nitrogen high in the atmosphere, which then glow. Oxygen gives the common green and the rarer red; nitrogen gives blue and purple.', 'Auroras are brightest when the Sun is most active, so they follow the roughly 11-year cycle of sunspots. See also the [[solar|Solar System]].'], see: ['solar', 'comet'] },
+  { id: 'volcano', t: 'Volcano', cat: 'Earth Science', vid: 'volcano', snd: ['rumble', 'Volcanic rumble', 5], ev: [1980, 'Mount St. Helens erupts'], cap: 'Video: an eruption throwing out lava bombs and ash.', body: ['A volcano is an opening in Earth\'s crust where molten rock, gas and ash escape from below. Molten rock is called magma while it is underground and lava once it reaches the surface.', 'Most volcanoes sit along the edges of [[tectonics|tectonic plates]], especially around the Pacific Ocean in a belt called the Ring of Fire. In 1980 Mount St. Helens in the United States erupted with a sideways blast that flattened forests for miles around.'], see: ['tectonics', 'jupiter'] },
+  { id: 'tectonics', t: 'Plate Tectonics', cat: 'Earth Science', body: ['Earth\'s outer shell is broken into huge slabs called plates. They ride on hotter, softer rock beneath and move a few centimetres a year, about as fast as fingernails grow.', 'Where plates pull apart, new crust forms. Where they collide, mountains rise and one plate may sink beneath the other, feeding [[volcano|volcanoes]]. Earthquakes happen when plates lock together and then suddenly slip.', 'Many [[reef|coral reef]] atolls are rings of coral growing on top of old volcanic islands that have slowly sunk back into the sea.'], see: ['volcano', 'reef'] },
+  { id: 'whale', t: 'Humpback Whale', cat: 'Nature', snd: ['whale', 'Humpback whale song', 7], body: ['The humpback whale is a large baleen whale found in oceans all over the world. Adults grow to about 15 metres long and are famous for leaping out of the water, which is called breaching.', 'Male humpbacks sing long, complex songs that can last twenty minutes and be repeated for hours. All the males in a region sing the same song, which slowly changes from year to year.', 'Many humpbacks migrate thousands of kilometres each year between cold feeding waters and warm breeding grounds, some of them near [[reef|coral reefs]].'], see: ['reef'] },
+  { id: 'reef', t: 'Coral Reef', cat: 'Nature', pic: 'reef', cap: 'Picture: a shallow reef in clear, sunlit water.', body: ['Coral reefs are underwater structures built by colonies of tiny animals called coral polyps, which make hard skeletons of calcium carbonate. Reefs cover less than one percent of the ocean floor but are home to about a quarter of all ocean species.', 'The Great Barrier Reef off Australia is the largest, stretching for more than 2,300 kilometres. Corals get much of their food from algae living inside them, which is why reefs grow in clear, sunlit, shallow water. Visitors include the [[whale|humpback whale]].'], see: ['whale', 'tectonics'] },
+  { id: 'piano', t: 'Piano', cat: 'Inventions', snd: ['scale', 'C major scale', 4], ev: [1700, 'Cristofori builds the first piano'], body: ['The piano was invented in Italy around 1700 by Bartolomeo Cristofori. Its original name, gravicembalo col piano e forte, means a harpsichord that can play both soft and loud.', 'A harpsichord plucks its strings, but a piano strikes them with felt-covered hammers, so the harder you press a key the louder the note. A modern piano has 88 keys and more than 200 strings.'], see: ['telephone', 'press'] },
+  { id: 'telephone', t: 'Telephone', cat: 'Inventions', snd: ['ring', 'Telephone bell, 1900s', 5], ev: [1876, 'Bell patents the telephone'], body: ['Alexander Graham Bell was granted a patent for the telephone in 1876. A telephone turns the sound of a voice into an electrical signal, sends it along a wire and turns it back into sound at the other end.', 'Early telephones had no dials. Callers lifted the earpiece and asked an operator at a switchboard to connect them by hand. Bells rang to announce a call, driven by a hand-cranked generator. Radio later carried voices without wires, all the way to the [[moon|Moon]].'], see: ['moon', 'piano'] },
+  { id: 'press', t: 'Printing Press', cat: 'Inventions', ev: [1440, 'Gutenberg\'s printing press'], body: ['Around 1440 Johannes Gutenberg, a goldsmith in Mainz, Germany, developed a printing press that used movable metal type. Single letters could be set into pages, inked, pressed onto paper and then reused.', 'His most famous work, the Gutenberg Bible, was printed around 1455. Printing spread quickly across Europe, making books cheaper and helping ideas travel faster than ever before, a little like this encyclopedia on a disc.'], see: ['pyramid', 'piano'] },
+  { id: 'pyramid', t: 'Great Pyramid', cat: 'History', pic: 'pyramid', ev: [-2560, 'Great Pyramid of Giza built'], cap: 'Picture: the Great Pyramid at sunset.', body: ['The Great Pyramid of Giza in Egypt was built around 2560 BC as a tomb for the pharaoh Khufu. It was originally about 146 metres tall and stayed the tallest human-made structure for nearly 4,000 years.', 'It is made of roughly 2.3 million stone blocks. It is the oldest of the Seven Wonders of the Ancient World and the only one still standing.'], see: ['press', 'moon'] },
+];
+const BY = Object.fromEntries(A.map((a) => [a.id, a]));
+const QUIZ = [
+  ['Which planet has the Great Red Spot?', ['Mars', 'Jupiter', 'Neptune', 'Venus'], 1, 'jupiter'],
+  ['About how often does Halley\'s Comet return?', ['Every 7 years', 'Every 76 years', 'Every 300 years', 'Every 1,000 years'], 1, 'comet'],
+  ['Who invented the piano around 1700?', ['Bartolomeo Cristofori', 'Johannes Gutenberg', 'Galileo Galilei', 'Alexander Graham Bell'], 0, 'piano'],
+  ['Which colour does oxygen most often give an aurora?', ['Blue', 'Green', 'Orange', 'White'], 1, 'aurora'],
+  ['What is molten rock called once it reaches the surface?', ['Magma', 'Lava', 'Basalt', 'Ash'], 1, 'volcano'],
+  ['In which year did Apollo 11 land on the Moon?', ['1959', '1969', '1972', '1981'], 1, 'moon'],
+  ['How many keys does a modern piano have?', ['66', '76', '88', '100'], 2, 'piano'],
+  ['What are male humpback whales famous for?', ['Building nests', 'Singing long songs', 'Hibernating', 'Changing colour'], 1, 'whale'],
+  ['Roughly how many stone blocks make up the Great Pyramid?', ['23,000', '230,000', '2.3 million', '23 million'], 2, 'pyramid'],
+];
+const links = (s) => s.replace(/\[\[(\w+)(?:\|([^\]]+))?\]\]/g, (_, id, l) => `<a data-go="${id}">${l || BY[id].t}</a>`);
+const plain = (s) => s.replace(/\[\[(\w+)(?:\|([^\]]+))?\]\]/g, (_, id, l) => l || BY[id].t);
+
+// Clips > low-res procedural video and still pictures (200x130)
+const VID = {
+  orbit(x, t) {
+    x.fillStyle = '#02030c'; x.fillRect(0, 0, 200, 130); STARS.forEach(([a, b, c]) => { x.fillStyle = `rgba(255,255,255,${0.3 + c * 0.6})`; x.fillRect(a, b, 1, 1); });
+    const P = [[16, 1.2, 1.4, '#c9a'], [24, 2.0, 2, '#edb'], [33, 3.2, 2.2, '#4af'], [42, 5, 1.8, '#e74'], [62, 12, 4.2, '#dcb'], [82, 24, 3.6, '#ec9']], body = [];
+    P.forEach(([r, p, s, c]) => { x.strokeStyle = 'rgba(120,150,220,0.3)'; x.beginPath(); x.ellipse(100, 65, r, r * 0.42, 0, 0, 7); x.stroke(); const a = (t / p) * Math.PI * 2; body.push([100 + Math.cos(a) * r, 65 + Math.sin(a) * r * 0.42, s, c, Math.sin(a)]); });
+    const sun = () => { const g = x.createRadialGradient(100, 65, 0, 100, 65, 16); g.addColorStop(0, '#fff8d0'); g.addColorStop(0.35, '#ffc838'); g.addColorStop(1, 'rgba(255,120,0,0)'); x.fillStyle = g; x.fillRect(84, 49, 32, 32); };
+    body.filter((b) => b[4] < 0).forEach(dot); sun(); body.filter((b) => b[4] >= 0).forEach(dot);
+    function dot([px, py, s, c]) { x.fillStyle = c; x.beginPath(); x.arc(px, py, s, 0, 7); x.fill(); if (s > 4) { x.strokeStyle = 'rgba(230,210,170,0.7)'; x.beginPath(); x.ellipse(px, py, s * 2, s * 0.6, -0.2, 0, 7); x.stroke(); } }
+  },
+  volcano(x, t) {
+    let g = x.createLinearGradient(0, 0, 0, 130); g.addColorStop(0, '#120818'); g.addColorStop(0.7, '#6a2420'); g.addColorStop(1, '#c4582a'); x.fillStyle = g; x.fillRect(0, 0, 200, 130);
+    for (let i = 0; i < 9; i++) { const k = (t * 0.12 + i / 9) % 1; x.fillStyle = `rgba(60,50,55,${0.55 * (1 - k)})`; x.beginPath(); x.arc(100 + Math.sin(i * 3 + t * 0.3) * 10 + k * 30, 48 - k * 60, 8 + k * 26, 0, 7); x.fill(); }
+    x.fillStyle = '#21140f'; x.beginPath(); x.moveTo(0, 130); x.lineTo(20, 120); x.lineTo(88, 50); x.lineTo(112, 50); x.lineTo(180, 118); x.lineTo(200, 130); x.fill();
+    const pulse = 0.6 + Math.sin(t * 7) * 0.2; g = x.createRadialGradient(100, 50, 0, 100, 50, 26); g.addColorStop(0, `rgba(255,220,120,${pulse})`); g.addColorStop(1, 'rgba(255,80,0,0)'); x.fillStyle = g; x.fillRect(70, 24, 60, 50);
+    x.lineWidth = 2; for (const [dx, len] of [[-1, 1], [1, 0.8]]) { const L = Math.min(1, (t % 12) / 8) * len; x.strokeStyle = `rgba(255,${120 + pulse * 80},40,0.9)`; x.beginPath(); x.moveTo(100 + dx * 6, 52); x.quadraticCurveTo(100 + dx * 26, 75, 100 + dx * (8 + 60 * L), 52 + 66 * L); x.stroke(); }
+    for (let i = 0; i < 46; i++) { const h1 = (Math.sin(i * 12.9898) * 43758.5453) % 1, h2 = (Math.sin(i * 78.233) * 12543.1) % 1, ph = (t * 0.9 + i * 0.137) % 1.5; if (ph > 1.15) continue; const vx = h1 * 60, vy = -70 - Math.abs(h2) * 50, px = 100 + vx * ph, py = 50 + vy * ph + 0.5 * 130 * ph * ph; if (py > 130) continue; x.fillStyle = ph < 0.4 ? '#fff4b0' : ph < 0.8 ? '#ffa030' : '#c03810'; x.fillRect(px, py, 2, 2); }
+  },
+  aurora(x, t) {
+    let g = x.createLinearGradient(0, 0, 0, 130); g.addColorStop(0, '#010414'); g.addColorStop(1, '#0a2a3c'); x.fillStyle = g; x.fillRect(0, 0, 200, 130); STARS.forEach(([a, b, c]) => { x.fillStyle = `rgba(255,255,255,${0.2 + c * 0.5})`; x.fillRect(a, b * 0.8, 1, 1); });
+    x.globalCompositeOperation = 'lighter';
+    AUR.forEach((strip, k) => { for (let i = 0; i < 200; i += 2) { const top = 18 + k * 10 + Math.sin(i * 0.035 + t * 0.6 + k * 2) * 12 + Math.sin(i * 0.012 - t * 0.25) * 14, h = 40 + Math.sin(i * 0.07 + t * 1.1 + k) * 16; x.globalAlpha = 0.5 + Math.sin(i * 0.05 + t * 1.7 + k) * 0.3; x.drawImage(strip, i, top, 2, h); } });
+    x.globalAlpha = 1; x.globalCompositeOperation = 'source-over';
+    x.fillStyle = '#0c1820'; x.beginPath(); x.moveTo(0, 130); for (let i = 0; i <= 200; i += 5) x.lineTo(i, 108 - Math.sin(i * 0.03) * 6); x.lineTo(200, 130); x.fill();
+    x.fillStyle = '#030a0e'; for (let i = 0; i < 200; i += 7) { const h = 10 + ((i * 37) % 11), b = 112 - Math.sin(i * 0.03) * 6; x.beginPath(); x.moveTo(i, b - h); x.lineTo(i - 4, b); x.lineTo(i + 4, b); x.fill(); }
+  },
+  comet(x, t) {
+    x.fillStyle = '#02030c'; x.fillRect(0, 0, 200, 130); STARS.forEach(([a, b, c]) => { x.fillStyle = `rgba(255,255,255,${0.3 + c * 0.5})`; x.fillRect(a, b, 1, 1); });
+    const sx = 46, sy = 65, g = x.createRadialGradient(sx, sy, 0, sx, sy, 14); g.addColorStop(0, '#fff8d0'); g.addColorStop(0.4, '#ffc838'); g.addColorStop(1, 'rgba(255,120,0,0)'); x.fillStyle = g; x.fillRect(sx - 14, sy - 14, 28, 28);
+    x.strokeStyle = 'rgba(120,150,220,0.25)'; x.beginPath(); x.ellipse(108, 65, 82, 34, 0, 0, 7); x.stroke();
+    const M = (t / 12) * Math.PI * 2; let E = M; for (let i = 0; i < 6; i++) E = M + 0.75 * Math.sin(E); const cx = 108 - Math.cos(E) * 82, cy = 65 + Math.sin(E) * 34;
+    const dx = cx - sx, dy = cy - sy, d = Math.hypot(dx, dy), ux = dx / d, uy = dy / d, L = Math.max(6, 900 / d);
+    const tg = x.createLinearGradient(cx, cy, cx + ux * L, cy + uy * L); tg.addColorStop(0, 'rgba(200,230,255,0.9)'); tg.addColorStop(1, 'rgba(120,170,255,0)'); x.fillStyle = tg;
+    x.beginPath(); x.moveTo(cx - uy * 2.5, cy + ux * 2.5); x.lineTo(cx + ux * L - uy * L * 0.18, cy + uy * L + ux * L * 0.18); x.lineTo(cx + ux * L + uy * L * 0.12, cy + uy * L - ux * L * 0.12); x.lineTo(cx + uy * 2.5, cy - ux * 2.5); x.fill();
+    const cg = x.createRadialGradient(cx, cy, 0, cx, cy, 5); cg.addColorStop(0, '#fff'); cg.addColorStop(1, 'rgba(180,220,255,0)'); x.fillStyle = cg; x.fillRect(cx - 5, cy - 5, 10, 10);
+  },
+};
+const AUR = [['80,255,160'], ['120,255,200'], ['200,90,255']].map(([c]) => { const s = document.createElement('canvas'); s.width = 1; s.height = 64; const x = s.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 64); g.addColorStop(0, `rgba(${c},0)`); g.addColorStop(0.7, `rgba(${c},0.55)`); g.addColorStop(1, `rgba(${c},0)`); x.fillStyle = g; x.fillRect(0, 0, 1, 64); return s; });
+const PIC = {
+  jupiter(x) {
+    x.fillStyle = '#02030c'; x.fillRect(0, 0, 200, 130); STARS.forEach(([a, b]) => { x.fillStyle = '#889'; x.fillRect(a, b, 1, 1); });
+    x.save(); x.beginPath(); x.arc(100, 65, 56, 0, 7); x.clip(); const C = ['#e8d8b8', '#c8946a', '#f0e4cc', '#b8784e', '#e8d4b0', '#d0a070', '#f2e6d0', '#a86a48', '#e0c8a0'];
+    for (let y = 9; y < 121; y += 2) { const k = Math.floor((y - 9) / 12.5); x.fillStyle = C[k % C.length]; x.fillRect(40 + Math.sin(y * 0.7) * 2, y, 120, 2); }
+    x.fillStyle = '#b8483a'; x.beginPath(); x.ellipse(120, 82, 11, 6, 0, 0, 7); x.fill(); x.fillStyle = 'rgba(255,200,180,0.5)'; x.beginPath(); x.ellipse(118, 81, 6, 3, 0, 0, 7); x.fill();
+    const g = x.createRadialGradient(80, 50, 10, 100, 65, 58); g.addColorStop(0, 'rgba(255,255,255,0.15)'); g.addColorStop(0.75, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.7)'); x.fillStyle = g; x.fillRect(40, 9, 120, 112); x.restore();
+    [[18, 40, 1.6], [176, 58, 2], [186, 90, 1.4], [28, 96, 1.8]].forEach(([a, b, r]) => { x.fillStyle = '#ddd'; x.beginPath(); x.arc(a, b, r, 0, 7); x.fill(); });
+  },
+  reef(x) {
+    let g = x.createLinearGradient(0, 0, 0, 130); g.addColorStop(0, '#6ad8f0'); g.addColorStop(1, '#0a4a7a'); x.fillStyle = g; x.fillRect(0, 0, 200, 130);
+    x.fillStyle = 'rgba(255,255,255,0.18)'; for (let i = 0; i < 6; i++) { x.beginPath(); x.moveTo(20 + i * 34, 0); x.lineTo(40 + i * 34, 0); x.lineTo(10 + i * 30, 130); x.lineTo(0 + i * 30, 130); x.fill(); }
+    x.fillStyle = '#e8d8a8'; x.beginPath(); x.moveTo(0, 130); x.quadraticCurveTo(100, 100, 200, 122); x.lineTo(200, 130); x.fill();
+    const r = ((a) => () => (a = (a * 16807) % 2147483647) / 2147483647)(7);
+    for (let i = 0; i < 14; i++) { const bx = r() * 200, by = 112 + r() * 12, c = ['#ff7a8a', '#ffb040', '#c060e0', '#ff5050', '#f0e060'][i % 5]; x.strokeStyle = c; x.lineWidth = 2; for (let k = 0; k < 4; k++) { x.beginPath(); x.moveTo(bx, by); x.quadraticCurveTo(bx + (r() - 0.5) * 20, by - 12, bx + (r() - 0.5) * 24, by - 14 - r() * 16); x.stroke(); } }
+    for (let i = 0; i < 9; i++) { const fx = 20 + r() * 160, fy = 30 + r() * 60, c = ['#ffd020', '#ff7020', '#40a0ff'][i % 3], s = i % 2 ? 1 : -1; x.fillStyle = c; x.beginPath(); x.ellipse(fx, fy, 6, 3.5, 0, 0, 7); x.fill(); x.beginPath(); x.moveTo(fx - 5 * s, fy); x.lineTo(fx - 10 * s, fy - 4); x.lineTo(fx - 10 * s, fy + 4); x.fill(); x.fillStyle = '#000'; x.fillRect(fx + 3 * s, fy - 1, 1, 1); }
+  },
+  pyramid(x) {
+    let g = x.createLinearGradient(0, 0, 0, 130); g.addColorStop(0, '#3a2a6a'); g.addColorStop(0.55, '#f08a40'); g.addColorStop(0.8, '#ffd890'); x.fillStyle = g; x.fillRect(0, 0, 200, 130);
+    g = x.createRadialGradient(150, 92, 0, 150, 92, 26); g.addColorStop(0, '#fff6d0'); g.addColorStop(1, 'rgba(255,220,140,0)'); x.fillStyle = g; x.fillRect(120, 62, 60, 60);
+    x.fillStyle = '#c88a4a'; x.beginPath(); x.moveTo(30, 104); x.lineTo(92, 34); x.lineTo(120, 104); x.fill(); x.fillStyle = '#8a5a30'; x.beginPath(); x.moveTo(92, 34); x.lineTo(120, 104); x.lineTo(150, 104); x.fill();
+    x.strokeStyle = 'rgba(90,50,20,0.35)'; for (let y = 40; y < 104; y += 4) { const w = (y - 34) / 70; x.beginPath(); x.moveTo(92 - 62 * w, y); x.lineTo(92 + 28 * w, y); x.stroke(); }
+    x.fillStyle = '#a87040'; x.beginPath(); x.moveTo(140, 104); x.lineTo(166, 76); x.lineTo(190, 104); x.fill();
+    x.fillStyle = '#e0a860'; x.fillRect(0, 104, 200, 26); x.fillStyle = 'rgba(160,100,50,0.4)'; for (let i = 0; i < 6; i++) { x.beginPath(); x.ellipse(i * 40 + 10, 118 + (i % 2) * 6, 30, 3, 0, 0, 7); x.fill(); }
+  },
+};
+
+// Sound clips > synthesized, one at a time
+let ac, clip = null;
+function audio() { if (!ac) ac = new AudioContext(); if (ac.state !== 'running') ac.resume(); return ac.state === 'running'; }
+function osc(out, type, f, t0, d, v, f2) { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + t0; o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + Math.min(0.08, d / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.05); return o; }
+function noise(sec) { const b = ac.createBuffer(1, ac.sampleRate * sec, ac.sampleRate), d = b.getChannelData(0); let last = 0; for (let i = 0; i < d.length; i++) { last = (last + 0.02 * (Math.random() * 2 - 1)) / 1.02; d[i] = last * 3.5; } const s = ac.createBufferSource(); s.buffer = b; return s; }
+const SND = {
+  whale(out) { const dl = ac.createDelay(), fb = ac.createGain(); dl.delayTime.value = 0.45; fb.gain.value = 0.45; out.connect(dl).connect(fb).connect(dl); dl.connect(ac.destination); [[300, 520, 0, 1.4], [520, 240, 1.5, 1.2], [180, 380, 2.9, 1.6], [380, 160, 4.6, 1.8]].forEach(([a, b, t0, d]) => { const o = osc(out, 'sine', a, t0, d, 0.18, b), v = ac.createOscillator(), vg = ac.createGain(); v.frequency.value = 6; vg.gain.value = 9; v.connect(vg).connect(o.frequency); v.start(ac.currentTime + t0); v.stop(ac.currentTime + t0 + d); osc(out, 'triangle', a * 2, t0, d, 0.03, b * 2); }); },
+  scale(out) { [261.6, 293.7, 329.6, 349.2, 392, 440, 493.9, 523.3].forEach((f, i) => { osc(out, 'triangle', f, i * 0.32, 1.3, 0.2); osc(out, 'sine', f * 2, i * 0.32, 0.6, 0.05); osc(out, 'sine', f * 3, i * 0.32, 0.3, 0.02); }); },
+  ring(out) { for (const t0 of [0, 2.4]) { const g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain(), t = ac.currentTime + t0; g.gain.value = 0; lfo.type = 'square'; lfo.frequency.value = 18; lg.gain.value = 0.09; lfo.connect(lg).connect(g.gain); lfo.start(t); lfo.stop(t + 1.6); [1180, 1620, 2400].forEach((f) => { const o = ac.createOscillator(); o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + 1.6); }); g.connect(out); } },
+  beep(out) { osc(out, 'sine', 2525, 0, 0.25, 0.12); const n = noise(5.6), bp = ac.createBiquadFilter(), g = ac.createGain(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.6; g.gain.value = 0.35; n.connect(bp).connect(g).connect(out); n.start(ac.currentTime + 0.3); const v = ac.createOscillator(), f1 = ac.createBiquadFilter(), vg = ac.createGain(), m = ac.createOscillator(), mg = ac.createGain(); v.type = 'sawtooth'; v.frequency.value = 118; f1.type = 'bandpass'; f1.Q.value = 6; f1.frequency.value = 900; m.frequency.value = 3.3; mg.gain.value = 500; m.connect(mg).connect(f1.frequency); vg.gain.setValueAtTime(0, ac.currentTime); for (let i = 0; i < 16; i++) vg.gain.setValueAtTime(Math.random() < 0.7 ? 0.05 : 0, ac.currentTime + 0.5 + i * 0.3); vg.gain.setValueAtTime(0, ac.currentTime + 5.4); v.connect(f1).connect(vg).connect(out); v.start(); m.start(); v.stop(ac.currentTime + 5.9); m.stop(ac.currentTime + 5.9); osc(out, 'sine', 2475, 5.9, 0.25, 0.12); },
+  rumble(out) { const n = noise(5), lp = ac.createBiquadFilter(), g = ac.createGain(), t = ac.currentTime; lp.type = 'lowpass'; lp.frequency.value = 140; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1.6, t + 1.5); g.gain.exponentialRampToValueAtTime(0.0001, t + 5); n.connect(lp).connect(g).connect(out); n.start(); for (let i = 0; i < 14; i++) osc(out, 'square', 60 + Math.random() * 90, 0.6 + Math.random() * 3.6, 0.05, 0.05); },
+};
+function stopClip() { if (!clip) return; clip.g.gain.setTargetAtTime(0, ac.currentTime, 0.05); const g = clip.g; setTimeout(() => g.disconnect(), 300); clearTimeout(clip.to); clip.btn?.classList.remove('on'); clip = null; }
+function playClip(btn) {
+  const a = BY[cur().id]; if (!a?.snd) return; const was = clip?.btn === btn; stopClip(); if (was) return;
+  btn.classList.add('on'); if (!audio()) { clip = { g: { gain: { setTargetAtTime() {} }, disconnect() {} }, btn, to: setTimeout(stopClip, a.snd[2] * 1000) }; return; }
+  const g = ac.createGain(); g.gain.value = 0.9; g.connect(ac.destination); SND[a.snd[0]](g); clip = { g, btn, to: setTimeout(stopClip, a.snd[2] * 1000) };
+}
+function seek() { if (!audio()) return; const n = noise(0.25), hp = ac.createBiquadFilter(), g = ac.createGain(); hp.type = 'highpass'; hp.frequency.value = 2500; g.gain.value = 0.25; n.connect(hp).connect(g).connect(ac.destination); n.start(); for (let i = 0; i < 4; i++) osc(ac.destination, 'square', 90, i * 0.06, 0.02, 0.03); }
+function chime(good) { if (!audio()) return; (good ? [523, 659, 784] : [330, 262]).forEach((f, i) => osc(ac.destination, 'triangle', f, i * 0.1, 0.4, 0.15)); }
+
+// Player > the one video on screen
+let player = null;
+function mountPlayer(a) {
+  const fig = $('#view figure'); if (!fig) return (player = null);
+  const x = fig.querySelector('canvas').getContext('2d');
+  if (a.pic) { PIC[a.pic](x); player = null; return; }
+  player = { x, kind: a.vid, t: 0, playing: true, dur: 12, fig }; drawPlayer();
+  fig.querySelector('.pp').onclick = () => { player.playing = !player.playing; drawPlayer(); };
+  fig.querySelector('.prog').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); player.t = ((e.clientX - r.left) / r.width) * player.dur; drawPlayer(); };
+}
+function drawPlayer() { const p = player; VID[p.kind](p.x, p.t); p.fig.querySelector('.prog i').style.width = `${(p.t / p.dur) * 100}%`; p.fig.querySelector('.tc').textContent = `00:${String(Math.floor(p.t)).padStart(2, '0')}/00:${p.dur}`; p.fig.querySelector('.pp').textContent = p.playing ? '❚❚' : '▶'; }
+
+// Views > contents, article, gallery, timeline, quiz, search
+const hist = [], fwd = [];
+const cur = () => hist[hist.length - 1] || {};
+let quiz = null, loading = false;
+async function go(s, push = true) {
+  if (push) { hist.push(s); fwd.length = 0; }
+  stopClip(); player = null; $('#side').classList.remove('open');
+  if (!capture) { loading = true; $('#load').hidden = false; $('#disc').classList.add('spin'); seek(); await wait(0.35 + Math.random() * 0.25); loading = false; $('#load').hidden = true; $('#disc').classList.remove('spin'); }
+  render(); $('#main').scrollTop = 0;
+}
+const open = (id) => go({ v: 'article', id });
+const view = (v) => go(v === 'quiz' ? { v, fresh: true } : { v });
+function render() {
+  const s = cur(), V = $('#view');
+  document.querySelectorAll('nav [data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === s.v));
+  $('#back').disabled = hist.length < 2; $('#fwd').disabled = !fwd.length;
+  document.querySelectorAll('#list li').forEach((li) => li.classList.toggle('on', s.v === 'article' && li.dataset.go === s.id));
+  if (s.v === 'article') {
+    const a = BY[s.id], media = a.vid || a.pic;
+    V.innerHTML = `<div class="page"><div class="kicker">${a.cat}</div><h1>${a.t}</h1>${media ? `<figure><div class="screen"><canvas width="200" height="130"></canvas></div>${a.vid ? '<div class="ctl"><button class="pp"></button><div class="prog"><i></i></div><span class="tc"></span></div>' : ''}<figcaption>${a.cap}</figcaption></figure>` : ''}${a.body.map((p, i) => `<p>${links(p)}</p>${i === 0 && a.snd ? `<button class="snd"><span class="eq"><i></i><i></i><i></i></span>&#9835; Play sound: ${a.snd[1]} (0:0${a.snd[2]})</button>` : ''}`).join('')}<div class="see"><b>See also:</b> ${a.see.map((id) => `<a data-go="${id}">${BY[id].t}</a>`).join(' &#183; ')}</div></div>`;
+    mountPlayer(a); V.querySelector('.snd')?.addEventListener('click', (e) => playClip(e.currentTarget));
+    $('#stat').textContent = `${a.t} · ${a.cat}`;
+  } else if (s.v === 'contents' || s.v === 'index') {
+    const cats = [...new Set(A.map((a) => a.cat))], q = QUIZ[Math.floor(Math.random() * QUIZ.length)];
+    V.innerHTML = `<div class="page"><div class="kicker">Welcome</div><h1>Contents</h1><p>Compendia holds ${A.length} articles with ${A.filter((a) => a.vid).length} video clips, ${A.filter((a) => a.pic).length} pictures and ${A.filter((a) => a.snd).length} sound clips. Choose a subject, browse the <span class="lnk" data-v="gallery">Media Gallery</span> or travel through the <span class="lnk" data-v="timeline">Timeline</span>.</p><div class="cats">${cats.map((c) => `<div class="cat"><h3>${c}</h3><div>${A.filter((a) => a.cat === c).map((a) => `<a data-go="${a.id}">${a.t}</a>`).join('<br />')}</div></div>`).join('')}</div><div class="dyk">Did you know? ${q[0].replace('?', '')}: ${q[1][q[2]]}. <a data-go="${q[3]}" style="color:#ffe890">Read more</a></div></div>`;
+    $('#stat').textContent = `${A.length} articles`;
+  } else if (s.v === 'gallery') {
+    const items = A.filter((a) => a.vid || a.pic || a.snd);
+    V.innerHTML = `<div class="page"><div class="kicker">Media</div><h1>Media Gallery</h1><div class="gal">${items.map((a) => `<div data-go="${a.id}"><canvas width="200" height="130" data-k="${a.id}"></canvas>${a.vid ? '&#9654; Video' : a.pic ? '&#9635; Picture' : '&#9835; Sound'}: ${a.t}<small>${a.vid ? a.cap.split('. ')[0].replace('Video: ', '') : a.pic ? a.cap.replace('Picture: ', '') : a.snd[1]}</small></div>`).join('')}</div></div>`;
+    V.querySelectorAll('canvas[data-k]').forEach((c) => { const a = BY[c.dataset.k], x = c.getContext('2d'); if (a.vid) VID[a.vid](x, 4); else if (a.pic) PIC[a.pic](x); else wave(x, a.snd[0]); });
+    $('#stat').textContent = `${items.length} media items`;
+  } else if (s.v === 'timeline') {
+    const evs = A.filter((a) => a.ev).sort((p, q) => p.ev[0] - q.ev[0]);
+    V.innerHTML = `<div class="page"><div class="kicker">History</div><h1>Timeline</h1><p>From the pyramids to the space age. Click an event to read about it.</p></div><div id="tl"><div class="track" style="width:${evs.length * 160 + 60}px">${evs.map((a, i) => `<div class="ev ${i % 2 ? 'dn' : 'up'}" data-go="${a.id}" style="left:${30 + i * 160}px"><b>${a.ev[0] < 0 ? `${-a.ev[0]} BC` : a.ev[0]}</b><span>${a.ev[1]}</span></div>`).join('')}</div></div>`;
+    $('#stat').textContent = `${evs.length} events`;
+  } else if (s.v === 'quiz') {
+    if (s.fresh || !quiz) { quiz = { qs: [...QUIZ].sort(() => Math.random() - 0.5).slice(0, 5), i: 0, score: 0, picked: null }; s.fresh = false; }
+    if (quiz.i >= quiz.qs.length) { V.innerHTML = `<div class="page q"><div class="kicker">Quiz</div><h1>Final score: ${quiz.score} / ${quiz.qs.length}</h1><p>${quiz.score >= 4 ? 'Outstanding! You really know your Compendia.' : quiz.score >= 2 ? 'Good effort. Read a few more articles and try again.' : 'Keep exploring the disc and have another go.'}</p><span class="btn" id="again">Play again</span></div>`; $('#again').onclick = () => view('quiz'); return; }
+    const [q, o, k, id] = quiz.qs[quiz.i], p = quiz.picked;
+    V.innerHTML = `<div class="page q"><div class="kicker">Quiz</div><div class="score">QUESTION ${quiz.i + 1} OF ${quiz.qs.length} &#183; SCORE ${quiz.score}</div><h1>${q}</h1><div class="opts">${o.map((t, i) => `<button data-a="${i}" class="${p === null ? '' : i === k ? 'right' : i === p ? 'wrong' : ''}">${'ABCD'[i]}. ${t}</button>`).join('')}</div>${p === null ? '' : `<p class="verdict" style="color:${p === k ? '#2a7a2a' : '#b03020'}">${p === k ? 'Correct!' : `Not quite. The answer is ${o[k]}.`}</p><p>Read more in <a data-go="${id}">${BY[id].t}</a>.</p><span class="btn" id="next">${quiz.i < quiz.qs.length - 1 ? 'Next question' : 'See my score'}</span>`}</div>`;
+    V.querySelectorAll('[data-a]').forEach((b) => (b.onclick = () => answer(+b.dataset.a))); $('#next')?.addEventListener('click', next);
+    $('#stat').textContent = `Quiz · ${quiz.score} correct`;
+  } else if (s.v === 'search') {
+    const r = searchAll(s.q), re = new RegExp(`(${s.q.replace(/[^\w ]/g, '').trim().split(/\s+/).join('|')})`, 'gi');
+    V.innerHTML = `<div class="page"><div class="kicker">Search</div><h1>${r.length} result${r.length === 1 ? '' : 's'} for "${s.q.replace(/[<&"]/g, '')}"</h1>${r.map(([a, snip]) => `<div class="res"><span class="lnk" data-go="${a.id}">${a.t}</span> <small>${a.cat}</small><p>${snip.replace(re, '<mark>$1</mark>')}</p></div>`).join('') || '<p>No articles matched. Try another word, like planet or music.</p>'}</div>`;
+    $('#stat').textContent = `Search: ${s.q}`;
+  }
+}
+function answer(i) { if (cur().v !== 'quiz' || !quiz || quiz.picked !== null) return; quiz.picked = i; const ok = i === quiz.qs[quiz.i][2]; if (ok) quiz.score++; chime(ok); render(); }
+function next() { quiz.i++; quiz.picked = null; render(); }
+function searchAll(q) {
+  const ws = q.toLowerCase().replace(/[^\w ]/g, '').split(/\s+/).filter((w) => w.length > 1); if (!ws.length) return [];
+  return A.map((a) => { const text = plain(a.body.join(' ')), low = text.toLowerCase(); let s = 0, at = -1; for (const w of ws) { if (a.t.toLowerCase().includes(w)) s += 5; let i = low.indexOf(w); if (i >= 0 && at < 0) at = i; while (i >= 0) { s++; i = low.indexOf(w, i + 1); } } const st = Math.max(0, at - 60); return [a, s, `${st ? '...' : ''}${text.slice(st, st + 170)}...`]; }).filter((r) => r[1] > 0).sort((p, q2) => q2[1] - p[1]).map(([a, , snip]) => [a, snip]);
+}
+function wave(x, k) { x.fillStyle = '#0a1430'; x.fillRect(0, 0, 200, 130); x.strokeStyle = '#f0c040'; x.lineWidth = 1.5; x.beginPath(); for (let i = 0; i < 200; i++) { const env = Math.sin((i / 200) * Math.PI), f = { whale: 0.08, scale: 0.4, ring: 0.9, beep: 0.6, rumble: 0.15 }[k]; x.lineTo(i, 65 + Math.sin(i * f) * Math.sin(i * f * 0.13) * 40 * env); } x.stroke(); x.fillStyle = '#ffe890'; x.font = 'bold 26px Georgia'; x.fillText('♫', 8, 30); }
+
+// Index > A-Z strip, find box, list
+let letter = null;
+function buildIndex() {
+  const q = $('#find').value.trim().toLowerCase(), items = A.filter((a) => (!letter || a.t[0] === letter) && (!q || a.t.toLowerCase().includes(q))).sort((p, r) => p.t.localeCompare(r.t));
+  $('#list').innerHTML = items.map((a) => `<li data-go="${a.id}">${a.t}<i>${a.vid ? '&#9654;' : ''}${a.pic ? '&#9635;' : ''}${a.snd ? '&#9835;' : ''}</i></li>`).join('');
+  $('#az').innerHTML = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map((l) => `<b class="${A.some((a) => a.t[0] === l) ? '' : 'off'}${l === letter ? ' on' : ''}" data-l="${l}">${l}</b>`).join('');
+  document.querySelectorAll('#list li').forEach((li) => li.classList.toggle('on', cur().v === 'article' && li.dataset.go === cur().id));
+}
+$('#az').onclick = (e) => { const l = e.target.closest('[data-l]')?.dataset.l; if (!l) return; letter = letter === l ? null : l; buildIndex(); };
+$('#find').oninput = () => { letter = null; buildIndex(); };
+$('#find').onkeydown = (e) => { if (e.key === 'Enter' && $('#find').value.trim()) go({ v: 'search', q: $('#find').value.trim() }); };
+document.addEventListener('click', (e) => { const g = e.target.closest('[data-go]'); if (g && !loading) return open(g.dataset.go); const v = e.target.closest('[data-v]'); if (v && !loading) { if (v.dataset.v === 'index' && innerWidth <= 700) return $('#side').classList.toggle('open'); view(v.dataset.v); } });
+$('#back').onclick = () => { if (hist.length > 1 && !loading) { fwd.push(hist.pop()); go(cur(), false); } };
+$('#fwd').onclick = () => { if (fwd.length && !loading) { hist.push(fwd.pop()); go(cur(), false); } };
+
+// Loop > globe, video playback
+const gx = $('#globe').getContext('2d'); let last = 0;
+function globe(t) {
+  gx.clearRect(0, 0, 84, 84); const g = gx.createRadialGradient(32, 30, 4, 42, 42, 40); g.addColorStop(0, '#9fe0ff'); g.addColorStop(0.6, '#1a6ad0'); g.addColorStop(1, '#0a2a6a'); gx.fillStyle = g; gx.beginPath(); gx.arc(42, 42, 38, 0, 7); gx.fill();
+  gx.save(); gx.beginPath(); gx.arc(42, 42, 38, 0, 7); gx.clip(); gx.strokeStyle = 'rgba(255,240,180,0.7)'; gx.lineWidth = 1.2;
+  for (let i = 0; i < 6; i++) { const a = ((t * 0.6 + (i * Math.PI) / 6) % Math.PI); gx.beginPath(); gx.ellipse(42, 42, Math.abs(Math.cos(a)) * 38, 38, 0, 0, 7); gx.stroke(); }
+  for (const y of [-24, -12, 0, 12, 24]) { const w = Math.sqrt(38 * 38 - y * y); gx.beginPath(); gx.ellipse(42, 42 + y, w, w * 0.12, 0, 0, 7); gx.stroke(); } gx.restore();
+  gx.strokeStyle = '#ffe080'; gx.lineWidth = 2; gx.beginPath(); gx.arc(42, 42, 39, 0, 7); gx.stroke();
+}
+function frame(ms) { requestAnimationFrame(frame); const t = ms / 1000, dt = Math.min(0.05, t - last); last = t; globe(t); if (player?.playing) { player.t = (player.t + dt) % player.dur; drawPlayer(); } }
+requestAnimationFrame(frame);
+
+// Attract > browse, play, quiz, search
+let touched = false;
+addEventListener('pointerdown', (e) => { audio(); if (e.isTrusted) touched = true; }, { capture: true });
+addEventListener('keydown', (e) => { audio(); if (e.isTrusted) touched = true; }, { capture: true });
+async function step(s, fn) { await wait(s); if (touched) throw 0; return fn(); }
+const click = (sel) => document.querySelector(sel)?.click();
+async function attract() {
+  try {
+    for (;;) {
+      await step(1.4, () => open('solar')); await wait(4.5);
+      await step(0, () => click('#view p a[data-go="jupiter"]')); await wait(3.5);
+      await step(0, () => view('gallery')); await wait(2.4);
+      await step(0, () => click('.gal [data-go="volcano"]')); await wait(3.5); await step(0, () => click('.snd')); await wait(3);
+      await step(0, () => view('timeline')); await wait(1); for (let i = 0; i < 30; i++) await step(0.04, () => ($('#tl').scrollLeft += 18)); await step(0.8, () => click('.ev[data-go="moon"]')); await wait(3.5);
+      await step(0, () => view('quiz')); await step(2.2, () => answer(quiz.qs[0][2])); await step(2.6, next); await step(2, () => answer((quiz.qs[1][2] + 1) % 4)); await wait(2.6);
+      for (const ch of 'whale') await step(0.12, () => { $('#find').value += ch; buildIndex(); }); await step(0.5, () => go({ v: 'search', q: $('#find').value }));
+      await step(2.2, () => click('.res [data-go="whale"]')); await step(1.2, () => click('.snd')); await wait(4); await step(0, () => { $('#find').value = ''; buildIndex(); });
+      await step(0.5, () => click('.see [data-go="reef"]')); await wait(3); await step(0, () => view('contents')); await wait(3);
+    }
+  } catch { /* user took over */ }
+}
+buildIndex();
+if (capture) { hist.push({ v: 'article', id: 'solar' }); render(); player.t = 7.3; drawPlayer(); } else { go({ v: 'contents' }); attract(); }
+
+window.__encyclo = { open, view, search: (q) => go({ v: 'search', q }), answer, next, back: () => $('#back').click(), state: () => ({ view: cur().v, id: cur().id, hist: hist.length, fwd: fwd.length, loading, quiz: quiz && { i: quiz.i, score: quiz.score, picked: quiz.picked }, playing: player ? { kind: player.kind, t: +player.t.toFixed(2), on: player.playing } : null, clip: !!clip, list: [...document.querySelectorAll('#list li')].map((l) => l.dataset.go) }) };
+</script>
+</body>
+</html>

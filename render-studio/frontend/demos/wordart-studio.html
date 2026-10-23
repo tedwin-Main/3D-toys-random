@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fancy Text Studio</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="33" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="canvas 2D, column-slice warping, extrusion, gradients, PNG export" />
+<meta name="description" content="The late-90s fancy text gallery every school newsletter used: a grey dialog with a grid of twelve styles (rainbow arch, chrome 3D, waving blue, gold slant, perspective floor shadow, neon glow, pyramid, bulge and more) and a page preview that renders whatever you type in the chosen style, ready to save as a PNG. Hard because canvas can't bend text, so each style draws the text flat with its gradient and outline, then rebuilds it one pixel column at a time through a warp function (arch, wave, slant, bulge, triangle, vanishing), and fakes 3D by stacking a tinted copy behind the face, plus skewed floor shadows and glows."/>
+<meta name="prompt" content="Build a late-90s fancy text gallery in one HTML file with canvas 2D: a grey dialog with a 4x3 grid of style thumbnails and a page preview of the user's text. Render each style by drawing the text flat with gradient fills (rainbow, chrome, gold, fire) and outlines, warping it column by column through arch, wave, slant, bulge, triangle and vanishing-point functions, and faking depth with stacked tinted extrusions, drop and skewed floor shadows and neon glow. Add font choice, animated wave styles, PNG export, click sounds and an attract mode that cycles styles and sample phrases." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/wordart-studio.html
+ * PURPOSE: late-90s fancy text gallery: gradient text warped per pixel column, stacked extrusions, shadows, PNG export
+ * UI: Render Studio > Frutiger Aero > Fancy Text Studio
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__wordart (style, text, font, png)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: #008080; font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif; display: grid; place-items: center; padding: 10px; overflow: auto; }
+#dlg { width: min(980px, 100%); background: #c0c0c0; border: 2px outset #fff; box-shadow: 2px 2px 0 #000; }
+#tb { display: flex; align-items: center; justify-content: space-between; padding: 3px 4px 3px 6px; background: linear-gradient(90deg, #000080, #1084d0); color: #fff; font-weight: bold; }
+#tb b { width: 16px; height: 14px; background: #c0c0c0; border: 2px outset #fff; color: #000; font: bold 10px/10px Arial; text-align: center; }
+#main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 10px; padding: 10px; }
+fieldset { border: 2px groove #fff; margin: 0; padding: 6px 8px 8px; }
+legend { padding: 0 4px; }
+#grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: #fff; border: 2px inset #fff; }
+#grid canvas { width: 100%; aspect-ratio: 2 / 1; border: 2px solid transparent; cursor: pointer; display: block; background: #fff; }
+#grid canvas.on { border: 2px dotted #000080; background: #c6d6ff; }
+.row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+input[type=text], select { font: inherit; border: 2px inset #fff; padding: 2px 4px; background: #fff; }
+#txt { flex: 1; min-width: 0; }
+button { font: inherit; min-width: 74px; padding: 3px 8px; background: #c0c0c0; border: 2px outset #fff; cursor: pointer; }
+button:active { border-style: inset; }
+#page { background: #808080; border: 2px inset #fff; padding: 14px; display: grid; place-items: center; min-height: 360px; }
+#sheet { width: 100%; background: #fff; box-shadow: 3px 3px 0 #333; padding: 18px 16px 24px; }
+#sheet .rule { height: 6px; margin: 6px 0; background: repeating-linear-gradient(90deg, #ccc 0 60%, transparent 60% 100%); background-size: 12px 6px; opacity: 0.6; }
+#sheet .rule.s { width: 70%; }
+#pv { width: 100%; display: block; aspect-ratio: 9 / 4; }
+#status { display: flex; gap: 2px; padding: 2px; } #status span { flex: 1; border: 1px inset #fff; padding: 1px 4px; }
+@media (max-width: 760px) { #main { grid-template-columns: minmax(0, 1fr); } #page { min-height: 0; padding: 8px; } }
+</style>
+</head>
+<body>
+<div id="dlg">
+  <div id="tb"><span>Fancy Text Gallery</span><b>x</b></div>
+  <div id="main">
+    <div>
+      <fieldset><legend>Select a style:</legend><div id="grid"></div></fieldset>
+      <fieldset style="margin-top:8px"><legend>Edit text</legend>
+        <div class="row"><input type="text" id="txt" maxlength="22" value="Summer 1999"></div>
+        <div class="row">Font: <select id="font"><option>Arial Black</option><option>Impact</option><option>Times New Roman</option><option>Comic Sans MS</option><option>Georgia</option><option>Verdana</option></select><label><input type="checkbox" id="bold" checked> Bold</label></div>
+        <div class="row"><button id="png">Save PNG</button><button id="next">Next style</button></div>
+      </fieldset>
+    </div>
+    <div id="page"><div id="sheet"><div class="rule"></div><div class="rule s"></div><canvas id="pv" width="900" height="400"></canvas><div class="rule"></div><div class="rule"></div><div class="rule s"></div></div></div>
+  </div>
+  <div id="status"><span id="st">Style 1 of 12</span><span>Page 1</span><span>Ln 1 Col 1</span></div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+
+// Fills > gradient builders over text box
+const RAIN = ['#ff0000', '#ff9900', '#ffff00', '#00cc00', '#0099ff', '#3300cc', '#9900cc'];
+const stops = (g, cs) => (cs.forEach((c, i) => g.addColorStop(i / (cs.length - 1), c)), g);
+const FILL = {
+  rainbow: (x, b) => stops(x.createLinearGradient(b.x0, 0, b.x1, 0), RAIN),
+  rainbowV: (x, b) => stops(x.createLinearGradient(0, b.y0, 0, b.y1), RAIN),
+  chrome: (x, b) => { const g = x.createLinearGradient(0, b.y0, 0, b.y1); [[0, '#ffffff'], [0.3, '#c8d0d8'], [0.48, '#4f5964'], [0.52, '#f4f8fb'], [0.75, '#97a2ae'], [1, '#eef2f6']].forEach(([o, c]) => g.addColorStop(o, c)); return g; },
+  gold: (x, b) => { const g = x.createLinearGradient(0, b.y0, 0, b.y1); [[0, '#fff6c0'], [0.35, '#ffd34a'], [0.5, '#9a6200'], [0.55, '#ffe27a'], [0.85, '#c58a00'], [1, '#fff0a0']].forEach(([o, c]) => g.addColorStop(o, c)); return g; },
+  fire: (x, b) => stops(x.createLinearGradient(0, b.y0, 0, b.y1), ['#ffff99', '#ffcc00', '#ff6600', '#cc0000']),
+  ocean: (x, b) => stops(x.createLinearGradient(b.x0, b.y0, b.x1, b.y1), ['#00ffff', '#0066ff', '#000099']),
+  purple: (x, b) => stops(x.createLinearGradient(b.x0, 0, b.x1, 0), ['#ff66cc', '#9933ff', '#3300cc']),
+  green: (x, b) => stops(x.createLinearGradient(0, b.y0, 0, b.y1), ['#ccff66', '#33cc33', '#006600']),
+  sky: (x, b) => stops(x.createLinearGradient(0, b.y0, 0, b.y1), ['#e6f7ff', '#66ccff', '#0066cc']),
+  stone: (x, b) => stops(x.createLinearGradient(0, b.y0, 0, b.y1), ['#dddddd', '#888888', '#bbbbbb', '#555555']),
+  white: () => '#ffffff', none: () => 'rgba(0,0,0,0)',
+};
+
+// Warps > per-column vertical offset + scale, u in 0..1
+const WARP = {
+  none: () => [0, 1],
+  arch: (u) => [-0.18 * Math.sin(Math.PI * u), 1],
+  wave: (u, t) => [0.09 * Math.sin(u * Math.PI * 3 + t * 2.4), 1],
+  slant: (u) => [0, 0.55 + 0.7 * u],
+  vanish: (u) => [0, 1.25 - 0.75 * u],
+  bulge: (u) => [0, 0.65 + 0.6 * Math.sin(Math.PI * u)],
+  triangle: (u) => [0, 0.45 + 0.85 * (1 - Math.abs(2 * u - 1))],
+  valley: (u) => [0.12 * (1 - Math.sin(Math.PI * u)) - 0.06, 0.8 + 0.5 * Math.abs(2 * u - 1)],
+};
+const STYLES = [
+  { name: 'Rainbow Arch', fill: 'rainbow', stroke: '#330066', sw: 2, warp: 'arch', ex: 0 },
+  { name: 'Chrome 3D', fill: 'chrome', stroke: '#2a3240', sw: 2, warp: 'none', ex: 14, exc: '#3d5a80', ed: [1, 1] },
+  { name: 'Blue Wave', fill: 'ocean', stroke: '#000044', sw: 2, warp: 'wave', ex: 0, drop: true, anim: true },
+  { name: 'Gold Slant', fill: 'gold', stroke: '#5a3a00', sw: 2, warp: 'slant', ex: 10, exc: '#6b4400', ed: [1, 1] },
+  { name: 'Outline Shadow', fill: 'white', stroke: '#000000', sw: 3, warp: 'none', ex: 0, drop: true },
+  { name: 'Purple Bulge', fill: 'purple', stroke: '#330033', sw: 2, warp: 'bulge', ex: 6, exc: '#550055', ed: [0.6, 1] },
+  { name: 'Fire Floor', fill: 'fire', stroke: '#660000', sw: 2, warp: 'none', ex: 0, floor: true },
+  { name: 'Green Pyramid', fill: 'green', stroke: '#003300', sw: 2, warp: 'triangle', ex: 10, exc: '#1a4d1a', ed: [0, 1] },
+  { name: 'Sky Vanish', fill: 'sky', stroke: '#ffffff', sw: 3, warp: 'vanish', ex: 0, drop: true },
+  { name: 'Stone Valley', fill: 'stone', stroke: '#222222', sw: 4, warp: 'valley', ex: 8, exc: '#333333', ed: [-1, 1] },
+  { name: 'Neon Glow', fill: 'none', stroke: '#ff33cc', sw: 5, warp: 'none', ex: 0, glow: '#ff66ff', bg: '#110022' },
+  { name: 'Rainbow Wave 3D', fill: 'rainbowV', stroke: '#000000', sw: 2, warp: 'wave', ex: 9, exc: '#222244', ed: [1, 1], anim: true },
+];
+
+// Render > flat text, column warp, tinted extrusion, shadows
+const A = document.createElement('canvas'), B = document.createElement('canvas'), C = document.createElement('canvas');
+let font = 'Arial Black', bold = true;
+function render(dst, text, st, t = 0) {
+  const W = dst.width, H = dst.height, x = dst.getContext('2d');
+  for (const c of [A, B, C]) { c.width = W; c.height = H; }
+  const a = A.getContext('2d'), b = B.getContext('2d'), c = C.getContext('2d');
+  let F = H * 0.42; a.font = `${bold ? 'bold ' : ''}${F}px "${font}"`; const w0 = a.measureText(text).width;
+  F *= Math.min(1, (W * 0.84) / Math.max(1, w0)); a.font = `${bold ? 'bold ' : ''}${F}px "${font}"`;
+  const tw = a.measureText(text).width, box = { x0: (W - tw) / 2, x1: (W + tw) / 2, y0: H / 2 - F * 0.55, y1: H / 2 + F * 0.45 };
+  a.textAlign = 'center'; a.textBaseline = 'middle'; a.lineJoin = 'round';
+  if (st.glow) { a.shadowColor = st.glow; a.shadowBlur = H * 0.06; }
+  a.fillStyle = FILL[st.fill](a, box); a.fillText(text, W / 2, H / 2);
+  a.lineWidth = st.sw * (H / 200); a.strokeStyle = st.stroke; a.strokeText(text, W / 2, H / 2);
+  if (st.glow) { a.shadowBlur = H * 0.02; a.lineWidth *= 0.4; a.strokeStyle = '#ffe6ff'; a.strokeText(text, W / 2, H / 2); }
+  // column slices through warp
+  const wf = WARP[st.warp], cy = H / 2, x0 = Math.max(0, Math.floor(box.x0 - H * 0.08)), x1 = Math.min(W, Math.ceil(box.x1 + H * 0.08));
+  if (st.warp === 'none') b.drawImage(A, 0, 0);
+  else for (let px = x0; px < x1; px++) { const [dy, sy] = wf((px - box.x0) / Math.max(1, tw), t); b.drawImage(A, px, 0, 1, H, px, cy - cy * sy + dy * H, 1, H * sy); }
+  // tinted copy for extrusion / shadows
+  const tint = (col) => { c.globalCompositeOperation = 'copy'; c.drawImage(B, 0, 0); c.globalCompositeOperation = 'source-in'; c.fillStyle = col; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over'; };
+  x.clearRect(0, 0, W, H); if (st.bg) { x.fillStyle = st.bg; x.fillRect(0, 0, W, H); }
+  const k = H / 200;
+  if (st.floor) { tint('rgba(80,40,0,0.35)'); x.save(); x.translate(0, box.y1 + (H * 0.04)); x.transform(1, 0, -1.1, 0.32, 0, 0); x.drawImage(C, 0, -(box.y1 + H * 0.04)); x.restore(); }
+  if (st.drop) { tint('rgba(0,0,0,0.35)'); x.drawImage(C, 6 * k, 6 * k); }
+  if (st.ex) { tint(st.exc); const [ex, ey] = st.ed; for (let i = st.ex; i >= 1; i--) x.drawImage(C, ex * i * k * 0.7, ey * i * k * 0.7); }
+  x.drawImage(B, 0, 0);
+}
+
+// Gallery > 12 thumbnails
+let cur = 0, dirty = true;
+const thumbs = STYLES.map((s, i) => { const c = document.createElement('canvas'); c.width = 200; c.height = 100; c.title = s.name; c.onclick = () => { input(); pick(i); }; $('#grid').append(c); return c; });
+function drawThumbs() { thumbs.forEach((c, i) => render(c, 'Fancy', STYLES[i], 0.6)); }
+function pick(i) { cur = (i + STYLES.length) % STYLES.length; thumbs.forEach((c, k) => c.classList.toggle('on', k === cur)); $('#st').textContent = `Style ${cur + 1} of 12 · ${STYLES[cur].name}`; dirty = true; click(); }
+$('#txt').oninput = () => { input(); dirty = true; };
+$('#font').onchange = (e) => { input(); font = e.target.value; drawThumbs(); dirty = true; };
+$('#bold').onchange = (e) => { input(); bold = e.target.checked; drawThumbs(); dirty = true; };
+$('#next').onclick = () => { input(); pick(cur + 1); };
+function png() { const a = document.createElement('a'); a.download = 'fancy-text.png'; a.href = $('#pv').toDataURL('image/png'); a.click(); return a.href.length; }
+$('#png').onclick = () => { input(); png(); };
+
+// Audio > click blip
+let ac = null; addEventListener('pointerdown', () => (ac ??= new AudioContext()));
+function click() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; o.frequency.value = 1200; g.gain.setValueAtTime(0.025, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.05); }
+
+// Attract > cycle styles + phrases while idle
+const PHRASES = ['Summer 1999', 'Happy Birthday!', 'Cool Site!!!', 'Party Time', 'Bake Sale', 'Under Construction', 'Lost Cat', 'Class of 2000'];
+let lastInput = -1e9, nextA = performance.now() + 1500, phI = 0;
+function input() { lastInput = performance.now(); }
+document.fonts?.ready.then(() => { drawThumbs(); dirty = true; });
+drawThumbs(); pick(1);
+function loop(now) {
+  if (now - lastInput > 7000 && now > nextA) { nextA = now + 2400; if (cur % 3 === 2) $('#txt').value = PHRASES[++phI % PHRASES.length]; pick(cur + 1); }
+  if (dirty || STYLES[cur].anim) { render($('#pv'), $('#txt').value || ' ', STYLES[cur], now / 1000); dirty = false; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__wordart = { style: pick, text: (s) => { $('#txt').value = s; dirty = true; }, font: (f) => { font = f; drawThumbs(); dirty = true; }, png };
+</script>
+</body>
+</html>

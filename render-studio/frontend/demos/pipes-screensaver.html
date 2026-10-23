@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Pipes Screensaver</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="30" />
+<meta name="capture" content="3200" />
+<meta name="tags" content="three.js, InstancedMesh, 3D grid random walk, Phong shading, TeapotGeometry" />
+<meta name="description" content="The late-90s 3D pipes screensaver: shiny Phong-shaded pipes grow cell by cell through an invisible 3D grid, turning at ball joints, never crossing each other, each new pipe in a fresh colour, with the rare teapot hiding at a joint. When the space fills up the screen fades to black and it starts again. Click to restart, drag to orbit. Hard because hundreds of growing segments must stay a few draw calls, so cylinders and joints live in instanced meshes whose matrices and colours are written as each pipe animates, while a self-avoiding walk picks turns through an occupancy grid."/>
+<meta name="prompt" content="Recreate the late-90s 3D pipes screensaver in three.js, one HTML file: pipes do self-avoiding random walks through a 14³ occupancy grid, growing smoothly segment by segment, turning at ball joints, ending when boxed in and restarting in a new bright colour, four at a time. Render all cylinders and spheres as InstancedMesh with per-instance colour and shiny Phong material, add a rare teapot joint, fade to black and reset when the grid fills, click to restart and drag to orbit with a slow auto-rotate." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/pipes-screensaver.html
+ * PURPOSE: 3D pipes screensaver: self-avoiding grid walks drawn with instanced cylinders and ball joints
+ * UI: Render Studio > Frutiger Aero > 3D Pipes Screensaver
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__pipes (reset, segments, pipes)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; touch-action: none; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.6s; }
+#hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: rgba(255, 255, 255, 0.4); font: 13px Tahoma, system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="fade"></div>
+<div id="hint">click to restart · drag to orbit</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.enablePan = false; controls.autoRotate = true; controls.autoRotateSpeed = 0.5;
+function fit() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+fit(); camera.position.set(4, 3, camera.aspect < 0.8 ? 33 : 25); addEventListener('resize', fit);
+scene.add(new THREE.AmbientLight('#ffffff', 0.35));
+const key = new THREE.DirectionalLight('#ffffff', 1.6); key.position.set(5, 8, 10); scene.add(key);
+const rim = new THREE.DirectionalLight('#9fb8ff', 0.5); rim.position.set(-8, -4, -6); scene.add(rim);
+
+// Grid > occupancy for self-avoiding walks
+const N = 14, OFF = (N - 1) / 2, occ = new Uint8Array(N * N * N);
+const DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+const id = (x, y, z) => x + N * (y + N * z);
+const inside = (c) => c.every((v) => v >= 0 && v < N);
+const free = (c) => inside(c) && !occ[id(...c)];
+
+// Instances > cylinders + joints, Phong shine
+const MAXS = 2600, MAXJ = 1400;
+const mat = new THREE.MeshPhongMaterial({ shininess: 90, specular: '#ffffff' });
+const cyl = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.27, 0.27, 1, 20, 1), mat, MAXS);
+const ball = new THREE.InstancedMesh(new THREE.SphereGeometry(0.38, 24, 16), mat, MAXJ);
+for (const m of [cyl, ball]) { m.count = 0; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.setColorAt(0, new THREE.Color()); m.frustumCulled = false; scene.add(m); }
+const teaGeo = new TeapotGeometry(0.42, 6), teapots = [];
+const PAL = ['#e8231c', '#22c32a', '#2a5df0', '#f2d21b', '#18d0e0', '#d43ad4', '#ff8a1a', '#e8e8f0', '#8c5cff', '#7fe05a'];
+let palI = Math.floor(Math.random() * PAL.length);
+const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), s = new THREE.Vector3(), col = new THREE.Color();
+const toW = (c) => new THREE.Vector3(c[0] - OFF, c[1] - OFF, c[2] - OFF);
+
+function joint(c, color) {
+  if (Math.random() < 0.006) { const t = new THREE.Mesh(teaGeo, new THREE.MeshPhongMaterial({ color, shininess: 90, specular: '#fff' })); t.position.copy(toW(c)); t.rotation.y = Math.random() * 6.28; scene.add(t); teapots.push(t); return; }
+  if (ball.count >= MAXJ) return;
+  m4.compose(toW(c), q.identity(), s.set(1, 1, 1)); ball.setMatrixAt(ball.count, m4); ball.setColorAt(ball.count, color); ball.count++;
+  ball.instanceMatrix.needsUpdate = true; ball.instanceColor.needsUpdate = true;
+}
+function setSeg(i, a, d, k) {
+  const dir = v.set(...d); q.setFromUnitVectors(UP, dir);
+  const p = toW(a).addScaledVector(dir, k / 2); m4.compose(p, q, s.set(1, Math.max(0.001, k), 1)); cyl.setMatrixAt(i, m4);
+}
+
+// Pipes > walk, grow, turn, end
+let pipes = [], fading = false, stepT = 0.03;
+function spawn() {
+  for (let tries = 0; tries < 60; tries++) {
+    const c = [0, 0, 0].map(() => Math.floor(Math.random() * N)); if (!free(c)) continue;
+    occ[id(...c)] = 1; const color = col.set(PAL[palI++ % PAL.length]).clone(); joint(c, color);
+    const p = { c, d: Math.floor(Math.random() * 6), color, seg: -1, t: 1, done: false }; pipes.push(p); return p;
+  }
+  return null;
+}
+function step(p) {
+  const opts = DIRS.map((_, i) => i).filter((i) => (i ^ 1) !== p.d && free(p.c.map((x, k) => x + DIRS[i][k])));
+  const ahead = opts.includes(p.d);
+  if (!opts.length || cyl.count >= MAXS) { p.done = true; return; }
+  let nd = p.d;
+  if (!ahead || Math.random() < 0.22) { const turns = opts.filter((i) => i !== p.d); nd = turns.length ? turns[Math.floor(Math.random() * turns.length)] : p.d; }
+  if (nd !== p.d && p.seg >= 0) joint(p.c, p.color);
+  p.d = nd; const nc = p.c.map((x, k) => x + DIRS[nd][k]); occ[id(...nc)] = 1;
+  p.seg = cyl.count++; p.from = p.c; p.c = nc; p.t = 0; cyl.setColorAt(p.seg, p.color); cyl.instanceColor.needsUpdate = true;
+}
+function reset() {
+  occ.fill(0); cyl.count = 0; ball.count = 0; pipes = []; teapots.forEach((t) => { scene.remove(t); t.material.dispose(); }); teapots.length = 0;
+  for (let i = 0; i < 4; i++) spawn();
+}
+function fadeReset() {
+  if (fading) return; fading = true; const f = document.getElementById('fade'); f.style.opacity = 1;
+  setTimeout(() => { reset(); f.style.opacity = 0; fading = false; }, 700);
+}
+reset();
+renderer.domElement.addEventListener('pointerdown', (e) => { renderer.domElement.dataset.d = e.clientX + ',' + e.clientY; });
+renderer.domElement.addEventListener('pointerup', (e) => { const [x, y] = (renderer.domElement.dataset.d || '0,0').split(',').map(Number); if (Math.hypot(e.clientX - x, e.clientY - y) < 6) fadeReset(); });
+
+let last = performance.now();
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  if (!fading) {
+    for (const p of pipes) {
+      if (p.done) continue;
+      p.t += dt / stepT;
+      while (p.t >= 1 && !p.done) { if (p.seg >= 0) setSeg(p.seg, p.from, DIRS[p.d], 1); p.t -= 1; step(p); if (p.done) break; }
+      if (!p.done && p.seg >= 0) setSeg(p.seg, p.from, DIRS[p.d], Math.min(1, p.t));
+    }
+    cyl.instanceMatrix.needsUpdate = true;
+    pipes = pipes.filter((p) => !p.done);
+    while (pipes.length < 4) if (!spawn()) { fadeReset(); break; }
+    if (cyl.count >= MAXS - 4) fadeReset();
+  }
+  controls.update(); renderer.render(scene, camera);
+});
+
+window.__pipes = { reset: fadeReset, segments: () => cyl.count, pipes: () => pipes.length };
+</script>
+</body>
+</html>

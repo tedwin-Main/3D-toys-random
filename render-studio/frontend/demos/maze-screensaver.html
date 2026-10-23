@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Maze Screensaver</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="31" />
+<meta name="capture" content="3900" />
+<meta name="tags" content="three.js, recursive backtracker, wall follower, InstancedMesh, canvas textures, minimap" />
+<meta name="description" content="The late-90s first-person maze screensaver: a freshly carved maze of brick walls, stone floor and tiled ceiling that you glide through on autopilot, hugging the left wall around every corner. Spinning chrome polyhedra float in the corridors and flip the whole world upside down when you pass through them, and a smiling face waits at the exit to start a new maze in a new wall style. Take over with the arrow keys or taps, and toggle the minimap. Hard because the maze is generated, instanced and textured procedurally, and the walker is a wall-following state machine with eased turns, moves and barrel-roll flips."/>
+<meta name="prompt" content="Recreate the late-90s 3D maze screensaver in three.js, one HTML file: carve a maze with a recursive backtracker, build it as instanced wall blocks with procedural canvas brick, stone floor and ceiling textures, and walk it first-person on autopilot with the left-hand rule, easing every move and 90° turn. Add spinning chrome polyhedra that flip the camera upside down when touched, a smiley at the exit that fades into a new maze with another wall style, a camera-carried light with fog, a toggleable minimap with the visited trail, manual arrow/tap control and synthesized blips." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/maze-screensaver.html
+ * PURPOSE: first-person maze screensaver: backtracker maze, wall-follower autopilot, flip polyhedra, minimap
+ * UI: Render Studio > Frutiger Aero > 3D Maze Screensaver
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__maze (regen, flip, map, pos)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; }
+#map { position: fixed; left: 12px; top: 12px; width: 150px; height: 150px; border: 1px solid rgba(255, 255, 255, 0.4); background: rgba(0, 0, 0, 0.55); image-rendering: pixelated; }
+#map.off { display: none; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.7s; }
+#ui { position: fixed; right: 12px; top: 12px; }
+#ui button { font: 12px Tahoma, system-ui, sans-serif; color: #fff; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 3px; padding: 4px 10px; cursor: pointer; }
+#hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: rgba(255, 255, 255, 0.45); font: 12px Tahoma, system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+<canvas id="map" width="170" height="170"></canvas>
+<div id="ui"><button id="mapb">Map</button></div>
+<div id="fade"></div>
+<div id="hint">arrows / tap to steer · autopilot resumes when idle</div>
+<script type="module">
+import * as THREE from 'three';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#000'); scene.fog = new THREE.Fog('#000', 5, 24);
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 100); camera.rotation.order = 'YXZ';
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+scene.add(new THREE.AmbientLight('#ffffff', 0.4));
+const lamp = new THREE.PointLight('#fff4e0', 6, 16, 1.2); scene.add(lamp);
+// Seed > first maze fixed so poster repeats, later mazes random
+let seed = 1999; const R = () => (seed ? ((seed = (seed * 16807) % 2147483647) / 2147483647) : Math.random()), S = 2, H = 2.2;
+
+// Textures > procedural brick, stone, wood, tiles, carpet
+function tex(draw, rep = 1) { const c = document.createElement('canvas'); c.width = c.height = 256; draw(c.getContext('2d')); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rep, rep); t.anisotropy = 8; return t; }
+function noise(x, a) { for (let i = 0; i < 2500; i++) { x.fillStyle = `rgba(${R() < 0.5 ? '0,0,0' : '255,255,255'},${R() * a})`; x.fillRect(R() * 256, R() * 256, 2, 2); } }
+const brick = (base, mortar) => (x) => {
+  x.fillStyle = mortar; x.fillRect(0, 0, 256, 256);
+  for (let r = 0; r < 8; r++) for (let c = -1; c < 4; c++) { const l = c * 64 + (r % 2) * 32 + 3, t = r * 32 + 3, h = base[0] + (R() - 0.5) * 30; x.fillStyle = `hsl(${h},${base[1]}%,${base[2] + (R() - 0.5) * 10}%)`; x.fillRect(l, t, 58, 26); x.fillStyle = 'rgba(255,255,255,0.12)'; x.fillRect(l, t, 58, 3); }
+  noise(x, 0.12);
+};
+const tiles = (a, b, n) => (x) => { const k = 256 / n; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { x.fillStyle = (i + j) % 2 ? a : b; x.fillRect(i * k, j * k, k, k); x.strokeStyle = 'rgba(0,0,0,0.35)'; x.strokeRect(i * k + 0.5, j * k + 0.5, k - 1, k - 1); } noise(x, 0.08); };
+const panels = (c) => (x) => { x.fillStyle = c; x.fillRect(0, 0, 256, 256); x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 3; for (let i = 0; i <= 256; i += 64) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i, 256); x.moveTo(0, i); x.lineTo(256, i); x.stroke(); } x.fillStyle = 'rgba(255,255,255,0.5)'; x.fillRect(96, 96, 64, 64); noise(x, 0.05); };
+const wood = (x) => { for (let i = 0; i < 16; i++) { x.fillStyle = `hsl(${28 + R() * 8},${45 + R() * 10}%,${30 + R() * 12}%)`; x.fillRect(i * 16, 0, 16, 256); x.fillStyle = 'rgba(0,0,0,0.3)'; x.fillRect(i * 16, 0, 1, 256); } for (let i = 0; i < 60; i++) { x.strokeStyle = 'rgba(0,0,0,0.12)'; x.beginPath(); const px = R() * 256; x.moveTo(px, 0); x.bezierCurveTo(px + 6, 80, px - 6, 170, px + 3, 256); x.stroke(); } };
+const STYLES = [
+  { wall: brick([10, 50, 34], '#8f877a'), floor: tiles('#6d6f73', '#5d5f63', 4), ceil: panels('#d9d6cc') },
+  { wall: brick([210, 10, 48], '#55585f'), floor: tiles('#8a2a2a', '#7a2323', 8), ceil: panels('#c9d3e0') },
+  { wall: wood, floor: tiles('#c9b98f', '#b5a57c', 4), ceil: panels('#ece6d4') },
+];
+const wallM = new THREE.MeshLambertMaterial(), floorM = new THREE.MeshLambertMaterial(), ceilM = new THREE.MeshLambertMaterial();
+
+// Maze > recursive backtracker on block grid
+const n = 8, G = n * 2 + 1;
+let grid, walls, floor, ceil, items = [], exitS, styleI = 0, visited;
+function carve() {
+  grid = Array.from({ length: G }, () => new Uint8Array(G).fill(1));
+  const st = [[0, 0]], seen = new Set(['0,0']); grid[1][1] = 0;
+  while (st.length) {
+    const [cx, cz] = st[st.length - 1], nb = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dz]) => [cx + dx, cz + dz]).filter(([x, z]) => x >= 0 && z >= 0 && x < n && z < n && !seen.has(x + ',' + z));
+    if (!nb.length) { st.pop(); continue; }
+    const [nx, nz] = nb[Math.floor(R() * nb.length)]; seen.add(nx + ',' + nz);
+    grid[nz * 2 + 1][nx * 2 + 1] = 0; grid[cz + nz + 1][cx + nx + 1] = 0; st.push([nx, nz]);
+  }
+}
+const open = (x, z) => x >= 0 && z >= 0 && x < G && z < G && !grid[z][x];
+function build() {
+  for (const o of [walls, floor, ceil, exitS, ...items.map((i) => i.m)]) if (o) scene.remove(o);
+  const st = STYLES[styleI % STYLES.length];
+  for (const [m, d] of [[wallM, st.wall], [floorM, st.floor], [ceilM, st.ceil]]) { m.map?.dispose(); m.map = tex(d, m === wallM ? 1 : G); m.needsUpdate = true; }
+  carve(); visited = new Set();
+  let cnt = 0; for (let z = 0; z < G; z++) for (let x = 0; x < G; x++) cnt += grid[z][x];
+  walls = new THREE.InstancedMesh(new THREE.BoxGeometry(S, H, S), wallM, cnt); let i = 0; const m4 = new THREE.Matrix4();
+  for (let z = 0; z < G; z++) for (let x = 0; x < G; x++) if (grid[z][x]) walls.setMatrixAt(i++, m4.makeTranslation(x * S, H / 2, z * S));
+  floor = new THREE.Mesh(new THREE.PlaneGeometry(G * S, G * S).rotateX(-Math.PI / 2), floorM); floor.position.set((G - 1) * S / 2, 0, (G - 1) * S / 2);
+  ceil = new THREE.Mesh(new THREE.PlaneGeometry(G * S, G * S).rotateX(Math.PI / 2), ceilM); ceil.position.set((G - 1) * S / 2, H, (G - 1) * S / 2);
+  scene.add(walls, floor, ceil);
+  // exit smiley + flip polyhedra on random corridor blocks
+  exitS = new THREE.Sprite(new THREE.SpriteMaterial({ map: smiley })); exitS.position.set((G - 2) * S, 1.05, (G - 2) * S); exitS.scale.setScalar(1.1); scene.add(exitS);
+  items = [];
+  const cells = []; for (let z = 1; z < G - 1; z++) for (let x = 1; x < G - 1; x++) if (open(x, z) && x + z > 4 && !(x === G - 2 && z === G - 2)) cells.push([x, z]);
+  for (let k = 0; k < 5 && cells.length; k++) {
+    const [x, z] = cells.splice(Math.floor(R() * cells.length), 1)[0];
+    const m = new THREE.Mesh(k % 2 ? new THREE.OctahedronGeometry(0.32) : new THREE.IcosahedronGeometry(0.32), new THREE.MeshStandardMaterial({ color: '#d8dde6', metalness: 1, roughness: 0.15, envMap: chromeEnv }));
+    m.position.set(x * S, 1.05, z * S); scene.add(m); items.push({ m, x, z, gone: false });
+  }
+  me.x = 1; me.z = 1; me.d = open(2, 1) ? 1 : 2; me.yaw = -me.d * Math.PI / 2; me.act = null; flipped = false; roll = 0;
+}
+
+// Assets > smiley sprite, fake chrome env
+const smiley = (() => { const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); const g = x.createRadialGradient(48, 44, 6, 64, 64, 60); g.addColorStop(0, '#fff8a8'); g.addColorStop(0.6, '#ffd21a'); g.addColorStop(1, '#e09a00'); x.fillStyle = g; x.beginPath(); x.arc(64, 64, 60, 0, 7); x.fill(); x.fillStyle = '#222'; x.beginPath(); x.ellipse(46, 50, 7, 11, 0, 0, 7); x.ellipse(82, 50, 7, 11, 0, 0, 7); x.fill(); x.strokeStyle = '#222'; x.lineWidth = 7; x.lineCap = 'round'; x.beginPath(); x.arc(64, 70, 30, 0.35, Math.PI - 0.35); x.stroke(); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+const chromeEnv = (() => { const c = document.createElement('canvas'); c.width = 256; c.height = 128; const x = c.getContext('2d'); const g = x.createLinearGradient(0, 0, 0, 128); g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, '#7f9fc8'); g.addColorStop(0.5, '#2a2a30'); g.addColorStop(1, '#b08a60'); x.fillStyle = g; x.fillRect(0, 0, 256, 128); const t = new THREE.CanvasTexture(c); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace; return t; })();
+
+// Walker > left-hand rule, eased moves/turns
+const DV = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const me = { x: 1, z: 1, d: 1, yaw: 0, act: null };
+let flipped = false, roll = 0, rollFrom = 0, rollT = 1, manualUntil = 0, regen = false;
+function decide() {
+  const L = (me.d + 3) % 4, F = me.d;
+  if (me.justTurned) { me.justTurned = false; return 'F'; }
+  if (open(me.x + DV[L][0], me.z + DV[L][1])) return 'L';
+  if (open(me.x + DV[F][0], me.z + DV[F][1])) return 'F';
+  return 'R';
+}
+function begin(a) {
+  if (a === 'F') { const nx = me.x + DV[me.d][0], nz = me.z + DV[me.d][1]; if (!open(nx, nz)) return false; me.act = { a, t: 0, dur: 0.42, fx: me.x, fz: me.z, tx: nx, tz: nz }; }
+  else { const s = a === 'L' ? 1 : -1; me.act = { a, t: 0, dur: 0.38, y0: me.yaw, y1: me.yaw + s * Math.PI / 2 }; me.d = (me.d + (a === 'L' ? 3 : 1)) % 4; me.justTurned = a === 'L'; }
+  return true;
+}
+const ease = (t) => t * t * (3 - 2 * t);
+function stepMe(dt, now) {
+  if (!me.act) { if (now < manualUntil || regen) return; begin(decide()); }
+  const a = me.act; if (!a) return;
+  a.t = Math.min(1, a.t + dt / a.dur); const k = ease(a.t);
+  if (a.a === 'F') { me.px = (a.fx + (a.tx - a.fx) * k) * S; me.pz = (a.fz + (a.tz - a.fz) * k) * S; }
+  else me.yaw = a.y0 + (a.y1 - a.y0) * k;
+  if (a.t >= 1) {
+    me.act = null;
+    if (a.a === 'F') { me.x = a.tx; me.z = a.tz; visited.add(me.x + ',' + me.z); arrive(); }
+  }
+}
+function arrive() {
+  for (const it of items) if (!it.gone && it.x === me.x && it.z === me.z) { it.gone = true; flip(); blip(660, 990); }
+  if (me.x === G - 2 && me.z === G - 2) newMaze();
+}
+function flip() { flipped = !flipped; rollFrom = roll; rollT = 0; }
+function newMaze() {
+  if (regen) return; regen = true; blip(523, 1046); document.getElementById('fade').style.opacity = 1;
+  setTimeout(() => { styleI++; seed = 0; build(); me.px = me.x * S; me.pz = me.z * S; document.getElementById('fade').style.opacity = 0; regen = false; }, 800);
+}
+
+// Input > keys, taps, map toggle
+addEventListener('keydown', (e) => {
+  const a = { ArrowUp: 'F', w: 'F', ArrowLeft: 'L', a: 'L', ArrowRight: 'R', d: 'R' }[e.key];
+  if (e.key === 'm' || e.key === 'M') toggleMap();
+  if (!a) return; e.preventDefault(); manualUntil = performance.now() + 6000; if (!me.act) begin(a);
+});
+renderer.domElement.addEventListener('pointerdown', (e) => { manualUntil = performance.now() + 6000; const f = e.clientX / innerWidth; if (!me.act) begin(f < 0.33 ? 'L' : f > 0.67 ? 'R' : 'F'); });
+const mapC = document.getElementById('map'), mx = mapC.getContext('2d');
+function toggleMap() { mapC.classList.toggle('off'); }
+document.getElementById('mapb').onclick = toggleMap;
+if (innerWidth < 600) mapC.classList.add('off');
+function drawMap() {
+  if (mapC.classList.contains('off')) return; const k = 170 / G; mx.clearRect(0, 0, 170, 170);
+  for (let z = 0; z < G; z++) for (let x = 0; x < G; x++) { mx.fillStyle = grid[z][x] ? 'rgba(200,120,90,0.85)' : visited.has(x + ',' + z) ? 'rgba(120,200,255,0.35)' : 'rgba(255,255,255,0.06)'; mx.fillRect(x * k, z * k, k, k); }
+  for (const it of items) if (!it.gone) { mx.fillStyle = '#dfe8ff'; mx.beginPath(); mx.arc((it.x + 0.5) * k, (it.z + 0.5) * k, k * 0.3, 0, 7); mx.fill(); }
+  mx.fillStyle = '#ffd21a'; mx.beginPath(); mx.arc((G - 1.5) * k, (G - 1.5) * k, k * 0.38, 0, 7); mx.fill();
+  const px = me.px / S + 0.5, pz = me.pz / S + 0.5, yw = -me.yaw; mx.save(); mx.translate(px * k, pz * k); mx.rotate(yw); mx.fillStyle = '#7fff7f'; mx.beginPath(); mx.moveTo(0, -k * 0.55); mx.lineTo(k * 0.4, k * 0.4); mx.lineTo(-k * 0.4, k * 0.4); mx.fill(); mx.restore();
+}
+
+// Audio > blips
+let ac = null; addEventListener('pointerdown', () => (ac ??= new AudioContext())); addEventListener('keydown', () => (ac ??= new AudioContext()));
+function blip(a, b) { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; o.frequency.setValueAtTime(a, t); o.frequency.exponentialRampToValueAtTime(b, t + 0.15); g.gain.setValueAtTime(0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.26); }
+
+build(); me.px = me.x * S; me.pz = me.z * S;
+let last = performance.now();
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  stepMe(dt, now);
+  rollT = Math.min(1, rollT + dt / 1.1); roll = rollFrom + ((flipped ? Math.PI : 0) - rollFrom) * ease(rollT);
+  camera.position.set(me.px, 1.05 + Math.sin(now * 0.008) * 0.015, me.pz); camera.rotation.set(0, me.yaw, roll);
+  lamp.position.copy(camera.position);
+  for (const it of items) { it.m.rotation.x += dt * 1.3; it.m.rotation.y += dt * 1.9; if (it.gone) it.m.scale.multiplyScalar(Math.max(0, 1 - dt * 5)); }
+  exitS.position.y = 1.05 + Math.sin(now * 0.003) * 0.1;
+  drawMap(); renderer.render(scene, camera);
+});
+
+window.__maze = { regen: newMaze, flip, map: toggleMap, pos: () => [me.x, me.z, me.d] };
+</script>
+</body>
+</html>

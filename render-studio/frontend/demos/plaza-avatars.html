@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plaza Avatars</title>
+<meta name="category" content="aero" />
+<meta name="style" content="humanity" />
+<meta name="order" content="18" />
+<meta name="capture" content="3400" />
+<meta name="tags" content="three.js, procedural avatars, canvas face textures, steering, raycast pick" />
+<meta name="description" content="A late-2000s console 'avatar plaza', with no brand: a crowd of chibi characters built from primitives (big round heads, capsule bodies, hair caps), each with a randomly generated face drawn on a canvas texture, wandering a bright white plaza with soft blob shadows and a gentle steering-and-separation walk. Click one and it hops, waves and shows its name and a speech bubble, and the camera eases over to it. Hard because every face is generated (eyes, brows, mouth, blush) and repainted when it blinks, and the crowd avoids each other without any physics engine." />
+<meta name="prompt" content="Build a late-2000s console-style 'avatar plaza' in three.js, one HTML file with no brand: 14 chibi avatars from primitives (big sphere head, capsule body, hair cap, stubby arms) with procedurally drawn canvas faces that blink, wandering a bright white plaza with blob shadows using simple steering plus separation. Clicking one makes it hop and wave, shows a name and speech bubble, and eases the camera to it; add a New Avatar button, a soft synth chime and an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/plaza-avatars.html
+ * PURPOSE: avatar plaza: primitive chibi avatars with canvas faces, steering crowd, click to hop and wave, camera ease
+ * UI: Render Studio > Frutiger Aero > Plaza Avatars
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__plaza (pick, add, count)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f7fa; font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif; }
+canvas { display: block; }
+#bubble { position: fixed; left: 0; top: 0; transform: translate(-50%, -100%); padding: 8px 14px; border-radius: 16px; background: #fff; color: #334; font-size: 14px; box-shadow: 0 4px 14px rgba(0, 40, 80, 0.2); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+#bubble b { display: block; font-size: 12px; color: #2a8ee6; }
+#bubble::after { content: ''; position: absolute; left: 50%; bottom: -8px; margin-left: -8px; border: 8px solid transparent; border-bottom: 0; border-top-color: #fff; }
+#bubble.on { opacity: 1; }
+#ui { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 10px; }
+#ui button { font: inherit; font-size: 15px; color: #445; border: 0; border-radius: 22px; padding: 10px 22px; cursor: pointer; background: linear-gradient(#ffffff, #eef2f6 50%, #e2e8ee 51%, #f4f7fa); box-shadow: inset 0 1px 0 #fff, 0 3px 10px rgba(0, 40, 80, 0.2), 0 0 0 1px #c9d3dc; }
+#ui button:hover { box-shadow: inset 0 1px 0 #fff, 0 0 0 2px #5fb6ff, 0 0 14px rgba(95, 182, 255, 0.6); }
+#title { position: fixed; left: 24px; top: 18px; font-size: 22px; font-weight: 300; color: #556; letter-spacing: 0.5px; }
+#title b { color: #2a8ee6; font-weight: 600; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="title">Avatar <b>Plaza</b></div>
+<div id="bubble"></div>
+<div id="ui"><button id="add">New Avatar</button><button id="all">Everyone wave</button></div>
+<script type="module">
+import * as THREE from 'three';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf4f7fa); scene.fog = new THREE.Fog(0xf4f7fa, 18, 42);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+const camGoal = new THREE.Vector3(0, 0.8, 0), camLook = new THREE.Vector3(0, 0.8, 0);
+let camDist = 13;
+function fit() { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); camDist = camera.aspect < 0.8 ? 19 : 13; }
+fit(); addEventListener('resize', fit);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xd8e2ea, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3, 8, 5); scene.add(sun);
+
+// Plaza > white floor with faint rings and blob shadow texture
+{
+  const c = document.createElement('canvas'); c.width = c.height = 1024; const x = c.getContext('2d');
+  const g = x.createRadialGradient(512, 512, 0, 512, 512, 512); g.addColorStop(0, '#ffffff'); g.addColorStop(1, '#eef2f6'); x.fillStyle = g; x.fillRect(0, 0, 1024, 1024);
+  x.strokeStyle = 'rgba(160,185,210,0.35)'; x.lineWidth = 3; for (let r = 80; r < 512; r += 80) { x.beginPath(); x.arc(512, 512, r, 0, Math.PI * 2); x.stroke(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 96), new THREE.MeshStandardMaterial({ map: t, roughness: 0.9 })); floor.rotation.x = -Math.PI / 2; scene.add(floor);
+}
+const blob = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(40,60,90,0.35)'); g.addColorStop(1, 'rgba(40,60,90,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })();
+
+// Avatar parts > shared geometries, random palettes
+const HEAD = new THREE.SphereGeometry(0.42, 40, 30), BODY = new THREE.CapsuleGeometry(0.24, 0.28, 8, 20), ARM = new THREE.CapsuleGeometry(0.07, 0.22, 6, 10), LEG = new THREE.CapsuleGeometry(0.08, 0.12, 6, 10), HAIR = new THREE.SphereGeometry(0.44, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.55);
+const SKIN = ['#ffe0c4', '#f6cfa8', '#e8b58a', '#c98e62', '#9c6644', '#ffd9d0'], HAIRC = ['#3a2a1e', '#6b3f1f', '#c98a3a', '#f2d16b', '#1f1f24', '#b8442e', '#8a8f99'], SHIRT = [0x2a8ee6, 0x4fae2e, 0xe8433a, 0xf2a20c, 0x8a4fd6, 0x1fb3a8, 0xff6fa8, 0x5c6b7a];
+const NAMES = ['Ava', 'Leo', 'Mia', 'Sam', 'Kai', 'Zoe', 'Max', 'Ivy', 'Ben', 'Isla', 'Ravi', 'Nia', 'Tom', 'Ela', 'Jun', 'Luz', 'Omar', 'Pip'];
+const SAYS = ['Hiya!', 'Nice day for it!', 'Want to play?', 'Love your hair!', 'Wave back!', 'Woohoo!', 'Did you see the new channel?', 'Bowling later?'];
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+function faceTex(f, blink) {
+  const c = f.canvas, x = c.getContext('2d'); x.clearRect(0, 0, 256, 128);
+  x.fillStyle = f.skin; x.fillRect(0, 0, 256, 128);
+  const ey = 58, ex = 22 * f.spread;
+  x.fillStyle = '#2a2a33';
+  [-1, 1].forEach((s) => {
+    const cx = 128 + s * ex;
+    if (blink) { x.fillRect(cx - 9, ey, 18, 3); } else { x.beginPath(); x.ellipse(cx, ey, 7 * f.eye, 10 * f.eye, 0, 0, Math.PI * 2); x.fill(); x.fillStyle = '#fff'; x.beginPath(); x.arc(cx + 2, ey - 4, 2.6, 0, Math.PI * 2); x.fill(); x.fillStyle = '#2a2a33'; }
+    x.lineWidth = 3.5; x.strokeStyle = f.hair; x.beginPath(); x.moveTo(cx - 10, ey - 18 - s * f.brow); x.lineTo(cx + 10, ey - 18 + s * f.brow); x.stroke();
+  });
+  x.fillStyle = 'rgba(255,120,140,0.35)'; [-1, 1].forEach((s) => { x.beginPath(); x.ellipse(128 + s * (ex + 12), ey + 18, 9, 5, 0, 0, Math.PI * 2); x.fill(); });
+  x.strokeStyle = '#a0404a'; x.lineWidth = 3.5; x.lineCap = 'round'; x.beginPath();
+  if (f.mouth === 0) x.arc(128, ey + 22, 10, 0.15 * Math.PI, 0.85 * Math.PI); else if (f.mouth === 1) { x.moveTo(120, ey + 30); x.lineTo(136, ey + 30); } else { x.fillStyle = '#a0404a'; x.ellipse(128, ey + 30, 7, 5, 0, 0, Math.PI * 2); x.fill(); }
+  x.stroke(); f.tex.needsUpdate = true;
+}
+const avatars = [], hit = [];
+function addAvatar(at) {
+  const g = new THREE.Group();
+  const f = { canvas: document.createElement('canvas'), skin: pick(SKIN), hair: pick(HAIRC), spread: 0.8 + Math.random() * 0.5, eye: 0.8 + Math.random() * 0.4, brow: Math.random() * 4 - 1, mouth: Math.floor(Math.random() * 3) };
+  f.canvas.width = 256; f.canvas.height = 128; f.tex = new THREE.CanvasTexture(f.canvas); f.tex.colorSpace = THREE.SRGBColorSpace; faceTex(f, false);
+  const skinM = new THREE.MeshStandardMaterial({ color: f.skin, roughness: 0.6 }), shirtM = new THREE.MeshStandardMaterial({ color: pick(SHIRT), roughness: 0.45 }), pantsM = new THREE.MeshStandardMaterial({ color: 0x3b4a5c, roughness: 0.7 });
+  const head = new THREE.Mesh(HEAD, new THREE.MeshStandardMaterial({ map: f.tex, roughness: 0.6 })); head.position.y = 1.18; head.rotation.y = -Math.PI / 2;
+  const hair = new THREE.Mesh(HAIR, new THREE.MeshStandardMaterial({ color: f.hair, roughness: 0.5 })); hair.position.y = 1.2; hair.rotation.x = -0.35; hair.scale.set(1, 1, 1.02);
+  const body = new THREE.Mesh(BODY, shirtM); body.position.y = 0.6;
+  const armL = new THREE.Group(), armR = new THREE.Group(); [armL, armR].forEach((a, i) => { const m = new THREE.Mesh(ARM, shirtM); m.position.y = -0.16; const hand = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), skinM); hand.position.y = -0.33; a.add(m, hand); a.position.set(i ? 0.3 : -0.3, 0.78, 0); a.rotation.z = i ? 0.25 : -0.25; });
+  const legL = new THREE.Mesh(LEG, pantsM), legR = new THREE.Mesh(LEG, pantsM); legL.position.set(-0.11, 0.17, 0); legR.position.set(0.11, 0.17, 0);
+  const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 1.1), new THREE.MeshBasicMaterial({ map: blob, transparent: true, depthWrite: false })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.01;
+  const rig = new THREE.Group(); rig.add(head, hair, body, armL, armR, legL, legR); g.add(rig, shadow);
+  const a = Math.random() * Math.PI * 2, r = 1 + Math.random() * 6; g.position.set(at ? at.x : Math.cos(a) * r, 0, at ? at.z : Math.sin(a) * r);
+  const sc = 0.9 + Math.random() * 0.25; rig.scale.setScalar(sc);
+  scene.add(g);
+  const av = { g, rig, head, armL, armR, legL, legR, f, name: NAMES[avatars.length % NAMES.length], target: new THREE.Vector3(), vel: new THREE.Vector3(), phase: Math.random() * 6, wait: Math.random() * 2, wave: 0, hop: 0, blinkT: 2 + Math.random() * 3, blink: 0 };
+  newTarget(av); avatars.push(av); hit.push(head, body); head.userData.av = av; body.userData.av = av;
+  if (at) { av.hop = 1; }
+  return av;
+}
+function newTarget(av) { const a = Math.random() * Math.PI * 2, r = Math.random() * 8; av.target.set(Math.cos(a) * r, 0, Math.sin(a) * r); }
+for (let i = 0; i < 14; i++) addAvatar();
+
+// Pick > raycast, hop, wave, bubble, camera ease
+const ray = new THREE.Raycaster(), mp = new THREE.Vector2();
+let focus = null, focusT = 0;
+let ac = null;
+function chime() { try { ac = ac || new AudioContext(); const t = ac.currentTime; [784, 1046.5, 1318.5].forEach((fr, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = fr; g.gain.setValueAtTime(0.05, t + i * 0.07); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.07 + 0.4); o.connect(g).connect(ac.destination); o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.45); }); } catch {} }
+function select(av) {
+  focus = av; focusT = 4.5; av.wave = 2.2; av.hop = 1; av.wait = 3;
+  av.vel.set(0, 0, 0); const b = document.getElementById('bubble'); b.innerHTML = `<b>${av.name}</b>${pick(SAYS)}`; b.classList.add('on');
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  mp.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mp, camera);
+  const h = ray.intersectObjects(hit, false)[0]; if (h) { select(h.object.userData.av); chime(); }
+});
+document.getElementById('add').onclick = () => { if (avatars.length >= 24) return; const av = addAvatar({ x: (Math.random() - 0.5) * 2, z: 3 + Math.random() }); select(av); chime(); };
+document.getElementById('all').onclick = () => { avatars.forEach((a) => { a.wave = 2; a.hop = Math.random() * 0.5 + 0.5; }); chime(); };
+
+// Loop > steering, separation, walk cycle, blink
+let lastInput = -1e9, aT = 0;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+const tmp = new THREE.Vector3(), sep = new THREE.Vector3(), clock = new THREE.Clock(), proj = new THREE.Vector3();
+let orbit = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
+  avatars.forEach((av) => {
+    const p = av.g.position;
+    if (av.wait > 0) { av.wait -= dt; av.vel.multiplyScalar(0.85); }
+    else { tmp.subVectors(av.target, p); const d = tmp.length(); if (d < 0.4) { av.wait = 1 + Math.random() * 3; newTarget(av); } else av.vel.lerp(tmp.normalize().multiplyScalar(0.9), dt * 2); }
+    sep.set(0, 0, 0); avatars.forEach((o) => { if (o === av) return; tmp.subVectors(p, o.g.position); const d = tmp.length(); if (d < 1.1 && d > 0.001) sep.add(tmp.multiplyScalar((1.1 - d) / d)); });
+    av.vel.addScaledVector(sep, dt * 6); p.addScaledVector(av.vel, dt);
+    const sp = av.vel.length();
+    if (sp > 0.05) { const yaw = Math.atan2(av.vel.x, av.vel.z); let dy = yaw - av.g.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); av.g.rotation.y += dy * Math.min(1, dt * 6); }
+    if (focus === av) { tmp.subVectors(camera.position, p); const yaw = Math.atan2(tmp.x, tmp.z); let dy = yaw - av.g.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); av.g.rotation.y += dy * Math.min(1, dt * 5); }
+    av.phase += dt * sp * 9; const sw = Math.sin(av.phase) * Math.min(1, sp * 1.5);
+    av.legL.rotation.x = sw * 0.6; av.legR.rotation.x = -sw * 0.6;
+    av.armL.rotation.x = -sw * 0.5; av.armR.rotation.x = av.wave > 0 ? 0 : sw * 0.5;
+    if (av.wave > 0) { av.wave -= dt; av.armR.rotation.z = 2.6 + Math.sin(t * 14) * 0.35; } else av.armR.rotation.z += (0.25 - av.armR.rotation.z) * Math.min(1, dt * 8);
+    if (av.hop > 0) { av.hop -= dt * 1.6; } const hy = av.hop > 0 ? Math.sin((1 - av.hop) * Math.PI) * 0.45 : 0;
+    av.rig.position.y = hy + Math.abs(Math.sin(av.phase)) * 0.05 * Math.min(1, sp * 1.5);
+    av.head.rotation.z = Math.sin(t * 1.3 + av.phase) * 0.05;
+    av.blinkT -= dt; if (av.blinkT < 0 && !av.blink) { av.blink = 0.12; faceTex(av.f, true); } if (av.blink) { av.blink -= dt; if (av.blink <= 0) { av.blink = 0; av.blinkT = 2 + Math.random() * 4; faceTex(av.f, false); } }
+  });
+  // Camera > orbit slowly, ease toward focus
+  if (focusT > 0) { focusT -= dt; if (focusT <= 0) { focus = null; document.getElementById('bubble').classList.remove('on'); } }
+  orbit += dt * (focus ? 0 : 0.05);
+  const fp = focus ? focus.g.position : null;
+  camGoal.set(fp ? fp.x : 0, fp ? 0.9 : 0.6, fp ? fp.z : 0);
+  camLook.lerp(camGoal, Math.min(1, dt * 2.5));
+  const dist = focus ? camDist * 0.42 : camDist;
+  tmp.set(camLook.x + Math.sin(orbit) * dist, camLook.y + (focus ? 1.4 : 5.5), camLook.z + Math.cos(orbit) * dist);
+  camera.position.lerp(tmp, Math.min(1, dt * 2)); camera.lookAt(camLook);
+  if (focus) { proj.copy(focus.g.position); proj.y += 1.85 * focus.rig.scale.y; proj.project(camera); const b = document.getElementById('bubble'); b.style.left = ((proj.x + 1) / 2) * innerWidth + 'px'; b.style.top = ((1 - proj.y) / 2) * innerHeight + 'px'; }
+  if (performance.now() - lastInput > 6000) { aT += dt; if (aT > 5.5) { aT = 0; select(avatars[Math.floor(Math.random() * avatars.length)]); } }
+  renderer.render(scene, camera);
+});
+setTimeout(() => select(avatars[0]), 1200);
+window.__plaza = { pick: (i) => select(avatars[i % avatars.length]), add: () => document.getElementById('add').click(), count: () => avatars.length };
+</script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glossy Phone UI</title>
+<meta name="category" content="aero" />
+<meta name="style" content="mcbling" />
+<meta name="order" content="16" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="2006 feature phone, QVGA UI, d-pad state machine, DTMF, polyphonic ringtones, WebAudio" />
+<meta name="description" content="A mid-2000s glossy feature phone, with no brand: a 240x320 screen with signal bars, battery and a bubbly wallpaper, a 3x3 menu of glossy icons, inbox and ringtone lists, and a camera viewfinder. It is driven by a real d-pad, soft keys, call/end keys and a 12-key pad (or the arrow keys and digits on a keyboard). Number keys play true dual-tone DTMF, and the Ringtones list plays original polyphonic tunes. Hard because every key routes through one screen state machine (idle, dialer, menu, list, view, camera), so the soft-key labels always match what the keys do." />
+<meta name="prompt" content="Recreate a mid-2000s glossy feature phone UI in one HTML file with no brand: a CSS candybar phone with a 240x320 screen (status bar, bubbly wallpaper, clock), a 3x3 menu of glossy icons, inbox and ringtone lists, a camera viewfinder, soft keys, a d-pad, call/end keys and a 12-key pad. Route every key through one screen state machine with matching soft-key labels, play dual-tone DTMF on digits and original polyphonic ringtones with WebAudio, and add an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/flip-phone-ui.html
+ * PURPOSE: 2006 feature phone: CSS handset, QVGA screen state machine (idle, dialer, menu, list, view, camera), DTMF keys, polyphonic ringtones
+ * UI: Render Studio > Frutiger Aero > Glossy Phone UI
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__phone (press, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Tahoma", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+body { background: radial-gradient(ellipse at 50% 30%, #ffffff, #d7ecfa 45%, #9fd0f2); display: grid; place-items: center; }
+#wrap { transform-origin: 50% 50%; }
+.phone { width: 300px; height: 640px; border-radius: 46px 46px 56px 56px; position: relative; padding: 26px 22px; background: linear-gradient(90deg, #6f7680, #e9edf1 12%, #c9cfd6 30%, #f7f9fb 50%, #c3c9d0 72%, #eef1f4 88%, #646b74); box-shadow: 0 30px 50px rgba(20, 60, 100, 0.35), inset 0 2px 2px rgba(255, 255, 255, 0.9), inset 0 -3px 6px rgba(0, 0, 0, 0.25); }
+.phone::before { content: ''; position: absolute; left: 50%; top: 12px; width: 60px; height: 6px; margin-left: -30px; border-radius: 3px; background: repeating-linear-gradient(90deg, #333 0 3px, #777 3px 5px); }
+.bezel { height: 344px; border-radius: 18px; padding: 12px; background: linear-gradient(#20252b, #0b0d10); box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.3), 0 1px 0 rgba(255, 255, 255, 0.8); position: relative; overflow: hidden; }
+.bezel::after { content: ''; position: absolute; inset: 0 0 55% 0; background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0) 60%); pointer-events: none; }
+#screen { width: 232px; height: 320px; position: relative; overflow: hidden; background: #000; font-size: 13px; color: #fff; border-radius: 2px; }
+#wp { position: absolute; inset: 0; width: 100%; height: 100%; }
+#bar { position: absolute; left: 0; right: 0; top: 0; height: 20px; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 11px; font-weight: 700; background: linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.05)); text-shadow: 0 1px 1px #000; z-index: 5; }
+.sig { display: flex; align-items: flex-end; gap: 1px; height: 12px; } .sig i { width: 3px; background: #fff; } .sig i:nth-child(1) { height: 4px; } .sig i:nth-child(2) { height: 6px; } .sig i:nth-child(3) { height: 9px; } .sig i:nth-child(4) { height: 12px; }
+.bat { margin-left: auto; width: 20px; height: 10px; border: 1px solid #fff; border-radius: 2px; position: relative; padding: 1px; } .bat::after { content: ''; position: absolute; right: -3px; top: 2px; width: 2px; height: 4px; background: #fff; } .bat b { display: block; height: 100%; width: 75%; background: #8dff5a; }
+#soft { position: absolute; left: 0; right: 0; bottom: 0; height: 24px; display: flex; justify-content: space-between; align-items: center; padding: 0 8px; font-weight: 700; background: linear-gradient(#3d8fe0, #1a5fb0 50%, #124d94 51%, #2a76c6); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); z-index: 5; }
+#soft span:nth-child(2) { font-size: 11px; opacity: 0.85; }
+.view { position: absolute; left: 0; right: 0; top: 20px; bottom: 24px; display: none; }
+.view.on { display: block; }
+#idle .clk { position: absolute; left: 0; right: 0; top: 42px; text-align: center; font-size: 46px; font-weight: 300; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6); font-family: "Trebuchet MS", sans-serif; }
+#idle .date { position: absolute; left: 0; right: 0; top: 102px; text-align: center; font-size: 13px; text-shadow: 0 1px 3px #000; }
+#idle .op { position: absolute; left: 0; right: 0; top: 8px; text-align: center; font-size: 12px; font-weight: 700; text-shadow: 0 1px 3px #000; }
+#idle .dial { position: absolute; left: 6px; right: 6px; bottom: 8px; text-align: right; font-size: 30px; font-weight: 700; text-shadow: 0 1px 4px #000; letter-spacing: 1px; overflow: hidden; white-space: nowrap; }
+#menu { background: linear-gradient(#0f3f78, #0a2448); }
+#menu h3, .list h3 { margin: 0; height: 26px; line-height: 26px; text-align: center; font-size: 13px; background: linear-gradient(#5fb0ff, #2a76c6 50%, #1a5fb0 51%, #3d8fe0); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 12px; }
+.ico { height: 72px; display: grid; place-items: center; border-radius: 14px; font-size: 30px; position: relative; transition: transform 0.15s; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.5); }
+.ico::after { content: ''; position: absolute; left: 4px; right: 4px; top: 2px; height: 45%; border-radius: 12px 12px 6px 6px; background: linear-gradient(rgba(255, 255, 255, 0.65), rgba(255, 255, 255, 0.05)); }
+.ico.sel { transform: scale(1.12); box-shadow: 0 0 0 2px #fff, 0 0 14px #9fe0ff; z-index: 2; }
+.list { background: linear-gradient(#f4f9fd, #d9e8f4); color: #123; }
+.row { height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-bottom: 1px solid #c3d6e6; font-size: 13px; }
+.row i { font-style: normal; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; color: #fff; background: linear-gradient(#7cc4ff, #2a8ee6); }
+.row.sel { color: #fff; background: linear-gradient(#ffb347, #f27d0c 50%, #e06a00 51%, #f59a32); }
+.row small { margin-left: auto; opacity: 0.6; font-size: 11px; }
+#msg { padding: 12px; font-size: 14px; line-height: 1.4; color: #123; background: linear-gradient(#fffbe0, #fff2b0); }
+#msg b { display: block; margin-bottom: 6px; color: #1a5fb0; }
+#cam canvas { width: 100%; height: 100%; display: block; }
+#cam .frame { position: absolute; inset: 20px; border: 2px solid rgba(255, 255, 255, 0.6); border-radius: 6px; } #cam .frame::after { content: ''; position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; margin: -12px; border: 2px solid #8dff5a; }
+#flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 9; transition: opacity 0.35s; }
+#flash.on { opacity: 1; transition: none; }
+#toast { position: absolute; left: 14px; right: 14px; top: 110px; padding: 10px; border-radius: 8px; text-align: center; font-weight: 700; color: #123; background: linear-gradient(#fff, #d9e8f4); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); display: none; z-index: 8; }
+#toast.on { display: block; }
+
+/* Keys */
+.keys { margin-top: 14px; }
+.top { display: grid; grid-template-columns: 1fr 100px 1fr; align-items: center; gap: 6px; }
+.k { border: 0; font: inherit; cursor: pointer; color: #223; -webkit-tap-highlight-color: transparent; }
+.sk { height: 30px; border-radius: 16px 6px 6px 16px; background: linear-gradient(#ffffff, #d5dbe1 50%, #c3cad1 51%, #e8ecf0); box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0, 0, 0, 0.35); }
+.sk.r { border-radius: 6px 16px 16px 6px; }
+.call, .end { height: 30px; border-radius: 16px; margin-top: 6px; font-size: 16px; color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(0, 0, 0, 0.35); }
+.call { background: linear-gradient(#9ff07a, #45b52a 50%, #339a1d 51%, #5fcf3d); } .end { background: linear-gradient(#ff9a9a, #e23b3b 50%, #c92525 51%, #f05a5a); }
+.dpad { width: 100px; height: 100px; border-radius: 50%; position: relative; background: radial-gradient(circle, #f5f7f9 0 28%, #b3bbc4 29% 31%, #e6eaee 32% 60%, #c2c9d0 100%); box-shadow: inset 0 2px 2px #fff, 0 2px 4px rgba(0, 0, 0, 0.35); }
+.dpad .k { position: absolute; background: transparent; width: 34px; height: 34px; font-size: 10px; color: #667; }
+.dpad .u { left: 33px; top: 0; } .dpad .d { left: 33px; bottom: 0; } .dpad .l { left: 0; top: 33px; } .dpad .rr { right: 0; top: 33px; }
+.dpad .ok { left: 31px; top: 31px; width: 38px; height: 38px; border-radius: 50%; font-size: 11px; font-weight: 700; color: #345; }
+.pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px 10px; margin-top: 12px; }
+.num { height: 30px; border-radius: 15px; background: linear-gradient(#ffffff, #dde2e7 50%, #ccd3d9 51%, #eff2f5); box-shadow: inset 0 1px 0 #fff, 0 1px 2px rgba(0, 0, 0, 0.35); font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.num small { font-size: 8px; font-weight: 400; color: #678; letter-spacing: 0.5px; }
+.k:active, .k.down { filter: brightness(0.86); transform: translateY(1px); }
+</style>
+</head>
+<body>
+<div id="wrap"><div class="phone">
+  <div class="bezel"><div id="screen">
+    <canvas id="wp" width="232" height="320"></canvas>
+    <div id="bar"><span class="sig"><i></i><i></i><i></i><i></i></span><span>3G</span><span id="bt">12:00</span><span class="bat"><b></b></span></div>
+    <div class="view on" id="idle"><div class="op">Bubble Mobile</div><div class="clk" id="clk">12:00</div><div class="date" id="date"></div><div class="dial" id="dial"></div></div>
+    <div class="view" id="menu"><h3 id="mtitle">Messages</h3><div class="grid" id="grid"></div></div>
+    <div class="view list" id="list"><h3 id="ltitle"></h3><div id="rows"></div></div>
+    <div class="view" id="msg"></div>
+    <div class="view" id="cam"><canvas width="232" height="276"></canvas><div class="frame"></div></div>
+    <div id="toast"></div><div id="flash"></div>
+    <div id="soft"><span id="sl">Menu</span><span id="sc"></span><span id="sr">Names</span></div>
+  </div></div>
+  <div class="keys">
+    <div class="top">
+      <div><button class="k sk" data-k="sl" style="width:100%">&nbsp;</button><button class="k call" data-k="call" style="width:100%">&#9990;&#xFE0E;</button></div>
+      <div class="dpad"><button class="k u" data-k="up">&#9650;</button><button class="k l" data-k="left">&#9664;</button><button class="k ok" data-k="ok">OK</button><button class="k rr" data-k="right">&#9654;</button><button class="k d" data-k="down">&#9660;</button></div>
+      <div><button class="k sk r" data-k="sr" style="width:100%">&nbsp;</button><button class="k end" data-k="end" style="width:100%">&#9632;</button></div>
+    </div>
+    <div class="pad" id="pad"></div>
+  </div>
+</div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const scr = $('#screen');
+
+// Fit > scale handset to viewport
+function fit() { const s = Math.min(1.2, (innerHeight - 24) / 660, (innerWidth - 20) / 310); $('#wrap').style.transform = `scale(${s})`; }
+fit(); addEventListener('resize', fit);
+
+// Keypad > digits with letters, DTMF freqs
+const KEYS = [['1', ''], ['2', 'abc'], ['3', 'def'], ['4', 'ghi'], ['5', 'jkl'], ['6', 'mno'], ['7', 'pqrs'], ['8', 'tuv'], ['9', 'wxyz'], ['*', ''], ['0', '+'], ['#', '']];
+KEYS.forEach(([d, l]) => { const b = document.createElement('button'); b.className = 'k num'; b.dataset.k = d; b.innerHTML = `${d}<small>${l}</small>`; $('#pad').append(b); });
+const DTMF_R = [697, 770, 852, 941], DTMF_C = [1209, 1336, 1477];
+
+// Apps > menu grid
+const APPS = [
+  { n: 'Messages', g: '✉', h: 200 }, { n: 'Contacts', g: '☎', h: 30 }, { n: 'Camera', g: '◉', h: 280 },
+  { n: 'Music', g: '♫', h: 320 }, { n: 'Games', g: '♠', h: 100 }, { n: 'Web', g: '◎', h: 185 },
+  { n: 'Calendar', g: '▦', h: 0 }, { n: 'Settings', g: '⚙', h: 220 }, { n: 'Ringtones', g: '♪', h: 50 },
+];
+APPS.forEach((a) => { const d = document.createElement('div'); d.className = 'ico'; d.textContent = a.g + '︎'; d.style.background = `linear-gradient(hsl(${a.h},80%,62%), hsl(${a.h},80%,40%))`; $('#grid').append(d); });
+const LISTS = {
+  Messages: [['Mia', 'r u coming 2nite? :)'], ['Leo', 'sent u that song!! check ur bluetooth'], ['Ava', 'brb mum needs the phone'], ['Sam', 'lol ok ttyl'], ['Network', 'You have 50 free texts left']],
+  Contacts: [['Ava', '07700 900123'], ['Leo', '07700 900456'], ['Mia', '07700 900789'], ['Mum', '07700 900111'], ['Sam', '07700 900222']],
+  Music: [['Aqua Drift', '3:12'], ['Glass Garden', '2:48'], ['Sky Arcade', '3:30'], ['Bubble Pop', '2:15']],
+  Games: [['Snake II', 'Arcade'], ['Bounce Ball', 'Puzzle'], ['Space Cubes', 'Action']],
+  Web: [['Home portal', ''], ['Bookmarks', ''], ['Go to address', '']],
+  Calendar: [['Today', 'Gig at 8pm'], ['Fri', 'Revision :('], ['Sat', 'Beach!!']],
+  Settings: [['Profiles', 'General'], ['Wallpaper', 'Bubbles'], ['Display', 'Bright'], ['Bluetooth', 'On'], ['Phone info', '']],
+  Ringtones: [['Crystal Bell', 'poly'], ['Bubbly Pop', 'poly'], ['Aqua Dream', 'poly'], ['Retro Funk', 'poly']],
+};
+
+// Ringtones > original melodies, note:beats (midi)
+const TUNES = [
+  { bpm: 150, lead: '76:1 79:1 84:2 83:1 79:1 76:2 74:1 76:1 79:2 72:2', bass: '48:4 43:4 45:4 41:4' },
+  { bpm: 170, lead: '72:.5 72:.5 79:1 77:.5 76:.5 74:1 72:1 74:.5 76:.5 77:1 79:2 0:1', bass: '48:2 55:2 53:2 55:2 48:2' },
+  { bpm: 110, lead: '69:1 72:1 76:1 74:2 72:1 69:1 67:2 69:3', bass: '45:4 41:4 43:4 45:2' },
+  { bpm: 128, lead: '67:.5 0:.5 67:.5 70:.5 72:1 70:.5 67:.5 65:1 67:1 0:1 74:1 72:2', bass: '43:1 43:1 46:1 43:1 41:1 41:1 43:2' },
+];
+let ac = null, voices = [];
+const wake = () => { if (!ac) try { ac = new AudioContext(); } catch {} };
+const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function stopTune() { voices.forEach((v) => { try { v.stop(); } catch {} }); voices = []; }
+function playTune(i) {
+  stopTune(); if (!ac) return; const T = TUNES[i], beat = 60 / T.bpm, t0 = ac.currentTime + 0.05;
+  [[T.lead, 'square', 0.045], [T.bass, 'triangle', 0.09]].forEach(([seq, type, vol]) => {
+    let t = t0; seq.split(' ').forEach((tok) => {
+      const [n, b] = tok.split(':').map(Number), d = b * beat;
+      if (n) { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = mf(n); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.01); g.gain.setValueAtTime(vol, t + d * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + d * 0.95); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); voices.push(o); }
+      t += d;
+    });
+  });
+}
+function dtmf(k) {
+  if (!ac) return; const idx = '123456789*0#'.indexOf(k); if (idx < 0) return;
+  const t = ac.currentTime, g = ac.createGain(); g.gain.setValueAtTime(0.06, t); g.gain.setValueAtTime(0.06, t + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18); g.connect(ac.destination);
+  [DTMF_R[Math.floor(idx / 3)], DTMF_C[idx % 3]].forEach((f) => { const o = ac.createOscillator(); o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + 0.2); });
+}
+const click = () => { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; o.frequency.value = 1800; g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.04); };
+
+// State machine > one route for every key
+const S = { v: 'idle', dial: '', m: 0, app: null, r: 0 };
+function show(v) { S.v = v; ['idle', 'menu', 'list', 'msg', 'cam'].forEach((id) => $('#' + id).classList.toggle('on', id === v)); paint(); }
+function soft(l, c, r) { $('#sl').textContent = l; $('#sc').textContent = c; $('#sr').textContent = r; }
+function toast(t, ms = 1200) { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => e.classList.remove('on'), ms); }
+function paint() {
+  if (S.v === 'idle') { $('#dial').textContent = S.dial; S.dial ? soft('Save', '', 'Clear') : soft('Menu', '', 'Names'); }
+  if (S.v === 'menu') { [...$('#grid').children].forEach((c, i) => c.classList.toggle('sel', i === S.m)); $('#mtitle').textContent = APPS[S.m].n; soft('Select', '', 'Back'); }
+  if (S.v === 'list') {
+    $('#ltitle').textContent = S.app; const L = LISTS[S.app];
+    $('#rows').innerHTML = L.map(([a, b], i) => `<div class="row${i === S.r ? ' sel' : ''}"><i>${APPS.find((x) => x.n === S.app).g}︎</i>${a}<small>${b.length > 14 ? '' : b}</small></div>`).join('');
+    soft(S.app === 'Ringtones' || S.app === 'Music' ? 'Play' : 'Open', '', 'Back');
+  }
+  if (S.v === 'msg') soft('Reply', '', 'Back');
+  if (S.v === 'cam') soft('Capture', '', 'Back');
+}
+function openRow() {
+  const [a, b] = LISTS[S.app][S.r];
+  if (S.app === 'Ringtones' || S.app === 'Music') { playTune(S.r % TUNES.length); toast('♪ ' + a); return; }
+  if (S.app === 'Messages') { $('#msg').innerHTML = `<b>From: ${a}</b>${b}`; show('msg'); return; }
+  if (S.app === 'Contacts') { toast('Calling ' + a + '...', 1600); return; }
+  toast(a + (b ? ': ' + b : ''));
+}
+function press(k) {
+  wake();
+  if (/^[0-9*#]$/.test(k)) { dtmf(k); if (S.v === 'idle') { if (S.dial.length < 14) S.dial += k; paint(); } return; }
+  click();
+  if (k === 'end') { stopTune(); S.dial = ''; show('idle'); return; }
+  if (S.v === 'idle') {
+    if (k === 'call') { if (S.dial) toast('Calling ' + S.dial + '...', 1600); else toast('No number'); return; }
+    if (k === 'sr' && S.dial) { S.dial = S.dial.slice(0, -1); paint(); return; }
+    if (k === 'sl' && S.dial) { toast('Saved to Contacts'); S.dial = ''; paint(); return; }
+    if (k === 'sl' || k === 'ok') { show('menu'); return; }
+    if (k === 'sr') { S.app = 'Contacts'; S.r = 0; show('list'); return; }
+  } else if (S.v === 'menu') {
+    const mv = { up: -3, down: 3, left: -1, right: 1 }[k];
+    if (mv != null) { S.m = (S.m + mv + 9) % 9; paint(); return; }
+    if (k === 'sl' || k === 'ok') { S.app = APPS[S.m].n; S.r = 0; show(S.app === 'Camera' ? 'cam' : 'list'); return; }
+    if (k === 'sr') show('idle');
+  } else if (S.v === 'list') {
+    const L = LISTS[S.app].length;
+    if (k === 'up' || k === 'down') { S.r = (S.r + (k === 'up' ? -1 : 1) + L) % L; paint(); return; }
+    if (k === 'sl' || k === 'ok' || k === 'call') { openRow(); return; }
+    if (k === 'sr' || k === 'left') { stopTune(); show('menu'); }
+  } else if (S.v === 'msg') {
+    if (k === 'sl') { toast('Message sent!'); show('list'); return; }
+    if (k === 'sr' || k === 'ok' || k === 'left') show('list');
+  } else if (S.v === 'cam') {
+    if (k === 'sl' || k === 'ok') { const f = $('#flash'); f.classList.add('on'); requestAnimationFrame(() => requestAnimationFrame(() => f.classList.remove('on'))); shutter(); toast('Saved to Pictures'); return; }
+    if (k === 'sr') show('menu');
+  }
+}
+function shutter() { if (!ac) return; const t = ac.currentTime, n = ac.sampleRate * 0.12, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (i < n * 0.3 ? 1 : 0.3) * (1 - i / n); const s = ac.createBufferSource(), g = ac.createGain(); s.buffer = b; g.gain.value = 0.25; s.connect(g).connect(ac.destination); s.start(t); }
+
+// Input > buttons, keyboard
+document.querySelectorAll('.k').forEach((b) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); press(b.dataset.k); }));
+const KB = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'ok', Escape: 'end', Backspace: 'sr', F1: 'sl', F2: 'sr' };
+addEventListener('keydown', (e) => { const k = KB[e.key] || (/^[0-9*#]$/.test(e.key) ? e.key : null); if (!k) return; e.preventDefault(); press(k); const b = document.querySelector(`.k[data-k="${CSS.escape(k)}"]`); if (b) { b.classList.add('down'); setTimeout(() => b.classList.remove('down'), 120); } });
+
+// Wallpaper + camera > canvases
+const wp = $('#wp').getContext('2d'), cam = $('#cam canvas').getContext('2d');
+const bub = Array.from({ length: 16 }, () => ({ x: Math.random() * 232, y: Math.random() * 320, r: 6 + Math.random() * 22, v: 6 + Math.random() * 14 }));
+function paintWp(t, dt) {
+  const g = wp.createLinearGradient(0, 0, 0, 320); g.addColorStop(0, '#2aa3f5'); g.addColorStop(0.6, '#5fd0c8'); g.addColorStop(1, '#8be35a'); wp.fillStyle = g; wp.fillRect(0, 0, 232, 320);
+  wp.fillStyle = 'rgba(255,255,255,0.12)'; wp.beginPath(); wp.ellipse(116, 360, 220, 120 + Math.sin(t) * 6, 0, 0, Math.PI * 2); wp.fill();
+  bub.forEach((b) => {
+    b.y -= b.v * dt; if (b.y < -b.r) { b.y = 320 + b.r; b.x = Math.random() * 232; }
+    const x = b.x + Math.sin(t + b.r) * 6, rg = wp.createRadialGradient(x - b.r * 0.35, b.y - b.r * 0.4, 1, x, b.y, b.r);
+    rg.addColorStop(0, 'rgba(255,255,255,0.85)'); rg.addColorStop(0.35, 'rgba(255,255,255,0.12)'); rg.addColorStop(0.9, 'rgba(200,240,255,0.18)'); rg.addColorStop(1, 'rgba(255,255,255,0.6)');
+    wp.fillStyle = rg; wp.beginPath(); wp.arc(x, b.y, b.r, 0, Math.PI * 2); wp.fill();
+  });
+}
+function paintCam(t) {
+  const g = cam.createLinearGradient(0, 0, 0, 276); g.addColorStop(0, '#8fd0ff'); g.addColorStop(0.55, '#e9f7ff'); g.addColorStop(0.56, '#6bbf3a'); g.addColorStop(1, '#2f7d1c'); cam.fillStyle = g; cam.fillRect(0, 0, 232, 276);
+  cam.fillStyle = '#fff6c0'; cam.beginPath(); cam.arc(170 + Math.sin(t * 0.7) * 6, 60, 18, 0, Math.PI * 2); cam.fill();
+  const id = cam.getImageData(0, 0, 232, 276), d = id.data; for (let i = 0; i < d.length; i += 16) { const n = (Math.random() - 0.5) * 30; d[i] += n; d[i + 1] += n; d[i + 2] += n; } cam.putImageData(id, 0, 0);
+}
+
+// Clock + attract loop
+const SCRIPT = ['sl', 'right', 'right', 'down', 'down', 'right', 'ok', 'down', 'ok', 'down', 'sr', 'left', 'left', 'up', 'up', 'up', 'ok', 'down', 'ok', 'sr', 'end', '0', '7', '7', '0', '0', 'end'];
+let lastInput = -1e9, aT = 0, aI = 0, last = performance.now(), lastMin = -1;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000;
+  paintWp(t, dt); if (S.v === 'cam') paintCam(t);
+  const d = new Date(); if (d.getMinutes() !== lastMin) { lastMin = d.getMinutes(); const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }); $('#clk').textContent = hm; $('#bt').textContent = hm; $('#date').textContent = d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }); }
+  if (now - lastInput > 7000) { aT += dt; if (aT > 0.75) { aT = 0; const k = SCRIPT[aI++ % SCRIPT.length]; press(k); const b = document.querySelector(`.k[data-k="${CSS.escape(k)}"]`); if (b) { b.classList.add('down'); setTimeout(() => b.classList.remove('down'), 160); } } }
+  requestAnimationFrame(frame);
+}
+paint(); requestAnimationFrame(frame);
+window.__phone = { press, state: () => ({ ...S }) };
+</script>
+</body>
+</html>

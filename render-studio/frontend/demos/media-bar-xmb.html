@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cross Media Bar</title>
+<meta name="category" content="aero" />
+<meta name="style" content="console" />
+<meta name="order" content="21" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="2006 console menu, canvas wave ribbon, 2D navigation grid, spring easing, WebAudio" />
+<meta name="description" content="A mid-2000s console 'cross media bar', with no brand: a horizontal row of white line-art category icons crossed by a vertical column of items, over the famous glowing wave ribbon whose background colour shifts with the month. Arrows, wheel, swipe or click move along both axes with springy easing and soft synth ticks. Hard because the ribbon is dozens of phase-offset sine strands drawn additively each frame, and the two-axis menu keeps a remembered item per category so moving back restores where you were." />
+<meta name="prompt" content="Recreate a 2006-style console cross media bar in one HTML file with no brand: a canvas backdrop with a smooth gradient whose hue follows the current month and a glowing additive wave ribbon of many sine strands; a horizontal row of white line-art category icons (Users, Settings, Photo, Music, Video, Game, Network, Friends) crossed by a vertical item column that remembers its position per category. Navigate with arrows, wheel, swipe and click, spring-ease every move, add a clock, synth ticks and an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/media-bar-xmb.html
+ * PURPOSE: cross media bar: month-hue gradient, additive sine wave ribbon, two-axis icon menu with remembered rows, spring easing, synth ticks
+ * UI: Render Studio > Frutiger Aero > Cross Media Bar
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__xmb (move, month)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Helvetica Neue", "Segoe UI", system-ui, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; background: #000; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+#clock { position: fixed; right: 5%; top: 6%; font-size: 18px; letter-spacing: 0.5px; text-shadow: 0 0 8px rgba(255, 255, 255, 0.5); display: flex; gap: 14px; align-items: center; }
+#clock i { width: 120px; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8)); }
+#bar { position: fixed; left: 0; top: 30%; width: 100%; height: 0; }
+.cat { position: absolute; left: 0; top: 0; width: 90px; text-align: center; transform-origin: 50% 0; cursor: pointer; }
+.cat svg { width: 60px; height: 60px; display: block; margin: 0 auto; filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35)); }
+.cat span { display: block; font-size: 15px; margin-top: 6px; opacity: 0; transition: opacity 0.2s; text-shadow: 0 0 8px rgba(0, 0, 0, 0.4); }
+.cat.on span { opacity: 1; }
+.item { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 16px; white-space: nowrap; cursor: pointer; transform-origin: 0 50%; }
+.item .th { width: 54px; height: 54px; border-radius: 6px; display: grid; place-items: center; background: linear-gradient(rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.06)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+.item .th svg { width: 30px; height: 30px; }
+.item b { font-weight: 400; font-size: 20px; text-shadow: 0 0 8px rgba(0, 0, 0, 0.4); }
+.item small { display: block; font-size: 12px; opacity: 0.7; }
+.item.on .th { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8), 0 0 16px rgba(255, 255, 255, 0.7); }
+#hint { position: fixed; left: 5%; bottom: 5%; font-size: 13px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="clock"><i></i><span id="ck"></span></div>
+<div id="bar"></div>
+<div id="hint">← → categories · ↑ ↓ items · Enter</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const sv = (p) => `<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const ICON = {
+  user: '<circle cx="24" cy="17" r="8"/><path d="M9 41c2-9 8-13 15-13s13 4 15 13"/>',
+  gear: '<circle cx="24" cy="24" r="6"/><path d="M24 6v6M24 36v6M6 24h6M36 24h6M11 11l4 4M33 33l4 4M11 37l4-4M33 15l4-4"/>',
+  photo: '<rect x="7" y="12" width="34" height="26" rx="3"/><circle cx="18" cy="21" r="3"/><path d="M8 35l11-10 8 7 5-4 9 8"/>',
+  music: '<path d="M18 36V12l20-4v24"/><circle cx="13" cy="36" r="5"/><circle cx="33" cy="32" r="5"/>',
+  video: '<rect x="6" y="12" width="26" height="24" rx="3"/><path d="M32 20l10-6v20l-10-6z"/>',
+  game: '<path d="M10 18h28a6 6 0 0 1 6 6l-2 10a4 4 0 0 1-7 1l-3-5H16l-3 5a4 4 0 0 1-7-1l-2-10a6 6 0 0 1 6-6z"/><path d="M14 24v6M11 27h6"/><circle cx="32" cy="25" r="1.5"/><circle cx="36" cy="29" r="1.5"/>',
+  net: '<circle cx="24" cy="24" r="17"/><path d="M7 24h34M24 7c6 6 6 28 0 34M24 7c-6 6-6 28 0 34"/>',
+  friends: '<circle cx="17" cy="18" r="6"/><circle cx="32" cy="20" r="5"/><path d="M5 40c1-7 6-11 12-11s11 4 12 11M28 30c6 0 11 3 13 10"/>',
+  dot: '<circle cx="24" cy="24" r="10"/>',
+};
+const CATS = [
+  ['Users', 'user', [['New User', 'Create an account'], ['Guest', 'Last signed in yesterday'], ['Turn Off System', '']]],
+  ['Settings', 'gear', [['System Update', ''], ['Theme Settings', 'Wave: Monthly'], ['Date and Time', ''], ['Sound Settings', ''], ['Display Settings', ''], ['Network Settings', '']]],
+  ['Photo', 'photo', [['Holiday 2006', '48 photos'], ['Beach Day', '23 photos'], ['Snow!', '12 photos'], ['Slideshow', 'All photos']]],
+  ['Music', 'music', [['Aqua Drift', 'Synth Demo · 3:12'], ['Glass Garden', 'Synth Demo · 2:48'], ['Sky Arcade', 'Synth Demo · 3:30'], ['Playlists', '4 lists'], ['Visualizer', '']]],
+  ['Video', 'video', [['Trailers', '6 videos'], ['Recorded TV', '2 shows'], ['Home Movies', '9 videos']]],
+  ['Game', 'game', [['Bubble Racer', 'Saved 2 hours ago'], ['Space Cubes', ''], ['Saved Data Utility', ''], ['Memory Card Utility', '']]],
+  ['Network', 'net', [['Internet Browser', ''], ['Online Manuals', ''], ['Remote Play', '']]],
+  ['Friends', 'friends', [['Ava · Online', 'Playing Bubble Racer'], ['Leo · Away', ''], ['Mia · Online', 'Watching Recorded TV'], ['Messages', '2 new']]],
+];
+const bar = $('#bar');
+const cats = CATS.map(([n, ic, items], i) => {
+  const el = document.createElement('div'); el.className = 'cat'; el.innerHTML = `${sv(ICON[ic])}<span>${n}</span>`; el.onclick = () => go(i - ci); bar.append(el);
+  const its = items.map(([t, s], k) => { const e = document.createElement('div'); e.className = 'item'; e.innerHTML = `<div class="th">${sv(ICON[k % 2 ? 'dot' : ic])}</div><div><b>${t}</b>${s ? `<small>${s}</small>` : ''}</div>`; e.onclick = () => { if (i !== ci) return; if (k === mem[i]) enter(); else vert(k - mem[i]); }; bar.append(e); return e; });
+  return { el, its };
+});
+const mem = CATS.map(() => 0);
+let ci = 3, cx = 3, iy = CATS.map(() => 0);
+
+// Springs > smooth category x and per-category item y
+function go(d) { const n = Math.max(0, Math.min(CATS.length - 1, ci + d)); if (n !== ci) { ci = n; tick(1200); } }
+function vert(d) { const L = CATS[ci][2].length, n = Math.max(0, Math.min(L - 1, mem[ci] + d)); if (n !== mem[ci]) { mem[ci] = n; tick(900); } }
+function enter() { const it = cats[ci].its[mem[ci]]; it.animate([{ transform: it.style.transform }, { transform: it.style.transform + ' scale(1.12)' }, { transform: it.style.transform }], { duration: 260 }); chord(); }
+function layout(dt) {
+  const W = innerWidth, sm = W < 700, step = sm ? 96 : 140, x0 = sm ? W * 0.3 : W * 0.24;
+  cx += (ci - cx) * Math.min(1, dt * 10);
+  cats.forEach((c, i) => {
+    const dx = i - cx, on = i === ci, s = on ? 1.15 : 0.82;
+    c.el.style.transform = `translate(${x0 + dx * step - 45}px, -36px) scale(${s})`; c.el.style.opacity = Math.max(0, 1 - Math.abs(dx) * 0.12); c.el.classList.toggle('on', on);
+    iy[i] += (mem[i] - iy[i]) * Math.min(1, dt * 10);
+    const vis = Math.max(0, 1 - Math.abs(dx) * 3);
+    c.its.forEach((e, k) => {
+      const dk = k - iy[i], sel = k === mem[i];
+      const y = dk < -0.5 ? -110 + (dk + 1) * 74 : 92 + dk * 74;
+      e.style.transform = `translate(${x0 + dx * step - 27}px, ${y}px) scale(${sel ? 1.08 : 0.92})`;
+      e.style.opacity = vis * (dk < -0.5 ? Math.max(0, 0.55 + (dk + 1) * 0.25) : sel ? 1 : 0.75);
+      e.style.pointerEvents = vis > 0.5 ? '' : 'none'; e.classList.toggle('on', sel && on);
+    });
+  });
+}
+
+// Wave > gradient by month, additive sine strands
+const bg = $('#bg'), x = bg.getContext('2d');
+const MONTH_HUE = [210, 200, 120, 95, 330, 50, 190, 40, 280, 25, 260, 0];
+let month = new Date().getMonth(), hueNow = MONTH_HUE[month];
+function size() { const d = Math.min(1.5, devicePixelRatio || 1); bg.width = innerWidth * d; bg.height = innerHeight * d; x.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+function wave(t, dt) {
+  const W = innerWidth, H = innerHeight; hueNow += (MONTH_HUE[month] - hueNow) * Math.min(1, dt * 2);
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, `hsl(${hueNow},55%,42%)`); g.addColorStop(0.6, `hsl(${hueNow + 10},60%,24%)`); g.addColorStop(1, `hsl(${hueNow + 20},65%,12%)`);
+  x.globalCompositeOperation = 'source-over'; x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.globalCompositeOperation = 'lighter';
+  const cy = H * 0.62;
+  for (let k = 0; k < 28; k++) {
+    const ph = k * 0.11, amp = H * (0.07 + 0.05 * Math.sin(k * 0.7 + t * 0.2)), f = 1.6 + k * 0.012;
+    x.beginPath();
+    for (let px = -10; px <= W + 10; px += 12) { const u = px / W; const y = cy + Math.sin(u * Math.PI * f + t * 0.35 + ph) * amp + Math.sin(u * Math.PI * 3.1 - t * 0.22 + ph * 2) * amp * 0.35; px < 0 ? x.moveTo(px, y) : x.lineTo(px, y); }
+    if (k % 7 === 0) { x.strokeStyle = 'rgba(255,255,255,0.035)'; x.lineWidth = 26; x.stroke(); }
+    x.strokeStyle = `rgba(255,255,255,${k % 7 === 0 ? 0.4 : 0.08})`; x.lineWidth = k % 7 === 0 ? 1.8 : 1; x.stroke();
+  }
+  const rg = x.createRadialGradient(W * 0.5, cy, 0, W * 0.5, cy, W * 0.6); rg.addColorStop(0, 'rgba(255,255,255,0.08)'); rg.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = rg; x.fillRect(0, 0, W, H);
+  x.globalCompositeOperation = 'source-over';
+}
+
+// Audio > soft ticks, enter chord
+let ac = null;
+const wake = () => { if (!ac) try { ac = new AudioContext(); } catch {} };
+addEventListener('pointerdown', wake); addEventListener('keydown', wake);
+function tick(f) { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f; g.gain.setValueAtTime(0.04, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.1); }
+function chord() { if (!ac) return; const t = ac.currentTime; [659.3, 830.6, 987.8].forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(0.04, t + i * 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6); o.connect(g).connect(ac.destination); o.start(t + i * 0.03); o.stop(t + 0.65); }); }
+
+// Input > keys, wheel, swipe
+addEventListener('keydown', (e) => { const m = { ArrowLeft: () => go(-1), ArrowRight: () => go(1), ArrowUp: () => vert(-1), ArrowDown: () => vert(1), Enter: enter }[e.key]; if (m) { e.preventDefault(); m(); } });
+let wa = 0; addEventListener('wheel', (e) => { wa += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? 0 : e.deltaY; if (Math.abs(e.deltaX) > 30) { go(Math.sign(e.deltaX)); wa = 0; } if (Math.abs(wa) > 60) { vert(Math.sign(wa)); wa = 0; } }, { passive: true });
+let p0 = null; addEventListener('pointerdown', (e) => (p0 = [e.clientX, e.clientY]));
+addEventListener('pointerup', (e) => { if (!p0) return; const dx = e.clientX - p0[0], dy = e.clientY - p0[1]; p0 = null; if (Math.max(Math.abs(dx), Math.abs(dy)) < 40) return; if (Math.abs(dx) > Math.abs(dy)) go(dx < 0 ? 1 : -1); else vert(dy < 0 ? 1 : -1); });
+
+// Loop + attract
+let lastInput = -1e9, aT = 0, aS = 0, last = performance.now(), lastMin = -1;
+['pointerdown', 'keydown', 'wheel'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true, passive: true }));
+const PATH = [1, 0, 0, 'd', 'd', 'u', 1, 'd', 1, 'd', 'd', -1, -1, -1, 'u'];
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000;
+  wave(t, dt); layout(dt);
+  const d = new Date(); if (d.getMinutes() !== lastMin) { lastMin = d.getMinutes(); $('#ck').textContent = `${d.getDate()}/${d.getMonth() + 1} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`; }
+  if (now - lastInput > 6000) { aT += dt; if (aT > 1.1) { aT = 0; const s = PATH[aS++ % PATH.length]; if (s === 'd') vert(1); else if (s === 'u') vert(-1); else if (s) go(s); if (aS % PATH.length === 0) month = (month + 1) % 12; } }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__xmb = { move: (dx, dy) => { if (dx) go(dx); if (dy) vert(dy); }, month: (m) => (month = ((m % 12) + 12) % 12) };
+</script>
+</body>
+</html>

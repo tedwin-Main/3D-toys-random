@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Text Screensaver</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="36" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="three.js, TextGeometry, FontLoader, PMREM env map, vertex colours, bevel extrusion" />
+<meta name="description" content="The late-90s 3D text screensaver: your words, extruded and bevelled, see-sawing, spinning, wobbling and tumbling on black. Click to swap the surface between solid gloss, chrome reflecting a sky-and-horizon environment, a marble texture and a rainbow; open the retro setup dialog to type your own text, show the time instead, change the motion and speed. Hard because the text is real extruded font geometry rebuilt on every change (and every second in clock mode), centred and fitted to any screen, with a generated environment map for the chrome and world-space UVs for the texture."/>
+<meta name="prompt" content="Recreate the late-90s 3D text screensaver in three.js, one HTML file: load the bundled helvetiker bold font with FontLoader, extrude the text with TextGeometry and a bevel, centre it and fit it to the viewport. Offer surfaces (solid gloss, chrome with a PMREM sky-gradient environment, canvas marble texture, rainbow vertex colours) cycled by clicking, motions (see-saw, spin, wobble, tumble, drift) and a retro setup dialog with text input, a show-time option and a speed slider. Attract mode cycles motions, surfaces and phrases." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/spinning-text-screensaver.html
+ * PURPOSE: 3D text screensaver: extruded font geometry with chrome/solid/texture/rainbow surfaces and classic motions
+ * UI: Render Studio > Frutiger Aero > 3D Text Screensaver
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__text (set, style, motion, time, state)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font: 11px Tahoma, Verdana, sans-serif; }
+canvas { display: block; touch-action: none; cursor: pointer; }
+#gear { position: fixed; right: 12px; bottom: 12px; padding: 4px 10px; color: #000; background: #d4d0c8; border: 2px outset #fff; font: inherit; cursor: pointer; opacity: 0.55; }
+#gear:hover { opacity: 1; }
+#dlg { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(330px, calc(100vw - 16px)); background: #d4d0c8; border: 2px outset #fff; box-shadow: 2px 2px 0 #000; display: none; color: #000; }
+#dlg.on { display: block; }
+#dlg .tb { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px 3px 6px; color: #fff; font-weight: 700; background: linear-gradient(90deg, #0a246a, #a6caf0); }
+#dlg .tb button { width: 16px; height: 14px; padding: 0; font: 700 9px/1 Tahoma, sans-serif; background: #d4d0c8; border: 2px outset #fff; }
+#dlg .body { padding: 10px; display: grid; gap: 8px; }
+#dlg fieldset { border: 1px groove #fff; padding: 6px 8px; margin: 0; display: grid; gap: 5px; }
+#dlg legend { padding: 0 3px; }
+#dlg input[type=text] { font: inherit; padding: 2px 3px; border: 2px inset #fff; width: 100%; box-sizing: border-box; }
+#dlg .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+#dlg select { font: inherit; }
+#dlg .ok { justify-self: end; display: flex; gap: 6px; }
+#dlg .ok button { min-width: 70px; font: inherit; padding: 3px; background: #d4d0c8; border: 2px outset #fff; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<button id="gear">Settings...</button>
+<div id="dlg">
+  <div class="tb"><span>3D Text Setup</span><button id="x">x</button></div>
+  <div class="body">
+    <fieldset><legend>Display</legend>
+      <label class="row"><input type="radio" name="disp" value="text" checked /> Text <input type="text" id="txt" maxlength="16" value="Aero Dreams" style="flex:1;width:auto" /></label>
+      <label class="row"><input type="radio" name="disp" value="time" /> Time</label>
+    </fieldset>
+    <fieldset><legend>Motion</legend>
+      <div class="row"><select id="mot"><option>See-saw</option><option>Spin</option><option>Wobble</option><option>Tumble</option><option>Drift</option></select>
+      <label class="row">Speed <input type="range" id="spd" min="0.3" max="2.5" step="0.1" value="1" /></label></div>
+    </fieldset>
+    <fieldset><legend>Surface Style</legend>
+      <div class="row" id="sty"></div>
+    </fieldset>
+    <div class="ok"><button id="okb">OK</button><button id="cancel">Cancel</button></div>
+  </div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { FontLoader } from 'three/addons/loaders/FontLoader.js';
+import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
+
+const $ = (s) => document.querySelector(s);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+camera.position.z = 10;
+
+// Env > sky-horizon-ground gradient for chrome
+const ec = document.createElement('canvas'); ec.width = 512; ec.height = 256;
+{ const x = ec.getContext('2d'), g = x.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, '#0b2c7a'); g.addColorStop(0.35, '#3f8fe0'); g.addColorStop(0.49, '#e8f7ff'); g.addColorStop(0.51, '#6a8a3a'); g.addColorStop(0.7, '#2b3a18'); g.addColorStop(1, '#050505');
+  x.fillStyle = g; x.fillRect(0, 0, 512, 256);
+  x.fillStyle = 'rgba(255,255,255,0.8)'; for (let i = 0; i < 9; i++) { x.beginPath(); x.ellipse(i * 60 + 20, 70 + (i % 3) * 14, 34, 9, 0, 0, 7); x.fill(); } }
+const et = new THREE.CanvasTexture(ec); et.mapping = THREE.EquirectangularReflectionMapping; et.colorSpace = THREE.SRGBColorSpace;
+const pmrem = new THREE.PMREMGenerator(renderer), envMap = pmrem.fromEquirectangular(et).texture;
+
+// Marble > canvas texture for world-space UVs
+const mc = document.createElement('canvas'); mc.width = mc.height = 256;
+{ const x = mc.getContext('2d'), d = x.createImageData(256, 256);
+  for (let j = 0; j < 256; j++) for (let i = 0; i < 256; i++) { const n = Math.sin(i * 0.05 + Math.sin(j * 0.07) * 3 + Math.sin((i + j) * 0.021) * 4), v = 0.5 + 0.5 * n, k = (j * 256 + i) * 4;
+    d.data[k] = 40 + v * 200; d.data[k + 1] = 90 + v * 150; d.data[k + 2] = 150 + v * 100; d.data[k + 3] = 255; }
+  x.putImageData(d, 0, 0); }
+const marble = new THREE.CanvasTexture(mc); marble.wrapS = marble.wrapT = THREE.RepeatWrapping; marble.repeat.set(0.6, 0.6); marble.colorSpace = THREE.SRGBColorSpace;
+
+const STYLES = [
+  ['Solid', () => new THREE.MeshPhongMaterial({ color: 0x2f7bff, specular: 0xffffff, shininess: 90 })],
+  ['Chrome', () => new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 1, roughness: 0.12, envMap, envMapIntensity: 1.3 })],
+  ['Texture', () => new THREE.MeshPhongMaterial({ map: marble, specular: 0x666666, shininess: 50 })],
+  ['Rainbow', () => new THREE.MeshPhongMaterial({ vertexColors: true, specular: 0xffffff, shininess: 70 })],
+];
+const MOTIONS = ['See-saw', 'Spin', 'Wobble', 'Tumble', 'Drift'];
+STYLES.forEach(([n], i) => $('#sty').insertAdjacentHTML('beforeend', `<label class="row"><input type="radio" name="sty" value="${i}" /> ${n}</label>`));
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(3, 4, 6); scene.add(key);
+const rim = new THREE.DirectionalLight(0x88ccff, 1.2); rim.position.set(-5, -2, -3); scene.add(rim);
+
+const pivot = new THREE.Group(); scene.add(pivot);
+let font = null, mesh = null, styleI = 1, motionI = 0, speed = 1, showTime = false, text = 'Aero Dreams', fitK = 1, tumbleK = 1, shownStr = '';
+
+function geom(str) {
+  const g = new TextGeometry(str || ' ', { font, size: 1, height: 0.38, curveSegments: 6, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.045, bevelSegments: 3 });
+  g.center(); g.computeBoundingBox();
+  const p = g.attributes.position, c = new Float32Array(p.count * 3), col = new THREE.Color(), w = g.boundingBox.max.x - g.boundingBox.min.x || 1;
+  for (let i = 0; i < p.count; i++) { col.setHSL(((p.getX(i) - g.boundingBox.min.x) / w) * 0.85, 0.9, 0.55); c.set([col.r, col.g, col.b], i * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return g;
+}
+function fit(widthOf) {
+  const visH = 2 * camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), visW = visH * camera.aspect;
+  fitK = Math.min((visW * 0.78) / widthOf, visH * 0.3); tumbleK = Math.min(fitK, (Math.min(visW, visH) * 0.8) / widthOf);
+}
+let timeW = 0;
+function timeWidth() { const g = geom('88:88:88'), w = g.boundingBox.max.x * 2; g.dispose(); return w; }
+function build() {
+  if (!font) return;
+  const str = showTime ? new Date().toTimeString().slice(0, 8) : text; shownStr = str;
+  const g = geom(str);
+  if (mesh) { mesh.geometry.dispose(); mesh.geometry = g; } else { mesh = new THREE.Mesh(g, STYLES[styleI][1]()); pivot.add(mesh); }
+  fit(showTime ? (timeW ||= timeWidth()) : g.boundingBox.max.x - g.boundingBox.min.x);
+  pivot.scale.setScalar(fitK);
+}
+function setStyle(i) { styleI = (i + STYLES.length) % STYLES.length; if (mesh) { mesh.material.dispose(); mesh.material = STYLES[styleI][1](); } syncDlg(); }
+function setMotion(i) { motionI = (i + MOTIONS.length) % MOTIONS.length; drift.set(0, 0); syncDlg(); }
+
+new FontLoader().load('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/fonts/helvetiker_bold.typeface.json', (f) => { font = f; build(); });
+
+// Dialog > retro setup
+function syncDlg() { $('#mot').selectedIndex = motionI; document.querySelectorAll('[name=sty]').forEach((r) => (r.checked = +r.value === styleI)); $('#spd').value = speed; $('#txt').value = text; document.querySelector(`[name=disp][value=${showTime ? 'time' : 'text'}]`).checked = true; }
+const openDlg = () => { syncDlg(); $('#dlg').classList.add('on'); input(); };
+const closeDlg = () => $('#dlg').classList.remove('on');
+$('#gear').onclick = openDlg; $('#x').onclick = closeDlg; $('#cancel').onclick = closeDlg;
+$('#okb').onclick = () => {
+  text = $('#txt').value.trim() || 'Aero Dreams'; showTime = document.querySelector('[name=disp]:checked').value === 'time';
+  speed = +$('#spd').value; motionI = $('#mot').selectedIndex; const s = document.querySelector('[name=sty]:checked'); setStyle(s ? +s.value : styleI);
+  drift.set(0, 0); build(); closeDlg(); input();
+};
+$('#dlg').addEventListener('pointerdown', input);
+
+// Input > click canvas cycles style
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', (e) => (downXY = [e.clientX, e.clientY]));
+renderer.domElement.addEventListener('pointerup', (e) => { if (downXY && Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]) < 6) { setStyle(styleI + 1); input(); } downXY = null; });
+addEventListener('keydown', (e) => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowRight') setMotion(motionI + 1); if (e.key === 'ArrowLeft') setMotion(motionI - 1); if (e.key === ' ') setStyle(styleI + 1); input(); });
+
+// Attract > cycle motion, surface, phrase while idle
+const PHRASES = ['Aero Dreams', 'Hello 1999', 'Y2K Ready', 'Welcome!', 'Crystal Sky'];
+let lastInput = -1e9, nextMotion = 7, nextStyle = 4.5, phraseI = 0;
+function input() { lastInput = performance.now(); }
+
+const drift = new THREE.Vector2(), dv = new THREE.Vector2(1.3, 0.9);
+let t = 0, last = performance.now(), lastSec = -1;
+function loop(now) {
+  const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now; t += dt * speed;
+  const T = now / 1000;
+  if (now - lastInput > 8000 && font) {
+    if (T > nextStyle) { nextStyle = T + 9; setStyle(styleI + 1); }
+    if (T > nextMotion) { nextMotion = T + 7; setMotion(motionI + 1); if (motionI === 0 && !showTime) { phraseI = (phraseI + 1) % PHRASES.length; text = PHRASES[phraseI]; build(); } }
+  }
+  if (showTime && Math.floor(T) !== lastSec) { lastSec = Math.floor(T); build(); }
+  const r = pivot.rotation; r.set(0, 0, 0); pivot.position.set(0, 0, 0);
+  if (motionI === 0) r.y = Math.sin(t * 1.1) * 1.05;
+  else if (motionI === 1) r.y = t * 1.4;
+  else if (motionI === 2) { r.x = Math.sin(t * 1.7) * 0.45; r.z = Math.sin(t * 1.3) * 0.25; r.y = Math.sin(t * 0.9) * 0.4; }
+  else if (motionI === 3) { r.x = t * 0.9; r.y = t * 1.3; r.z = t * 0.4; }
+  else {
+    const visH = 2 * camera.position.z * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), bx = visH * camera.aspect * 0.12, by = visH * 0.3;
+    drift.addScaledVector(dv, dt * speed); if (Math.abs(drift.x) > bx) { dv.x *= -1; drift.x = Math.sign(drift.x) * bx; } if (Math.abs(drift.y) > by) { dv.y *= -1; drift.y = Math.sign(drift.y) * by; }
+    pivot.position.set(drift.x, drift.y, 0); r.y = Math.sin(t * 0.8) * 0.5; pivot.scale.setScalar(fitK * 0.8);
+  }
+  if (motionI !== 4) pivot.scale.setScalar(motionI === 3 ? tumbleK : fitK);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); build(); });
+syncDlg();
+
+window.__text = { set: (s) => { text = s; showTime = false; build(); }, style: setStyle, motion: setMotion, time: (on = true) => { showTime = on; build(); }, state: () => ({ text: shownStr, style: STYLES[styleI][0], motion: MOTIONS[motionI], ready: !!mesh }) };
+</script>
+</body>
+</html>

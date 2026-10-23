@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Click Wheel Player</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="23" />
+<meta name="capture" content="3350" />
+<meta name="tags" content="2005 pocket music player, circular drag input, menu stack, WebAudio sequencer" />
+<meta name="description" content="A 2005-era pocket music player, with no brand: a glossy white body, a small colour screen with a sliding menu stack (Music, Playlists, Songs, Extras, Settings, Now Playing), and a working click wheel. Dragging round the wheel scrolls lists with a tiny tick each step, the four wheel buttons do Menu, Back, Forward and Play/Pause, and the centre button selects. Songs are original synth tunes from a lookahead sequencer, and on Now Playing the wheel turns the volume. Hard because the wheel turns pointer angle into steps (handling the wrap past 180 degrees), and every screen slides in or out as a stack." />
+<meta name="prompt" content="Build a 2005-style pocket music player in one HTML file with no brand: glossy white CSS body, a 320x240 colour screen with a sliding menu stack (Music, Playlists, Songs, Extras, Settings, Now Playing with art, progress and time), and a real click wheel where circular dragging scrolls lists with a tick per step; Menu, Back, Forward, Play/Pause and a centre select. Songs are original tunes from a WebAudio lookahead sequencer; on Now Playing the wheel sets volume. Add keyboard support and an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/click-wheel-player.html
+ * PURPOSE: 2005 pocket player: circular-drag click wheel, sliding menu stack, Now Playing with synth sequencer and volume
+ * UI: Render Studio > Frutiger Aero > Click Wheel Player
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__wheel (turn, press, screen)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Helvetica Neue", "Myriad Pro", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 30%, #ffffff, #e3eef7 50%, #b7d3ea); }
+#wrap { transform-origin: 50% 50%; }
+.body { width: 330px; height: 560px; border-radius: 36px; position: relative; padding: 26px 25px; background: linear-gradient(135deg, #ffffff, #f2f4f6 40%, #e2e6ea); box-shadow: 0 30px 60px rgba(30, 70, 110, 0.35), inset 0 0 0 1px rgba(0, 0, 0, 0.06), inset 0 2px 1px #fff, inset 0 -3px 6px rgba(0, 0, 0, 0.08); }
+.body::after { content: ''; position: absolute; inset: 0; border-radius: 36px; background: linear-gradient(115deg, rgba(255, 255, 255, 0.22) 0 30%, rgba(255, 255, 255, 0) 31%); pointer-events: none; }
+#screen { width: 280px; height: 210px; border-radius: 6px; overflow: hidden; position: relative; background: #fff; box-shadow: 0 0 0 3px #1b1d20, 0 0 0 4px #cfd5db; font-size: 14px; color: #111; }
+#hdr { height: 22px; display: flex; align-items: center; justify-content: center; position: relative; font-size: 12px; font-weight: 700; background: linear-gradient(#fdfdfd, #d6dbe0); border-bottom: 1px solid #9aa3ad; z-index: 3; }
+#hdr .pl { position: absolute; left: 7px; font-size: 9px; }
+#hdr .bat { position: absolute; right: 7px; width: 20px; height: 9px; border: 1px solid #333; border-radius: 2px; padding: 1px; } #hdr .bat b { display: block; height: 100%; width: 70%; background: linear-gradient(#9fe07a, #3f9a22); }
+#views { position: absolute; left: 0; right: 0; top: 22px; bottom: 0; }
+.view { position: absolute; inset: 0; background: #fff; transition: transform 0.28s cubic-bezier(.3, .8, .3, 1); }
+.row { height: 25px; line-height: 25px; padding: 0 10px; display: flex; font-weight: 600; font-size: 14px; }
+.row::after { content: '›'; margin-left: auto; color: #888; font-weight: 400; font-size: 18px; }
+.row.leaf::after { content: ''; }
+.row.sel { color: #fff; background: linear-gradient(#69b3f5, #1d6fd0); }
+.row.sel::after { color: #fff; }
+.np { padding: 10px; display: grid; grid-template-columns: 96px 1fr; gap: 10px; }
+.np canvas { width: 96px; height: 96px; border-radius: 3px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
+.np .meta { font-size: 13px; line-height: 1.35; } .np .meta b { display: block; font-size: 14px; } .np .meta span { color: #555; }
+.np .pg { grid-column: 1 / -1; }
+.bar { height: 9px; border-radius: 5px; background: linear-gradient(#e6e9ec, #cfd5db); box-shadow: inset 0 0 0 1px #9aa3ad; overflow: hidden; } .bar i { display: block; height: 100%; width: 0; background: linear-gradient(#9fd0ff, #2a7ed6); }
+.times { display: flex; justify-content: space-between; font-size: 11px; color: #444; margin-top: 3px; }
+#vol { margin-top: 6px; opacity: 0; transition: opacity 0.3s; display: flex; align-items: center; gap: 6px; font-size: 11px; } #vol.on { opacity: 1; } #vol .bar { flex: 1; }
+.clockv { display: grid; place-items: center; height: 100%; font-size: 44px; font-weight: 300; }
+#wheel { width: 220px; height: 220px; margin: 38px auto 0; border-radius: 50%; position: relative; background: radial-gradient(circle, transparent 0 34%, #f7f8f9 35%, #e9ecef 100%); box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.9), inset 0 -2px 4px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.15); touch-action: none; cursor: grab; }
+#wheel .lbl { position: absolute; font-size: 12px; font-weight: 700; color: #a3aab2; pointer-events: none; }
+#wheel .m { top: 14px; left: 50%; transform: translateX(-50%); letter-spacing: 1px; }
+#wheel .f { right: 16px; top: 50%; transform: translateY(-50%); } #wheel .b { left: 16px; top: 50%; transform: translateY(-50%); } #wheel .p { bottom: 14px; left: 50%; transform: translateX(-50%); }
+#center { position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; margin: -38px; border-radius: 50%; background: linear-gradient(#f4f6f8, #dfe3e7); box-shadow: inset 0 1px 1px #fff, 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.2); cursor: pointer; }
+#center:active, #center.down { background: linear-gradient(#dfe3e7, #f4f6f8); }
+#dotp { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: radial-gradient(circle, rgba(90, 160, 255, 0.5), transparent 70%); pointer-events: none; opacity: 0; transition: opacity 0.2s; }
+</style>
+</head>
+<body>
+<div id="wrap"><div class="body">
+  <div id="screen"><div id="hdr"><span class="pl" id="pl"></span><span id="title">Menu</span><span class="bat"><b></b></span></div><div id="views"></div></div>
+  <div id="wheel"><span class="lbl m">MENU</span><span class="lbl f">&#9654;&#9654;</span><span class="lbl b">&#9664;&#9664;</span><span class="lbl p">&#9654;&#10074;&#10074;</span><div id="dotp"></div><div id="center"></div></div>
+</div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+function fit() { const s = Math.min(1.25, (innerHeight - 24) / 580, (innerWidth - 20) / 340); $('#wrap').style.transform = `scale(${s})`; }
+fit(); addEventListener('resize', fit);
+
+// Songs > original tunes for the sequencer
+const SONGS = [
+  { t: 'Aqua Drift', a: 'Synth Demo', h: 200, bpm: 104, lead: '64 67 71 69 67 64 62 64 . 67 71 74 72 71 67 .', bass: '40 . 40 . 45 . 45 . 43 . 43 . 38 . 38 .' },
+  { t: 'Glass Garden', a: 'Synth Demo', h: 120, bpm: 118, lead: '72 . 76 79 . 77 76 72 74 . 77 81 . 79 77 74', bass: '48 . 48 55 53 . 53 52 50 . 50 57 55 . 55 53' },
+  { t: 'Sky Arcade', a: 'Synth Demo', h: 30, bpm: 132, lead: '67 71 74 79 74 71 67 71 69 72 76 81 76 72 69 72', bass: '43 . 43 . 43 . 43 . 45 . 45 . 45 . 45 .' },
+  { t: 'Bubble Pop', a: 'Synth Demo', h: 320, bpm: 124, lead: '76 76 . 72 74 . 76 . 79 . 77 76 74 . 72 .', bass: '48 . 52 . 55 . 52 . 53 . 57 . 55 . 50 .' },
+];
+const MENU = {
+  Menu: ['Music', 'Videos', 'Photos', 'Extras', 'Settings', 'Shuffle Songs', 'Now Playing'],
+  Music: ['Playlists', 'Artists', 'Albums', 'Songs', 'Genres'],
+  Playlists: ['On-The-Go', 'Chill Mix', 'Top 25 Most Played'], Artists: ['Synth Demo'], Albums: ['Pocket Sessions'], Genres: ['Electronic'],
+  'Chill Mix': 'SONGS', 'On-The-Go': 'SONGS', 'Top 25 Most Played': 'SONGS', 'Synth Demo': 'SONGS', 'Pocket Sessions': 'SONGS', Electronic: 'SONGS', Songs: 'SONGS',
+  Videos: ['Movies', 'Music Videos', 'TV Shows'], Photos: ['Photo Library', 'Last Roll'],
+  Extras: ['Clock', 'Games', 'Contacts', 'Calendar', 'Notes'], Settings: ['About', 'Shuffle', 'Repeat', 'Backlight', 'EQ', 'Language'],
+};
+const listOf = (k) => (MENU[k] === 'SONGS' ? SONGS.map((s) => s.t) : MENU[k]);
+
+// Stack > views slide in from right, out to right
+const stack = [];
+function push(key) {
+  const v = document.createElement('div'); v.className = 'view';
+  const it = { key, el: v, sel: 0, top: 0 };
+  if (key === 'Now Playing') { v.innerHTML = `<div class="np"><canvas width="96" height="96"></canvas><div class="meta"><b id="npT"></b><span id="npA"></span><br><span style="font-size:11px">1 of ${SONGS.length}</span></div><div class="pg"><div class="bar"><i id="npB"></i></div><div class="times"><span id="npE">0:00</span><span id="npR">-0:00</span></div><div id="vol">&#128264;&#xFE0E;<div class="bar"><i id="vB"></i></div>&#128266;&#xFE0E;</div></div></div>`; }
+  else if (key === 'Clock') { v.innerHTML = '<div class="clockv" id="clockv"></div>'; }
+  v.style.transform = stack.length ? 'translateX(100%)' : 'translateX(0)';
+  $('#views').append(v); stack.push(it);
+  requestAnimationFrame(() => { v.style.transform = 'translateX(0)'; if (stack.length > 1) { const pv = stack[stack.length - 2].el; pv.style.transform = 'translateX(-30%)'; setTimeout(() => { if (cur() === it) pv.style.visibility = 'hidden'; }, 300); } });
+  render();
+}
+function pop() {
+  if (stack.length < 2) return; const it = stack.pop(); it.el.style.transform = 'translateX(100%)'; setTimeout(() => it.el.remove(), 300);
+  const top = stack[stack.length - 1].el; top.style.visibility = ''; top.style.transform = 'translateX(0)'; render();
+}
+const cur = () => stack[stack.length - 1];
+function render() {
+  const it = cur(); $('#title').textContent = it.key === 'Menu' ? 'Menu' : it.key;
+  const L = listOf(it.key); if (!L) { if (it.key === 'Now Playing') paintNP(); return; }
+  const VIS = 7; if (it.sel < it.top) it.top = it.sel; if (it.sel >= it.top + VIS) it.top = it.sel - VIS + 1;
+  it.el.innerHTML = L.slice(it.top, it.top + VIS).map((n, k) => `<div class="row${k + it.top === it.sel ? ' sel' : ''}${MENU[it.key] === 'SONGS' || (!MENU[n] && n !== 'Now Playing' && n !== 'Shuffle Songs' && n !== 'Clock') ? ' leaf' : ''}">${n}</div>`).join('');
+}
+function select() {
+  const it = cur(), L = listOf(it.key); if (!L) { if (it.key === 'Now Playing') toggle(); return; }
+  const n = L[it.sel];
+  if (MENU[it.key] === 'SONGS') { play(it.sel); push('Now Playing'); return; }
+  if (n === 'Shuffle Songs') { play(Math.floor(Math.random() * SONGS.length)); push('Now Playing'); return; }
+  if (n === 'Now Playing') { if (song < 0) play(0); push('Now Playing'); return; }
+  if (n === 'Clock') { push('Clock'); return; }
+  if (MENU[n]) push(n); else blink(it);
+}
+function blink(it) { const r = it.el.querySelector('.sel'); if (r) r.animate([{ opacity: 1 }, { opacity: 0.4 }, { opacity: 1 }], { duration: 220 }); }
+
+// Sequencer > lookahead scheduler, two voices
+let ac = null, master = null, song = -1, playing = false, step = 0, nextT = 0, startT = 0, pausedAt = 0, vol = 0.6;
+const wake = () => { if (!ac) try { ac = new AudioContext(); master = ac.createGain(); master.gain.value = vol * 0.5; master.connect(ac.destination); } catch {} };
+const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+const clk = () => performance.now() / 1000;
+function play(i) { wake(); song = i; step = 0; playing = true; if (ac) nextT = ac.currentTime + 0.05; startT = clk(); pausedAt = 0; }
+function toggle() { if (song < 0) { play(0); return; } playing = !playing; const now = clk(); if (!playing) pausedAt = now - startT; else { startT = now - pausedAt; if (ac) nextT = ac.currentTime + 0.05; } }
+function note(m, t, d, type, v) { if (!ac || !m) return; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = mf(m); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(master); o.start(t); o.stop(t + d + 0.02); }
+function schedule() {
+  if (!ac || !playing || song < 0) return; const S = SONGS[song], sp = 60 / S.bpm / 2, L = S.lead.split(' '), B = S.bass.split(' ');
+  while (nextT < ac.currentTime + 0.12) {
+    const i = step % 16; note(+L[i] || 0, nextT, sp * 1.6, 'triangle', 0.12); note(+B[i] || 0, nextT, sp * 1.8, 'sine', 0.2);
+    if (i % 4 === 0) { const n = ac.sampleRate * 0.05, b = ac.createBuffer(1, n, ac.sampleRate), d = b.getChannelData(0); for (let k = 0; k < n; k++) d[k] = (Math.random() * 2 - 1) * (1 - k / n); const s = ac.createBufferSource(), g = ac.createGain(); s.buffer = b; g.gain.value = 0.05; s.connect(g).connect(master); s.start(nextT); }
+    nextT += sp; step++;
+  }
+}
+const LEN = 95;
+function paintNP() {
+  const S = SONGS[Math.max(0, song)], c = cur().el.querySelector('canvas'); if (!c) return;
+  const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 96, 96); g.addColorStop(0, `hsl(${S.h},75%,62%)`); g.addColorStop(1, `hsl(${S.h + 40},75%,25%)`); x.fillStyle = g; x.fillRect(0, 0, 96, 96);
+  for (let i = 0; i < 6; i++) { x.fillStyle = `hsla(${S.h + i * 15},90%,80%,0.3)`; x.beginPath(); x.arc(20 + i * 13, 40 + Math.sin(i) * 20, 12 + i * 3, 0, 7); x.fill(); }
+  x.fillStyle = 'rgba(255,255,255,0.25)'; x.fillRect(0, 0, 96, 40);
+  $('#npT').textContent = S.t; $('#npA').textContent = S.a;
+}
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+function updNP() {
+  if (cur().key !== 'Now Playing' || song < 0) return;
+  const e = playing ? clk() - startT : pausedAt;
+  if (e > LEN) { play((song + 1) % SONGS.length); paintNP(); return; }
+  $('#npB').style.width = (e / LEN) * 100 + '%'; $('#npE').textContent = fmt(e); $('#npR').textContent = '-' + fmt(LEN - e);
+}
+
+// Wheel > angle delta to steps, buttons by quadrant
+const wheel = $('#wheel'); let wa = null, acc = 0, volT = 0;
+const ang = (e) => { const r = wheel.getBoundingClientRect(); return Math.atan2(e.clientY - r.top - r.height / 2, e.clientX - r.left - r.width / 2); };
+function click() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; o.frequency.value = 3200; g.gain.setValueAtTime(0.02, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.012); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.02); }
+function turn(n) {
+  const it = cur();
+  if (it.key === 'Now Playing') { vol = Math.max(0, Math.min(1, vol + n * 0.05)); if (master) master.gain.value = vol * 0.5; $('#vB').style.width = vol * 100 + '%'; $('#vol').classList.add('on'); volT = 1.5; click(); return; }
+  const L = listOf(it.key); if (!L) return; const ns = Math.max(0, Math.min(L.length - 1, it.sel + n)); if (ns !== it.sel) { it.sel = ns; render(); click(); }
+}
+function press(b) {
+  wake();
+  if (b === 'menu') pop(); else if (b === 'select') select(); else if (b === 'play') toggle();
+  else if (b === 'next' || b === 'prev') { if (song < 0) return; play((song + (b === 'next' ? 1 : SONGS.length - 1)) % SONGS.length); if (cur().key === 'Now Playing') paintNP(); }
+}
+wheel.addEventListener('pointerdown', (e) => {
+  if (e.target === $('#center')) return; wake(); wa = { a: ang(e), moved: 0, x: e.clientX, y: e.clientY }; acc = 0; wheel.setPointerCapture(e.pointerId);
+});
+wheel.addEventListener('pointermove', (e) => {
+  if (!wa) return; const a = ang(e); let d = a - wa.a; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; wa.a = a; wa.moved += Math.abs(d); acc += d;
+  const STEP = Math.PI / 12; while (Math.abs(acc) >= STEP) { turn(Math.sign(acc)); acc -= Math.sign(acc) * STEP; }
+  const r = wheel.getBoundingClientRect(), dp = $('#dotp'); dp.style.left = e.clientX - r.left - 9 + 'px'; dp.style.top = e.clientY - r.top - 9 + 'px'; dp.style.opacity = 1;
+});
+wheel.addEventListener('pointerup', (e) => {
+  $('#dotp').style.opacity = 0; if (!wa) return; const m = wa.moved; wa = null; if (m > 0.15) return;
+  const a = ang(e), q = Math.round(a / (Math.PI / 2)); press({ '-1': 'menu', 0: 'next', 1: 'play', 2: 'prev', '-2': 'prev' }[q]);
+});
+$('#center').addEventListener('pointerdown', (e) => { e.stopPropagation(); press('select'); });
+addEventListener('keydown', (e) => { const k = { ArrowDown: () => turn(1), ArrowUp: () => turn(-1), Enter: () => press('select'), Escape: () => press('menu'), Backspace: () => press('menu'), ' ': () => press('play'), ArrowRight: () => press('next'), ArrowLeft: () => press('prev') }[e.key]; if (k) { e.preventDefault(); wake(); k(); } });
+
+// Loop + attract
+const SCRIPT = ['t1', 't1', 't-1', 'select', 't1', 't1', 't1', 'select', 't1', 't1', 'select', 'w', 'next', 'w', 'menu', 'menu', 't1', 't1', 't1', 'select', 't-1', 't-1', 't-1', 't-1', 'select', 'w', 'menu', 'menu', 't-1', 't-1', 't-1'];
+let lastInput = -1e9, aT = 0, aI = 0, last = performance.now(), lastSec = -1;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  schedule(); updNP();
+  if (volT > 0) { volT -= dt; if (volT <= 0) $('#vol').classList.remove('on'); }
+  $('#pl').innerHTML = playing ? '&#9654;' : song >= 0 ? '&#10074;&#10074;' : '';
+  const d = new Date(); if (cur().key === 'Clock' && d.getSeconds() !== lastSec) { lastSec = d.getSeconds(); const c = $('#clockv'); if (c) c.textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+  if (now - lastInput > 6000) { aT += dt; if (aT > 0.7) { aT = 0; const s = SCRIPT[aI++ % SCRIPT.length]; if (s[0] === 't') turn(+s.slice(1)); else if (s !== 'w') { if (s === 'select') { $('#center').classList.add('down'); setTimeout(() => $('#center').classList.remove('down'), 150); } if (s === 'select') select(); else if (s === 'menu') pop(); else press(s); } } }
+  requestAnimationFrame(frame);
+}
+push('Menu'); requestAnimationFrame(frame);
+window.__wheel = { turn, press, screen: () => cur().key };
+</script>
+</body>
+</html>

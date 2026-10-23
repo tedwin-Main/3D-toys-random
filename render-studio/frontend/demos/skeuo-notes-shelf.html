@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Skeuo Notes Shelf</title>
+<meta name="category" content="aero" />
+<meta name="style" content="skeuo" />
+<meta name="order" content="45" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="canvas-generated wood leather linen paper textures, CSS 3D page flip, clip-path torn paper, contenteditable, WebAudio foley synth" />
+<meta name="description" content="Peak skeuomorphism, circa 2010: a stitched leather notepad of yellow ruled paper in a handwriting face sits beside a wooden bookshelf on grey linen. Pick a notebook off the shelf and the binding changes to its leather, flip pages over the top like a legal pad, type straight onto the paper, and delete a note by tearing the sheet off along its perforation so it drops away, leaving a ragged stub. Hard because every material, from wood grain and leather pores to linen weave, paper fibre and cloth book spines, is generated on canvas at load, and the flip, tear and fall are layered CSS 3D and clip-path animations with synthesized paper and wood foley."/>
+<meta name="prompt" content="Build an early-2010s skeuomorphic notes app in one HTML file with no images: canvas-generated linen background, wood-grain bookshelf with cloth and leather book spines in gold foil, and a leather-bound legal notepad with stitching, yellow ruled paper, red margin and a handwriting font. Clicking a notebook on the shelf pulls it out and rebinds the pad in its leather; pages flip over the top edge in CSS 3D with shading; notes are editable; the trash button tears the sheet off along a jagged perforation and drops it away. WebAudio synthesizes page swish, tear crackle, book thud and pencil ticks. Attract mode flips, switches books, handwrites a new note and tears one off." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/skeuo-notes-shelf.html
+ * PURPOSE: Skeuomorphic notes app: leather legal pad, page flip, torn-page delete, wooden bookshelf of notebooks
+ * UI: Render Studio > Frutiger Aero > Skeuomorphism > Skeuo Notes Shelf
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__skeuo (flip, tear, book, add, note, count)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: #d6d1c4 var(--linen); font: 14px "Helvetica Neue", Helvetica, Arial, sans-serif; color: #3a2a1a; display: flex; align-items: center; justify-content: center; gap: 40px; padding: 20px; }
+.shelf { width: 340px; flex: none; padding: 14px 14px 0; border-radius: 6px; background: #5a3418 var(--wood); background-size: 300px; box-shadow: inset 0 0 0 1px rgba(255, 220, 170, 0.25), inset 0 0 40px rgba(0, 0, 0, 0.55), 0 18px 40px rgba(40, 25, 10, 0.45); }
+.row { position: relative; height: 196px; display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.25) 30%, rgba(0, 0, 0, 0.35)); }
+.row::after { content: ""; position: absolute; left: -14px; right: -14px; bottom: -18px; height: 18px; background: #6a3e1c var(--wood); background-size: 300px; box-shadow: inset 0 2px 0 rgba(255, 220, 170, 0.35), inset 0 -3px 4px rgba(0, 0, 0, 0.4), 0 6px 8px rgba(0, 0, 0, 0.35); z-index: 2; }
+.row + .row { margin-top: 18px; }
+.book { position: relative; flex: none; border-radius: 3px 3px 1px 1px; cursor: pointer; transition: transform 0.35s cubic-bezier(0.3, 1.5, 0.5, 1), box-shadow 0.35s; background-color: var(--c); background-image: var(--cloth), linear-gradient(90deg, rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.18) 25%, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.3)); background-blend-mode: multiply, normal; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 2px 0 3px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; align-items: center; }
+.book::before, .book::after { content: ""; position: absolute; left: 3px; right: 3px; height: 3px; border-top: 1px solid #e2c06a; border-bottom: 1px solid #e2c06a; }
+.book::before { top: 12px; } .book::after { bottom: 12px; }
+.book span { margin-top: 26px; writing-mode: vertical-rl; transform: rotate(180deg); font: bold 10px Georgia, serif; letter-spacing: 0.12em; color: #f0d68a; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.6); white-space: nowrap; overflow: hidden; max-height: calc(100% - 50px); }
+.book.leather { background-image: var(--leather), linear-gradient(90deg, rgba(0, 0, 0, 0.4), rgba(255, 255, 255, 0.22) 25%, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.35)); }
+.book.leather span { font: bold 11px "Noteworthy", "Marker Felt", "Segoe Print", cursive; letter-spacing: 0.05em; color: #fff3d6; transform: none; writing-mode: vertical-lr; }
+.book.nb::before { top: auto; bottom: -8px; left: 40%; right: auto; width: 7px; height: 20px; border: 0; background: #b0182a; clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%); z-index: 3; }
+.book:hover { transform: translateY(-4px); }
+.book.sel { transform: translateY(-16px) scale(1.04); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3), 4px 8px 10px rgba(0, 0, 0, 0.5); z-index: 1; }
+.book.wiggle { animation: wig 0.5s; }
+@keyframes wig { 30% { transform: translateY(-20px) rotate(-6deg); } 60% { transform: translateY(-6px) rotate(2deg); } }
+.pad { position: relative; width: 500px; flex: none; height: min(700px, calc(100vh - 40px)); display: flex; flex-direction: column; filter: drop-shadow(0 18px 24px rgba(40, 25, 10, 0.45)); }
+.binding { position: relative; z-index: 5; height: 66px; flex: none; border-radius: 10px 10px 4px 4px; background-color: var(--bind, #6b3e1f); background-image: var(--leather), linear-gradient(180deg, rgba(255, 255, 255, 0.25), rgba(0, 0, 0, 0.3)); background-blend-mode: multiply, overlay; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -2px 3px rgba(0, 0, 0, 0.5), 0 3px 4px rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: space-between; padding: 0 18px; transition: background-color 0.5s; }
+.binding::before { content: ""; position: absolute; inset: 6px; border: 2px dashed rgba(255, 236, 200, 0.6); border-radius: 7px; pointer-events: none; }
+.binding h1 { margin: 0; font: bold 22px "Helvetica Neue", Helvetica, sans-serif; color: rgba(255, 238, 205, 0.92); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 230, 190, 0.2); }
+.btn { position: relative; z-index: 1; min-width: 40px; height: 30px; padding: 0 12px; border-radius: 6px; border: 1px solid rgba(30, 15, 5, 0.75); color: #fff; font: bold 13px "Helvetica Neue", sans-serif; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.6); cursor: pointer; background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.08) 50%, rgba(0, 0, 0, 0.12) 51%, rgba(0, 0, 0, 0.05)), var(--bind, #6b3e1f); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 1px 0 rgba(255, 230, 190, 0.3); }
+.btn:active { background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6); }
+.stubs { height: 10px; margin: -2px 6px 0; flex: none; position: relative; z-index: 4; background: #fff6b8; clip-path: var(--stub); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1); }
+.stack { position: relative; flex: 1; margin: -4px 6px 0; perspective: 1400px; }
+.stack::before, .stack::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: -4px; height: 100%; background: #f4e9a0; border-radius: 0 0 4px 4px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.15); }
+.stack::after { left: 6px; right: 6px; bottom: -8px; background: #eadd8e; z-index: -1; }
+.page { position: absolute; inset: 0; z-index: 1; border-radius: 0 0 4px 4px; background-color: #fff8bd; background-image: linear-gradient(90deg, transparent 50px, #e88a8a 50px, #e88a8a 51px, transparent 51px, transparent 54px, #e88a8a 54px, #e88a8a 55px, transparent 55px), repeating-linear-gradient(180deg, transparent 0 29px, #9ec3e0 29px 30px), var(--paper); background-position: 0 0, 0 52px, 0 0; padding: 14px 22px 20px 66px; transform-origin: 50% 0; backface-visibility: hidden; overflow: hidden; }
+.page .date { height: 38px; font: 11px "Helvetica Neue", sans-serif; color: #a08560; display: flex; justify-content: space-between; padding-right: 4px; }
+.page .body { font: 21px / 30px "Noteworthy", "Marker Felt", "Bradley Hand", "Segoe Print", "Comic Sans MS", cursive; color: #2a2010; white-space: pre-wrap; outline: none; min-height: 60%; caret-color: #8a3a10; }
+.page .body:first-line { font-weight: bold; }
+.flip { z-index: 3; pointer-events: none; }
+.flip::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, 0.0), rgba(60, 40, 0, var(--sh, 0))); pointer-events: none; }
+.tear { z-index: 3; pointer-events: none; clip-path: var(--tearclip); }
+.foot { height: 50px; flex: none; margin-top: 10px; border-radius: 4px 4px 10px 10px; background-color: var(--bind, #6b3e1f); background-image: var(--leather), linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.3)); background-blend-mode: multiply, overlay; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 3px rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; transition: background-color 0.5s; position: relative; z-index: 5; }
+.foot .count { font: bold 13px "Helvetica Neue", sans-serif; color: rgba(255, 236, 200, 0.85); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.6); }
+.foot div { display: flex; gap: 8px; }
+.hint { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); padding: 5px 12px; border-radius: 999px; font: 12px "Helvetica Neue", sans-serif; color: #fff; background: rgba(60, 40, 20, 0.6); white-space: nowrap; pointer-events: none; z-index: 20; }
+@media (max-width: 880px) {
+  body { flex-direction: column; justify-content: flex-start; gap: 22px; padding: 14px 12px 40px; }
+  .shelf { width: 100%; padding: 10px 10px 0; }
+  .row { height: 132px; overflow: hidden; } .row + .row { display: none; }
+  .book { transform-origin: bottom; zoom: 0.68; }
+  .pad { width: 100%; height: auto; flex: 1; }
+  .page { padding-left: 60px; }
+}
+</style>
+</head>
+<body>
+<div class="shelf" id="shelf"><div class="row"></div><div class="row"></div><div class="row"></div></div>
+<div class="pad" id="pad">
+  <div class="binding"><button class="btn" id="bNew" title="New note">+</button><h1 id="title">Notes</h1><button class="btn" id="bBack">Notes</button></div>
+  <div class="stubs" id="stubs"></div>
+  <div class="stack" id="stack"></div>
+  <div class="foot"><div><button class="btn" id="bPrev">&#9664;</button><button class="btn" id="bNext">&#9654;</button></div><span class="count" id="count"></span><div><button class="btn" id="bTear">Tear off</button></div></div>
+</div>
+<div class="hint">pick a notebook · flip pages · type on the paper · tear a page off</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+let seed = 11; const R = () => ((seed = (seed * 16807) % 2147483647) / 2147483647), rnd = (a, b) => a + R() * (b - a);
+
+// Textures > canvas generated, set as css vars
+function tex(w, h, fn) { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); fn(x, w, h); return `url(${c.toDataURL()})`; }
+function pixels(x, w, h, f) { const im = x.createImageData(w, h); for (let y = 0; y < h; y++) for (let i = 0; i < w; i++) { const [r, g, b, a = 255] = f(i, y), k = (y * w + i) * 4; im.data[k] = r; im.data[k + 1] = g; im.data[k + 2] = b; im.data[k + 3] = a; } x.putImageData(im, 0, 0); }
+const css = document.documentElement.style;
+css.setProperty('--linen', tex(160, 160, (x, w, h) => {
+  x.fillStyle = '#d6d1c4'; x.fillRect(0, 0, w, h);
+  for (let i = 0; i < w; i++) { x.fillStyle = `rgba(${R() < 0.5 ? '255,255,255' : '90,80,60'},${rnd(0.03, 0.12)})`; x.fillRect(i, 0, 1, h); x.fillRect(0, i, w, 1); }
+  for (let i = 0; i < 900; i++) { x.fillStyle = `rgba(80,70,50,${rnd(0.04, 0.12)})`; x.fillRect(rnd(0, w), rnd(0, h), rnd(2, 6), 1); }
+}));
+css.setProperty('--wood', tex(300, 300, (x, w, h) => pixels(x, w, h, (i, y) => {
+  const g = Math.sin((y + 9 * Math.sin(i * 0.013) + 5 * Math.sin(i * 0.041 + y * 0.02)) * 0.42) * 0.5 + 0.5, k = 0.78 + 0.22 * Math.pow(g, 3) + (Math.random() - 0.5) * 0.06;
+  return [120 * k, 72 * k, 36 * k];
+})));
+css.setProperty('--leather', tex(200, 200, (x, w, h) => {
+  pixels(x, w, h, () => { const v = 200 + Math.random() * 40; return [v, v, v]; });
+  for (let i = 0; i < 2600; i++) { x.fillStyle = `rgba(0,0,0,${rnd(0.08, 0.25)})`; x.beginPath(); x.arc(rnd(0, w), rnd(0, h), rnd(0.4, 1.4), 0, 7); x.fill(); }
+  for (let i = 0; i < 60; i++) { x.strokeStyle = `rgba(0,0,0,${rnd(0.05, 0.12)})`; x.beginPath(); const sx = rnd(0, w), sy = rnd(0, h); x.moveTo(sx, sy); x.quadraticCurveTo(sx + rnd(-20, 20), sy + rnd(-20, 20), sx + rnd(-30, 30), sy + rnd(-30, 30)); x.stroke(); }
+}));
+css.setProperty('--cloth', tex(64, 64, (x, w, h) => pixels(x, w, h, (i, y) => { const v = 210 + ((i % 2) ^ (y % 2)) * 25 + Math.random() * 20; return [v, v, v]; })));
+css.setProperty('--paper', tex(128, 128, (x, w, h) => pixels(x, w, h, () => [120, 100, 40, Math.random() * 14])));
+function jag(n, lo, hi, top = true) { const p = []; for (let i = 0; i <= n; i++) p.push(`${(i / n) * 100}% ${rnd(lo, hi)}%`); return top ? `polygon(0 0, 100% 0, ${p.reverse().join(', ')})` : p.join(', '); }
+css.setProperty('--stub', jag(60, 20, 100));
+
+// Data > notebooks and notes
+const BOOKS = [
+  { name: 'Ideas', color: '#6b3e1f', notes: ['Grocery list\n- milk\n- eggs\n- coffee beans!!\n- fresh basil', 'App idea:\na flashlight that is also a mirror', 'Call Mom back about Sunday lunch', 'Things to try\nlatte art, pottery class, learn the ukulele'] },
+  { name: 'Recipes', color: '#7a1f24', notes: ['Pancakes\n2 cups flour\n2 eggs\n1 1/2 cups milk\npinch of salt, knob of butter', "Gran's lemon cake\nzest TWO lemons, not one", 'Guacamole\n3 avocados, 1 lime, cilantro, red onion, salt'] },
+  { name: 'Travel', color: '#1f4a5a', notes: ['Packing list\npassport, charger, sunscreen, camera, socks', 'Lisbon\nold tram line, custard tarts, sunset at the lookout', 'Road trip playlist\nsing-alongs only'] },
+];
+const FILLER = [['#3f5a2a', 'Field Guide'], ['#2a3550', 'Atlas'], ['#8a6a2a', 'Poems'], ['#5a2a4a', 'Letters'], ['#2a4a3a', 'Botany'], ['#7a3a1a', 'Journal 2009'], ['#3a3a3a', 'Manual'], ['#6a5a3a', 'Sketches'], ['#25405a', 'Logbook'], ['#5a1a1a', 'Classics'], ['#4a5a6a', 'Maps'], ['#6a4a2a', 'Cookbook'], ['#30402a', 'Garden'], ['#4a2a2a', 'Diaries']];
+let bi = 0, pi = 0, busy = false;
+const rows = document.querySelectorAll('.row');
+const nbSlots = { 0: 2, 1: 5, 2: 1 };
+rows.forEach((row, r) => {
+  const items = FILLER.slice(r * 5, r * 5 + 5).map(([c, t]) => ({ c, t }));
+  items.splice(nbSlots[r], 0, { nb: r });
+  for (const it of items) {
+    const el = document.createElement('div'); el.className = 'book';
+    if (it.nb !== undefined) { const b = BOOKS[it.nb]; el.classList.add('leather', 'nb'); el.style.cssText = `--c:${b.color};width:46px;height:178px`; el.innerHTML = `<span>${b.name}</span>`; el.dataset.nb = it.nb; }
+    else { el.style.cssText = `--c:${it.c};width:${Math.round(rnd(24, 40))}px;height:${Math.round(rnd(132, 172))}px`; el.innerHTML = `<span>${it.t}</span>`; }
+    el.onclick = () => (el.dataset.nb !== undefined ? book(+el.dataset.nb) : (el.classList.remove('wiggle'), void el.offsetWidth, el.classList.add('wiggle'), thud()));
+    row.append(el);
+  }
+});
+
+// Pad > render page, flip, tear
+const stack = $('#stack');
+function dateOf(i) { const d = new Date(2010, 9, 12 - i * 2, 9 + i, 41); return [d.toDateString().replace(/ (\d{4})$/, ', $1'), d.toTimeString().slice(0, 5)]; }
+function pageEl(i) {
+  const el = document.createElement('div'); el.className = 'page'; const [d, t] = dateOf(i);
+  el.innerHTML = `<div class="date"><span>${d}</span><span>${t}</span></div><div class="body" contenteditable="true" spellcheck="false"></div>`;
+  const body = el.querySelector('.body'); body.textContent = BOOKS[bi].notes[i] ?? ''; body.oninput = () => { BOOKS[bi].notes[i] = body.innerText; scratch(); };
+  return el;
+}
+function render() {
+  const old = stack.querySelector('.page:not(.flip):not(.tear)'), el = pageEl(pi); stack.append(el); old?.remove();
+  const n = BOOKS[bi].notes.length; $('#count').textContent = n ? `${pi + 1} of ${n}` : 'empty'; $('#title').textContent = BOOKS[bi].name;
+  css.setProperty('--bind', BOOKS[bi].color);
+  document.querySelectorAll('.book.nb').forEach((b) => b.classList.toggle('sel', +b.dataset.nb === bi));
+}
+function flip(dir = 1) {
+  const n = BOOKS[bi].notes.length, to = pi + dir; if (busy || to < 0 || to >= n) return false; busy = true;
+  const top = pageEl(dir > 0 ? pi : to); top.classList.add('flip'); stack.append(top);
+  pi = to; render(); stack.append(top);
+  const a = dir > 0 ? [0, 170] : [170, 0];
+  top.animate([{ transform: `rotateX(${a[0]}deg)`, '--sh': 0 }, { transform: `rotateX(${(a[0] + a[1]) / 2}deg) translateZ(30px)`, '--sh': 0.35 }, { transform: `rotateX(${a[1]}deg)`, '--sh': 0.6 }], { duration: 650, easing: 'cubic-bezier(.45,.05,.4,1)' }).onfinish = () => { top.remove(); busy = false; };
+  swish(); return true;
+}
+function tear() {
+  const notes = BOOKS[bi].notes; if (busy || !notes.length) return false; busy = true;
+  const sheet = pageEl(pi); sheet.classList.add('tear'); sheet.style.setProperty('--tearclip', `polygon(${jag(40, 0, 1.6, false)}, 100% 100%, 0 100%)`); stack.append(sheet);
+  notes.splice(pi, 1); pi = Math.min(pi, Math.max(0, notes.length - 1)); render(); stack.append(sheet);
+  css.setProperty('--stub', jag(60, 10, 100));
+  const side = R() < 0.5 ? -1 : 1; sheet.style.transformOrigin = side > 0 ? '0 0' : '100% 0';
+  sheet.animate([
+    { transform: 'none' },
+    { transform: `rotate(${side * 3}deg)`, offset: 0.18 },
+    { transform: `rotate(${side * 1}deg) translateY(6px)`, offset: 0.32 },
+    { transform: `translate(${side * 60}px, 60px) rotate(${side * 12}deg)`, offset: 0.5, opacity: 1 },
+    { transform: `translate(${side * 220}px, 900px) rotate(${side * 38}deg)`, opacity: 0.9 },
+  ], { duration: 1500, easing: 'ease-in' }).onfinish = () => { sheet.remove(); busy = false; };
+  rip(); return true;
+}
+function book(i) {
+  if (busy || i === bi) return; bi = i; pi = 0; thud();
+  render();
+  stack.querySelector('.page').animate([{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'ease-out' });
+}
+function add(text = '') {
+  if (busy) return; BOOKS[bi].notes.push(text); pi = BOOKS[bi].notes.length - 1; render(); swish();
+  const body = stack.querySelector('.page .body'); if (!text) body.focus(); return body;
+}
+$('#bNext').onclick = () => flip(1); $('#bPrev').onclick = () => flip(-1); $('#bTear').onclick = () => tear(); $('#bNew').onclick = () => add();
+$('#bBack').onclick = () => book((bi + 1) % BOOKS.length);
+addEventListener('keydown', (e) => { if (document.activeElement?.isContentEditable) return; if (e.key === 'ArrowRight') flip(1); if (e.key === 'ArrowLeft') flip(-1); });
+
+// Audio > paper and wood foley
+let ac, noise;
+function audio() { if (ac) return; ac = new AudioContext(); noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+addEventListener('pointerdown', audio, { capture: true }); addEventListener('keydown', audio, { capture: true });
+function burst(t, dur, type, f0, f1, g0, q = 1) {
+  const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = noise; s.loop = true; f.type = type; f.Q.value = q;
+  f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(g0, t + Math.min(0.03, dur / 3)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(f).connect(g).connect(ac.destination); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+}
+function swish() { if (ac) burst(ac.currentTime, 0.32, 'bandpass', 2600, 700, 0.25, 0.8); }
+function rip() { if (!ac) return; const t = ac.currentTime; let at = 0; for (let i = 0; i < 22; i++) { burst(t + at, 0.025, 'highpass', 1800, 2400, rnd(0.15, 0.4)); at += 0.012 + i * 0.0025; } burst(t + at, 0.4, 'bandpass', 1800, 500, 0.15); }
+function thud() { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.15); g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.22); burst(t, 0.08, 'lowpass', 900, 300, 0.2); }
+function scratch() { if (ac) burst(ac.currentTime, 0.05, 'bandpass', rnd(3000, 5000), 2500, 0.06, 2); }
+
+// Attract > flip, switch book, handwrite a note, tear one
+const SCRIPT = ['Note to self\nbuy more yellow pads', 'Remember\nwater the fern on Thursdays', 'Movie night\npopcorn + blanket fort'];
+let idleAt = performance.now(), step = 0, typing = null;
+addEventListener('pointerdown', () => { idleAt = performance.now() + 12000; typing = null; }, { capture: true });
+addEventListener('keydown', () => { idleAt = performance.now() + 12000; typing = null; }, { capture: true });
+function attract(now) {
+  if (typing) { if (now > typing.next) { const { body, text } = typing; body.textContent = text.slice(0, ++typing.i); BOOKS[bi].notes[pi] = body.textContent; scratch(); typing.next = now + 70 + Math.random() * 60; if (typing.i >= text.length) typing = null; } return; }
+  if (now - idleAt < 6000 || busy) return;
+  const s = step++ % 6;
+  if (s === 0 || s === 1) { if (!flip(1)) flip(-1); }
+  else if (s === 2) book((bi + 1) % BOOKS.length);
+  else if (s === 3) { const text = SCRIPT[step % SCRIPT.length]; typing = { body: add(' '), text, i: 0, next: now + 400 }; }
+  else if (s === 4) { if (BOOKS[bi].notes.length > 2) tear(); }
+  else flip(-1);
+  idleAt = now - 6000 + 2600;
+}
+render();
+if (capture) { idleAt = -1e9; step = 3; }
+function loop(now) { attract(now); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+window.__skeuo = { flip, tear, book, add, note: () => BOOKS[bi].notes[pi], count: () => BOOKS[bi].notes.length };
+</script>
+</body>
+</html>

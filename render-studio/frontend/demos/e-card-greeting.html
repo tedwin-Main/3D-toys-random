@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>E-Card Greeting</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="49" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="CSS 3D envelope and bi-fold card, Web Animations API sequencing, canvas confetti physics, procedural card art, WebAudio MIDI-style piano player" />
+<meta name="description" content="A free e-card site from 2000: someone sent you a card, so click the sealed envelope and the flap lifts, the card slides out, unfolds like a real bi-fold to a poem and a personal note, confetti bursts across the page and a tinny MIDI-style tune plays from the little embedded player. Switch between Birthday, Thank You and Just Because, then fill in the send form and watch the card fold back into its envelope, get stamped and fly off with a pickup code. Hard because the envelope, flap, pocket and two-sided cover are layered CSS 3D faces driven by awaited Web Animations, every card front and scene is painted procedurally, and the music is a small sequenced piano synth with chords."/>
+<meta name="prompt" content="Build a 2000-era free e-card website in one HTML file: tiled pastel background, gradient logo header, category sidebar, a CSS 3D envelope with opening flap and pocket that releases a bi-fold card which then opens in 3D to a poem and a message, canvas confetti, a procedurally drawn card front per category (birthday balloons, thank-you flowers, just-because heart) and an animated inside scene (cake with flickering candles or floating hearts), an embedded MIDI-style player synthesizing piano melodies with chords in WebAudio, and a send form that folds the card back, closes the envelope, stamps it and flies it away with a pickup code. Attract mode opens, plays and sends cards." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/e-card-greeting.html
+ * PURPOSE: 2000 e-card site: 3D envelope, unfolding card, confetti, MIDI-style tune, send form that mails the card away
+ * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > E-Card Greeting
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__ecard (open, send, pick, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { font: 13px Verdana, Geneva, sans-serif; color: #333; background: #fde8f4 radial-gradient(circle, #fff 0 2px, transparent 3px) 0 0 / 28px 28px, #fde8f4; background-color: #fde8f4; overflow-x: hidden; }
+#fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; }
+.top { display: flex; align-items: center; gap: 18px; padding: 10px 24px; background: linear-gradient(180deg, #6a4cff, #3a1fb8); border-bottom: 4px solid #ffcc33; }
+.logo { font: italic 900 30px "Arial Black", sans-serif; background: linear-gradient(180deg, #fff, #ffe066 55%, #ff9a1f); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(2px 2px 0 #220a66); }
+.top span { color: #fff; font-weight: bold; }
+.new { color: #ffcc33 !important; animation: blink 0.9s steps(2) infinite; }
+@keyframes blink { 50% { visibility: hidden; } }
+.wrap { display: grid; grid-template-columns: 180px 640px 280px; gap: 18px; justify-content: center; padding: 16px; }
+.side, .form { background: #fff; border: 2px solid #b9a6ff; border-radius: 8px; padding: 10px; align-self: start; }
+.side h3, .form h3 { margin: 0 0 8px; padding: 4px 8px; font-size: 12px; color: #fff; background: linear-gradient(90deg, #ff5fa8, #ffb35f); border-radius: 4px; }
+.cat { display: block; width: 100%; margin-bottom: 6px; padding: 6px; text-align: left; font: bold 12px Verdana, sans-serif; color: #3a1fb8; background: linear-gradient(180deg, #fff, #e8e2ff); border: 2px outset #d8cfff; cursor: pointer; }
+.cat.on { border-style: inset; background: #ffe066; }
+.side ol { margin: 6px 0 0; padding-left: 20px; line-height: 1.7; font-size: 11px; color: #555; }
+.side .cnt { margin-top: 10px; text-align: center; font-size: 11px; }
+.side .cnt b { font: bold 13px "Courier New", monospace; background: #000; color: #3f3; padding: 1px 4px; letter-spacing: 2px; }
+.stage { position: relative; height: 470px; perspective: 1400px; background: rgba(255, 255, 255, 0.6); border: 2px dashed #ffb3d6; border-radius: 12px; overflow: hidden; }
+.msg { position: absolute; left: 0; right: 0; top: 10px; text-align: center; font: bold 15px Verdana, sans-serif; color: #3a1fb8; z-index: 6; }
+.msg small { display: block; font-weight: normal; font-size: 11px; color: #777; }
+.scaler { position: absolute; left: 50%; top: 52%; width: 0; height: 0; }
+.env { position: absolute; left: -170px; top: -80px; width: 340px; height: 220px; cursor: pointer; }
+#envBack { z-index: 1; } #card { z-index: 2; } #envFront { z-index: 3; } #flapWrap { z-index: 4; }
+.env .back { position: absolute; inset: 0; background: #f6e7c8; border-radius: 4px; box-shadow: 0 10px 24px rgba(80, 40, 100, 0.35); }
+.env .pocket { position: absolute; inset: 0; z-index: 3; background: linear-gradient(160deg, #fff4dc, #efdcb4); clip-path: polygon(0 0, 50% 55%, 100% 0, 100% 100%, 0 100%); border-radius: 4px; }
+.env .pocket::after { content: ""; position: absolute; inset: 0; background: linear-gradient(20deg, transparent 49.5%, rgba(160, 120, 60, 0.35) 50%, transparent 50.5%), linear-gradient(-20deg, transparent 49.5%, rgba(160, 120, 60, 0.35) 50%, transparent 50.5%); }
+.env .flap { position: absolute; left: 0; top: 0; width: 100%; height: 130px; z-index: 4; transform-origin: 50% 0; transform-style: preserve-3d; }
+.env .flap div { position: absolute; inset: 0; clip-path: polygon(0 0, 100% 0, 50% 100%); backface-visibility: hidden; }
+.env .flap .out { background: linear-gradient(180deg, #f9eccf, #e9d29f); }
+.env .flap .in { transform: rotateX(180deg); background: repeating-linear-gradient(45deg, #ff7fb8 0 8px, #fff 8px 16px, #7fb8ff 16px 24px, #fff 24px 32px); }
+.seal { position: absolute; left: 50%; top: 104px; width: 44px; height: 44px; margin-left: -22px; border-radius: 50%; z-index: 5; background: radial-gradient(circle at 35% 30%, #ff8aa0, #c4103a 60%, #8a0a28); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35); display: grid; place-items: center; color: #ffd6de; font: bold 18px Georgia, serif; }
+.stamp { position: absolute; right: 16px; top: 14px; z-index: 5; width: 46px; height: 54px; padding: 4px; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); clip-path: polygon(0 4%, 4% 0, 8% 4%, 12% 0, 16% 4%, 20% 0, 24% 4%, 28% 0, 32% 4%, 36% 0, 40% 4%, 44% 0, 48% 4%, 52% 0, 56% 4%, 60% 0, 64% 4%, 68% 0, 72% 4%, 76% 0, 80% 4%, 84% 0, 88% 4%, 92% 0, 96% 4%, 100% 0, 100% 100%, 0 100%); }
+.stamp div { width: 100%; height: 100%; background: linear-gradient(180deg, #7fd0ff, #3a8ae0); display: grid; place-items: center; color: #fff; font: bold 9px Verdana; }
+.post { position: absolute; right: 50px; top: 30px; z-index: 5; width: 64px; height: 64px; border: 2px solid rgba(60, 40, 120, 0.55); border-radius: 50%; color: rgba(60, 40, 120, 0.6); font: bold 8px Verdana; display: grid; place-items: center; text-align: center; transform: rotate(-14deg); opacity: 0; }
+.addr { position: absolute; left: 40px; top: 120px; z-index: 5; font: 16px "Comic Sans MS", cursive; color: #3a1fb8; line-height: 1.4; }
+.card { position: absolute; left: -130px; top: -138px; width: 260px; height: 340px; transform-style: preserve-3d; }
+.inner { position: absolute; inset: 0; background: #fffdf6; border-radius: 3px; box-shadow: 0 6px 18px rgba(60, 30, 80, 0.3); padding: 18px 16px; text-align: center; font: 14px "Comic Sans MS", cursive; color: #5a2a8a; }
+.inner canvas { width: 228px; height: 150px; display: block; margin: 8px auto 0; }
+.inner .note { font: 13px Georgia, serif; color: #333; line-height: 1.5; min-height: 70px; }
+.cover { position: absolute; inset: 0; transform-origin: 0 50%; transform-style: preserve-3d; }
+.cover > * { position: absolute; inset: 0; backface-visibility: hidden; border-radius: 3px; }
+.cover canvas { width: 100%; height: 100%; box-shadow: 0 6px 18px rgba(60, 30, 80, 0.3); }
+.cover .poem { transform: rotateY(180deg); background: #fffaf0; padding: 40px 22px; font: italic 15px / 1.8 Georgia, serif; color: #5a2a8a; text-align: center; box-shadow: inset -10px 0 20px rgba(0, 0, 0, 0.08); white-space: pre-line; }
+.midi { margin-top: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: #d4d0c8; border: 2px outset #fff; font: 11px Tahoma, sans-serif; }
+.midi button { width: 24px; height: 20px; border: 2px outset #fff; background: #d4d0c8; cursor: pointer; font-size: 9px; }
+.midi .lcd { flex: 1; overflow: hidden; white-space: nowrap; background: #000; color: #3f3; font: 11px "Courier New", monospace; padding: 2px 6px; }
+.midi .lcd span { display: inline-block; animation: mq 8s linear infinite; padding-left: 100%; }
+@keyframes mq { to { transform: translateX(-100%); } }
+.midi .tm { width: 40px; font-family: "Courier New", monospace; }
+.form label { display: block; margin: 6px 0 2px; font-size: 11px; font-weight: bold; color: #3a1fb8; }
+.form input, .form textarea { width: 100%; padding: 4px; border: 2px inset #ddd; font: 12px Verdana, sans-serif; }
+.form textarea { height: 70px; resize: none; }
+.send { margin-top: 10px; width: 100%; padding: 8px; font: bold 14px Verdana, sans-serif; color: #fff; background: linear-gradient(180deg, #ff8ac4, #e0207a); border: 2px outset #ffb3d6; border-radius: 6px; cursor: pointer; }
+.sent { margin-top: 10px; padding: 8px; background: #e8ffe0; border: 2px solid #6c6; font-size: 12px; display: none; }
+.sent b { font-family: "Courier New", monospace; }
+.foot { text-align: center; font-size: 10px; color: #888; padding-bottom: 16px; }
+@media (max-width: 1150px) {
+  .wrap { grid-template-columns: minmax(0, 640px); }
+  .side { display: none; }
+  .stage { height: 420px; }
+  .top { gap: 10px; padding: 10px 14px; } .top span:last-child { display: none; } .logo { font-size: 24px; }
+}
+</style>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div class="top"><div class="logo">eGreetz!</div><span>Over 10,000 FREE e-cards!</span><span class="new">NEW!</span><span style="margin-left:auto;font-weight:normal;font-size:11px">Send a smile across the Information Superhighway</span></div>
+<div class="wrap">
+  <div class="side"><h3>Categories</h3><button class="cat on" data-c="0">Birthday</button><button class="cat" data-c="1">Thank You</button><button class="cat" data-c="2">Just Because</button>
+    <h3 style="margin-top:12px">Top Cards</h3><ol><li>Dancing Hamster</li><li>Y2K Survivor</li><li>Cyber Hug</li><li>Get Well Soon</li><li>Happy Friday!!</li></ol>
+    <div class="cnt">cards sent today<br /><b id="sentCount">048213</b></div></div>
+  <div>
+    <div class="stage" id="stage"><div class="msg" id="msg">You've got an e-card from Jamie!<small>click the envelope to open it</small></div>
+      <div class="scaler" id="scaler">
+        <div class="env envp" id="envBack"><div class="back"></div></div>
+        <div class="card" id="card">
+          <div class="inner"><div style="font:bold 16px Comic Sans MS, cursive">Dear Alex,</div><div class="note" id="note"></div><canvas id="scene" width="456" height="300"></canvas></div>
+          <div class="cover" id="cover"><canvas id="front" width="520" height="680"></canvas><div class="poem" id="poem"></div></div>
+        </div>
+        <div class="env envp" id="envFront">
+          <div class="pocket"></div>
+          <div class="seal" id="seal">e</div>
+          <div class="stamp"><div>2000<br />32c</div></div>
+          <div class="post" id="post">eGREETZ<br />MAIL<br />JAN 01</div>
+          <div class="addr" id="addr">To: Alex<br />From: Jamie</div>
+        </div>
+        <div class="env envp" id="flapWrap" style="pointer-events:none"><div class="flap" id="flap"><div class="out"></div><div class="in"></div></div></div>
+      </div>
+    </div>
+    <div class="midi"><button id="play">&#9654;</button><button id="stop">&#9632;</button><div class="lcd"><span id="track">happybday.mid - eGreetz MIDI Player</span></div><span class="tm" id="tm">0:00</span></div>
+  </div>
+  <div class="form"><h3>Send this card to a friend!</h3>
+    <label>Friend's name</label><input id="fTo" value="" placeholder="Sam" /><label>Friend's e-mail</label><input id="fMail" placeholder="sam@example.com" />
+    <label>Your name</label><input id="fFrom" placeholder="Alex" /><label>Your message</label><textarea id="fMsg" placeholder="Type something nice!"></textarea>
+    <button class="send" id="sendBtn">Send Card! &raquo;</button><div class="sent" id="sent">Your card is on its way! Pickup code: <b id="code"></b></div></div>
+</div>
+<div class="foot">eGreetz! is a fictional free e-card service · cards are kept for 30 days · best viewed in 800x600 or higher</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const rnd = (a, b) => a + Math.random() * (b - a), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Cards > front art, poem, note, tune per category
+const CARDS = [
+  { name: 'Birthday', file: 'happybday.mid', bg: ['#fff3a8', '#ffc4e1'], title: 'Happy Birthday!', poem: 'Another year of you,\nanother year of fun,\nmay all your wishes\ncome true, every one!', note: 'Hope your day is as awesome as you are! Have some cake for me :) - Jamie',
+    tune: { beat: 0.38, mel: [['D4', 0.75], ['D4', 0.25], ['E4', 1], ['D4', 1], ['G4', 1], ['F#4', 2], ['D4', 0.75], ['D4', 0.25], ['E4', 1], ['D4', 1], ['A4', 1], ['G4', 2], ['D4', 0.75], ['D4', 0.25], ['D5', 1], ['B4', 1], ['G4', 1], ['F#4', 1], ['E4', 2], ['C5', 0.75], ['C5', 0.25], ['B4', 1], ['G4', 1], ['A4', 1], ['G4', 3]], ch: ['G', 'G', 'D', 'D', 'D', 'G', 'G', 'G', 'C', 'C', 'G', 'D', 'G', 'G'] } },
+  { name: 'Thank You', file: 'thanks.mid', bg: ['#e0f7ff', '#d8ffd0'], title: 'Thank You!', poem: 'For kindness big\nand favours small,\nyou really are\nthe best of all.', note: 'Thanks so much for helping me move. I owe you pizza forever! - Jamie',
+    tune: { beat: 0.34, mel: [['E4', 1], ['G4', 1], ['C5', 2], ['B4', 1], ['A4', 1], ['G4', 2], ['F4', 1], ['A4', 1], ['G4', 1], ['E4', 1], ['D4', 2], ['G4', 2], ['E4', 1], ['G4', 1], ['C5', 2], ['D5', 1], ['C5', 1], ['A4', 2], ['G4', 1], ['E4', 1], ['D4', 1], ['G4', 1], ['C4', 4]], ch: ['C', 'C', 'F', 'C', 'F', 'G', 'C', 'C', 'F', 'F', 'G', 'C'] } },
+  { name: 'Just Because', file: 'thinking.mid', bg: ['#f0e0ff', '#ffe0ec'], title: 'Thinking of You', poem: 'No reason, no season,\nno holiday too,\njust a little note\nto say hi to you.', note: 'Saw this card and thought of you. Miss our chats! Call me soon - Jamie',
+    tune: { beat: 0.36, mel: [['A4', 1.5], ['G4', 0.5], ['F4', 1], ['C5', 1], ['A4', 2], ['G4', 1], ['A4', 1], ['Bb4', 1.5], ['A4', 0.5], ['G4', 1], ['F4', 1], ['G4', 4], ['A4', 1.5], ['G4', 0.5], ['F4', 1], ['C5', 1], ['D5', 2], ['C5', 1], ['A4', 1], ['G4', 1.5], ['A4', 0.5], ['G4', 1], ['E4', 1], ['F4', 4]], ch: ['F', 'F', 'Bb', 'F', 'C', 'C', 'F', 'F', 'Bb', 'Bb', 'C', 'F'] } },
+];
+let ci = 0;
+function star(x, cx, cy, r, col) { x.fillStyle = col; x.beginPath(); for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 - Math.PI / 2, rr = i % 2 ? r * 0.45 : r; x.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } x.fill(); }
+function heart(x, cx, cy, s, col) { x.fillStyle = col; x.beginPath(); x.moveTo(cx, cy + s * 0.9); x.bezierCurveTo(cx - s * 1.4, cy, cx - s * 0.9, cy - s * 1.1, cx, cy - s * 0.35); x.bezierCurveTo(cx + s * 0.9, cy - s * 1.1, cx + s * 1.4, cy, cx, cy + s * 0.9); x.fill(); }
+function drawFront() {
+  const c = CARDS[ci], x = $('#front').getContext('2d'), W = 520, H = 680; x.setTransform(1, 0, 0, 1, 0, 0);
+  const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, c.bg[0]); g.addColorStop(1, c.bg[1]); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  for (let i = 0; i < 60; i++) { x.fillStyle = ['#ff5fa8', '#ffcc33', '#5fc8ff', '#8a5fff', '#5fd88a'][i % 5]; x.globalAlpha = 0.5; x.fillRect((i * 97) % W, (i * 151) % H, 8, 8); } x.globalAlpha = 1;
+  x.strokeStyle = '#fff'; x.lineWidth = 10; x.strokeRect(18, 18, W - 36, H - 36);
+  if (ci === 0) [[150, 250, '#ff4f7a'], [260, 200, '#5fa8ff'], [370, 260, '#ffcc33']].forEach(([bx, by, col], i) => {
+    x.strokeStyle = '#888'; x.lineWidth = 2; x.beginPath(); x.moveTo(bx, by + 70); x.quadraticCurveTo(bx + (i - 1) * 20, by + 180, 260, 520); x.stroke();
+    const rg = x.createRadialGradient(bx - 20, by - 25, 5, bx, by, 75); rg.addColorStop(0, '#fff'); rg.addColorStop(0.25, col); rg.addColorStop(1, col); x.fillStyle = rg; x.beginPath(); x.ellipse(bx, by, 58, 70, 0, 0, 7); x.fill();
+    x.fillStyle = col; x.beginPath(); x.moveTo(bx - 8, by + 76); x.lineTo(bx + 8, by + 76); x.lineTo(bx, by + 66); x.fill();
+  });
+  if (ci === 1) { for (let i = 0; i < 7; i++) { const fx = 120 + (i % 4) * 95 + (i > 3 ? 45 : 0), fy = 210 + (i > 3 ? 110 : 0), col = ['#ff6fa0', '#ffb347', '#c77dff', '#ff5f5f'][i % 4]; x.strokeStyle = '#3c9a4a'; x.lineWidth = 6; x.beginPath(); x.moveTo(fx, fy); x.lineTo(260, 520); x.stroke();
+    for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; x.fillStyle = col; x.beginPath(); x.ellipse(fx + Math.cos(a) * 26, fy + Math.sin(a) * 26, 22, 14, a, 0, 7); x.fill(); } x.fillStyle = '#ffe066'; x.beginPath(); x.arc(fx, fy, 16, 0, 7); x.fill(); }
+    x.fillStyle = '#ff9ac4'; x.beginPath(); x.moveTo(200, 470); x.lineTo(320, 470); x.lineTo(290, 560); x.lineTo(230, 560); x.fill(); }
+  if (ci === 2) { heart(x, 260, 290, 120, '#ff4f8a'); x.fillStyle = 'rgba(255,255,255,0.45)'; x.beginPath(); x.ellipse(205, 230, 30, 16, -0.6, 0, 7); x.fill(); [[110, 140], [420, 170], [400, 450], [120, 430], [260, 110]].forEach(([sx, sy], i) => star(x, sx, sy, 22 + (i % 2) * 10, '#ffcc33')); }
+  x.font = 'italic 900 52px "Arial Black", sans-serif'; x.textAlign = 'center'; const tg = x.createLinearGradient(0, 560, 0, 630); tg.addColorStop(0, '#8a5fff'); tg.addColorStop(1, '#ff4f8a');
+  x.lineWidth = 10; x.strokeStyle = '#fff'; x.strokeText(c.title, 260, 615); x.fillStyle = tg; x.fillText(c.title, 260, 615);
+  $('#poem').textContent = c.poem; $('#note').textContent = c.note; $('#track').textContent = `${c.file} - eGreetz MIDI Player - now playing`;
+  document.querySelectorAll('.cat').forEach((b) => b.classList.toggle('on', +b.dataset.c === ci));
+}
+drawFront();
+
+// Scene > inside animation: cake candles or floating hearts
+const sx = $('#scene').getContext('2d');
+function drawScene(t) {
+  const W = 456, H = 300; sx.clearRect(0, 0, W, H);
+  if (ci === 0) {
+    sx.fillStyle = '#ffd6e8'; sx.fillRect(128, 170, 200, 90); sx.fillStyle = '#fff'; sx.fillRect(128, 160, 200, 22); for (let i = 0; i < 10; i++) { sx.beginPath(); sx.arc(138 + i * 20, 182, 10, 0, Math.PI); sx.fill(); }
+    sx.fillStyle = '#c47a3a'; sx.fillRect(110, 258, 236, 12);
+    for (let i = 0; i < 5; i++) { const cx = 158 + i * 35; sx.fillStyle = ['#5fa8ff', '#ff5fa8', '#ffcc33', '#5fd88a', '#c77dff'][i]; sx.fillRect(cx - 5, 112, 10, 50);
+      const f = 1 + 0.18 * Math.sin(t * 17 + i * 2) + 0.1 * Math.sin(t * 29 + i); const fg = sx.createRadialGradient(cx, 100, 1, cx, 98, 18 * f); fg.addColorStop(0, '#fff8c0'); fg.addColorStop(0.4, '#ffb020'); fg.addColorStop(1, 'rgba(255,120,0,0)'); sx.fillStyle = fg; sx.beginPath(); sx.ellipse(cx + Math.sin(t * 9 + i) * 2, 98, 9 * f, 16 * f, 0, 0, 7); sx.fill(); }
+  } else for (let i = 0; i < 9; i++) { const y = H - ((t * 40 + i * 47) % (H + 60)) + 30, xx = 40 + i * 46 + Math.sin(t * 2 + i) * 14; ci === 1 ? star(sx, xx, y, 14 + (i % 3) * 4, ['#ffcc33', '#5fc8ff', '#5fd88a'][i % 3]) : heart(sx, xx, y, 14 + (i % 3) * 4, ['#ff4f8a', '#ff9ac4', '#c77dff'][i % 3]); }
+}
+
+// Confetti > canvas particles
+const fx = $('#fx'), fc = fx.getContext('2d'); let bits = [];
+function size() { const d = Math.min(2, devicePixelRatio); fx.width = innerWidth * d; fx.height = innerHeight * d; fc.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+function confetti() { const r = $('#stage').getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height * 0.45; for (let i = 0; i < 180; i++) { const a = rnd(-Math.PI, 0), v = rnd(4, 13); bits.push({ x: cx, y: cy, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3, r: rnd(0, 6), vr: rnd(-0.3, 0.3), w: rnd(5, 10), h: rnd(3, 6), c: ['#ff5fa8', '#ffcc33', '#5fc8ff', '#8a5fff', '#5fd88a', '#ff7f50'][i % 6], life: 1 }); } }
+function drawFx() { fc.clearRect(0, 0, innerWidth, innerHeight); bits = bits.filter((b) => (b.life -= 0.0045) > 0 && b.y < innerHeight + 20); for (const b of bits) { b.vy += 0.18; b.vx *= 0.99; b.vy *= 0.99; b.x += b.vx + Math.sin(b.y * 0.05) * 0.6; b.y += b.vy; b.r += b.vr; fc.save(); fc.translate(b.x, b.y); fc.rotate(b.r); fc.scale(1, Math.cos(b.r * 2)); fc.globalAlpha = Math.min(1, b.life * 2); fc.fillStyle = b.c; fc.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); fc.restore(); } }
+
+// Music > MIDI-style piano: melody + left hand chords
+let ac, playing = null;
+const SEMI = { C: 0, 'C#': 1, D: 2, Eb: 3, E: 4, F: 5, 'F#': 6, G: 7, Ab: 8, A: 9, Bb: 10, B: 11 };
+const hz = (n) => { const m = n.match(/^([A-G][b#]?)(\d)$/); return 440 * Math.pow(2, (SEMI[m[1]] + (+m[2] + 1) * 12 - 69) / 12); };
+const CHORD = { G: ['G2', 'D3', 'B3'], D: ['D3', 'A3', 'F#3'], C: ['C3', 'G3', 'E3'], F: ['F2', 'C3', 'A3'], Bb: ['Bb2', 'F3', 'D3'] };
+function audio() { if (!ac) ac = new AudioContext(); ac.resume(); }
+addEventListener('pointerdown', audio, { capture: true });
+function piano(f, t, d, v) { [[1, 'triangle', 1], [2, 'sine', 0.35], [3, 'sine', 0.12]].forEach(([m, type, a]) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f * m; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v * a, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + Math.max(0.4, d * 1.6)); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d * 1.6 + 0.05); }); }
+function play() {
+  stop(); const tune = CARDS[ci].tune; playing = { t0: performance.now(), dur: tune.mel.reduce((s, [, d]) => s + d, 0) * tune.beat };
+  if (!ac || ac.state !== 'running') return;
+  let at = ac.currentTime + 0.05; const start = at;
+  for (const [n, d] of tune.mel) { piano(hz(n), at, d * tune.beat, 0.16); at += d * tune.beat; }
+  tune.ch.forEach((c, i) => { const ct = start + i * 2 * tune.beat; if (ct < at) CHORD[c].forEach((n) => piano(hz(n), ct, tune.beat * 1.6, 0.05)); });
+}
+function stop() { playing = null; if (ac) { ac.close(); ac = new AudioContext(); } }
+$('#play').onclick = () => { audio(); play(); }; $('#stop').onclick = stop;
+function whoosh() { if (!ac || ac.state !== 'running') return; const t = ac.currentTime, b = ac.createBuffer(1, ac.sampleRate * 0.8, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; f.type = 'bandpass'; f.frequency.setValueAtTime(300, t); f.frequency.exponentialRampToValueAtTime(4000, t + 0.6); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.4, t + 0.2); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.75); s.connect(f).connect(g).connect(ac.destination); s.start(t); }
+
+// Envelope > open and send sequences
+let state = 'sealed', K = capture ? 0.35 : 1;
+const anim = (el, kf, ms, opt = {}) => el.animate(kf, { duration: ms * K, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards', ...opt }).finished;
+const card = $('#card'), cover = $('#cover'), flap = $('#flap'), envs = [...document.querySelectorAll('.envp')], flapWrap = $('#flapWrap');
+const envAnim = (kf, ms, opt) => Promise.all(envs.map((e) => anim(e, kf, ms, opt)));
+function fit() { const s = Math.min(1, ($('#stage').clientWidth - 20) / 600); $('#scaler').style.transform = `scale(${s})`; }
+fit(); addEventListener('resize', fit);
+const SEALED = 'scale(0.6)', OUT = 'translateY(-200px) scale(0.6)', SHOW = 'translate(130px, -30px) scale(1)', GONE = 'translateY(260px) rotate(6deg)';
+async function openCard() {
+  if (state !== 'sealed') return; state = 'busy'; $('#msg').innerHTML = 'Opening your card...<small>&nbsp;</small>';
+  await anim($('#seal'), [{ opacity: 1 }, { opacity: 0, transform: 'scale(1.6)' }], 250);
+  await anim(flap, [{ transform: 'perspective(900px) rotateX(0)' }, { transform: 'perspective(900px) rotateX(180deg)' }], 500);
+  flapWrap.style.zIndex = 0;
+  await anim(card, [{ transform: SEALED }, { transform: OUT }], 650);
+  card.style.zIndex = 6;
+  await Promise.all([anim(card, [{ transform: OUT }, { transform: SHOW }], 600), envAnim([{ transform: 'none', opacity: 1 }, { transform: GONE, opacity: 0 }], 600)]);
+  confetti(); play();
+  await anim(cover, [{ transform: 'perspective(1400px) rotateY(0)' }, { transform: 'perspective(1400px) rotateY(-178deg)' }], 1100);
+  state = 'open'; $('#msg').innerHTML = 'Happy reading! :)<small>use the form to send it to a friend</small>';
+}
+async function send() {
+  if (state === 'busy') return; if (state === 'sealed') await openCard(); state = 'busy'; stop();
+  const to = $('#fTo').value || 'Sam', from = $('#fFrom').value || 'Alex'; $('#msg').innerHTML = `Sending to ${to}...<small>&nbsp;</small>`;
+  if ($('#fMsg').value) $('#note').textContent = `${$('#fMsg').value} - ${from}`;
+  await anim(cover, [{ transform: 'perspective(1400px) rotateY(-178deg)' }, { transform: 'perspective(1400px) rotateY(0)' }], 800);
+  await Promise.all([envAnim([{ transform: GONE, opacity: 0 }, { transform: 'none', opacity: 1 }], 500), anim(card, [{ transform: SHOW }, { transform: OUT }], 500)]);
+  card.style.zIndex = 2; await anim(card, [{ transform: OUT }, { transform: SEALED }], 500);
+  flapWrap.style.zIndex = 4; await anim(flap, [{ transform: 'perspective(900px) rotateX(180deg)' }, { transform: 'perspective(900px) rotateX(0)' }], 400);
+  $('#addr').innerHTML = `To: ${to}<br />From: ${from}`; await anim($('#seal'), [{ opacity: 0, transform: 'scale(1.6)' }, { opacity: 1, transform: 'none' }], 250);
+  await anim($('#post'), [{ opacity: 0, transform: 'rotate(-14deg) scale(2)' }, { opacity: 1, transform: 'rotate(-14deg) scale(1)' }], 250);
+  whoosh(); await Promise.all([card, ...envs].map((e) => anim(e, [{ transform: e === card ? SEALED : 'none' }, { transform: `translate(-20px, 20px) rotate(-4deg)${e === card ? ' scale(0.6)' : ''}`, offset: 0.25 }, { transform: `translate(700px, -500px) rotate(25deg) scale(${e === card ? 0.24 : 0.4})`, opacity: 0 }], 900, { easing: 'ease-in' })));
+  const code = Math.random().toString(36).slice(2, 6).toUpperCase() + '-' + Math.random().toString(36).slice(2, 4).toUpperCase();
+  $('#code').textContent = code; $('#sent').style.display = 'block'; $('#sentCount').textContent = String(+$('#sentCount').textContent + 1).padStart(6, '0');
+  $('#msg').innerHTML = `Card sent to ${to}!<small>pickup code ${code}</small>`; await sleep(1800 * K); reset();
+}
+function reset() {
+  state = 'sealed'; [card, cover, flap, $('#seal'), $('#post'), ...envs].forEach((el) => el.getAnimations().forEach((a) => a.cancel()));
+  flapWrap.style.zIndex = 4; card.style.zIndex = 2; $('#addr').innerHTML = 'To: Alex<br />From: Jamie'; drawFront();
+  card.style.transform = SEALED; $('#msg').innerHTML = `You've got an e-card from Jamie!<small>click the envelope to open it</small>`;
+}
+card.style.transform = SEALED;
+$('#envFront').onclick = () => openCard();
+$('#sendBtn').onclick = () => { touched = true; send(); };
+function pick(i) { if (state === 'busy') return; ci = i; stop(); reset(); }
+document.querySelectorAll('.cat').forEach((b) => (b.onclick = () => pick(+b.dataset.c)));
+
+// Attract > open, read, fill form, send, next category
+let touched = false; addEventListener('pointerdown', (e) => { if (!e.isTrusted) return; touched = true; }, { capture: true });
+async function typeInto(el, txt) { el.value = ''; for (const ch of txt) { if (touched) return; el.value += ch; await sleep(55); } }
+async function attract() {
+  await sleep(1800);
+  while (!touched) {
+    await openCard(); await sleep(5200); if (touched) break;
+    await typeInto($('#fTo'), 'Sam'); await typeInto($('#fMail'), 'sam@example.com'); await typeInto($('#fFrom'), 'Alex'); await typeInto($('#fMsg'), 'Thought you would like this one!');
+    if (touched) break; await send(); $('#sent').style.display = 'none'; ['#fTo', '#fMail', '#fFrom', '#fMsg'].forEach((s) => ($(s).value = ''));
+    pick((ci + 1) % CARDS.length); await sleep(2200);
+  }
+}
+if (capture) { touched = true; openCard(); } else attract();
+
+function loop(now) {
+  const t = now / 1000; drawScene(t); drawFx();
+  if (playing) { const e = (now - playing.t0) / 1000; $('#tm').textContent = `0:${String(Math.floor(Math.min(e, playing.dur))).padStart(2, '0')}`; if (e > playing.dur + 1) playing = null; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__ecard = { open: openCard, send, pick, state: () => ({ state, card: CARDS[ci].name, confetti: bits.length, sent: $('#sentCount').textContent }) };
+</script>
+</body>
+</html>

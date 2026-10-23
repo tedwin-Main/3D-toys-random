@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memory Card Manager</title>
+<meta name="category" content="aero" />
+<meta name="style" content="console" />
+<meta name="order" content="57" />
+<meta name="capture" content="1800" />
+<meta name="tags" content="flat-shaded polyhedra on canvas with painter's sort, block allocation across two 15-block cards, WAAPI flight between grids, confirm dialogs, WebAudio drone" />
+<meta name="description" content="An early-2000s console memory card screen: two 15-block cards float over slow blue light ribbons, each save a spinning flat-shaded 3D icon (crystal, cube, pyramid, gem, ring) that takes one to three blocks. Pick a save to see it turn large in the info panel, copy it to the other card and watch its blocks fly across while the progress bar warns you not to remove the card, or delete it and see the blocks crumble and the rest slide back. Full cards and duplicate saves get the proper refusal. Hard because the icons are real little meshes rotated, sorted and lit every frame in 2D canvas, and block allocation, copy and delete keep both cards consistent while the animation plays."/>
+<meta name="prompt" content="Build an early-2000s game console memory card manager in one HTML file with original styling and fictional game names: two 15-block memory cards side by side over an animated ambient background, saves that use 1 to 3 blocks each with spinning flat-shaded 3D icons drawn on canvas (polyhedra rotated, depth-sorted and lit), an info panel with a large spinning icon, copy (blocks fly to the other card, progress bar dialog) and delete (confirm, blocks crumble, later saves slide back), not-enough-space and already-exists errors, keyboard control, cursor blips and a quiet synth drone. Attract mode copies and deletes saves; works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/memory-card-manager.html
+ * PURPOSE: console memory card manager: two 15-block cards, spinning 3D save icons, copy and delete with block animation
+ * UI: Render Studio > Retro Aesthetics > 2000s > Console Aero > Memory Card Manager
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__memcard (select, copy, del, answer, state)
+ */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #020818; }
+body { font: 300 14px "Segoe UI", "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.06em; color: #d8ecff; user-select: none; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+main { position: relative; height: 100%; max-width: 980px; margin: 0 auto; padding: 18px 20px; display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+header { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid rgba(140, 200, 255, 0.25); padding-bottom: 8px; }
+h1 { margin: 0; font-weight: 200; font-size: 26px; letter-spacing: 0.18em; text-shadow: 0 0 18px rgba(80, 180, 255, 0.6); }
+#clock { font-size: 12px; opacity: 0.7; }
+#cards { display: flex; gap: 18px; }
+.card { flex: 1; padding: 12px; border-radius: 14px; background: linear-gradient(180deg, rgba(40, 90, 160, 0.22), rgba(10, 30, 70, 0.3)); border: 1px solid rgba(140, 200, 255, 0.18); transition: border-color 0.3s, box-shadow 0.3s; }
+.card.on { border-color: rgba(140, 220, 255, 0.55); box-shadow: 0 0 30px rgba(60, 160, 255, 0.25), inset 0 0 20px rgba(60, 160, 255, 0.12); }
+.card h2 { margin: 0 0 10px; font-weight: 400; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.card h2 .chip { width: 14px; height: 18px; border-radius: 2px 6px 2px 2px; background: linear-gradient(180deg, #9ab, #456); box-shadow: inset 0 -5px 0 #234; }
+.card h2 .free { margin-left: auto; font-size: 11px; opacity: 0.7; }
+.grid { --b: clamp(54px, 5.2vw, 80px); display: grid; grid-template-columns: repeat(5, var(--b)); grid-auto-rows: var(--b); gap: 7px; justify-content: center; }
+.blk { position: relative; border-radius: 9px; background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.015)); border: 1px solid rgba(150, 200, 255, 0.16); cursor: pointer; }
+.blk.used { background: radial-gradient(circle at 50% 40%, hsla(var(--h), 80%, 60%, 0.3), hsla(var(--h), 70%, 30%, 0.15)); border-color: hsla(var(--h), 80%, 72%, 0.55); }
+.blk.cont::after { content: ""; position: absolute; left: 30%; right: 30%; top: 50%; height: 3px; margin-top: -1.5px; border-radius: 2px; background: hsla(var(--h), 80%, 75%, 0.6); box-shadow: 0 0 8px hsla(var(--h), 90%, 70%, 0.8); }
+.blk canvas { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); }
+.blk.sel { box-shadow: 0 0 0 2px #9ef, 0 0 18px rgba(80, 200, 255, 0.8); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 2px #cff, 0 0 26px rgba(120, 220, 255, 1); } }
+.blk.crumble { animation: crumble 0.6s ease-in forwards; }
+@keyframes crumble { 30% { transform: scale(1.12); filter: brightness(2); } to { transform: scale(0.2) rotate(40deg); opacity: 0; } }
+.blk.flash { animation: flash 0.8s ease-out; }
+@keyframes flash { from { filter: brightness(2.4); box-shadow: 0 0 30px #9ef; } }
+.ghost { position: fixed; z-index: 30; pointer-events: none; box-shadow: 0 0 24px hsla(var(--h), 90%, 70%, 0.9); }
+#bottom { display: flex; gap: 16px; align-items: center; }
+#info { flex: 1; display: flex; align-items: center; gap: 14px; min-height: 120px; padding: 10px 14px; border-radius: 14px; background: linear-gradient(90deg, rgba(40, 100, 180, 0.25), rgba(10, 30, 70, 0.1)); border: 1px solid rgba(140, 200, 255, 0.15); }
+#big { width: 110px; height: 110px; flex: none; }
+#info h3 { margin: 0 0 4px; font-weight: 400; font-size: 19px; letter-spacing: 0.08em; }
+#info p { margin: 2px 0; font-size: 12px; opacity: 0.8; }
+#acts { display: flex; flex-direction: column; gap: 8px; }
+button { font: inherit; color: #e8f6ff; letter-spacing: 0.1em; padding: 9px 22px; border-radius: 22px; cursor: pointer; border: 1px solid rgba(150, 210, 255, 0.5); background: linear-gradient(180deg, rgba(120, 190, 255, 0.35), rgba(30, 80, 160, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+button:hover, button.f { background: linear-gradient(180deg, rgba(150, 220, 255, 0.6), rgba(40, 120, 220, 0.55)); box-shadow: 0 0 14px rgba(80, 180, 255, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+button:disabled { opacity: 0.35; pointer-events: none; }
+#hint { font-size: 11px; opacity: 0.55; text-align: center; }
+#dlg { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; background: rgba(0, 6, 20, 0.55); }
+#dlg.on { display: grid; }
+#dlg.prog { background: transparent; place-items: end center; padding-bottom: 6vh; }
+#dlg .box { width: min(440px, calc(100vw - 32px)); padding: 18px 20px; border-radius: 14px; text-align: center; background: linear-gradient(180deg, rgba(30, 70, 140, 0.92), rgba(8, 24, 60, 0.95)); border: 1px solid rgba(150, 210, 255, 0.5); box-shadow: 0 0 40px rgba(40, 140, 255, 0.4); }
+#dText { margin: 0 0 14px; line-height: 1.5; }
+.btns { display: flex; gap: 12px; justify-content: center; }
+.bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4af, #bff); box-shadow: 0 0 10px #8df; }
+@media (hover: none) { #hint { display: none; } }
+@media (max-width: 700px) {
+  main { padding: 12px; gap: 10px; }
+  h1 { font-size: 18px; letter-spacing: 0.12em; }
+  #cards { flex-direction: column; gap: 10px; }
+  .card { padding: 10px; }
+  .grid { --b: min(54px, calc((100vw - 72px) / 5)); gap: 6px; }
+  #bottom { flex-direction: column; align-items: stretch; gap: 10px; }
+  #info { min-height: 0; padding: 8px 10px; }
+  #big { width: 72px; height: 72px; }
+  #info h3 { font-size: 16px; }
+  #acts { flex-direction: row; } #acts button { flex: 1; padding: 9px 0; }
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<main>
+  <header><h1>MEMORY CARD</h1><span id="clock"></span></header>
+  <div id="cards">
+    <section class="card" data-c="0"><h2><i class="chip"></i>Memory Card (Slot 1)<span class="free"></span></h2><div class="grid"></div></section>
+    <section class="card" data-c="1"><h2><i class="chip"></i>Memory Card (Slot 2)<span class="free"></span></h2><div class="grid"></div></section>
+  </div>
+  <div id="bottom">
+    <div id="info"><canvas id="big" width="220" height="220"></canvas><div><h3 id="iName"></h3><p id="iSub"></p><p id="iMeta"></p></div></div>
+    <div id="acts"><button id="bCopy">Copy</button><button id="bDel">Delete</button></div>
+  </div>
+  <div id="hint">&#8592; &#8594; select save &#183; &#8593; &#8595; switch card &#183; Enter copy &#183; Del delete</div>
+</main>
+<div id="dlg"><div class="box"><p id="dText"></p><div class="bar" hidden><i></i></div><div class="btns"><button id="dYes">Yes</button><button id="dNo">No</button></div></div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+
+// Meshes > small polyhedra for save icons
+const MESH = (() => {
+  const cube = { v: [], f: [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]] };
+  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) cube.v.push([x * 0.72, y * 0.72, z * 0.72]);
+  const octa = { v: [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], f: [] };
+  for (const a of [0, 1]) for (const b of [2, 3]) for (const c of [4, 5]) octa.f.push([a, b, c]);
+  const pyramid = { v: [[-0.8, -0.6, -0.8], [0.8, -0.6, -0.8], [0.8, -0.6, 0.8], [-0.8, -0.6, 0.8], [0, 1, 0]], f: [[0, 1, 2, 3], [0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]] };
+  const crystal = { v: [[0, 1.15, 0], [0, -1, 0]], f: [] };
+  for (let i = 0; i < 6; i++) { const a = (i * Math.PI) / 3; crystal.v.push([Math.cos(a) * 0.6, 0.25, Math.sin(a) * 0.6]); crystal.f.push([2 + i, 2 + ((i + 1) % 6), 0], [2 + i, 2 + ((i + 1) % 6), 1]); }
+  const t = (1 + Math.sqrt(5)) / 2, k = 1 / Math.hypot(1, t);
+  const ico = { v: [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map((p) => p.map((q) => q * k)), f: [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]] };
+  const torus = { v: [], f: [] }, U = 14, V = 6;
+  for (let i = 0; i < U; i++) for (let j = 0; j < V; j++) { const a = (i / U) * Math.PI * 2, b = (j / V) * Math.PI * 2; torus.v.push([Math.cos(a) * (0.72 + Math.cos(b) * 0.28), Math.sin(b) * 0.28, Math.sin(a) * (0.72 + Math.cos(b) * 0.28)]); torus.f.push([i * V + j, ((i + 1) % U) * V + j, ((i + 1) % U) * V + ((j + 1) % V), i * V + ((j + 1) % V)]); }
+  return { cube, octa, pyramid, crystal, ico, torus };
+})();
+function drawMesh(x, m, S, ry, rx, hue, k) {
+  const cy = Math.cos(ry), sy = Math.sin(ry), cx = Math.cos(rx), sx = Math.sin(rx);
+  const P = m.v.map(([a, b, c]) => { const X = a * cy + c * sy, Z0 = -a * sy + c * cy; return [X, b * cx - Z0 * sx, b * sx + Z0 * cx]; });
+  const F = m.f.map((f) => { const p = f.map((i) => P[i]), [a, b, c] = p, u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...n) || 1; return { p, z: p.reduce((s, q) => s + q[2], 0) / p.length, L: Math.abs(n[0] * -0.45 + n[1] * 0.6 + n[2] * -0.66) / l }; }).sort((A, B) => B.z - A.z);
+  x.lineJoin = 'round'; x.lineWidth = S / 90;
+  for (const { p, L } of F) {
+    x.beginPath(); p.forEach(([X, Y, Z], i) => { const s = (S * 0.33 * k * 3.2) / (3.2 + Z); i ? x.lineTo(S / 2 + X * s, S / 2 - Y * s) : x.moveTo(S / 2 + X * s, S / 2 - Y * s); }); x.closePath();
+    x.fillStyle = `hsl(${hue}, 75%, ${22 + L * 52}%)`; x.fill(); x.strokeStyle = `hsla(${hue}, 100%, 85%, 0.35)`; x.stroke();
+  }
+}
+
+// Data > fictional saves, card state
+const INIT = [
+  [{ name: 'System Configuration', sub: 'Console settings', blocks: 1, mesh: 'cube', hue: 205, date: '2003/10/02 18:40' }, { name: 'Starfall Odyssey', sub: 'Chapter 6 · The Ninth Moon · 42:17', blocks: 3, mesh: 'crystal', hue: 275, date: '2003/10/22 23:58' }, { name: 'Rally Sprint 2', sub: 'Season 2 · 14 trophies', blocks: 2, mesh: 'pyramid', hue: 22, date: '2003/10/19 16:05' }, { name: 'Pocket Beasts Arena', sub: 'Badge 5 · 87 caught', blocks: 2, mesh: 'ico', hue: 125, date: '2003/10/21 20:31' }, { name: 'Tide Runner', sub: 'Reef 3 · 12 pearls', blocks: 1, mesh: 'torus', hue: 178, date: '2003/09/30 11:12' }, { name: 'Neon Drift', sub: 'Night Circuit · Rank B', blocks: 2, mesh: 'octa', hue: 320, date: '2003/10/12 01:44' }],
+  [{ name: 'Kingdom of Glass', sub: 'Floor 12 · Level 31', blocks: 3, mesh: 'octa', hue: 48, date: '2003/10/18 22:20' }],
+];
+const clone = (a) => a.map((c) => c.map((s) => ({ ...s })));
+let cards = clone(INIT), cur = { c: 0, i: capture ? 1 : 0 }, busy = false, ghosts = [];
+const used = (c) => cards[c].reduce((n, s) => n + s.blocks, 0);
+const sel = () => cards[cur.c][cur.i];
+
+// Render > block grids, info panel
+let icons = [];
+function render() {
+  icons = [];
+  document.querySelectorAll('.card').forEach((el, c) => {
+    el.classList.toggle('on', c === cur.c); el.querySelector('.free').textContent = `${15 - used(c)} free blocks`;
+    const g = el.querySelector('.grid'); g.innerHTML = ''; let k = 0;
+    cards[c].forEach((s, i) => { for (let j = 0; j < s.blocks; j++, k++) { const b = document.createElement('div'); b.className = `blk used${j ? ' cont' : ''}${c === cur.c && i === cur.i ? ' sel' : ''}`; b.style.setProperty('--h', s.hue); b.dataset.c = c; b.dataset.i = i; if (!j) { const cv = document.createElement('canvas'); cv.width = cv.height = 112; b.appendChild(cv); icons.push({ x: cv.getContext('2d'), s, c, i }); } g.appendChild(b); } });
+    for (; k < 15; k++) { const b = document.createElement('div'); b.className = 'blk'; b.dataset.c = c; g.appendChild(b); }
+  });
+  const s = sel();
+  $('#iName').textContent = s ? s.name : 'Free space'; $('#iSub').textContent = s ? s.sub : `Memory Card (Slot ${cur.c + 1})`;
+  $('#iMeta').textContent = s ? `${s.blocks} block${s.blocks > 1 ? 's' : ''} · saved ${s.date}` : `${15 - used(cur.c)} of 15 blocks free`;
+  $('#bCopy').disabled = $('#bDel').disabled = !s;
+}
+function flash(c, i) { document.querySelectorAll(`.blk[data-c="${c}"][data-i="${i}"]`).forEach((b) => b.classList.add('flash')); }
+
+// Dialog > confirm, alert, progress
+let dlgResolve = null, focusYes = true;
+function paintFocus() { $('#dYes').classList.toggle('f', focusYes); $('#dNo').classList.toggle('f', !focusYes); }
+function ask(text, yes = 'Yes', no = 'No', defYes = true) {
+  return new Promise((r) => { $('#dText').textContent = text; $('#dYes').textContent = yes; $('#dNo').textContent = no; $('#dYes').hidden = !yes; $('.bar').hidden = true; $('.btns').hidden = false; $('#dlg').className = 'on'; focusYes = !!yes && defYes; paintFocus(); dlgResolve = r; });
+}
+function answer(v) { if (!dlgResolve) return; const r = dlgResolve; dlgResolve = null; $('#dlg').className = ''; v ? ok() : blip(); r(v); }
+$('#dYes').onclick = () => answer(true); $('#dNo').onclick = () => answer(false);
+function progress(text, ms) {
+  $('#dText').textContent = text; $('.btns').hidden = true; $('.bar').hidden = false; $('#dlg').className = 'on prog';
+  const i = $('.bar i'); i.style.transition = 'none'; i.style.width = '0'; void i.offsetWidth; i.style.transition = `width ${ms}ms linear`; i.style.width = '100%';
+  return new Promise((r) => setTimeout(() => { $('#dlg').className = ''; r(); }, ms + 150));
+}
+
+// Ops > copy with flying blocks, delete with crumble
+function fly(c, i, d) {
+  const src = [...document.querySelectorAll(`.blk[data-c="${c}"][data-i="${i}"]`)], dst = [...document.querySelectorAll(`.card[data-c="${d}"] .blk`)].slice(used(d));
+  src.forEach((b, j) => {
+    const a = b.getBoundingClientRect(), z = dst[j].getBoundingClientRect(), g = document.createElement('div');
+    g.className = `blk used ghost${j ? ' cont' : ''}`; g.style.cssText = `--h:${cards[c][i].hue};left:${a.left}px;top:${a.top}px;width:${a.width}px;height:${a.height}px`;
+    if (!j) { const cv = document.createElement('canvas'); cv.width = cv.height = 112; g.appendChild(cv); icons.push({ x: cv.getContext('2d'), s: cards[c][i], c: -1, i: -1 }); }
+    document.body.appendChild(g); ghosts.push(g);
+    const dx = z.left - a.left, dy = z.top - a.top;
+    g.animate([{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${dx * 0.5}px,${dy * 0.5 - 40}px) scale(1.25)`, offset: 0.5 }, { transform: `translate(${dx}px,${dy}px) scale(1)` }], { duration: 1000, delay: 150 + j * 180, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' });
+  });
+}
+async function copy() {
+  const s = sel(); if (!s || busy) return; const d = 1 - cur.c; busy = true;
+  if (cards[d].some((t) => t.name === s.name)) { err(); await ask(`"${s.name}" data already exists on Memory Card (Slot ${d + 1}).`, '', 'OK'); busy = false; return; }
+  if (15 - used(d) < s.blocks) { err(); await ask(`Not enough free space on Memory Card (Slot ${d + 1}). ${s.blocks} blocks are needed.`, '', 'OK'); busy = false; return; }
+  if (!(await ask(`Copy "${s.name}" to Memory Card (Slot ${d + 1})?`))) { busy = false; return; }
+  fly(cur.c, cur.i, d); whoosh(); await progress(`Copying "${s.name}". Do not remove the memory card or reset the console.`, 1700);
+  cards[d].push({ ...s }); busy = false; render(); ghosts.forEach((g) => g.remove()); ghosts = []; flash(d, cards[d].length - 1); chime();
+}
+async function del() {
+  const s = sel(); if (!s || busy) return; busy = true;
+  if (!(await ask(`Delete "${s.name}" from Memory Card (Slot ${cur.c + 1})? Deleted data cannot be recovered.`, 'Yes', 'No', false))) { busy = false; return; }
+  document.querySelectorAll(`.blk[data-c="${cur.c}"][data-i="${cur.i}"]`).forEach((b, j) => { b.style.animationDelay = `${j * 90}ms`; b.classList.add('crumble'); });
+  crunch(); await wait(0.6 + s.blocks * 0.09);
+  cards[cur.c].splice(cur.i, 1); cur.i = Math.min(cur.i, cards[cur.c].length - 1); busy = false; render();
+}
+$('#bCopy').onclick = () => copy(); $('#bDel').onclick = () => del();
+$('#cards').onclick = (e) => { const b = e.target.closest('.blk'); if (!b || busy) return; cur = { c: +b.dataset.c, i: b.dataset.i ? +b.dataset.i : -1 }; blip(); render(); };
+addEventListener('keydown', (e) => {
+  if (e.isTrusted) touch();
+  if (dlgResolve) { if (/Arrow(Left|Right)/.test(e.key) && !$('#dYes').hidden) { focusYes = !focusYes; paintFocus(); blip(); } else if (e.key === 'Enter') answer(focusYes); else if (e.key === 'Escape') answer(false); e.preventDefault(); return; }
+  if (busy) return; const n = cards[cur.c].length;
+  if (e.key === 'ArrowRight' && n) cur.i = (cur.i + 1) % n;
+  else if (e.key === 'ArrowLeft' && n) cur.i = cur.i < 0 ? n - 1 : (cur.i - 1 + n) % n;
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { cur.c = 1 - cur.c; cur.i = Math.min(Math.max(cur.i, 0), cards[cur.c].length - 1); }
+  else if (e.key === 'Enter') return copy();
+  else if (e.key === 'Delete' || e.key === 'Backspace') return del();
+  else return;
+  e.preventDefault(); blip(); render();
+});
+
+// Audio > drone, blips
+let ac, master; let touched = false;
+function touch() { touched = true; start(); }
+function start() {
+  if (ac) return ac.resume(); ac = new AudioContext(); master = ac.createGain(); master.gain.value = 0.5; master.connect(ac.destination);
+  const lp = ac.createBiquadFilter(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain(); lp.type = 'lowpass'; lp.frequency.value = 420; lp.Q.value = 4; g.gain.value = 0.035; lfo.frequency.value = 0.07; lg.gain.value = 260; lfo.connect(lg).connect(lp.frequency); lfo.start();
+  [55, 55.35, 82.4, 110.2].forEach((f) => { const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.connect(lp); o.start(); });
+  lp.connect(g).connect(master);
+}
+addEventListener('pointerdown', (e) => { if (e.isTrusted) touch(); }, { capture: true });
+const live = () => ac && ac.state === 'running';
+function tone(f, t0, d, type = 'sine', v = 0.08, f2) { const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime + t0; o.type = type; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(master); o.start(t); o.stop(t + d + 0.02); }
+function blip() { if (live()) tone(1320, 0, 0.06, 'sine', 0.05); }
+function ok() { if (live()) { tone(880, 0, 0.12); tone(1320, 0.07, 0.18); } }
+function err() { if (live()) tone(140, 0, 0.3, 'square', 0.05, 110); }
+function whoosh() { if (live()) tone(300, 0, 1.4, 'triangle', 0.04, 1800); }
+function chime() { if (live()) [1046.5, 1568, 2093].forEach((f, i) => tone(f, i * 0.08, 0.8, 'sine', 0.06)); }
+function crunch() { if (!live()) return; const n = ac.createBufferSource(), b = ac.createBuffer(1, ac.sampleRate * 0.6, ac.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2; n.buffer = b; const f = ac.createBiquadFilter(), g = ac.createGain(); f.type = 'bandpass'; f.frequency.setValueAtTime(2400, ac.currentTime); f.frequency.exponentialRampToValueAtTime(200, ac.currentTime + 0.6); g.gain.value = 0.25; n.connect(f).connect(g).connect(master); n.start(); tone(520, 0, 0.5, 'sine', 0.06, 90); }
+
+// Background > light ribbons, drifting motes
+const bg = $('#bg'), bx = bg.getContext('2d'); let W, H, DPR;
+function size() { DPR = Math.min(devicePixelRatio, 1.5); W = bg.width = innerWidth * DPR; H = bg.height = innerHeight * DPR; }
+addEventListener('resize', size); size();
+const MOTES = Array.from({ length: 36 }, () => ({ x: Math.random(), y: Math.random(), s: 2 + Math.random() * 5, v: 0.01 + Math.random() * 0.02, r: Math.random() * 6 }));
+function drawBg(t) {
+  const g = bx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#021030'); g.addColorStop(0.6, '#03234f'); g.addColorStop(1, '#010818'); bx.fillStyle = g; bx.fillRect(0, 0, W, H);
+  bx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 4; k++) {
+    bx.beginPath(); for (let x = -20; x <= W + 20; x += 24 * DPR) { const y = H * (0.5 + k * 0.07) + Math.sin(x / (260 * DPR) + t * 0.25 + k * 1.7) * 70 * DPR + Math.sin(x / (90 * DPR) - t * 0.4 * (k + 1)) * 16 * DPR; x < 0 ? bx.moveTo(x, y) : bx.lineTo(x, y); }
+    bx.strokeStyle = `hsla(${195 + k * 14}, 90%, 60%, 0.06)`; bx.lineWidth = (50 + k * 26) * DPR; bx.stroke(); bx.strokeStyle = `hsla(${195 + k * 14}, 100%, 75%, 0.35)`; bx.lineWidth = 1.2 * DPR; bx.stroke();
+  }
+  for (const m of MOTES) { m.y -= m.v / 60; if (m.y < -0.05) m.y = 1.05; const x = (m.x + Math.sin(t * 0.2 + m.r) * 0.02) * W, y = m.y * H; bx.save(); bx.translate(x, y); bx.rotate(t * 0.3 + m.r); bx.fillStyle = 'rgba(140,210,255,0.18)'; bx.fillRect(-m.s * DPR / 2, -m.s * DPR / 2, m.s * DPR, m.s * DPR); bx.restore(); }
+  bx.globalCompositeOperation = 'source-over';
+}
+
+// Loop > background, icons, big icon
+const big = $('#big').getContext('2d'); let bigA = 0, last = 0;
+function frame(ms) {
+  requestAnimationFrame(frame); const t = ms / 1000, dt = Math.min(0.05, t - last); last = t; drawBg(t);
+  for (const ic of icons) { const on = ic.c === cur.c && ic.i === cur.i; ic.s.a = (ic.s.a ?? Math.random() * 6) + dt * (on ? 2.6 : 0.7); ic.x.clearRect(0, 0, 112, 112); drawMesh(ic.x, MESH[ic.s.mesh], 112, ic.s.a, 0.4 + Math.sin(t * 1.3 + ic.s.hue) * 0.18, ic.s.hue, on ? 1.12 : 1); }
+  big.clearRect(0, 0, 220, 220); const s = sel(); bigA += dt * 1.1; if (s) { const gl = big.createRadialGradient(110, 110, 10, 110, 110, 110); gl.addColorStop(0, `hsla(${s.hue},90%,60%,0.35)`); gl.addColorStop(1, 'transparent'); big.fillStyle = gl; big.fillRect(0, 0, 220, 220); drawMesh(big, MESH[s.mesh], 220, bigA, 0.45 + Math.sin(t * 0.8) * 0.2, s.hue, 1.05 + Math.sin(t * 2) * 0.03); }
+  $('#clock').textContent = `Thu 23 Oct 2003  ${String(21 + Math.floor((t / 60 + 14) / 60) % 3).padStart(2, '0')}:${String(Math.floor(t / 60 + 14) % 60).padStart(2, '0')}`;
+}
+render(); requestAnimationFrame(frame);
+
+// Attract > copy, delete, refuse duplicate, reset
+const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
+const key = (k) => dispatchEvent(new KeyboardEvent('keydown', { key: k }));
+async function step(s, fn) { await wait(s); if (touched) throw 0; fn(); }
+async function moveTo(c, i) { while (cur.c !== c) await step(0.4, () => key('ArrowDown')); while (cur.i !== i) await step(0.35, () => key(cur.i < i ? 'ArrowRight' : 'ArrowLeft')); }
+async function attract() {
+  try {
+    for (;;) {
+      await moveTo(0, 1); await step(0.8, copy); await step(1.2, () => answer(true)); await wait(2.2);
+      await moveTo(0, 3); await step(0.6, copy); await step(1.0, () => answer(true)); await wait(2.2);
+      await moveTo(1, 0); await step(0.8, del); await step(1.5, () => answer(true)); await wait(1.4);
+      await moveTo(0, 1); await step(0.6, copy); await step(2.0, () => answer(false)); await wait(1.6);
+      await step(0, () => { cards = clone(INIT); cur = { c: 0, i: 0 }; render(); }); await wait(1);
+    }
+  } catch { /* user took over */ }
+}
+if (!capture) attract();
+
+window.__memcard = { select: (c, i) => { cur = { c, i }; render(); }, copy: () => { copy(); }, del: () => { del(); }, answer, state: () => ({ cur: { ...cur }, busy, dialog: !!dlgResolve, cards: cards.map((c) => c.map((s) => `${s.name}:${s.blocks}`)), free: [15 - used(0), 15 - used(1)] }) };
+</script>
+</body>
+</html>

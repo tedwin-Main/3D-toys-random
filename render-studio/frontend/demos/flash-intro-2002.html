@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flash Intro 2002</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="48" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="seekable time-driven timeline, SVG stroke draw-on, CSS filter tweens, canvas streak background, WebAudio sequencer and hit stingers, Skip Intro" />
+<meta name="description" content="The splash page every 2002 design studio had: a pixel-type preloader counts to 100% and asks you to click to enter, then chrome swooshes draw themselves across the dark, CREATE, INNOVATE, INSPIRE slam in with zoom blur and flash frames, HUD rings spin with ticking coordinates, and a chrome VORTEX logo wipes in with a glint, a typed tagline and glossy menu buttons, all over a pumping synthesized techno loop with a stinger on every hit. Skip Intro jumps straight to the menu and Replay runs it again. Hard because the whole intro is one pure function of time, so it can seek, skip and replay exactly, with SVG stroke draw-on, filter and letter-spacing tweens, a canvas streak field and audio stingers all locked to the same clock."/>
+<meta name="prompt" content="Build a 2002-style Flash intro splash page in one HTML file with no plugins: a pixel-type preloader with a loading bar that ends in CLICK TO ENTER (auto-enters if idle), then a seekable time-driven timeline: chrome-gradient SVG swooshes drawing on, three big words zooming in with blur, letter-spacing and flash frames, spinning HUD rings with ticking coordinates, and a chrome logo wipe with glint sweep, orbit swoosh, typed tagline and staggered glossy menu buttons that open glass content panels. Canvas background of streaks and scanlines. WebAudio techno loop with zap stingers on hits, chord stab on the logo and hover blips. Skip Intro and Replay buttons, sound toggle." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/flash-intro-2002.html
+ * PURPOSE: 2002 Flash-style splash intro: preloader, chrome swooshes, zooming words, HUD rings, logo reveal, techno loop, Skip Intro
+ * UI: Render Studio > Frutiger Aero > Y2K Futurism > Flash Intro 2002
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__flash (skip, replay, enter, t, state)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #05070d; color: #cfe8ff; font: 11px Verdana, Geneva, sans-serif; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+.px { font: bold 10px "Courier New", monospace; letter-spacing: 0.25em; text-transform: uppercase; }
+#pre { position: fixed; inset: 0; display: grid; place-items: center; z-index: 5; background: #05070d; }
+.load { width: 240px; display: grid; gap: 8px; text-align: center; }
+.lbar { height: 9px; padding: 1px; border: 1px solid #6fa8d8; }
+.lbar i { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, #cfe8ff 0 3px, transparent 3px 4px); }
+#enter { margin-top: 10px; padding: 8px 0; border: 1px solid #6fa8d8; background: none; color: #fff; cursor: pointer; visibility: hidden; animation: blink 0.8s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0.35; } }
+svg.sw { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.word { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); font: italic 900 clamp(46px, 11vw, 150px) "Arial Black", Arial, sans-serif; white-space: nowrap; opacity: 0; pointer-events: none; color: #fff; text-shadow: 0 0 30px rgba(120, 190, 255, 0.6); }
+.hud { position: fixed; left: 50%; top: 50%; width: min(70vmin, 560px); height: min(70vmin, 560px); transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
+.coords { position: fixed; left: 24px; bottom: 54px; color: #6fa8d8; line-height: 1.8; opacity: 0; white-space: pre; }
+.logo { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; opacity: 0; }
+.logo h1 { margin: 0; font: italic 900 clamp(52px, 12vw, 150px) / 1 "Arial Black", Arial, sans-serif; letter-spacing: -0.02em; background: linear-gradient(100deg, transparent 0 var(--g0), rgba(255, 255, 255, 0.95) var(--g1), transparent var(--g2) 100%), linear-gradient(180deg, #fff 0%, #dbe7f5 40%, #5b6b82 50%, #1c2433 54%, #8fb2e0 72%, #fff 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 18px rgba(110, 180, 255, 0.5)); padding: 0 0.12em; }
+.logo .tag { margin-top: 10px; color: #8fc3ff; min-height: 14px; }
+nav { position: fixed; left: 0; right: 0; top: 66%; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 0 16px; }
+nav button { opacity: 0; padding: 7px 18px; border-radius: 999px; border: 1px solid #8fc3ff; color: #fff; font: bold 11px Verdana, sans-serif; letter-spacing: 0.2em; cursor: pointer; background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0.08) 50%, rgba(40, 110, 200, 0.35) 51%, rgba(120, 190, 255, 0.4)); box-shadow: 0 0 12px rgba(80, 160, 255, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.7); }
+nav button:hover, nav button.on { background: linear-gradient(180deg, #fff, #bfe0ff 50%, #3a8ae0 51%, #8fd0ff); color: #02203f; }
+.panel { position: fixed; left: 50%; bottom: 60px; width: min(520px, calc(100% - 32px)); transform: translate(-50%, 20px); padding: 14px 18px; border: 1px solid rgba(143, 195, 255, 0.6); border-radius: 10px; background: linear-gradient(180deg, rgba(120, 180, 255, 0.18), rgba(20, 40, 80, 0.5)); backdrop-filter: blur(8px); line-height: 1.6; opacity: 0; pointer-events: none; transition: 0.3s; }
+.panel.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.panel b { display: block; margin-bottom: 4px; color: #fff; letter-spacing: 0.2em; }
+.corner { position: fixed; z-index: 6; display: flex; gap: 14px; align-items: center; }
+.corner button { padding: 4px 10px; border: 1px solid #6fa8d8; background: rgba(5, 7, 13, 0.6); color: #cfe8ff; cursor: pointer; }
+.corner button:hover { background: #cfe8ff; color: #05070d; }
+#brandSm { left: 20px; top: 18px; color: #6fa8d8; }
+.eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; margin-right: 6px; vertical-align: -1px; }
+.eq i { width: 2px; background: currentColor; animation: eq 0.5s ease-in-out infinite alternate; }
+.eq i:nth-child(2) { animation-delay: 0.15s; } .eq i:nth-child(3) { animation-delay: 0.3s; } .eq i:nth-child(4) { animation-delay: 0.08s; }
+.off .eq i { animation: none; height: 2px !important; }
+@keyframes eq { from { height: 2px; } to { height: 10px; } }
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 4; mix-blend-mode: screen; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<svg class="sw" id="sw" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="ch" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1c2433" stop-opacity="0" /><stop offset="0.3" stop-color="#8fb2e0" /><stop offset="0.55" stop-color="#fff" /><stop offset="0.7" stop-color="#5b6b82" /><stop offset="1" stop-color="#cfe8ff" stop-opacity="0" /></linearGradient>
+    <linearGradient id="bl" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2a7fff" stop-opacity="0" /><stop offset="0.5" stop-color="#4fc3ff" /><stop offset="1" stop-color="#2a7fff" stop-opacity="0" /></linearGradient>
+  </defs>
+  <g id="swg">
+    <path class="s" d="M-100 760 C 300 520, 700 980, 1100 640 S 1600 300, 1750 420" stroke="url(#ch)" stroke-width="26" fill="none" stroke-linecap="round" />
+    <path class="s" d="M-100 820 C 380 600, 760 1000, 1150 700 S 1600 380, 1750 480" stroke="url(#bl)" stroke-width="5" fill="none" />
+    <path class="s" d="M1700 180 C 1300 380, 900 40, 500 300 S -50 520, -150 420" stroke="url(#ch)" stroke-width="14" fill="none" stroke-linecap="round" />
+    <path class="s" d="M1700 240 C 1280 430, 880 110, 470 350 S -60 580, -150 480" stroke="url(#bl)" stroke-width="3" fill="none" />
+  </g>
+</svg>
+<svg class="hud" id="hud" viewBox="-100 -100 200 200">
+  <circle r="92" fill="none" stroke="#6fa8d8" stroke-width="0.6" stroke-dasharray="2 4" id="r1" />
+  <circle r="80" fill="none" stroke="#cfe8ff" stroke-width="1.6" stroke-dasharray="40 14 6 14" id="r2" />
+  <circle r="64" fill="none" stroke="#4fc3ff" stroke-width="0.8" stroke-dasharray="120 40" id="r3" />
+  <path d="M-100 0 H-70 M70 0 H100 M0 -100 V-70 M0 70 V100" stroke="#cfe8ff" stroke-width="0.6" />
+  <circle r="3" fill="#4fc3ff" />
+</svg>
+<div class="word" id="w0">CREATE.</div><div class="word" id="w1">INNOVATE.</div><div class="word" id="w2">INSPIRE.</div>
+<div class="coords px" id="coords"></div>
+<div class="logo" id="logo"><h1 id="logoTxt">VORTEX</h1><div class="tag px" id="tag"></div></div>
+<nav id="nav"><button data-s="0">HOME</button><button data-s="1">WORK</button><button data-s="2">ABOUT</button><button data-s="3">CONTACT</button></nav>
+<div class="panel" id="panel"><b id="pTitle"></b><span id="pText"></span></div>
+<div class="corner px" id="brandSm">vortex//media [v2.0]</div>
+<div class="corner" id="sndWrap" style="right:18px;top:12px"><button class="px" id="snd"><span class="eq"><i></i><i></i><i></i><i></i></span>sound on</button></div>
+<div class="corner" id="skipWrap" style="right:18px;bottom:14px"><button class="px" id="skip">skip intro &gt;&gt;</button></div>
+<div id="flash"></div>
+<div id="pre"><div class="load px"><span id="lt">loading 0%</span><div class="lbar"><i id="lb"></i></div><span style="opacity:.5">best viewed at 1024x768</span><button class="px" id="enter">[ click to enter ]</button></div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const clamp = (x) => Math.max(0, Math.min(1, x)), seg = (t, a, b) => clamp((t - a) / (b - a)), ease = (x) => 1 - Math.pow(1 - x, 3);
+
+// Timeline > key times in seconds from enter
+const WORDS = [1.0, 2.3, 3.6], HITS = [...WORDS, 7.5], END = 10.6;
+const LOAD = 2.2, AUTO = 3.4;
+let start = performance.now(), enterAt = null, t = -1, soundOn = true, lastT = -1;
+const swPaths = [...document.querySelectorAll('#swg path')]; const lens = swPaths.map((p) => p.getTotalLength());
+swPaths.forEach((p, i) => { p.style.strokeDasharray = lens[i]; });
+
+function render(t) {
+  // Swooshes > draw on, drift
+  swPaths.forEach((p, i) => { const d = ease(seg(t, 0.05 + i * 0.12, 1.2 + i * 0.12)); p.style.strokeDashoffset = lens[i] * (1 - d); p.style.opacity = 0.35 + 0.65 * (1 - seg(t, 4.8, 6)) + (t > 7.5 ? 0.25 : 0); });
+  $('#swg').setAttribute('transform', `rotate(${Math.sin(t * 0.3) * 3} 800 500) translate(${Math.sin(t * 0.5) * 20} 0)`);
+  // Words > zoom blur in, stretch out
+  WORDS.forEach((at, i) => {
+    const pi = ease(seg(t, at, at + 0.35)), po = seg(t, at + 0.95, at + 1.2), el = $(`#w${i}`);
+    el.style.opacity = pi * (1 - po); el.style.filter = `blur(${(1 - pi) * 14 + po * 10}px)`; el.style.letterSpacing = `${0.5 - 0.44 * pi + po * 0.7}em`;
+    el.style.transform = `translate(-50%, -50%) scale(${(2.6 - 1.6 * pi) * (1 + po * 0.15)}, ${(2.6 - 1.6 * pi) * (1 - po * 0.6)})`;
+  });
+  // Hud > rings + coordinates
+  const hv = seg(t, 4.9, 5.3) * (1 - seg(t, 7.1, 7.6)); $('#hud').style.opacity = hv; $('#coords').style.opacity = hv;
+  $('#r1').setAttribute('transform', `rotate(${t * 40})`); $('#r2').setAttribute('transform', `rotate(${-t * 70})`); $('#r3').setAttribute('transform', `rotate(${t * 120})`);
+  $('#hud').style.transform = `translate(-50%, -50%) scale(${0.7 + 0.3 * ease(seg(t, 4.9, 5.5)) + seg(t, 7.1, 7.6) * 0.8})`;
+  if (hv > 0) $('#coords').textContent = `sys.init ......... ok\nx: ${(t * 1234.5 % 999).toFixed(2)}  y: ${(t * 777.7 % 999).toFixed(2)}\nlink: 56.0 kbps .. ok\nrender: vector ... ok\nload: ${Math.min(100, Math.round(seg(t, 4.9, 7) * 100))}%`;
+  // Logo > wipe, glint, tagline
+  const lp = ease(seg(t, 7.5, 8.1)), lg = $('#logo'); lg.style.opacity = t >= 7.5 ? 1 : 0;
+  $('#logoTxt').style.clipPath = lp < 1 ? `inset(0 ${(1 - lp) * 100}% 0 0)` : 'none'; lg.style.transform = `translate(-50%, -50%) scale(${1.15 - 0.15 * lp})`;
+  const g = ((t - 8.2) % 4) / 0.8, gx = -30 + clamp(g) * 160; ['--g0', '--g1', '--g2'].forEach((v, i) => $('#logoTxt').style.setProperty(v, `${gx - 12 + i * 12}%`));
+  const TAG = 'digital media // motion // interactive'; $('#tag').textContent = TAG.slice(0, Math.floor(seg(t, 8.8, 9.6) * TAG.length)) + (t > 8.8 && t < 9.8 ? '_' : '');
+  // Menu > staggered buttons
+  document.querySelectorAll('nav button').forEach((b, i) => { const p = ease(seg(t, 9.6 + i * 0.12, 9.95 + i * 0.12)); b.style.opacity = p; b.style.transform = `translateY(${(1 - p) * 22}px)`; b.style.pointerEvents = p > 0.9 ? 'auto' : 'none'; });
+  $('#skipWrap').style.display = t > 0.2 && (t < 9.4 || t > END) ? '' : 'none';
+  if (t > END) $('#skip').textContent = 'replay intro';
+  // Flash > frames on hits
+  $('#flash').style.opacity = HITS.reduce((m, h) => (t >= h ? Math.max(m, Math.exp(-(t - h) * 9) * 0.55) : m), 0);
+}
+
+// Background > streaks and scanlines on canvas
+const bg = $('#bg'), bx = bg.getContext('2d');
+let streaks = [];
+function size() { const d = Math.min(2, devicePixelRatio); bg.width = innerWidth * d; bg.height = innerHeight * d; bx.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+for (let i = 0; i < 60; i++) streaks.push({ x: Math.random(), y: Math.random(), v: 0.2 + Math.random() * 0.8, l: 0.02 + Math.random() * 0.12 });
+function drawBg(t) {
+  const W = innerWidth, H = innerHeight, punch = HITS.reduce((m, h) => (t >= h ? Math.max(m, Math.exp(-(t - h) * 4)) : m), 0);
+  const g = bx.createRadialGradient(W / 2, H * 0.45, 0, W / 2, H * 0.45, Math.max(W, H) * 0.7); g.addColorStop(0, `rgba(30,60,110,${0.9 + punch * 0.1})`); g.addColorStop(1, '#05070d'); bx.fillStyle = g; bx.fillRect(0, 0, W, H);
+  bx.fillStyle = 'rgba(0,0,0,0.25)'; for (let y = 0; y < H; y += 3) bx.fillRect(0, y, W, 1);
+  bx.strokeStyle = 'rgba(120,180,255,0.08)'; bx.lineWidth = 1; for (let x = ((t * 40) % 60) - 60; x < W; x += 60) { bx.beginPath(); bx.moveTo(x, 0); bx.lineTo(x, H); bx.stroke(); }
+  const sp = 1 + punch * 6 + (t > 0 && t < 7.5 ? 0.6 : 0);
+  for (const s of streaks) { s.x -= s.v * 0.004 * sp; if (s.x < -0.2) { s.x = 1.1; s.y = Math.random(); }
+    const gr = bx.createLinearGradient(s.x * W, 0, (s.x + s.l * sp) * W, 0); gr.addColorStop(0, `rgba(220,240,255,${0.5 * s.v})`); gr.addColorStop(1, 'rgba(120,180,255,0)'); bx.strokeStyle = gr; bx.lineWidth = s.v * 1.5; bx.beginPath(); bx.moveTo(s.x * W, s.y * H); bx.lineTo((s.x + s.l * sp) * W, s.y * H); bx.stroke(); }
+}
+
+// Audio > techno loop, zap stingers, chord stab, blips
+let ac, out, nextT = 0, step = 0, noiseBuf;
+function initAudio() {
+  if (ac) return; ac = new AudioContext(); out = ac.createGain(); out.gain.value = 0.4; const comp = ac.createDynamicsCompressor(); out.connect(comp).connect(ac.destination);
+  noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; nextT = ac.currentTime + 0.05;
+}
+function env(g, t, a, v, d) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); }
+function osc(type, f, t, a, v, d, dest = out) { const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.value = f; env(g, t, a, v, d); o.connect(g).connect(dest); o.start(t); o.stop(t + a + d + 0.05); return o; }
+function nz(t, type, f, v, d) { const s = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = noiseBuf; fl.type = type; fl.frequency.value = f; env(g, t, 0.002, v, d); s.connect(fl).connect(g).connect(out); s.start(t); s.stop(t + d + 0.05); return fl; }
+const BASS = [41.2, 0, 41.2, 82.4, 0, 41.2, 49, 55, 41.2, 0, 41.2, 82.4, 0, 61.7, 55, 49];
+function seq() {
+  if (!ac || !soundOn || enterAt === null) return; const sp = 60 / 134 / 4;
+  while (nextT < ac.currentTime + 0.12) {
+    const s = step % 16, tt = nextT;
+    if (s % 4 === 0) { const o = osc('sine', 150, tt, 0.002, 0.9, 0.28); o.frequency.exponentialRampToValueAtTime(40, tt + 0.12); }
+    nz(tt, 'highpass', 8000, s % 4 === 2 ? 0.22 : 0.06, 0.05);
+    if (s % 8 === 4) nz(tt, 'bandpass', 1800, 0.3, 0.15);
+    if (BASS[s]) { const o = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = BASS[s] * 2; lp.type = 'lowpass'; lp.Q.value = 10; lp.frequency.setValueAtTime(300 + 1200 * (0.5 + 0.5 * Math.sin(step / 16)), tt); lp.frequency.exponentialRampToValueAtTime(160, tt + 0.12); env(g, tt, 0.004, 0.3, 0.14); o.connect(lp).connect(g).connect(out); o.start(tt); o.stop(tt + 0.2); }
+    nextT += sp; step++;
+  }
+}
+function zap() { if (!ac || !soundOn) return; const t0 = ac.currentTime, o = osc('sawtooth', 1400, t0, 0.003, 0.18, 0.3); o.frequency.exponentialRampToValueAtTime(70, t0 + 0.3); nz(t0, 'bandpass', 3000, 0.25, 0.3); }
+function stab() { if (!ac || !soundOn) return; const t0 = ac.currentTime; [220, 277.2, 329.6, 440].forEach((f) => osc('sawtooth', f, t0, 0.01, 0.07, 1.4)); nz(t0, 'highpass', 5000, 0.3, 1.2); }
+function blip() { if (ac && soundOn) osc('square', 1320, ac.currentTime, 0.002, 0.05, 0.05); }
+
+// Control > enter, skip, replay, sound, menu
+function enter(at = 0) { if (enterAt !== null) return; enterAt = performance.now() - at * 1000; $('#pre').style.display = 'none'; lastT = at - 0.001; }
+$('#enter').onclick = () => { initAudio(); ac.resume(); enter(); };
+$('#skip').onclick = () => { initAudio(); if (t > END) replay(); else { enterAt = performance.now() - 9.5 * 1000; lastT = 9.5; } };
+function replay() { enterAt = performance.now(); lastT = 0; $('#skip').innerHTML = 'skip intro &gt;&gt;'; $('#panel').classList.remove('show'); document.querySelectorAll('nav button').forEach((b) => b.classList.remove('on')); }
+$('#snd').onclick = () => { initAudio(); ac.resume(); soundOn = !soundOn; $('#sndWrap').classList.toggle('off', !soundOn); $('#snd').lastChild.textContent = soundOn ? 'sound on' : 'sound off'; nextT = ac.currentTime + 0.05; };
+const PAGES = [['HOME', 'Welcome to the new VORTEX//MEDIA. Fresh motion work, vector experiments and downloadable desktop wallpapers every month.'], ['WORK', 'Broadcast idents, CD-ROM menus, kiosk interfaces and award-hopeful splash pages. Click any thumbnail to launch the 640x480 viewer.'], ['ABOUT', 'Six designers, two sound guys and one very loud server rack. Founded 1999, still rendering.'], ['CONTACT', 'Sign the guestbook or drop us a line. We reply faster than a 56k modem, usually.']];
+document.querySelectorAll('nav button').forEach((b) => { b.onmouseenter = blip; b.onclick = () => { const [h, p] = PAGES[b.dataset.s]; $('#pTitle').textContent = h; $('#pText').textContent = p; $('#panel').classList.add('show'); document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b)); blip(); }; });
+
+// Attract > auto enter, replay after the menu sits
+let touched = false; addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+if (capture) { touched = true; enter(7.6); }
+
+function loop(now) {
+  const T = (now - start) / 1000;
+  if (enterAt === null) {
+    const p = seg(T, 0.1, LOAD); $('#lb').style.width = `${p * 100}%`; $('#lt').textContent = p < 1 ? `loading ${Math.floor(p * 100)}%` : 'loaded 100%';
+    if (p >= 1) $('#enter').style.visibility = 'visible';
+    if (T > AUTO && !touched) enter();
+    drawBg(-1);
+  } else {
+    t = (now - enterAt) / 1000;
+    for (const h of HITS) if (lastT < h && t >= h) (h === 7.5 ? stab : zap)();
+    lastT = t; render(t); drawBg(t); seq();
+    if (!touched && t > END + 7) replay();
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__flash = { skip: () => $('#skip').click(), replay, enter, t: () => +t.toFixed(2), state: () => ({ entered: enterAt !== null, t: +t.toFixed(2), sound: soundOn, panel: $('#panel').classList.contains('show') && $('#pTitle').textContent }) };
+</script>
+</body>
+</html>

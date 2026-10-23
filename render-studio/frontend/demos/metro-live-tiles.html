@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Live Tiles Start</title>
+<meta name="category" content="aero" />
+<meta name="style" content="metro" />
+<meta name="order" content="38" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="CSS grid column-dense packing, 3D flip and peek tiles, turnstile transition, panorama parallax, canvas thumbnails" />
+<meta name="description" content="The early-2010s flat 'Frutiger Metro' start screen: a sideways-scrolling wall of coloured live tiles in thin light type that peek, flip and cycle their content on their own (mail, calendar, weather, photos, people, music, news, clock). Pressing a tile tilts it toward your finger; opening one turnstiles the other tiles away and zooms into a panorama app whose big title parallaxes behind the pivots. A charm panel swaps the accent background and pattern; at phone width it reflows into the two-column phone start. Hard because the tile wall is a dense column-flow grid of four tile sizes, every tile animates on its own timer, and the open and close transitions are choreographed per column."/>
+<meta name="prompt" content="Build an early-2010s flat live-tile start screen in one HTML file: a horizontally scrolling wall of grouped coloured tiles in four sizes packed with CSS grid column-dense, thin light type and line icons, tiles that peek, flip and cycle live content on independent timers, a press-to-tilt effect, a turnstile animation that opens a full-screen panorama app with parallax title and pivots, and a charm panel to change the accent background. Reflow to a two-column phone start under 600 px and add an attract mode that scrolls and opens apps." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/metro-live-tiles.html
+ * PURPOSE: flat live-tile start screen: peeking/flipping tiles, turnstile open into panorama apps, accent charm
+ * UI: Render Studio > Frutiger Aero > Frutiger Metro > Live Tiles Start
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__metro (open, back, accent, state)
+ */
+:root { --bg: #1d1d6b; --pat: none; --u: 74px; --g: 8px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; color: #fff; font-family: "Segoe UI Light", "Segoe UI", "Selawik", "Open Sans", "Helvetica Neue", sans-serif; font-weight: 300; user-select: none; -webkit-user-select: none; }
+body { background: var(--pat), var(--bg); transition: background-color 0.4s; }
+#start { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+#start::-webkit-scrollbar { display: none; }
+header { position: sticky; left: 0; display: flex; justify-content: space-between; align-items: center; padding: 34px 48px 22px 110px; width: 100vw; }
+header h1 { margin: 0; font-size: 54px; font-weight: 200; letter-spacing: -1px; }
+#user { display: flex; align-items: center; gap: 12px; font-size: 22px; }
+#user i { width: 40px; height: 40px; background: linear-gradient(160deg, #7fd3ff, #3b6fd8); display: grid; place-items: center; font-style: normal; font-size: 20px; }
+#gear { background: none; border: 0; color: #fff; font-size: 24px; cursor: pointer; padding: 6px; }
+#wall { display: flex; gap: 56px; padding: 0 110px 40px; width: max-content; perspective: 1400px; }
+.group h2 { margin: 0 0 12px; font-size: 20px; font-weight: 300; opacity: 0.85; }
+.grid { display: grid; grid-auto-flow: column dense; grid-template-rows: repeat(6, var(--u)); grid-auto-columns: var(--u); gap: var(--g); }
+.tile { position: relative; overflow: hidden; cursor: pointer; transform-style: preserve-3d; transition: transform 0.12s, opacity 0.3s; outline: 2px solid transparent; outline-offset: -2px; }
+.tile:hover { outline-color: rgba(255, 255, 255, 0.45); }
+.s { grid-column: span 1; grid-row: span 1; } .m { grid-column: span 2; grid-row: span 2; } .w { grid-column: span 4; grid-row: span 2; } .l { grid-column: span 4; grid-row: span 4; }
+.tile .name { position: absolute; left: 10px; bottom: 7px; font-size: 13px; font-weight: 400; z-index: 2; text-shadow: 0 0 6px rgba(0, 0, 0, 0.2); }
+.s .name { display: none; }
+.s .face { padding: 8px; } .s .ico { width: 62%; }
+.strip { position: absolute; inset: 0; transition: transform 0.7s cubic-bezier(0.1, 0.9, 0.2, 1); }
+.face { position: absolute; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 12px 14px 26px; overflow: hidden; }
+.face canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.face .big { font-size: 46px; font-weight: 200; line-height: 1; }
+.face .mid { font-size: 20px; font-weight: 300; line-height: 1.15; }
+.face .small { font-size: 13px; font-weight: 400; opacity: 0.9; line-height: 1.35; }
+.face .row { display: flex; align-items: center; gap: 12px; }
+.face .over { position: relative; z-index: 1; margin-top: auto; background: linear-gradient(transparent, rgba(0, 0, 0, 0.45)); margin: auto -14px -26px; padding: 18px 14px 28px; }
+.ico { width: 44%; max-width: 64px; aspect-ratio: 1; margin: auto; stroke: #fff; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.flip .card { position: absolute; inset: 0; transform-style: preserve-3d; transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.flip .card .face { backface-visibility: hidden; }
+.flip .card .face.b { transform: rotateX(180deg); }
+.flip.on .card { transform: rotateX(180deg); }
+.mosaic { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+.mosaic b { transition: opacity 0.6s; }
+#app { position: fixed; inset: 0; display: none; overflow: hidden; }
+#app.on { display: block; }
+#app .bgimg { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.35; }
+#app .title { position: absolute; top: 18px; left: 40px; font-size: 120px; font-weight: 200; white-space: nowrap; pointer-events: none; opacity: 0.9; letter-spacing: -3px; }
+#pano { position: absolute; inset: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; display: flex; padding-top: 170px; scrollbar-width: none; }
+#pano::-webkit-scrollbar { display: none; }
+#pano section { flex: none; width: min(520px, 82vw); padding: 0 40px; scroll-snap-align: start; }
+#pano h3 { margin: 0 0 18px; font-size: 38px; font-weight: 200; }
+.item { display: flex; gap: 14px; align-items: center; margin-bottom: 16px; animation: rise 0.5s both; }
+.item b { width: 58px; height: 58px; flex: none; }
+.item div { font-size: 20px; line-height: 1.2; }
+.item small { display: block; font-size: 14px; opacity: 0.7; }
+.pics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pics canvas { width: 100%; aspect-ratio: 1; animation: rise 0.5s both; }
+@keyframes rise { from { opacity: 0; transform: translateX(40px); } }
+#backb { position: absolute; left: 22px; bottom: 22px; width: 44px; height: 44px; border-radius: 50%; border: 2px solid #fff; background: none; color: #fff; font-size: 22px; cursor: pointer; z-index: 2; }
+#charm { position: fixed; top: 0; right: 0; bottom: 0; width: min(340px, 90vw); background: #111; padding: 30px 28px; transform: translateX(100%); transition: transform 0.35s cubic-bezier(0.1, 0.9, 0.2, 1); z-index: 5; }
+#charm.on { transform: none; }
+#charm h4 { margin: 0 0 6px; font-size: 30px; font-weight: 200; }
+#charm p { font-size: 14px; opacity: 0.7; margin: 18px 0 8px; }
+#sw, #pats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+#sw b, #pats b { aspect-ratio: 1; cursor: pointer; outline: 2px solid transparent; }
+#sw b.on, #pats b.on { outline-color: #fff; }
+#pats { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 600px) {
+  :root { --u: calc((100vw - 24px - 3 * var(--g)) / 4); }
+  #start { overflow-x: hidden; overflow-y: auto; }
+  header { padding: 22px 12px 14px; }
+  header h1 { font-size: 40px; }
+  #user span { display: none; }
+  #wall { flex-direction: column; gap: var(--g); padding: 0 12px 40px; width: auto; }
+  .group h2 { display: none; }
+  .grid { grid-auto-flow: row dense; grid-template-rows: none; grid-auto-rows: var(--u); grid-template-columns: repeat(4, var(--u)); grid-auto-columns: auto; }
+  .face .big { font-size: 34px; }
+  #app .title { font-size: 72px; left: 18px; }
+  #pano { padding-top: 110px; }
+  #pano section { padding: 0 18px; }
+}
+</style>
+</head>
+<body>
+<div id="start">
+  <header><h1>Start</h1><div id="user"><span>Alex</span><i>☺</i><button id="gear" title="Personalize">⚙</button></div></header>
+  <div id="wall"></div>
+</div>
+<div id="app"><canvas class="bgimg"></canvas><div class="title"></div><div id="pano"></div><button id="backb" title="Back">←</button></div>
+<div id="charm"><h4>Personalize</h4><p>Start background colour</p><div id="sw"></div><p>Pattern</p><div id="pats"></div></div>
+<script>
+const $ = (s) => document.querySelector(s), R = Math.random, pick = (a) => a[Math.floor(R() * a.length)];
+const C = { cyan: '#1ba1e2', purple: '#a200ff', teal: '#00aba9', lime: '#8cbf26', brown: '#a05000', pink: '#e671b8', orange: '#f09609', green: '#339933', red: '#e51400', blue: '#2d89ef', violet: '#603cba', emerald: '#00a300' };
+
+// Icons > thin line SVG paths
+const IC = {
+  mail: '<rect x="8" y="16" width="48" height="32"/><path d="M8 16l24 18 24-18"/>',
+  cal: '<rect x="10" y="14" width="44" height="40"/><path d="M10 24h44M20 8v10M44 8v10"/>',
+  people: '<circle cx="24" cy="24" r="8"/><path d="M10 50c0-9 6-14 14-14s14 5 14 14"/><circle cx="44" cy="22" r="6"/><path d="M40 34c8 0 14 4 14 12"/>',
+  chat: '<path d="M10 14h44v28H30l-12 10V42h-8z"/>',
+  clock: '<circle cx="32" cy="32" r="22"/><path d="M32 18v14l10 6"/>',
+  sun: '<circle cx="32" cy="32" r="10"/><path d="M32 8v8M32 48v8M8 32h8M48 32h8M15 15l6 6M43 43l6 6M15 49l6-6M43 21l6-6"/>',
+  music: '<path d="M24 46V16l26-6v30"/><circle cx="18" cy="46" r="6"/><circle cx="44" cy="40" r="6"/>',
+  video: '<rect x="8" y="16" width="36" height="32"/><path d="M44 28l12-8v24l-12-8"/>',
+  game: '<path d="M14 24h36c5 0 8 4 8 10v6c0 6-6 8-10 4l-6-6H22l-6 6c-4 4-10 2-10-4v-6c0-6 3-10 8-10z"/><path d="M20 30v8M16 34h8"/><circle cx="44" cy="31" r="1.5"/><circle cx="48" cy="36" r="1.5"/>',
+  cam: '<rect x="8" y="20" width="48" height="30"/><circle cx="32" cy="35" r="9"/><path d="M22 20l4-6h12l4 6"/>',
+  store: '<path d="M12 24h40l-4 28H16z"/><path d="M24 24v-6a8 8 0 0 1 16 0v6"/>',
+  news: '<rect x="8" y="12" width="40" height="40"/><path d="M48 22h8v26a4 4 0 0 1-8 0M16 22h24M16 30h24M16 38h16"/>',
+  map: '<path d="M8 16l16-6 16 6 16-6v38l-16 6-16-6-16 6z"/><path d="M24 10v38M40 16v38"/>',
+  cog: '<circle cx="32" cy="32" r="8"/><path d="M32 10v8M32 46v8M10 32h8M46 32h8M17 17l6 6M41 41l6 6M17 47l6-6M41 23l6-6"/>',
+  plane: '<path d="M8 36l48-18-12 30-10-10-8 8v-12z"/>',
+  chart: '<path d="M8 52h48M14 44l10-12 10 6 16-20"/>',
+  ball: '<circle cx="32" cy="32" r="22"/><path d="M14 22c10 6 26 6 36 0M14 42c10-6 26-6 36 0M32 10v44"/>',
+  desk: '<rect x="8" y="12" width="48" height="32"/><path d="M24 52h16M32 44v8"/>',
+};
+const svg = (k) => `<svg class="ico" viewBox="0 0 64 64">${IC[k]}</svg>`;
+
+// Pictures > procedural Frutiger photos for tiles and apps
+function scene(cv, seed) {
+  const r = ((s) => () => ((s = (s * 16807) % 2147483647) / 2147483647))(seed * 977 + 13), g = cv.getContext('2d'), w = (cv.width = 240), h = (cv.height = 160);
+  const kind = seed % 4, sky = g.createLinearGradient(0, 0, 0, h);
+  const pal = [['#4fb6ff', '#d9f3ff'], ['#ff9a5a', '#ffe0a8'], ['#1b4f9c', '#7fd0ff'], ['#7ad1ff', '#f2fbff']][kind];
+  sky.addColorStop(0, pal[0]); sky.addColorStop(1, pal[1]); g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(255,255,240,0.9)'; g.beginPath(); g.arc(40 + r() * 160, 30 + r() * 30, 12 + r() * 10, 0, 7); g.fill();
+  for (let i = 0; i < 3; i++) { g.fillStyle = `rgba(255,255,255,${0.5 + r() * 0.4})`; const x = r() * w, y = 20 + r() * 50; g.beginPath(); g.ellipse(x, y, 30 + r() * 30, 8 + r() * 6, 0, 0, 7); g.fill(); }
+  const hill = (y0, c1, c2) => { const gr = g.createLinearGradient(0, y0 - 20, 0, h); gr.addColorStop(0, c1); gr.addColorStop(1, c2); g.fillStyle = gr; g.beginPath(); g.moveTo(0, h); for (let x = 0; x <= w; x += 8) g.lineTo(x, y0 + Math.sin(x * 0.02 + r() * 0.3 + seed) * 14); g.lineTo(w, h); g.fill(); };
+  if (kind === 2) { hill(110, '#1fa3d8', '#0b5f9a'); g.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 12; i++) { g.beginPath(); g.arc(r() * w, 110 + r() * 50, 1 + r() * 4, 0, 7); g.fill(); } }
+  else { hill(100 + r() * 20, '#9be15d', '#2f8f2f'); hill(125 + r() * 10, '#6fcf3f', '#1f6f1f'); }
+  return cv;
+}
+const sceneEl = (seed) => scene(document.createElement('canvas'), seed);
+
+// Tiles > data: size, colour, faces, behaviour, app pivots
+const now = new Date(), DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const list = (rows) => rows.map(([a, b]) => ({ a, b }));
+const TILES = [
+  { g: 'Everyday', id: 'mail', name: 'Mail', size: 'w', col: C.blue, kind: 'peek', faces: [() => `<div class="row">${svg('mail')}<div class="big">7</div></div>`, () => `<div class="mid">Jordan Lee</div><div class="small">Photos from the lake trip<br/>Pinned a few of the sunset ones...</div>`, () => `<div class="mid">Book club</div><div class="small">Next month: the glass city novel</div>`], pivots: [['inbox', list([['Jordan Lee', 'Photos from the lake trip'], ['Book club', 'Next month: the glass city novel'], ['Sam R.', 'Lunch Friday?'], ['Cloud Drive', 'Your files are synced']])], ['unread', list([['Priya', 'Slides for Monday'], ['Newsletter', 'Ten tiles you missed']])], ['flagged', list([['Mum', 'Call me back x']])]] },
+  { g: 'Everyday', id: 'cal', name: 'Calendar', size: 'w', col: C.red, kind: 'peek', faces: [() => `<div class="row"><div class="big">${now.getDate()}</div><div class="mid">${DAYS[now.getDay()]}</div></div>`, () => `<div class="mid">Design review</div><div class="small">2:00 PM · Room Aqua<br/>with Priya, Sam</div>`], pivots: [['today', list([['9:00', 'Stand-up'], ['14:00', 'Design review'], ['19:30', 'Swim']])], ['tomorrow', list([['All day', 'Harbour festival'], ['18:00', 'Dinner with Jo']])]] },
+  { g: 'Everyday', id: 'people', name: 'People', size: 'm', col: C.orange, kind: 'mosaic', pivots: [['all', list([['Alex Kim', 'online'], ['Jordan Lee', 'shared 3 photos'], ['Priya N.', 'at the beach'], ['Sam R.', 'listening to Glass Skies']])], ['what\'s new', list([['Jordan Lee', 'Sunset over the lagoon!'], ['Sam R.', 'New high score']])]] },
+  { g: 'Everyday', id: 'msg', name: 'Messaging', size: 's', col: C.violet, kind: 'icon', icon: 'chat', pivots: [['threads', list([['Jo', 'see you at 7 :)'], ['Sam', 'lol']])]] },
+  { g: 'Everyday', id: 'clock', name: 'Clock', size: 'm', col: C.teal, kind: 'flip', faces: [() => `<div class="big" data-clock>--:--</div><div class="small">${DAYS[now.getDay()]}</div>`, () => `${svg('clock')}<div class="small">Alarm 7:00</div>`], pivots: [['world', list([['Harbour City', 'local'], ['Pine Valley', '+1 h'], ['Coral Bay', '-3 h']])], ['alarms', list([['7:00', 'Weekdays'], ['9:30', 'Weekend']])]] },
+  { g: 'Everyday', id: 'weather', name: 'Weather', size: 'w', col: C.cyan, kind: 'peek', faces: [() => `<div class="row">${svg('sun')}<div><div class="big">24°</div><div class="small">Harbour City · Sunny</div></div></div>`, () => `<div class="small">Today 26° / 17° sunny<br/>Tomorrow 23° / 16° showers<br/>${DAYS[(now.getDay() + 2) % 7]} 25° / 18° clear</div>`], pivots: [['now', list([['24°', 'Sunny, feels like 25°'], ['UV 6', 'Wear sunscreen'], ['Wind', '12 km/h SE']])], ['hourly', list([['13:00', '25° sunny'], ['16:00', '24° clouds'], ['19:00', '20° clear']])], ['daily', list([['Tomorrow', '23° showers'], ['Next day', '25° clear']])]] },
+  { g: 'Everyday', id: 'photos', name: 'Photos', size: 'w', col: C.emerald, kind: 'photos', pivots: [['albums', 'pics'], ['camera roll', 'pics']] },
+  { g: 'Play', id: 'music', name: 'Music', size: 'm', col: C.pink, kind: 'peek', faces: [(t) => `<canvas data-scene="3"></canvas>`, () => `<div class="small">Now playing</div><div class="mid">Glass Skies</div><div class="small">The Bubble Club</div>`], pivots: [['now playing', list([['Glass Skies', 'The Bubble Club'], ['Aqua Morning', 'Lagoon FM']])], ['albums', 'pics']] },
+  { g: 'Play', id: 'video', name: 'Video', size: 's', col: C.red, kind: 'icon', icon: 'video', pivots: [['featured', list([['Reef Life', 'documentary'], ['Sky Racers', 'film']])]] },
+  { g: 'Play', id: 'games', name: 'Games', size: 'm', col: C.green, kind: 'flip', faces: [() => svg('game'), () => `<div class="big">3</div><div class="small">friends online</div>`], pivots: [['collection', list([['Bubble Pop', 'played today'], ['Sky Rally', 'new achievement']])], ['friends', list([['skater_kid88', 'playing Sky Rally']])]] },
+  { g: 'Play', id: 'cam', name: 'Camera', size: 's', col: C.purple, kind: 'icon', icon: 'cam', pivots: [['camera', 'pics']] },
+  { g: 'Play', id: 'store', name: 'Store', size: 's', col: C.emerald, kind: 'icon', icon: 'store', pivots: [['spotlight', list([['Tile Tycoon', 'free'], ['Aqua Notes', '$1.49']])]] },
+  { g: 'Play', id: 'news', name: 'News', size: 'w', col: C.brown, kind: 'peek', faces: [() => `<canvas data-scene="6"></canvas><div class="over mid">Harbour opens new glass pavilion</div>`, () => `<canvas data-scene="9"></canvas><div class="over mid">Reef census counts record turtles</div>`], pivots: [['top stories', list([['Harbour opens glass pavilion', 'City · 2h'], ['Record turtles on the reef', 'Science · 4h'], ['Wind farm powers the coast', 'Eco · 6h']])], ['sports', list([['Sky Rally final tonight', 'Motorsport']])]] },
+  { g: 'Info', id: 'finance', name: 'Finance', size: 'm', col: C.teal, kind: 'flip', faces: [() => `<div class="mid">CLRW</div><div class="big">+2.4%</div>`, () => `${svg('chart')}`], pivots: [['watchlist', list([['CLRW', '+2.4%'], ['AQUA', '+0.8%'], ['GLSS', '-0.3%']])]] },
+  { g: 'Info', id: 'maps', name: 'Maps', size: 'm', col: C.blue, kind: 'icon', icon: 'map', pivots: [['nearby', list([['Lagoon Café', '400 m'], ['Glass Pavilion', '1.2 km']])]] },
+  { g: 'Info', id: 'travel', name: 'Travel', size: 'm', col: C.violet, kind: 'flip', faces: [() => svg('plane'), () => `<canvas data-scene="10"></canvas><div class="over small">Coral Bay · 3 nights</div>`], pivots: [['trips', list([['Coral Bay', 'Fri – Mon'], ['Pine Valley', 'next month']])]] },
+  { g: 'Info', id: 'sports', name: 'Sports', size: 's', col: C.lime, kind: 'icon', icon: 'ball', pivots: [['scores', list([['Harbour 2 – 1 Coral', 'FT']])]] },
+  { g: 'Info', id: 'desk', name: 'Desktop', size: 'w', col: C.cyan, kind: 'peek', faces: [() => `<canvas data-scene="12"></canvas>`], pivots: [['desktop', 'pics']] },
+  { g: 'Info', id: 'settings', name: 'Settings', size: 's', col: '#555', kind: 'icon', icon: 'cog', pivots: [['settings', list([['Personalize', 'colours, lock screen'], ['Wi-Fi', 'HarbourNet'], ['Updates', 'up to date']])]] },
+];
+
+// Build > groups, tiles, faces
+const wall = $('#wall'), groups = {};
+TILES.forEach((t, i) => {
+  if (!groups[t.g]) { const el = document.createElement('div'); el.className = 'group'; el.innerHTML = `<h2>${t.g}</h2><div class="grid"></div>`; wall.append(el); groups[t.g] = el.querySelector('.grid'); }
+  const el = document.createElement('div'); el.className = `tile ${t.size} ${t.kind === 'flip' ? 'flip' : ''}`; el.style.background = t.col; el.dataset.id = t.id; t.el = el; t.k = 0;
+  if (t.kind === 'peek') el.innerHTML = `<div class="strip">${t.faces.map((f, j) => `<div class="face" style="top:${j * 100}%">${f()}</div>`).join('')}</div>`;
+  else if (t.kind === 'flip') el.innerHTML = `<div class="card"><div class="face">${t.faces[0]()}</div><div class="face b" style="background:${t.col}">${t.faces[1]()}</div></div>`;
+  else if (t.kind === 'icon') el.innerHTML = `<div class="face">${svg(t.icon)}</div>`;
+  else if (t.kind === 'mosaic') { el.innerHTML = `<div class="mosaic">${Array.from({ length: 9 }, (_, j) => `<b style="background:hsl(${(j * 47 + 20) % 360},55%,${50 + (j % 3) * 8}%)"></b>`).join('')}</div>`; }
+  else if (t.kind === 'photos') el.innerHTML = `<div class="strip">${[1, 4, 7, 11].map((s, j) => `<div class="face" style="top:${j * 100}%"><canvas data-scene="${s}"></canvas></div>`).join('')}</div>`;
+  el.insertAdjacentHTML('beforeend', `<div class="name">${t.name}</div>`);
+  groups[t.g].append(el);
+  t.next = performance.now() + 1500 + i * 420 + R() * 2500;
+});
+document.querySelectorAll('canvas[data-scene]').forEach((c) => scene(c, +c.dataset.scene));
+
+// Live > each tile animates on its own timer
+function liveStep(now) {
+  for (const t of TILES) {
+    if (now < t.next) continue; t.next = now + 3500 + R() * 5000;
+    if (t.kind === 'peek' || t.kind === 'photos') { const n = t.el.querySelectorAll('.face').length; if (n < 2) continue; t.k = (t.k + 1) % n; t.el.querySelector('.strip').style.transform = `translateY(${-t.k * 100}%)`; }
+    else if (t.kind === 'flip') t.el.classList.toggle('on');
+    else if (t.kind === 'mosaic') t.el.querySelectorAll('.mosaic b').forEach((b) => { if (R() < 0.4) { b.style.opacity = 0.3; setTimeout(() => { b.style.background = `hsl(${Math.floor(R() * 360)},55%,${50 + Math.floor(R() * 3) * 8}%)`; b.style.opacity = 1; }, 300); } });
+  }
+  document.querySelectorAll('[data-clock]').forEach((e) => (e.textContent = new Date().toTimeString().slice(0, 5)));
+}
+
+// Press > tilt toward finger
+let pressT = null;
+wall.addEventListener('pointerdown', (e) => {
+  input(); const el = e.target.closest('.tile'); if (!el) return; const r = el.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+  el.style.transform = `perspective(600px) rotateY(${x * 14}deg) rotateX(${-y * 14}deg) scale(0.97)`; pressT = el; tick();
+});
+addEventListener('pointerup', (e) => { if (!pressT) return; const el = pressT; pressT = null; el.style.transform = ''; if (e.target.closest('.tile') === el) open(el.dataset.id); });
+addEventListener('pointercancel', () => { if (pressT) pressT.style.transform = ''; pressT = null; });
+const start = $('#start');
+start.addEventListener('wheel', (e) => { if (matchMedia('(max-width:600px)').matches) return; start.scrollLeft += e.deltaY + e.deltaX; e.preventDefault(); input(); }, { passive: false });
+
+// App > turnstile out, panorama in
+let cur = null;
+function open(id) {
+  const t = TILES.find((x) => x.id === id); if (!t || cur) return; cur = t; tickOpen();
+  const tiles = [...document.querySelectorAll('.tile')], cx0 = t.el.getBoundingClientRect().left;
+  tiles.forEach((el) => { const d = Math.abs(el.getBoundingClientRect().left - cx0); el.style.transition = `transform 0.35s ${d * 0.0004}s ease-in, opacity 0.35s ${d * 0.0004}s`; el.style.transformOrigin = 'left center'; el.style.transform = 'rotateY(-80deg)'; el.style.opacity = 0; });
+  setTimeout(() => {
+    const app = $('#app'); app.style.background = t.col; scene(app.querySelector('.bgimg'), t.id.length * 3 + 1); app.querySelector('.title').textContent = t.name.toLowerCase();
+    $('#pano').innerHTML = t.pivots.map(([h, items], si) => `<section><h3>${h}</h3>${items === 'pics' ? `<div class="pics">${Array.from({ length: 9 }, (_, j) => `<canvas data-scene="${j + si * 9 + 2}" style="animation-delay:${j * 40}ms"></canvas>`).join('')}</div>` : items.map((it, j) => `<div class="item" style="animation-delay:${j * 60}ms"><b style="background:rgba(255,255,255,${0.15 + (j % 3) * 0.1})"></b><div>${it.a}<small>${it.b}</small></div></div>`).join('')}</section>`).join('');
+    $('#pano').querySelectorAll('canvas[data-scene]').forEach((c) => scene(c, +c.dataset.scene)); $('#pano').scrollLeft = 0;
+    app.classList.add('on'); app.animate([{ transform: 'scale(0.6)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 300, easing: 'cubic-bezier(0.1,0.9,0.2,1)' });
+  }, 380);
+}
+function back() {
+  if (!cur) return; cur = null; tick();
+  $('#app').classList.remove('on');
+  document.querySelectorAll('.tile').forEach((el, i) => { el.style.transition = `transform 0.4s ${i * 0.015}s cubic-bezier(0.1,0.9,0.2,1), opacity 0.4s ${i * 0.015}s`; el.style.transform = ''; el.style.opacity = 1; });
+  setTimeout(() => document.querySelectorAll('.tile').forEach((el) => { el.style.transition = ''; el.style.transformOrigin = ''; }), 900);
+}
+$('#backb').onclick = () => { input(); back(); };
+addEventListener('keydown', (e) => { if (e.key === 'Escape') { input(); back(); $('#charm').classList.remove('on'); } });
+$('#pano').addEventListener('scroll', () => { $('#app .title').style.transform = `translateX(${-$('#pano').scrollLeft * 0.35}px)`; });
+
+// Charm > accent background + pattern
+const ACC = ['#1d1d6b', '#4e0f7a', '#0b5d5b', '#1d5c1d', '#7a1d1d', '#8a3d00', '#003e7a', '#2b2b2b', '#6b0f4b', '#004d1a', '#3a1d7a', '#005e8a'];
+const PATS = ['none', 'radial-gradient(circle at 80% 120%, rgba(255,255,255,0.12) 0 30%, transparent 30.5%), radial-gradient(circle at 10% -20%, rgba(255,255,255,0.08) 0 40%, transparent 40.5%)', 'repeating-linear-gradient(120deg, rgba(255,255,255,0.05) 0 40px, transparent 40px 80px)', 'radial-gradient(rgba(255,255,255,0.1) 1.5px, transparent 2px) 0 0 / 22px 22px'];
+function accent(i, p) {
+  if (i != null) { document.documentElement.style.setProperty('--bg', ACC[i % ACC.length]); document.querySelectorAll('#sw b').forEach((b, j) => b.classList.toggle('on', j === i % ACC.length)); }
+  if (p != null) { document.documentElement.style.setProperty('--pat', PATS[p % PATS.length]); document.querySelectorAll('#pats b').forEach((b, j) => b.classList.toggle('on', j === p % PATS.length)); }
+}
+ACC.forEach((c, i) => { const b = document.createElement('b'); b.style.background = c; b.onclick = () => { input(); accent(i); }; $('#sw').append(b); });
+PATS.forEach((p, i) => { const b = document.createElement('b'); b.style.background = `${p === 'none' ? '' : p + ','} #444`; b.onclick = () => { input(); accent(null, i); }; $('#pats').append(b); });
+$('#gear').onclick = (e) => { e.stopPropagation(); input(); $('#charm').classList.toggle('on'); };
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#charm, #gear')) $('#charm').classList.remove('on'); });
+accent(0, 1);
+
+// Audio > soft synth ticks
+let ac = null;
+addEventListener('pointerdown', () => { ac ??= new AudioContext(); }, { capture: true });
+function blip(f, d, v) { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(f, t); o.frequency.exponentialRampToValueAtTime(f * 0.7, t + d); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d); }
+const tick = () => blip(1800, 0.04, 0.05), tickOpen = () => { blip(900, 0.12, 0.06); setTimeout(() => blip(1350, 0.1, 0.04), 60); };
+
+// Attract > scroll the wall, open an app, pan its pivots, come back
+let lastInput = -1e9, nextA = 4000, aStep = 0;
+function input() { lastInput = performance.now(); }
+function attract(now) {
+  if (now - lastInput < 9000 || now < nextA) return;
+  const narrow = matchMedia('(max-width:600px)').matches;
+  if (!cur) {
+    if (aStep++ % 2 === 0) { const max = narrow ? start.scrollHeight - start.clientHeight : start.scrollWidth - start.clientWidth; start.scrollTo({ [narrow ? 'top' : 'left']: R() * max, behavior: 'smooth' }); nextA = now + 3500; }
+    else { open(pick(TILES).id); nextA = now + 2200; }
+  } else { const p = $('#pano'); if (p.scrollLeft + p.clientWidth < p.scrollWidth - 10) { p.scrollBy({ left: p.clientWidth * 0.8, behavior: 'smooth' }); nextA = now + 2000; } else { back(); nextA = now + 3000; } }
+}
+
+function loop(now) { liveStep(now); attract(now); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+window.__metro = { open, back, accent, state: () => ({ app: cur?.id ?? null, tiles: TILES.length, flipped: document.querySelectorAll('.tile.flip.on').length }) };
+</script>
+</body>
+</html>

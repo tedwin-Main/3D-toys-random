@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dial-Up Connect</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="46" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="WebAudio modem handshake synthesis, DTMF, FSK, virtual timeline, progressive image passes, beveled 98-style UI, draggable windows" />
+<meta name="description" content="The sound of 1999 getting online: a beveled Connect To dialog dials a 555 number with a dial tone and real DTMF pairs, rings, then plays a synthesized modem handshake of answer tone with phase reversals, FSK negotiation, line probing and scrambled training hiss while a modem-lights panel blinks and an oscilloscope traces the line. Once connected at 49,333 bps the tray icon flickers, mail trickles into the inbox and an attached lake photo arrives in progressive passes from blocky to sharp, top to bottom, at dial-up speed. Hard because every sound is built from oscillators, filtered noise and scheduled frequency hops, the whole sequence runs on one virtual timeline that the UI, LEDs, scope and audio all follow, and the photo is painted procedurally and revealed pass by pass."/>
+<meta name="prompt" content="Build a late-90s dial-up connection simulator in one HTML file with a 98-style beveled UI: a Connect To dialog (user, masked password, 555 number) that dials with dial tone, DTMF and ringback, then synthesizes a modem handshake in WebAudio (2100 Hz answer tone with phase reversals, FSK negotiation, multi-tone line probing, scrambled training noise), status text steps, a modem lights panel (MR TR OH CD HS RD SD) and an oscilloscope. On connect: tray icon blinking, a Connected at 49,333 bps balloon, an inbox that receives messages one by one and a procedurally painted photo that loads as progressive pixelated passes top to bottom. Disconnect, draggable windows, attract-mode auto dial, mobile stacked layout." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/dial-up-connect.html
+ * PURPOSE: 90s dial-up simulator: DTMF + modem handshake synth, modem lights, tray icon, inbox with progressive photo
+ * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Dial-Up Connect
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__dialup (dial, hangup, state, image)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { background: #008080; font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; color: #000; user-select: none; }
+.icons { position: absolute; left: 12px; top: 12px; display: grid; gap: 18px; }
+.icon { width: 74px; display: grid; justify-items: center; gap: 4px; color: #fff; text-align: center; }
+.icon canvas { width: 32px; height: 32px; image-rendering: pixelated; }
+.win { position: absolute; background: #c0c0c0; padding: 3px; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #dfdfdf, inset -2px -2px #808080, inset 2px 2px #fff, 4px 4px 0 rgba(0, 0, 0, 0.25); }
+.title { height: 18px; display: flex; align-items: center; gap: 4px; padding: 0 2px 0 4px; color: #fff; font-weight: bold; background: linear-gradient(90deg, #000080, #1084d0); cursor: move; }
+.win.inactive .title { background: linear-gradient(90deg, #808080, #b5b5b5); color: #d4d0c8; }
+.title span { flex: 1; white-space: nowrap; overflow: hidden; }
+.title i { width: 16px; height: 14px; display: grid; place-items: center; font: bold 9px/1 Tahoma, sans-serif; font-style: normal; color: #000; background: #c0c0c0; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080; }
+.b { min-width: 75px; height: 23px; padding: 0 10px; border: 0; background: #c0c0c0; font: 11px Tahoma, sans-serif; box-shadow: inset -1px -1px #0a0a0a, inset 1px 1px #fff, inset -2px -2px #808080, inset 2px 2px #dfdfdf; cursor: pointer; }
+.b:active { box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #808080; }
+.b.def { outline: 1px solid #000; outline-offset: -1px; }
+.b:disabled { color: #808080; text-shadow: 1px 1px #fff; }
+.field { height: 21px; padding: 3px 4px; background: #fff; box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a; white-space: nowrap; overflow: hidden; }
+.sunk { background: #fff; box-shadow: inset -1px -1px #fff, inset 1px 1px #808080, inset -2px -2px #dfdfdf, inset 2px 2px #0a0a0a; }
+#dlg { left: 120px; top: 50px; width: 370px; }
+.dbody { padding: 12px 12px 10px; display: grid; grid-template-columns: 54px 1fr; gap: 10px 12px; }
+.dbody canvas { width: 48px; height: 48px; image-rendering: pixelated; }
+.form { display: grid; grid-template-columns: 82px 1fr; gap: 6px 8px; align-items: center; }
+.status { grid-column: 1 / -1; height: 44px; padding: 6px 8px; display: flex; align-items: center; gap: 8px; }
+.status b { font-weight: normal; }
+.stats { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; color: #333; }
+.acts { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 6px; }
+#modem { left: 120px; top: 382px; width: 370px; }
+.panel { margin: 8px; padding: 10px 12px 8px; border-radius: 6px 6px 3px 3px; background: linear-gradient(180deg, #ece4cf, #d6ccb2); box-shadow: inset 0 1px 0 #fff, inset 0 -3px 0 #b7ab8c, 0 2px 3px rgba(0, 0, 0, 0.4); }
+.brand { font: italic bold 12px Georgia, serif; color: #5a5040; margin-bottom: 6px; }
+.leds { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; text-align: center; font: bold 9px Tahoma, sans-serif; color: #5a5040; }
+.leds div { display: grid; justify-items: center; gap: 3px; }
+.leds i { width: 10px; height: 6px; border-radius: 2px; background: #5a1010; box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.6); }
+.leds i.on { background: #ff3a2a; box-shadow: 0 0 6px 2px rgba(255, 60, 40, 0.7), inset 0 1px 0 #ffb0a0; }
+.leds i.g.on { background: #4aff4a; box-shadow: 0 0 6px 2px rgba(80, 255, 80, 0.6), inset 0 1px 0 #c0ffc0; }
+#scope { display: block; width: calc(100% - 16px); height: 70px; margin: 0 8px 8px; background: #001400; }
+#mail { left: 520px; top: 34px; width: 680px; height: 600px; display: none; flex-direction: column; }
+#mail.show { display: flex; animation: pop 0.18s steps(3); }
+@keyframes pop { from { transform: scale(0.3); opacity: 0.4; } }
+.tools { display: flex; gap: 2px; padding: 4px 2px; border-bottom: 1px solid #808080; box-shadow: 0 1px #fff; }
+.tools span { padding: 3px 8px; }
+.tools span:hover { box-shadow: inset -1px -1px #808080, inset 1px 1px #fff; }
+.list { height: 128px; margin: 4px 2px; overflow: hidden; }
+.list table { width: 100%; border-collapse: collapse; }
+.list th { text-align: left; font-weight: normal; padding: 2px 6px; background: #c0c0c0; box-shadow: inset -1px -1px #808080, inset 1px 1px #fff; }
+.list td { padding: 2px 6px; white-space: nowrap; }
+.list tr.unread td { font-weight: bold; }
+.list tr.sel td { background: #000080; color: #fff; }
+.list tr.arrive { animation: arrive 0.4s steps(2); }
+@keyframes arrive { from { opacity: 0; } }
+.preview { flex: 1; margin: 0 2px 4px; padding: 8px 10px; overflow: hidden; }
+.hdr { padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid #c0c0c0; line-height: 1.6; }
+.photo { display: grid; width: max-content; gap: 4px; margin-top: 8px; }
+#photo { width: 320px; height: 200px; background: #fff; image-rendering: pixelated; border: 1px solid #808080; }
+.sbar { display: flex; gap: 2px; }
+.sbar div { flex: 1; padding: 2px 4px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff; white-space: nowrap; overflow: hidden; }
+.bar { height: 14px; padding: 2px; }
+.bar i { display: block; height: 100%; width: 0; background: repeating-linear-gradient(90deg, #000080 0 8px, transparent 8px 10px); }
+.task { position: fixed; left: 0; right: 0; bottom: 0; height: 30px; padding: 3px 2px; display: flex; gap: 3px; align-items: center; background: #c0c0c0; box-shadow: inset 0 1px #dfdfdf, inset 0 2px #fff; z-index: 99; }
+.start { min-width: 0; font-weight: bold; display: flex; align-items: center; gap: 4px; padding: 0 6px; }
+.start em { width: 16px; height: 14px; background: conic-gradient(#f33 0 25%, #3c3 0 50%, #fc0 0 75%, #36f 0); font-style: normal; transform: skewX(-8deg); }
+.tbtn { min-width: 0; width: 150px; text-align: left; overflow: hidden; white-space: nowrap; }
+.tbtn.on { box-shadow: inset 1px 1px #0a0a0a, inset -1px -1px #fff, inset 2px 2px #808080; background: repeating-conic-gradient(#c0c0c0 0 25%, #fff 0 50%) 0 0 / 2px 2px; font-weight: bold; }
+.tray { margin-left: auto; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; box-shadow: inset 1px 1px #808080, inset -1px -1px #fff; }
+.tray canvas { width: 16px; height: 16px; image-rendering: pixelated; }
+.balloon { position: fixed; right: 18px; bottom: 40px; width: 250px; padding: 8px 10px; background: #ffffe1; border: 1px solid #000; border-radius: 8px; z-index: 100; display: none; box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3); }
+.balloon::after { content: ""; position: absolute; right: 40px; bottom: -10px; border: 10px solid transparent; border-bottom: 0; border-top-color: #000; }
+.balloon b { display: block; margin-bottom: 3px; }
+.balloon.show { display: block; }
+@media (max-width: 760px) {
+  body { overflow-y: auto; padding: 8px 8px 44px; }
+  html, body { height: auto; min-height: 100%; }
+  .icons { display: none; }
+  .win { position: relative; left: auto !important; top: auto !important; width: 100% !important; margin-bottom: 10px; }
+  #mail { height: 470px !important; }
+  #photo { width: 100%; height: auto; aspect-ratio: 8 / 5; }
+  .photo { display: grid; }
+  .tbtn { width: 90px; }
+}
+</style>
+</head>
+<body>
+<div class="icons" id="icons"></div>
+<div class="win" id="dlg">
+  <div class="title"><span>Connect To</span><i>?</i><i>&#10005;</i></div>
+  <div class="dbody">
+    <canvas id="dlgIcon" width="32" height="32"></canvas>
+    <div><div style="font-weight:bold;margin-bottom:8px">My Connection</div>
+      <div class="form"><label>User name:</label><div class="field">surfer99</div><label>Password:</label><div class="field">********</div><label>Phone number:</label><div class="field">9, 555-0142</div><label>Dialing from:</label><div class="field">Home</div></div></div>
+    <div class="status sunk" id="status"><span id="statusText">Ready to dial.</span></div>
+    <div class="stats" id="stats"><span>Speed: <b id="spd">-</b></span><span>Duration: <b id="dur">00:00:00</b></span><span>Sent: <b id="sent">0</b> bytes</span><span>Received: <b id="recv">0</b> bytes</span></div>
+    <div class="acts"><button class="b def" id="dial">Connect</button><button class="b" id="hang" disabled>Disconnect</button></div>
+  </div>
+</div>
+<div class="win inactive" id="modem">
+  <div class="title"><span>Modem Status</span><i>_</i><i>&#10005;</i></div>
+  <div class="panel"><div class="brand">SpeedLink 56K External</div><div class="leds" id="leds"></div></div>
+  <canvas id="scope" width="700" height="140"></canvas>
+</div>
+<div class="win inactive" id="mail">
+  <div class="title"><span>Inbox - Mail Reader</span><i>_</i><i>&#9633;</i><i>&#10005;</i></div>
+  <div class="tools"><span>New Mail</span><span>Reply</span><span>Forward</span><span>Delete</span><span>Send/Recv</span></div>
+  <div class="list sunk"><table><thead><tr><th style="width:24px">!</th><th>From</th><th>Subject</th><th>Received</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="preview sunk" id="preview">
+    <div class="hdr"><b>From:</b> Dana &lt;dana@lakeside.example&gt;<br /><b>Subject:</b> Lake photos!!<br /><b>Attach:</b> lake_trip.jpg (96 KB)</div>
+    Hi!! Finally got the pictures back from the photo place and scanned the best one. Sooo pretty, we HAVE to go back next summer. It might take a minute to load lol<br />- D
+    <div class="photo"><canvas id="photo" width="320" height="200"></canvas><div class="bar sunk"><i id="pbar"></i></div><span id="plabel">Waiting for connection...</span></div>
+  </div>
+  <div class="sbar"><div id="mstat">Offline</div><div id="mbytes">0 KB</div><div>Working Online</div></div>
+</div>
+<div class="balloon" id="balloon"><b>My Connection is now connected</b>Speed: 49.3 Kbps</div>
+<div class="task"><button class="b start"><em></em>Start</button><button class="b tbtn on" id="t1">Connect To</button><button class="b tbtn" id="t2">Modem Status</button><button class="b tbtn" id="t3" style="display:none">Inbox</button>
+  <div class="tray"><canvas id="trayIcon" width="16" height="16"></canvas><span id="clock"></span></div></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+
+// Icons > pixel art drawn from tiny palettes
+function pix(c, rows, pal) { const x = c.getContext('2d'); rows.forEach((r, y) => [...r].forEach((ch, i) => { if (ch !== '.') { x.fillStyle = pal[ch]; x.fillRect(i * 2, y * 2, 2, 2); } })); }
+const PAL = { k: '#000', w: '#fff', g: '#c0c0c0', d: '#808080', b: '#000080', c: '#00ffff', y: '#ffff00', t: '#008080', r: '#c00', e: '#3c8c3c' };
+const COMPUTER = ['................', '..kkkkkkkkkkk...', '..kgggggggggk...', '..kgbbbbbbbgk...', '..kgbccccbbgk...', '..kgbcbbbbbgk...', '..kgbbbbbbbgk...', '..kgggggggggk...', '..kkkkkkkkkkk...', '.....kgggk......', '..kkkkkkkkkkkk..', '..kwwwwwwwwwdk..', '..kgggggggg.dk..', '..kkkkkkkkkkkk..', '................', '................'];
+const GLOBE = ['................', '.....kkkkkk.....', '...kkbbeebbkk...', '..kbbeeeebbbbk..', '..kbeeeeebbeek..', '.kbbbeeebbbeeek.', '.kbbbbeebbbbeek.', '.kbbbbbbbbbbbbk.', '.kbbbbeeebbbbbk.', '.kbbbeeeeebbbbk.', '..kbbbeeeebbbk..', '..kbbbbeebbbbk..', '...kkbbbbbbkk...', '.....kkkkkk.....', '................', '................'];
+const MAIL = ['................', '................', '.kkkkkkkkkkkkkk.', '.kwkwwwwwwwwkwk.', '.kwwkwwwwwwkwwk.', '.kwwwkwwwwkwwwk.', '.kwwwwkwwkwwwwk.', '.kwwwkwkkwkwwwk.', '.kwwkwwwwwwkwwk.', '.kwkwwwwwwwwkwk.', '.kkwwwwwwwwwwkk.', '.kkkkkkkkkkkkkk.', '................', '................', '................', '................'];
+const TRASH = ['................', '.....kkkkkk.....', '..kkkkkkkkkkkk..', '..kggggggggggk..', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kwgwgwgwgk...', '...kkkkkkkkkk...', '................', '................', '................', '................'];
+[['Computer', COMPUTER], ['Internet', GLOBE], ['Mail', MAIL], ['Trash', TRASH]].forEach(([n, art]) => { const d = document.createElement('div'); d.className = 'icon'; d.innerHTML = `<canvas width="32" height="32"></canvas><span>${n}</span>`; pix(d.firstChild, art, PAL); $('#icons').append(d); });
+pix($('#dlgIcon'), ['................', '..kkkkkk........', '..kccbbk........', '..kbbbbk.kkkkkk.', '..kkkkkk.kbbcck.', '...kggk..kbbbbk.', '..kkkkkk.kkkkkk.', '.....k....kggk..', '.....k...kkkkkk.', '.....kkkkk......', '..........y.....', '.........yyy....', '..........y.....', '................', '................', '................'], PAL);
+
+// Leds > modem front panel
+const LEDS = ['HS', 'AA', 'CD', 'OH', 'RD', 'SD', 'TR', 'MR'];
+$('#leds').innerHTML = LEDS.map((l) => `<div><i id="led-${l}" class="${l === 'MR' || l === 'TR' ? 'g' : ''}"></i>${l}</div>`).join('');
+const led = (l, on) => $(`#led-${l}`).classList.toggle('on', !!on);
+
+// Timeline > one virtual clock drives ui, leds, scope, audio
+const NUM = '95550142';
+const T = { dtmf: 0.9, ring: 2.25, answer: 3.4, fsk: 4.7, probe: 5.5, train: 6.1, verify: 8.6, register: 9.9, connect: 11.1 };
+const MAILS = [['Dana', 'Lake photos!!', true], ['Sam', 'Re: weekend plans', false], ['Chris', 'FW: FW: FW: funny cat story', false], ['WebZine', 'Your newsletter - Issue #42', false]];
+let state = 'idle', vt = 0, lastPerf = performance.now(), hungAt = 0;
+function phase(t) {
+  if (t < T.dtmf) return { s: 'Dialing...', k: 'dial' };
+  if (t < T.ring - 0.15) { const i = Math.floor((t - T.dtmf) / 0.15), on = (t - T.dtmf) % 0.15 < 0.09; return { s: 'Dialing...', k: on ? 'dtmf' : 'gap', d: NUM[i] }; }
+  if (t < T.answer) return { s: 'Dialing...', k: t - T.ring < 1.0 ? 'ring' : 'gap' };
+  if (t < T.fsk) return { s: 'Connecting...', k: 'answer' };
+  if (t < T.probe) return { s: 'Connecting...', k: 'fsk' };
+  if (t < T.train) return { s: 'Connecting...', k: 'probe' };
+  if (t < T.verify) return { s: 'Connecting...', k: 'noise' };
+  if (t < T.register) return { s: 'Verifying user name and password...', k: 'data' };
+  if (t < T.connect) return { s: 'Registering your computer on the network...', k: 'data' };
+  return { s: 'Connected at 49,333 bps.', k: 'data' };
+}
+
+// Audio > handshake synthesized and scheduled from one start time
+let ac, out, live = [];
+function audio() { if (ac) return; ac = new AudioContext(); out = ac.createGain(); out.gain.value = 0.25; out.connect(ac.destination); }
+addEventListener('pointerdown', audio, { capture: true });
+function env(g, t, d, v) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.008); g.gain.setValueAtTime(v, Math.max(t + 0.01, t + d - 0.01)); g.gain.linearRampToValueAtTime(0, t + d); }
+function tone(fs, t, d, v = 0.1) { fs.forEach((f) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; env(g, t, d, v); o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.02); live.push(o); }); }
+function fsk(pairs, t, d, baud, v) { pairs.forEach(([a, b]) => { const o = ac.createOscillator(), g = ac.createGain(); for (let k = 0; k < d * baud; k++) o.frequency.setValueAtTime(Math.random() < 0.5 ? a : b, t + k / baud); env(g, t, d, v); o.connect(g).connect(out); o.start(t); o.stop(t + d + 0.02); live.push(o); }); }
+function hiss(t, d, f, q, v) {
+  const buf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate), ch = buf.getChannelData(0); for (let i = 0; i < ch.length; i++) ch[i] = Math.random() * 2 - 1;
+  const s = ac.createBufferSource(), bp = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = buf; s.loop = true; bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+  g.gain.setValueAtTime(0, t); for (let k = 0; k < d / 0.03; k++) g.gain.setValueAtTime(v * (0.55 + Math.random() * 0.45), t + k * 0.03); g.gain.setValueAtTime(0, t + d);
+  s.connect(bp).connect(g).connect(out); s.start(t); s.stop(t + d + 0.02); live.push(s);
+}
+const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5: [770, 1336], 6: [770, 1477], 7: [852, 1209], 8: [852, 1336], 9: [852, 1477], 0: [941, 1336] };
+function handshake(offset) {
+  if (!ac || ac.state !== 'running') return; const t0 = ac.currentTime - offset, at = (x) => Math.max(ac.currentTime, t0 + x);
+  if (offset < T.dtmf) tone([350, 440], at(0), T.dtmf - Math.max(0, offset), 0.06);
+  [...NUM].forEach((d, i) => { const s = T.dtmf + i * 0.15; if (s >= offset) tone(DTMF[d], t0 + s, 0.09, 0.07); });
+  if (offset < T.ring) tone([440, 480], at(T.ring), 1.0, 0.05);
+  if (offset < T.answer) for (let k = 0; k < 3; k++) tone([2100], t0 + T.answer + k * 0.44, 0.42, 0.06);
+  if (offset < T.fsk) { fsk([[980, 1180]], t0 + T.fsk, 0.4, 300, 0.05); fsk([[1650, 1850]], t0 + T.fsk + 0.4, 0.4, 300, 0.05); }
+  if (offset < T.probe) for (let k = 0; k < 2; k++) tone([150, 450, 750, 1050, 1350, 1650, 1950, 2250, 2550, 2850, 3150, 3450, 3750], t0 + T.probe + k * 0.32, 0.22, 0.012);
+  if (offset < T.train) { hiss(t0 + T.train, 0.5, 1200, 2, 0.5); fsk([[1200, 2400]], t0 + T.train + 0.5, 0.3, 600, 0.04); hiss(t0 + T.train + 0.8, T.verify - T.train - 0.8, 1800, 0.6, 0.6); }
+}
+function silence() { live.forEach((n) => { try { n.stop(); } catch {} }); live = []; }
+function click() { if (ac) { const t = ac.currentTime; tone([1800], t, 0.015, 0.08); } }
+function chime() { if (ac) { const t = ac.currentTime; tone([880], t, 0.18, 0.06); tone([1318.5], t + 0.16, 0.35, 0.06); } }
+
+// Photo > procedural lake scene, progressive passes
+const W = 320, H = 200, src = document.createElement('canvas'); src.width = W; src.height = H;
+{
+  const x = src.getContext('2d'); let s = 5; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const sky = x.createLinearGradient(0, 0, 0, 110); sky.addColorStop(0, '#3b7fd0'); sky.addColorStop(1, '#f3c9a0'); x.fillStyle = sky; x.fillRect(0, 0, W, 110);
+  x.fillStyle = '#fff6d8'; x.beginPath(); x.arc(230, 70, 16, 0, 7); x.fill();
+  for (let i = 0; i < 5; i++) { x.fillStyle = 'rgba(255,255,255,0.75)'; const cx = r() * W, cy = 15 + r() * 40; for (let k = 0; k < 5; k++) { x.beginPath(); x.ellipse(cx + k * 9, cy + Math.sin(k) * 3, 12, 6, 0, 0, 7); x.fill(); } }
+  [['#6a7fa8', 70, 0.012], ['#4a6a5a', 88, 0.02], ['#2f5a3a', 100, 0.035]].forEach(([c, base, f], li) => { x.fillStyle = c; x.beginPath(); x.moveTo(0, 112); for (let i = 0; i <= W; i += 4) x.lineTo(i, base - Math.abs(Math.sin(i * f + li)) * (30 - li * 8) - Math.sin(i * 0.11) * 3); x.lineTo(W, 112); x.fill(); });
+  const lake = x.createLinearGradient(0, 110, 0, H); lake.addColorStop(0, '#5d8fc0'); lake.addColorStop(1, '#1d3f6a'); x.fillStyle = lake; x.fillRect(0, 110, W, H - 110);
+  x.save(); x.globalAlpha = 0.35; x.translate(0, 220); x.scale(1, -1); x.drawImage(src, 0, 0, W, 110, 0, 0, W, 110); x.restore();
+  for (let i = 0; i < 70; i++) { x.fillStyle = `rgba(255,255,255,${0.15 + r() * 0.3})`; x.fillRect(r() * W, 112 + r() * 88, 6 + r() * 20, 1); }
+  for (let i = 0; i < 28; i++) { const tx = i < 14 ? r() * 70 : 250 + r() * 70, th = 30 + r() * 40, ty = 112; x.fillStyle = '#1d3a22'; x.beginPath(); x.moveTo(tx, ty - th); x.lineTo(tx - th * 0.22, ty); x.lineTo(tx + th * 0.22, ty); x.fill(); }
+  x.fillStyle = '#7a4a2a'; x.fillRect(120, 150, 70, 5); x.fillRect(126, 155, 3, 20); x.fillRect(182, 155, 3, 20);
+  x.fillStyle = '#c03030'; x.beginPath(); x.moveTo(150, 168); x.lineTo(190, 168); x.lineTo(184, 176); x.lineTo(156, 176); x.fill();
+}
+const passes = [16, 8, 3, 1].map((b) => { const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d'); x.imageSmoothingEnabled = false; const sm = document.createElement('canvas'); sm.width = Math.ceil(W / b); sm.height = Math.ceil(H / b); sm.getContext('2d').drawImage(src, 0, 0, sm.width, sm.height); x.drawImage(sm, 0, 0, W, H); return c; });
+const pc = $('#photo').getContext('2d'); pc.imageSmoothingEnabled = false;
+function drawPhoto(p) {
+  pc.fillStyle = '#fff'; pc.fillRect(0, 0, W, H); if (p <= 0) return;
+  const k = Math.min(3, Math.floor(p * 4)), f = p * 4 - k;
+  if (k > 0) pc.drawImage(passes[k - 1], 0, 0);
+  const rows = Math.floor(H * (k === 3 && p >= 1 ? 1 : f)); if (rows > 0) pc.drawImage(passes[k], 0, 0, W, rows, 0, 0, W, rows);
+}
+
+// Ui > dial, hangup, per-frame sync
+const IMG_T = 2.2, IMG_D = 8.5;
+function dial(at = 0) { if (state === 'dialing' || state === 'online') return; audio(); state = 'dialing'; vt = at; $('#dial').disabled = true; $('#hang').disabled = false; $('#spd').textContent = '-'; handshake(at); }
+function hangup() {
+  if (state === 'idle') return; silence(); click(); state = 'idle'; hungAt = performance.now(); vt = 0;
+  $('#dial').disabled = false; $('#hang').disabled = true; $('#statusText').textContent = 'Disconnected.'; $('#balloon').classList.remove('show');
+  $('#mstat').textContent = 'Offline'; LEDS.forEach((l) => led(l, l === 'MR' || l === 'TR'));
+}
+$('#dial').onclick = () => dial(); $('#hang').onclick = hangup;
+let shownMail = 0, recv = 0, sent = 0;
+function resetMail() { shownMail = 0; $('#rows').innerHTML = ''; drawPhoto(0); $('#pbar').style.width = '0'; $('#plabel').textContent = 'Waiting for connection...'; $('#mail').classList.remove('show'); $('#t3').style.display = 'none'; }
+function sync(dt) {
+  if (state === 'dialing' || state === 'online') vt += dt;
+  const on = state !== 'idle', ph = phase(vt), conn = on && vt >= T.connect, carrier = on && vt >= T.verify;
+  if (on) $('#statusText').textContent = ph.s;
+  const flick = Math.random() < 0.5;
+  led('MR', 1); led('TR', 1); led('OH', on); led('CD', carrier); led('HS', carrier); led('AA', 0);
+  led('SD', on && (ph.k === 'dtmf' || (carrier && Math.random() < 0.25))); led('RD', on && ((ph.k === 'noise' && flick) || (conn && vt < T.connect + IMG_T + IMG_D && flick) || (carrier && Math.random() < 0.15)));
+  if (on && carrier) { recv += Math.round(dt * (conn ? 5200 : 300) * (0.6 + Math.random() * 0.8)); sent += Math.round(dt * 220 * Math.random()); }
+  $('#recv').textContent = recv.toLocaleString(); $('#sent').textContent = sent.toLocaleString();
+  const secs = conn ? Math.floor(vt - T.connect) : 0; $('#dur').textContent = `00:${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`;
+  if (state === 'dialing' && conn) { state = 'online'; $('#spd').textContent = '49,333 bps'; $('#balloon').classList.add('show'); setTimeout(() => $('#balloon').classList.remove('show'), 4500); }
+  if (conn) {
+    const mt = vt - T.connect;
+    if (mt > 0.8 && !$('#mail').classList.contains('show')) { $('#mail').classList.add('show'); $('#t3').style.display = ''; focusWin($('#mail')); $('#mstat').textContent = 'Checking for new messages...'; }
+    const want = Math.min(MAILS.length, Math.floor((mt - 1.0) / 0.5) + 1);
+    while (shownMail < want && mt > 1.0) { const [from, subj, clip] = MAILS[shownMail++], tr = document.createElement('tr'); tr.className = `unread arrive${shownMail === 1 ? ' sel' : ''}`; tr.innerHTML = `<td>${clip ? '&#128206;' : ''}</td><td>${from}</td><td>${subj}</td><td>12/31/99 11:${String(shownMail * 9 + 2).padStart(2, '0')} PM</td>`; $('#rows').append(tr); chime(); }
+    const p = Math.max(0, Math.min(1, (mt - IMG_T) / IMG_D));
+    if (mt > IMG_T) { drawPhoto(p); $('#pbar').style.width = `${p * 100}%`; $('#plabel').textContent = p < 1 ? `Loading picture... ${Math.round(p * 100)}% (${Math.round(p * 96)} KB of 96 KB at 5.2 KB/s)` : 'lake_trip.jpg (96 KB)'; $('#mstat').textContent = p < 1 ? 'Receiving message 1 of 4...' : '4 message(s), 4 unread'; $('#mbytes').textContent = `${Math.round(p * 96)} KB`; }
+  }
+  if (!on && hungAt && performance.now() - hungAt > 1200) { resetMail(); recv = sent = 0; hungAt = 0; }
+  drawScope(on ? ph : { k: 'off' });
+  drawTray(on, carrier);
+}
+
+// Scope > synthetic line trace from current phase
+const sc = $('#scope').getContext('2d');
+function drawScope(ph) {
+  const w = 700, h = 140; sc.fillStyle = 'rgba(0,20,0,0.55)'; sc.fillRect(0, 0, w, h);
+  sc.strokeStyle = 'rgba(0,120,0,0.5)'; sc.lineWidth = 1; for (let i = 1; i < 8; i++) { sc.beginPath(); sc.moveTo((i * w) / 8, 0); sc.lineTo((i * w) / 8, h); sc.stroke(); } sc.beginPath(); sc.moveTo(0, h / 2); sc.lineTo(w, h / 2); sc.stroke();
+  const t = performance.now() / 1000, F = { dial: [350, 440], dtmf: DTMF[ph.d] || [770, 1336], ring: [440, 480], answer: [2100], probe: [450, 1050, 1650, 2250, 2850, 3450] }[ph.k];
+  sc.strokeStyle = '#4aff4a'; sc.lineWidth = 2; sc.shadowColor = '#4aff4a'; sc.shadowBlur = 6; sc.beginPath();
+  for (let i = 0; i <= w; i += 2) {
+    let y = 0;
+    if (F) y = F.reduce((a, f) => a + Math.sin(i * f * 0.00009 * 6 + t * f * 0.01), 0) / F.length;
+    else if (ph.k === 'fsk') y = Math.sin(i * (Math.floor(i / 40 + t * 20) % 2 ? 0.09 : 0.14));
+    else if (ph.k === 'noise' || ph.k === 'data') y = (Math.random() * 2 - 1) * (ph.k === 'data' ? 0.25 : 0.85);
+    i ? sc.lineTo(i, h / 2 - y * h * 0.4) : sc.moveTo(i, h / 2 - y * h * 0.4);
+  }
+  sc.stroke(); sc.shadowBlur = 0;
+}
+
+// Tray > two-monitor icon, screens blink with traffic
+const tc = $('#trayIcon').getContext('2d');
+function drawTray(on, carrier) {
+  tc.clearRect(0, 0, 16, 16); if (!on) return;
+  const scr = (x, y, lit) => { tc.fillStyle = '#000'; tc.fillRect(x, y, 8, 7); tc.fillStyle = lit ? '#00ffff' : '#000080'; tc.fillRect(x + 1, y + 1, 6, 5); tc.fillStyle = '#808080'; tc.fillRect(x + 2, y + 7, 4, 1); };
+  scr(0, 1, carrier && Math.random() < 0.35); scr(7, 7, carrier && Math.random() < 0.5);
+}
+
+// Windows > focus + drag by title
+const wins = [...document.querySelectorAll('.win')]; let z = 10;
+function focusWin(w) { wins.forEach((x) => x.classList.toggle('inactive', x !== w)); w.style.zIndex = ++z; ['dlg', 'modem', 'mail'].forEach((id, i) => $(`#t${i + 1}`).classList.toggle('on', w.id === id)); }
+wins.forEach((w) => {
+  w.addEventListener('pointerdown', () => focusWin(w));
+  w.querySelector('.title').addEventListener('pointerdown', (e) => {
+    if (innerWidth < 760) return; const ox = e.clientX - w.offsetLeft, oy = e.clientY - w.offsetTop;
+    const mv = (ev) => { w.style.left = `${ev.clientX - ox}px`; w.style.top = `${Math.max(0, ev.clientY - oy)}px`; };
+    addEventListener('pointermove', mv); addEventListener('pointerup', () => removeEventListener('pointermove', mv), { once: true });
+  });
+});
+['dlg', 'modem', 'mail'].forEach((id, i) => ($(`#t${i + 1}`).onclick = () => focusWin($(`#${id}`))));
+setInterval(() => ($('#clock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })), 1000);
+$('#clock').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+// Attract > auto dial, read mail, hang up, repeat
+let idleUntil = performance.now() + 2500, touched = false;
+addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+function attract(now) {
+  if (touched) return;
+  if (state === 'idle' && now > idleUntil) dial();
+  if (state === 'online' && vt > T.connect + IMG_T + IMG_D + 5) { hangup(); idleUntil = now + 3500; }
+}
+if (capture) { touched = true; dial(T.connect + IMG_T + IMG_D * 0.45 - 2.4); }
+
+function loop(now) { const dt = Math.min(0.1, (now - lastPerf) / 1000); lastPerf = now; sync(dt); attract(now); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+
+window.__dialup = { dial, hangup, state: () => ({ state, t: +vt.toFixed(2), status: $('#statusText').textContent, mails: shownMail }), image: () => $('#pbar').style.width };
+</script>
+</body>
+</html>

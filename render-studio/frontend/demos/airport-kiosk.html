@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Airport Kiosk</title>
+<meta name="category" content="aero" />
+<meta name="style" content="humanity" />
+<meta name="order" content="51" />
+<meta name="capture" content="2800" />
+<meta name="tags" content="split-flap board engine, SVG terminal map routing with getPointAtLength, canvas sunlit concourse, WebAudio flap clatter and chimes" />
+<meta name="description" content="A bright Humanity Aero airport kiosk from around 2008: through tall sunlit windows planes taxi past while a glossy white touch kiosk greets you in five languages. Its split-flap departures board clatters every character through the alphabet as flights move from On Time to Boarding to Final Call and roll off, the clock ticks forward, and tapping any flight draws an animated walking route on the terminal map from You Are Here to the gate, with a little traveller walking it and the walk time. Hard because the board is a per-character flap engine that steps each cell through the drum independently with synthesized clatter, the map routes along a waypoint path, and the whole concourse view is painted on canvas."/>
+<meta name="prompt" content="Build a Humanity Aero airport wayfinding kiosk in one HTML file: canvas background of a sunlit terminal with tall window mullions, sky, clouds and a plane taxiing, a glossy white kiosk with blue glass header cycling Welcome in five languages, a split-flap departures board where every character steps through the flap drum independently (time, destination, flight, gate, remarks) and statuses advance with a simulated clock as flights depart and new ones roll in, wayfinding signs with pictograms, and an SVG terminal map where tapping a flight animates a walking route from You Are Here to its gate with a walking dot and walk time. WebAudio flap clatter and boarding chimes; attract mode cycles flights; works at phone width." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/airport-kiosk.html
+ * PURPOSE: Humanity Aero airport kiosk: split-flap departures board, terminal map routing, wayfinding signs, sunlit concourse
+ * UI: Render Studio > Frutiger Aero > Humanity Aero > Airport Kiosk
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__kiosk (select, minute, board, route)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body { font: 13px "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: #12324f; background: #cfe6f7; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+.kiosk { position: fixed; inset: 18px 22px 18px; display: grid; grid-template-rows: auto 1fr; border-radius: 22px; overflow: hidden; background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 247, 253, 0.9)); box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.75), 0 0 0 11px rgba(120, 160, 200, 0.4), 0 30px 60px rgba(20, 60, 100, 0.35); }
+.head { display: flex; align-items: center; gap: 16px; padding: 12px 22px; color: #fff; background: linear-gradient(180deg, #5fc3ff, #1677d2 52%, #0a5cb0 53%, #2a9af0); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7); }
+.mark { width: 34px; height: 34px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #bfe6ff 40%, #3a9ae8); display: grid; place-items: center; }
+.mark svg { width: 20px; height: 20px; }
+.head h1 { margin: 0; font: 600 20px "Segoe UI", sans-serif; letter-spacing: 0.01em; text-shadow: 0 1px 2px rgba(0, 40, 90, 0.5); }
+.hello { min-width: 150px; font-size: 16px; opacity: 0.95; transition: opacity 0.4s; }
+.head .wx { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.sun { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff7c0, #ffcc33 60%, #ff9a1f); box-shadow: 0 0 12px #ffd24a; }
+.clock { font: 600 20px "Segoe UI", sans-serif; }
+.body { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 18px; padding: 16px 20px; min-height: 0; }
+.board { --cw: 15px; --gg: 10px; display: flex; flex-direction: column; background: #15191f; border-radius: 12px; padding: 12px 12px 8px; box-shadow: inset 0 2px 8px #000, 0 6px 16px rgba(0, 30, 60, 0.3); min-width: 0; overflow: hidden; }
+.bt { display: flex; align-items: center; gap: 10px; color: #ffd23a; font: bold 15px "Helvetica Neue", Arial, sans-serif; letter-spacing: 0.18em; margin: 0 2px 8px; }
+.bt svg { width: 20px; height: 20px; }
+.cols, .row { display: flex; gap: var(--gg); }
+#rows { flex: 1; min-height: 0; }
+.cols span { flex: none; }
+.h-tm { width: calc(5 * (var(--cw) + 2px) - 2px); } .h-ds { width: calc(12 * (var(--cw) + 2px) - 2px); } .h-fl { width: calc(6 * (var(--cw) + 2px) - 2px); } .h-gt { width: calc(3 * (var(--cw) + 2px) - 2px); }
+.cols { color: #8a96a8; font-size: 10px; letter-spacing: 0.14em; margin: 0 2px 4px; }
+.row { padding: 3px 2px; border-radius: 6px; cursor: pointer; }
+.row:hover { background: rgba(255, 255, 255, 0.05); }
+.row.sel { background: rgba(80, 170, 255, 0.22); box-shadow: inset 0 0 0 1px rgba(120, 200, 255, 0.6); }
+.grp { display: flex; gap: 2px; }
+.c { position: relative; width: var(--cw); height: calc(var(--cw) * 1.6); border-radius: 3px; display: grid; place-items: center; font: bold var(--cw) "Helvetica Neue", Arial, sans-serif; color: #f2f2f2; background: linear-gradient(180deg, #2c323b 0 49%, #1d2128 51% 100%); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 0 #000; overflow: hidden; }
+.c::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: #000; }
+.g-st .c { color: #ffd23a; }
+.c.f1 { animation: flip1 0.06s linear; } .c.f2 { animation: flip2 0.06s linear; }
+@keyframes flip1 { 0% { transform: scaleY(0.4); filter: brightness(1.6); } }
+@keyframes flip2 { 0% { transform: scaleY(0.4); filter: brightness(1.6); } }
+.row.boarding .g-st .c { color: #6dff9a; } .row.final .g-st .c { color: #ff6a5a; }
+.signs { display: flex; gap: 8px; margin-top: auto; padding-top: 10px; flex-wrap: wrap; }
+.sign { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; background: #22272f; color: #ffd23a; font: bold 13px "Helvetica Neue", Arial, sans-serif; }
+.sign svg { width: 22px; height: 22px; }
+.side { display: grid; grid-template-rows: auto 1fr; gap: 12px; min-height: 0; }
+.mapcard { position: relative; border-radius: 14px; background: linear-gradient(180deg, #fff, #eef6fd); box-shadow: inset 0 0 0 1px #c7dcef, 0 6px 16px rgba(0, 40, 90, 0.12); padding: 10px 12px; min-height: 0; display: grid; grid-template-rows: auto 1fr auto; }
+.mapcard h2 { margin: 0 0 6px; font: 600 15px "Segoe UI", sans-serif; color: #0a5cb0; }
+#map { width: 100%; height: 100%; min-height: 0; }
+.info { display: flex; align-items: center; gap: 12px; padding: 8px 10px; margin-top: 6px; border-radius: 10px; background: linear-gradient(180deg, #e6f4ff, #cfe8ff); box-shadow: inset 0 1px 0 #fff; }
+.info b { font-size: 18px; color: #0a5cb0; }
+.info > div:first-child { min-width: 0; } #iFl { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .info .walk { flex: none; }
+.info .walk { margin-left: auto; text-align: right; font-size: 12px; }
+.info .walk b { display: block; font-size: 22px; }
+.helper { display: flex; gap: 12px; align-items: center; }
+.helper canvas { width: 70px; height: 84px; flex: none; }
+.bubble { position: relative; flex: 1; padding: 10px 12px; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px rgba(0, 40, 90, 0.15); font-size: 13px; line-height: 1.4; }
+.bubble::before { content: ""; position: absolute; left: -8px; top: 22px; border: 8px solid transparent; border-left: 0; border-right-color: #fff; }
+@media (max-width: 900px) {
+  .kiosk { inset: 8px; }
+  .head { padding: 10px 14px; gap: 10px; } .head h1 { font-size: 15px; } .hello { display: none; } .wx span:not(.clock) { display: none; }
+  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 10px; gap: 10px; overflow: hidden; }
+  .g-tm, .cols .h-tm, .g-fl, .cols .h-fl, .signs, .helper { display: none !important; }
+  .board { --gg: 6px; padding: 10px 8px 6px; } .row:nth-child(n+11) { display: none; } .body { padding: 8px; }
+  .side { grid-template-rows: 1fr; }
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="kiosk">
+  <div class="head"><div class="mark"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" fill="#0a5cb0" /></svg></div><h1>Skyway International</h1><span class="hello" id="hello">Welcome</span>
+    <div class="wx"><div class="sun"></div><span>Sunny 24°</span><span class="clock" id="clock">14:20</span></div></div>
+  <div class="body">
+    <div class="board">
+      <div class="bt"><svg viewBox="0 0 24 24"><path d="M2.5 19h19v2h-19zm19.6-9.6c-.2-.8-1-1.3-1.8-1.1L15 9.7 8.1 3.3l-1.9.5 4.1 7.2-5 1.3-2-1.5-1.5.4 2.6 4.5 16.6-4.4c.8-.3 1.3-1.1 1.1-1.9z" fill="#ffd23a" /></svg>DEPARTURES</div>
+      <div class="cols"><span class="h-tm">TIME</span><span class="h-ds">DESTINATION</span><span class="h-fl">FLIGHT</span><span class="h-gt">GATE</span><span>REMARKS</span></div>
+      <div id="rows"></div>
+      <div class="signs">
+        <div class="sign"><svg viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z" fill="#ffd23a" /></svg>Gates A1-A10</div>
+        <div class="sign">Gates B1-B10<svg viewBox="0 0 24 24"><path d="M4 11h12.2l-5.6-5.6L12 4l8 8-8 8-1.4-1.4 5.6-5.6H4z" fill="#ffd23a" /></svg></div>
+        <div class="sign"><svg viewBox="0 0 24 24"><circle cx="7" cy="4" r="2" fill="#ffd23a" /><path d="M5 7h4v7H8v8H6v-8H5z" fill="#ffd23a" /><circle cx="17" cy="4" r="2" fill="#ffd23a" /><path d="M15 7h4l1.5 8H19v7h-4v-7h-1.5z" fill="#ffd23a" /></svg>Restrooms</div>
+        <div class="sign"><svg viewBox="0 0 24 24"><path d="M3 8h13v5a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5zm13 1h2a3 3 0 0 1 0 6h-2v-2h2a1 1 0 0 0 0-2h-2zM2 20h16v2H2z" fill="#ffd23a" /></svg>Coffee</div>
+        <div class="sign"><svg viewBox="0 0 24 24"><rect x="5" y="7" width="14" height="12" rx="2" fill="#ffd23a" /><path d="M9 7V4h6v3" stroke="#ffd23a" stroke-width="2" fill="none" /><circle cx="8" cy="21" r="1.5" fill="#ffd23a" /><circle cx="16" cy="21" r="1.5" fill="#ffd23a" /></svg>Baggage</div>
+      </div>
+    </div>
+    <div class="side">
+      <div class="helper"><canvas id="helper" width="140" height="168"></canvas><div class="bubble" id="bubble">Hi there! Tap any flight on the board and I'll show you the way to your gate.</div></div>
+      <div class="mapcard"><h2>Terminal map</h2>
+        <svg id="map" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet">
+          <defs><linearGradient id="fl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" /><stop offset="1" stop-color="#dbeaf7" /></linearGradient></defs>
+          <path d="M150 230 h100 a14 14 0 0 1 14 14 v30 a14 14 0 0 1 -14 14 h-100 a14 14 0 0 1 -14 -14 v-30 a14 14 0 0 1 14 -14z" fill="url(#fl)" stroke="#9cc0e0" stroke-width="2" />
+          <path d="M165 232 L60 60 a16 16 0 0 1 28 -16 L195 224z" fill="url(#fl)" stroke="#9cc0e0" stroke-width="2" />
+          <path d="M235 232 L340 60 a16 16 0 0 0 -28 -16 L205 224z" fill="url(#fl)" stroke="#9cc0e0" stroke-width="2" />
+          <g id="gates"></g><g id="amen"></g>
+          <path id="route" fill="none" stroke="#1677d2" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 9" />
+          <circle id="walker" r="6" fill="#ff7a1a" stroke="#fff" stroke-width="2" />
+          <g id="here"><circle cx="200" cy="262" r="14" fill="#1677d2" opacity="0.25"><animate attributeName="r" values="8;18;8" dur="1.6s" repeatCount="indefinite" /></circle><circle cx="200" cy="262" r="6" fill="#1677d2" stroke="#fff" stroke-width="2" /><text x="200" y="290" text-anchor="middle" font-size="10" font-weight="bold" fill="#0a5cb0">YOU ARE HERE</text></g>
+        </svg>
+        <div class="info" id="info"><div><small>Select a flight</small><br /><b id="iFl">-</b></div><div class="walk"><span id="iGate">Gate -</span><b id="iWalk">-</b></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const capture = new URLSearchParams(location.search).has('capture');
+const rnd = (a, b) => a + Math.random() * (b - a);
+
+// Background > sunlit terminal windows with a taxiing plane
+const bg = $('#bg'), bx = bg.getContext('2d');
+function size() { const d = Math.min(2, devicePixelRatio); bg.width = innerWidth * d; bg.height = innerHeight * d; bx.setTransform(d, 0, 0, d, 0, 0); }
+size(); addEventListener('resize', size);
+const clouds = Array.from({ length: 7 }, () => ({ x: Math.random(), y: rnd(0.08, 0.4), s: rnd(0.6, 1.4) }));
+function drawBg(t) {
+  const W = innerWidth, H = innerHeight, hz = H * 0.62;
+  const sky = bx.createLinearGradient(0, 0, 0, hz); sky.addColorStop(0, '#5fb4ef'); sky.addColorStop(1, '#d6efff'); bx.fillStyle = sky; bx.fillRect(0, 0, W, hz);
+  for (const c of clouds) { const x = ((c.x + t * 0.004 * c.s) % 1.3 - 0.15) * W, y = c.y * H; bx.fillStyle = 'rgba(255,255,255,0.85)'; for (let k = 0; k < 5; k++) { bx.beginPath(); bx.ellipse(x + k * 26 * c.s, y + Math.sin(k * 1.7) * 6, 34 * c.s, 16 * c.s, 0, 0, 7); bx.fill(); } }
+  bx.fillStyle = '#9fb9c9'; bx.fillRect(0, hz - 8, W, 8); bx.fillStyle = '#7d93a3'; bx.fillRect(0, hz, W, H * 0.05);
+  const px = ((t * 18) % (W + 400)) - 200, py = hz - 2; bx.save(); bx.translate(px, py); bx.fillStyle = '#f4f8fb';
+  bx.beginPath(); bx.ellipse(0, -14, 90, 12, 0, 0, 7); bx.fill(); bx.beginPath(); bx.moveTo(-70, -18); bx.lineTo(-92, -54); bx.lineTo(-76, -54); bx.lineTo(-48, -22); bx.fill();
+  bx.fillStyle = '#d5e2ec'; bx.beginPath(); bx.moveTo(-10, -10); bx.lineTo(-40, 14); bx.lineTo(-26, 14); bx.lineTo(20, -8); bx.fill(); bx.fillStyle = '#1677d2'; bx.fillRect(-60, -16, 130, 3); bx.fillStyle = '#2a3a4a'; for (let i = -50; i < 60; i += 9) bx.fillRect(i, -19, 4, 3); bx.restore();
+  const fl = bx.createLinearGradient(0, hz, 0, H); fl.addColorStop(0, '#e8eef2'); fl.addColorStop(1, '#c4d0d8'); bx.fillStyle = fl; bx.fillRect(0, hz + H * 0.05, W, H);
+  bx.fillStyle = 'rgba(40,60,80,0.55)'; for (let x = 0; x < W; x += W / 7) bx.fillRect(x - 5, 0, 10, hz + H * 0.05);
+  bx.fillRect(0, hz * 0.32, W, 6);
+  bx.fillStyle = 'rgba(255,250,220,0.18)'; for (let x = 0; x < W; x += W / 7) { bx.beginPath(); bx.moveTo(x + 10, hz + H * 0.05); bx.lineTo(x + W / 7 - 10, hz + H * 0.05); bx.lineTo(x + W / 7 + 120, H); bx.lineTo(x + 140, H); bx.fill(); }
+}
+
+// Flights > fictional schedule, minutes since midnight
+const DEST = ['LISBON', 'TOKYO', 'NEW YORK', 'SYDNEY', 'REYKJAVIK', 'NAIROBI', 'VANCOUVER', 'SINGAPORE', 'BUENOS AIRES', 'COPENHAGEN', 'HONOLULU', 'MUMBAI', 'SEOUL', 'CAPE TOWN', 'OSLO', 'MONTREAL'];
+const CODES = ['QV', 'NX', 'ZA', 'KR', 'VT', 'SK'];
+let now = 14 * 60 + 20, nextDep = now + 18, nd = 0;
+function mkFlight() { const d = DEST[nd++ % DEST.length], g = (Math.random() < 0.5 ? 'A' : 'B') + (1 + Math.floor(Math.random() * 10)); nextDep += 6 + Math.floor(Math.random() * 9); return { dep: nextDep, dest: d, fl: `${CODES[nd % 6]} ${100 + Math.floor(Math.random() * 800)}`, gate: g }; }
+let flights = Array.from({ length: 14 }, mkFlight);
+const title = (s) => s.toLowerCase().replace(/\b\w/g, (m) => m.toUpperCase());
+const hhmm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+function remark(f) { const d = f.dep - now; return d <= 5 ? ['CLOSED', 'final'] : d <= 15 ? ['FINAL CALL', 'final'] : d <= 30 ? ['BOARDING', 'boarding'] : f.delay ? ['DELAYED', ''] : ['ON TIME', '']; }
+
+// Board > split-flap cells stepping through the drum
+const DRUM = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-.';
+const W_ = { tm: 5, ds: 12, fl: 6, gt: 3, st: 10 };
+const cells = [];
+$('#rows').innerHTML = flights.map((_, r) => `<div class="row" data-r="${r}">${Object.entries(W_).map(([k, n]) => `<div class="grp g-${k}">${'<span class="c"> </span>'.repeat(n)}</div>`).join('')}</div>`).join('');
+document.querySelectorAll('.row').forEach((row, r) => { cells[r] = {}; for (const k of Object.keys(W_)) cells[r][k] = [...row.querySelectorAll(`.g-${k} .c`)].map((el) => ({ el, cur: ' ', target: ' ', wait: 0, alt: false })); row.onclick = () => select(r, true); });
+function setRow(r, f) {
+  const [rm, cls] = remark(f), vals = { tm: hhmm(f.dep), ds: f.dest, fl: f.fl, gt: f.gate, st: rm };
+  for (const [k, v] of Object.entries(vals)) cells[r][k].forEach((c, i) => { const ch = (v[i] || ' ').toUpperCase(); if (c.target !== ch) { c.target = ch; c.wait = Math.floor(Math.random() * 8); } });
+  document.querySelector(`.row[data-r="${r}"]`).classList.toggle('boarding', cls === 'boarding');
+  document.querySelector(`.row[data-r="${r}"]`).classList.toggle('final', cls === 'final');
+}
+function stepFlaps() {
+  let moving = 0;
+  for (const row of cells) for (const k in row) for (const c of row[k]) {
+    if (c.cur === c.target) continue; if (c.wait-- > 0) continue;
+    const i = DRUM.indexOf(c.cur); c.cur = DRUM[(i + 1) % DRUM.length]; c.el.textContent = c.cur; c.alt = !c.alt; c.el.className = `c ${c.alt ? 'f1' : 'f2'}`; moving++;
+  }
+  return moving;
+}
+function refresh() { flights.forEach((f, r) => setRow(r, f)); }
+// Fit > cell size from board width, and height on desktop
+function fit() {
+  const b = $('.board'), mob = innerWidth <= 900, n = mob ? 25 : 36, gaps = mob ? 3 : 4, gg = mob ? 6 : 10;
+  const w = (b.clientWidth - (mob ? 20 : 28) - gaps * gg) / n - 2, h = ($('#rows').clientHeight / 14 - 6) / 1.6;
+  b.style.setProperty('--cw', `${Math.max(7, Math.min(24, w, mob ? 99 : h)).toFixed(2)}px`);
+}
+fit(); addEventListener('resize', fit);
+
+// Map > gates, amenities, routing
+const GATES = {};
+['A', 'B'].forEach((side) => { for (let i = 1; i <= 10; i++) { const k = i / 11, x = side === 'A' ? 180 - k * 112 : 220 + k * 112, y = 225 - k * 170, off = side === 'A' ? -1 : 1; GATES[side + i] = { x: x + off * (i % 2 ? 18 : -18) * 0.85, y: y - 6, jx: x, jy: y }; } });
+$('#gates').innerHTML = Object.entries(GATES).map(([g, p]) => `<g><circle cx="${p.x}" cy="${p.y}" r="8" fill="#fff" stroke="#1677d2" stroke-width="1.5" /><text x="${p.x}" y="${p.y + 3}" text-anchor="middle" font-size="7" font-weight="bold" fill="#0a5cb0">${g}</text></g>`).join('');
+const AMEN = [[200, 244, '#ff7a1a', 'S'], [150, 256, '#2a9af0', 'WC'], [250, 256, '#8a5a2a', 'C'], [118, 150, '#2a9af0', 'WC'], [282, 150, '#8a5a2a', 'C']];
+$('#amen').innerHTML = AMEN.map(([x, y, c, t]) => `<g><rect x="${x - 9}" y="${y - 7}" width="18" height="14" rx="3" fill="${c}" /><text x="${x}" y="${y + 3}" text-anchor="middle" font-size="7" font-weight="bold" fill="#fff">${t}</text></g>`).join('');
+let sel = -1, walkT0 = 0, routeLen = 0;
+function select(r, user) {
+  sel = r; const f = flights[r], g = GATES[f.gate]; document.querySelectorAll('.row').forEach((x) => x.classList.toggle('sel', +x.dataset.r === r));
+  const side = f.gate[0], jx = 200 + (side === 'A' ? -12 : 12), d = `M200 262 L200 236 L${jx} 226 L${g.jx} ${g.jy} L${g.x} ${g.y}`;
+  const route = $('#route'); route.setAttribute('d', d); routeLen = route.getTotalLength(); walkT0 = performance.now();
+  const mins = Math.max(3, Math.round(routeLen / 28)); $('#iFl').textContent = `${f.fl} to ${title(f.dest)}`; $('#iGate').textContent = `Gate ${f.gate} · departs ${hhmm(f.dep)}`; $('#iWalk').textContent = `${mins} min walk`;
+  $('#bubble').textContent = `Gate ${f.gate} is about ${mins} minutes from here. Follow the ${side === 'A' ? 'left' : 'right'} concourse. Have a lovely trip to ${title(f.dest)}!`;
+  if (user) blip();
+}
+function drawRoute(nowMs) {
+  const route = $('#route'), w = $('#walker'); if (sel < 0) { w.style.display = 'none'; return; }
+  const p = Math.min(1, (nowMs - walkT0) / 1400); route.style.strokeDashoffset = p < 1 ? 0 : `${-nowMs / 60}`;
+  const drawn = routeLen * p; route.style.strokeDasharray = p < 1 ? `${drawn} ${routeLen}` : '1 9';
+  const q = ((nowMs - walkT0) / 5000) % 1, pt = route.getPointAtLength(routeLen * (p < 1 ? p : q)); w.style.display = ''; w.setAttribute('cx', pt.x); w.setAttribute('cy', pt.y);
+}
+
+// Helper > friendly attendant drawn on canvas
+{
+  const x = $('#helper').getContext('2d'); x.scale(2, 2);
+  x.fillStyle = '#1677d2'; x.beginPath(); x.moveTo(12, 84); x.quadraticCurveTo(14, 46, 35, 44); x.quadraticCurveTo(56, 46, 58, 84); x.fill();
+  x.fillStyle = '#fff'; x.beginPath(); x.moveTo(29, 45); x.lineTo(35, 58); x.lineTo(41, 45); x.fill(); x.fillStyle = '#ffcc33'; x.fillRect(33, 49, 4, 12);
+  x.fillStyle = '#c98a5e'; x.fillRect(31, 36, 8, 10); x.beginPath(); x.ellipse(35, 26, 13, 15, 0, 0, 7); x.fill();
+  x.fillStyle = '#3a2418'; x.beginPath(); x.ellipse(35, 17, 15, 10, 0, Math.PI, 0); x.fill(); x.beginPath(); x.ellipse(23, 26, 4, 10, 0, 0, 7); x.fill(); x.beginPath(); x.ellipse(47, 26, 4, 10, 0, 0, 7); x.fill();
+  x.fillStyle = '#1677d2'; x.beginPath(); x.ellipse(35, 12, 12, 5, 0, 0, 7); x.fill(); x.fillRect(23, 10, 24, 4);
+  x.fillStyle = '#2a1a10'; x.beginPath(); x.arc(30, 26, 1.8, 0, 7); x.arc(40, 26, 1.8, 0, 7); x.fill();
+  x.strokeStyle = '#7a3a2a'; x.lineWidth = 1.6; x.beginPath(); x.arc(35, 30, 5, 0.2, Math.PI - 0.2); x.stroke();
+}
+
+// Audio > flap clatter, chimes, blip
+let ac; function audio() { if (!ac) ac = new AudioContext(); ac.resume(); }
+addEventListener('pointerdown', audio, { capture: true });
+const ok = () => ac && ac.state === 'running';
+let clickBuf = null;
+function clatter(n) {
+  if (!ok() || !n) return; if (!clickBuf) { clickBuf = ac.createBuffer(1, 600, ac.sampleRate); const d = clickBuf.getChannelData(0); for (let i = 0; i < 600; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / 60); }
+  for (let k = 0; k < Math.min(4, Math.ceil(n / 12)); k++) { const s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = clickBuf; f.type = 'bandpass'; f.frequency.value = rnd(1800, 3600); g.gain.value = 0.18; s.connect(f).connect(g).connect(ac.destination); s.start(ac.currentTime + Math.random() * 0.03); }
+}
+function chime() { if (!ok()) return; const t = ac.currentTime; [[784, 0], [622, 0.45]].forEach(([fr, d]) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = fr; g.gain.setValueAtTime(0.0001, t + d); g.gain.exponentialRampToValueAtTime(0.15, t + d + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 1.4); o.connect(g).connect(ac.destination); o.start(t + d); o.stop(t + d + 1.5); }); }
+function blip() { if (!ok()) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = 1180; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.1, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.2); }
+
+// Clock > minute ticks, departures roll off
+function minute() {
+  now++; $('#clock').textContent = hhmm(now);
+  if (Math.random() < 0.15) { const f = flights[Math.floor(rnd(4, 8))]; if (f) f.delay = true; }
+  const before = flights.map((f) => remark(f)[0]);
+  if (flights[0].dep - now <= 0) { flights.shift(); flights.push(mkFlight()); if (sel >= 0) { sel = Math.max(0, sel - 1); select(sel); } }
+  refresh(); if (flights.some((f, i) => remark(f)[0] === 'BOARDING' && before[i] !== 'BOARDING')) chime();
+}
+const HELLO = ['Welcome', 'Bienvenue', 'Willkommen', 'ようこそ', 'Bienvenido'];
+let hi = 0; setInterval(() => { const h = $('#hello'); h.style.opacity = 0; setTimeout(() => { h.textContent = HELLO[++hi % HELLO.length]; h.style.opacity = 1; }, 400); }, 2600);
+
+// Attract > cycle flights, advance the clock
+let touched = false; addEventListener('pointerdown', () => { touched = true; }, { capture: true });
+let lastMin = performance.now(), lastFlap = 0, lastAuto = performance.now(), autoI = 0;
+refresh();
+if (capture) { setTimeout(() => select(2), 500); } else setTimeout(() => select(0), 1800);
+function loop(ms) {
+  drawBg(ms / 1000);
+  if (ms - lastFlap > 38) { lastFlap = ms; clatter(stepFlaps()); }
+  if (ms - lastMin > 3200) { lastMin = ms; minute(); }
+  if (!touched && !capture && ms - lastAuto > 5200) { lastAuto = ms; select(++autoI % (innerWidth <= 900 ? 10 : flights.length)); }
+  drawRoute(ms); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+window.__kiosk = { select, minute, board: () => cells.map((r) => Object.values(r).map((g) => g.map((c) => c.cur).join('')).join('|')), route: () => ({ sel, len: Math.round(routeLen), walk: $('#iWalk').textContent }) };
+</script>
+</body>
+</html>

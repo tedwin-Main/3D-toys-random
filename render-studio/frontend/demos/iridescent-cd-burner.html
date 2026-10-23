@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Iridescent CD Burner</title>
+<meta name="category" content="aero" />
+<meta name="style" content="y2k" />
+<meta name="order" content="34" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="three.js, diffraction grating shader, spectral colour, glossy UI, WebAudio" />
+<meta name="description" content="An early-2000s disc burning app around a real-looking CD: the blank spins on a glossy blue backdrop, its data side throwing rainbow diffraction bands that slide as the disc wobbles, while a laser spot creeps outward and darkens the dye ring track by track. The glass app panel shows the track list, a 80-minute capacity bar, write speed, buffer and a striped progress bar; when it finishes it chimes and ejects. Hard because the rainbow is computed, not textured: each pixel takes the groove direction and the light-view half vector, solves the grating equation for the first three diffraction orders and turns those wavelengths into colour."/>
+<meta name="prompt" content="Build an early-2000s CD burning app in one HTML file with three.js: a spinning, gently wobbling CD whose data side uses a diffraction-grating shader (groove tangent dotted with the half vector, 1.6 µm spacing, first three orders mapped from wavelength to RGB) over a silver mirror base, a burned dye region that grows outward under a glowing laser spot, a clear hub and rim. Overlay a glossy glass app panel with track list, 80-minute capacity bar, speed menu, buffer readout, striped progress bar, Burn and Eject gel buttons, a finished chime and an eject animation, synthesized drive whir and clunks, and an attract mode that keeps burning discs." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/iridescent-cd-burner.html
+ * PURPOSE: CD burner app: diffraction-grating disc shader, laser burn ring, glossy burn panel, eject animation
+ * UI: Render Studio > Frutiger Aero > Iridescent CD Burner
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__burner (burn, eject, progress, speed)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b4fa0; font: 12px "Segoe UI", Tahoma, system-ui, sans-serif; }
+canvas { display: block; }
+#app { position: fixed; left: 24px; top: 50%; transform: translateY(-50%); width: 320px; border-radius: 12px; color: #fff; background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.12) 40%, rgba(20, 70, 140, 0.35)); border: 1px solid rgba(255, 255, 255, 0.65); box-shadow: 0 12px 40px rgba(0, 20, 60, 0.5), inset 0 1px #fff; backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4); text-shadow: 0 1px 2px rgba(0, 20, 60, 0.7); }
+#app h1 { margin: 0; padding: 10px 14px 6px; font: 600 16px "Segoe UI", Tahoma, sans-serif; display: flex; align-items: center; gap: 8px; }
+#app h1 i { width: 22px; height: 22px; border-radius: 50%; background: conic-gradient(#f66, #fd5, #6f8, #6df, #a7f, #f6c, #f66); box-shadow: inset 0 0 0 7px rgba(255, 255, 255, 0.0), 0 0 0 1px #fff; position: relative; }
+#app h1 i::after { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: #3a7bd0; box-shadow: 0 0 0 1px #fff; }
+.sec { margin: 0 10px 8px; padding: 8px; border-radius: 8px; background: rgba(0, 30, 80, 0.28); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3); }
+#tracks { list-style: none; margin: 0; padding: 0; max-height: 170px; overflow: hidden; }
+#tracks li { display: flex; justify-content: space-between; padding: 2px 6px; border-radius: 4px; }
+#tracks li.w { background: linear-gradient(90deg, rgba(255, 170, 60, 0.6), rgba(255, 120, 40, 0.15)); }
+#tracks li.d { opacity: 0.6; } #tracks li.d span::before { content: "\2713  "; color: #9f9; }
+.cap { height: 12px; border-radius: 6px; background: rgba(0, 0, 0, 0.35); overflow: hidden; margin: 4px 0 2px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5); }
+.cap div { height: 100%; width: 78%; background: linear-gradient(180deg, #c7ff9a, #49c22a 50%, #2f9a14 51%, #6fe24a); border-radius: 6px; }
+.small { font-size: 10px; opacity: 0.85; display: flex; justify-content: space-between; }
+.prog { height: 16px; border-radius: 8px; overflow: hidden; background: rgba(255, 255, 255, 0.25); box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4); margin: 6px 0 4px; }
+.prog div { height: 100%; width: 0; border-radius: 8px; background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.35) 0 8px, transparent 8px 16px), linear-gradient(180deg, #bfe6ff, #3a9bf0 50%, #1f7ad8 51%, #58b8ff); background-size: 22px 22px, 100% 100%; animation: stripes 0.8s linear infinite; }
+@keyframes stripes { to { background-position: 22px 0, 0 0; } }
+#status { min-height: 30px; }
+.btns { display: flex; gap: 8px; padding: 2px 10px 12px; align-items: center; }
+.gel { font: 700 14px "Segoe UI", Tahoma, sans-serif; color: #fff; border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 16px; padding: 7px 22px; cursor: pointer; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.4); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), inset 0 1px rgba(255, 255, 255, 0.7); }
+#burn { background: linear-gradient(180deg, #ffc49a, #ff6a1a 50%, #e04a00 51%, #ff8c3a); }
+#burn.on { animation: pulse 1s ease-in-out infinite; } @keyframes pulse { 50% { box-shadow: 0 0 18px #ff8a3a, inset 0 1px rgba(255, 255, 255, 0.7); } }
+#eject { background: linear-gradient(180deg, #e2ecf7, #9fb3c9 50%, #7f95ad 51%, #b6c7d8); color: #123; text-shadow: none; padding: 7px 14px; }
+select { font: inherit; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.85); padding: 3px 6px; margin-left: auto; }
+#toast { position: fixed; left: 50%; top: 18px; transform: translate(-50%, -80px); padding: 10px 18px; border-radius: 10px; background: linear-gradient(180deg, #fff, #dff1ff); color: #124; box-shadow: 0 6px 20px rgba(0, 20, 60, 0.45); font-weight: 600; transition: transform 0.4s; z-index: 5; white-space: nowrap; }
+#toast.on { transform: translate(-50%, 0); }
+@media (max-width: 700px) { #app { left: 8px; right: 8px; width: auto; top: auto; bottom: 8px; transform: none; } #tracks { max-height: 92px; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+<div id="toast">Disc burned successfully!</div>
+<div id="app">
+  <h1><i></i>DiscForge Burning Studio</h1>
+  <div class="sec"><ul id="tracks"></ul><div class="cap"><div></div></div><div class="small"><span id="used">62:40 used</span><span>80:00 CD-R</span></div></div>
+  <div class="sec"><div id="status">Ready. Insert a blank disc and press Burn.</div><div class="prog"><div id="bar"></div></div><div class="small"><span id="pct">0%</span><span id="buf">Buffer 100%</span></div></div>
+  <div class="btns"><button class="gel" id="burn">Burn!</button><button class="gel" id="eject">Eject</button><select id="speed"><option value="4">4x</option><option value="12" selected>12x</option><option value="24">24x</option><option value="48">48x</option></select></div>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+function fit() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+  const narrow = camera.aspect < 0.9; camera.position.set(narrow ? 0 : -2.2, 1.2, narrow ? 25 : 15); camera.lookAt(narrow ? 0 : -2.2, 0, 0);
+  rig.position.set(narrow ? 0 : 1.6, narrow ? 4.2 : 0, 0); rig.userData.narrow = narrow;
+}
+
+// Backdrop > glossy blue gradient + bokeh
+{
+  const c = document.createElement('canvas'); c.width = 512; c.height = 512; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 512); g.addColorStop(0, '#0a3a86'); g.addColorStop(0.55, '#1d7ad6'); g.addColorStop(1, '#8fd3ff'); x.fillStyle = g; x.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 40; i++) { const px = Math.random() * 512, py = Math.random() * 512, r = 10 + Math.random() * 50, b = x.createRadialGradient(px, py, 0, px, py, r); b.addColorStop(0, `rgba(255,255,255,${0.05 + Math.random() * 0.12})`); b.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = b; x.fillRect(px - r, py - r, r * 2, r * 2); }
+  x.strokeStyle = 'rgba(255,255,255,0.12)'; x.lineWidth = 30; x.beginPath(); x.moveTo(-20, 380); x.bezierCurveTo(150, 300, 330, 470, 540, 330); x.stroke();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; scene.background = t;
+}
+
+// Disc > diffraction-grating shader on data side
+const rig = new THREE.Group(); scene.add(rig);
+const tilt = new THREE.Group(); tilt.rotation.set(-1.05, 0.35, 0); rig.add(tilt);
+const spin = new THREE.Group(); tilt.add(spin);
+fit(); addEventListener('resize', fit);
+const U = { uL: { value: new THREE.Vector3(0.25, 0.9, 0.55).normalize() }, uBurn: { value: 0.3 }, uT: { value: 0 } };
+const disc = new THREE.Mesh(new THREE.RingGeometry(0.75, 4, 160, 24), new THREE.ShaderMaterial({
+  uniforms: U, side: THREE.DoubleSide, transparent: true,
+  vertexShader: `varying vec3 vW; varying vec3 vN; varying vec3 vT; varying vec2 vP;
+    void main(){ vP = position.xy; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0)); vT = normalize(mat3(modelMatrix) * vec3(-position.y, position.x, 0.0)); gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform vec3 uL; uniform float uBurn; uniform float uT; varying vec3 vW; varying vec3 vN; varying vec3 vT; varying vec2 vP;
+    vec3 spec(float lam){ if (lam < 0.38 || lam > 0.75) return vec3(0.0); float x = (lam - 0.38) / 0.37;
+      float h = (1.0 - x) * 0.78; vec3 c = clamp(abs(fract(h + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      return c * smoothstep(0.0, 0.12, x) * (1.0 - smoothstep(0.88, 1.0, x)); }
+    float hash(float n){ return fract(sin(n) * 43758.5453); }
+    void main(){ float r = length(vP); vec3 N = normalize(vN); vec3 V = normalize(cameraPosition - vW); if (dot(N, V) < 0.0) N = -N;
+      vec3 L = normalize(uL); vec3 H = normalize(L + V); vec3 T = normalize(vT);
+      float u = abs(dot(T, H)) * 1.6; vec3 rain = vec3(0.0);
+      for (int m = 1; m <= 3; m++) rain += spec(u / float(m)) / (float(m) * float(m));
+      vec3 R = reflect(-V, N); float sky = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
+      vec3 base = mix(vec3(0.42, 0.47, 0.55), vec3(0.95, 0.97, 1.0), sky) * 0.9;
+      float sp = pow(max(dot(N, H), 0.0), 120.0);
+      float hub = 1.0 - smoothstep(1.2, 1.26, r), rim = smoothstep(3.93, 3.97, r);
+      float burned = 1.0 - smoothstep(uBurn - 0.02, uBurn, (r - 1.42) / 2.5);
+      float tracks = 0.5 + 0.5 * sin(r * 140.0); float a = atan(vP.y, vP.x);
+      vec3 c = base * (1.0 - 0.35 * clamp(length(rain), 0.0, 1.0)) + rain * 0.95 * (1.0 - hub) + sp * 1.5;
+      vec3 dye = vec3(0.32, 0.18, 0.55);
+      c = mix(c, c * 0.55 + dye * 0.35, burned * step(1.42, r) * (0.85 + 0.15 * tracks));
+      c = mix(c, c * 1.1 + vec3(0.03), (1.0 - burned) * step(1.42, r) * 0.15 * hash(floor(a * 40.0)));
+      float edge = exp(-pow(((r - 1.42) / 2.5 - uBurn) * 60.0, 2.0)); c += vec3(1.0, 0.45, 0.2) * edge * 0.35 * step(0.01, uBurn) * step(uBurn, 0.999);
+      c = mix(c, vec3(0.85, 0.9, 0.95) + sp, hub * 0.6); c = mix(c, vec3(0.95), rim * 0.6);
+      gl_FragColor = vec4(c, mix(1.0, 0.55, hub)); }`,
+}));
+spin.add(disc);
+const edge = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.05, 160, 1, true).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: '#cfd8e2' })); edge.position.z = -0.025; spin.add(edge);
+const laser = new THREE.Sprite(new THREE.SpriteMaterial({ map: (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, '#ffffff'); g.addColorStop(0.15, '#ffd0a0'); g.addColorStop(0.4, 'rgba(255,90,20,0.6)'); g.addColorStop(1, 'rgba(255,40,0,0)'); x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c); })(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+laser.scale.setScalar(0.9); tilt.add(laser);
+const shadow = new THREE.Mesh(new THREE.CircleGeometry(4.3, 64), new THREE.MeshBasicMaterial({ color: '#001a40', transparent: true, opacity: 0.25 })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = -3.4; shadow.scale.set(1, 0.6, 1); rig.add(shadow);
+
+// Burn > phases, tracks, progress, eject
+const TR = [['Summer Mix Intro', '3:12'], ['Ocean Drive', '4:05'], ['Bubblegum Skies', '3:48'], ['Glass Garden', '5:20'], ['Aqua Lounge', '4:41'], ['Night Ferry', '6:02'], ['Pixel Sunrise', '3:30'], ['Last Day of School', '4:10'], ['Hidden Track', '0:52']];
+const li = TR.map(([n, d], i) => { const e = document.createElement('li'); e.innerHTML = `<span>${String(i + 1).padStart(2, '0')}. ${n}</span><b>${d}</b>`; document.getElementById('tracks').append(e); return e; });
+const $ = (s) => document.getElementById(s);
+let phase = 'idle', prog = 0, phaseT = 0, ejectT = -1, speed = 12;
+$('speed').onchange = (e) => { speed = +e.target.value; input(); };
+function burn(from = 0) { if (phase !== 'idle') return; phase = 'lead'; phaseT = 0; prog = from; $('burn').classList.add('on'); clunk(0.3); }
+function eject() { if (phase === 'burn' || phase === 'lead') { phase = 'idle'; $('status').textContent = 'Burn cancelled. Disc may be unusable.'; } ejectT = 0; clunk(1); $('burn').classList.remove('on'); }
+$('burn').onclick = () => { input(); burn(); }; $('eject').onclick = () => { input(); eject(); };
+function ui() {
+  const k = Math.floor(prog * TR.length);
+  li.forEach((e, i) => { e.classList.toggle('w', phase === 'burn' && i === k); e.classList.toggle('d', i < k || phase === 'done'); });
+  $('bar').style.width = (prog * 100).toFixed(1) + '%'; $('pct').textContent = Math.floor(prog * 100) + '%';
+  $('buf').textContent = `Buffer ${phase === 'burn' ? 92 + Math.floor(Math.random() * 8) : 100}%`;
+  if (phase === 'lead') $('status').textContent = 'Writing lead-in...';
+  else if (phase === 'burn') $('status').textContent = `Writing track ${Math.min(TR.length, k + 1)} of ${TR.length} at ${speed}x...`;
+  else if (phase === 'out') $('status').textContent = 'Writing lead-out and closing session...';
+}
+
+// Audio > drive whir, clunks, done chime
+let ac = null, whir = null;
+addEventListener('pointerdown', () => { if (ac) return; ac = new AudioContext(); const o = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain(); o.type = 'sawtooth'; f.type = 'lowpass'; f.frequency.value = 600; g.gain.value = 0; o.connect(f).connect(g).connect(ac.destination); o.start(); whir = { o, g }; });
+function clunk(k) { if (!ac) return; const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(50, t + 0.15); g.gain.setValueAtTime(0.15 * k, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.22); }
+function chime() { if (!ac) return; [659.3, 830.6, 987.8, 1318.5].forEach((f, i) => { const t = ac.currentTime + i * 0.11, o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 1); }); }
+
+// Attract > burn, eject, repeat
+let lastInput = -1e9, idleT = 0, first = true;
+function input() { lastInput = performance.now(); }
+let last = performance.now(), spinA = 0;
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000; phaseT += dt;
+  const busy = phase === 'lead' || phase === 'burn' || phase === 'out';
+  if (phase === 'lead' && phaseT > 1) { phase = 'burn'; phaseT = 0; }
+  if (phase === 'burn') { prog = Math.min(1, prog + (dt * speed) / 150); if (prog >= 1) { phase = 'out'; phaseT = 0; } }
+  if (phase === 'out' && phaseT > 1.2) { phase = 'done'; phaseT = 0; $('burn').classList.remove('on'); $('status').textContent = 'Disc burned successfully! 9 tracks, 62:40.'; $('toast').classList.add('on'); chime(); setTimeout(() => $('toast').classList.remove('on'), 2600); }
+  if (phase === 'done' && phaseT > 2.4 && ejectT < 0) eject();
+  if (ejectT >= 0) {
+    ejectT += dt; const k = ejectT < 1 ? ejectT : ejectT < 2.2 ? 1 : Math.max(0, 3.2 - ejectT);
+    tilt.position.set(0, -k * 1.2, k * 3.5);
+    if (ejectT > 1.4 && phase !== 'idle') { phase = 'idle'; prog = 0; $('status').textContent = 'Ready. Insert a blank disc and press Burn.'; }
+    if (ejectT > 3.2) { ejectT = -1; tilt.position.set(0, 0, 0); idleT = 0; }
+  }
+  const rpm = busy ? 4 + speed * 0.35 : phase === 'done' ? 3 : 0.6; spinA += dt * rpm; spin.rotation.z = spinA;
+  tilt.rotation.x = -1.05 + Math.sin(t * 0.7) * 0.12; tilt.rotation.y = 0.35 + Math.sin(t * 0.43) * 0.22;
+  U.uBurn.value = phase === 'idle' && ejectT < 0 ? 0 : prog; U.uT.value = t;
+  const lr = 1.42 + prog * 2.5; laser.position.set(lr * 0.7, -lr * 0.7, 0.05); laser.visible = busy; laser.material.opacity = 0.75 + Math.random() * 0.25;
+  if (whir) { whir.o.frequency.setTargetAtTime(busy ? 60 + speed * 6 : 30, ac.currentTime, 0.4); whir.g.gain.setTargetAtTime(busy ? 0.02 : 0, ac.currentTime, 0.3); }
+  if (phase === 'idle' && ejectT < 0 && now - lastInput > 4000) { idleT += dt; if (idleT > (first ? 0.1 : 1.5)) { burn(first ? 0.42 : 0); first = false; } }
+  shadow.visible = !rig.userData.narrow; ui(); renderer.render(scene, camera);
+});
+
+window.__burner = { burn: () => burn(), eject, progress: () => prog, speed: (s) => { speed = s; $('speed').value = String(s); } };
+</script>
+</body>
+</html>

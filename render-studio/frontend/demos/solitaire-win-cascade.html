@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card Solitaire</title>
+<meta name="category" content="aero" />
+<meta name="style" content="retro" />
+<meta name="order" content="37" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="canvas 2D, drag and drop, greedy solver, seeded deal, accumulation trails, WebAudio" />
+<meta name="description" content="Late-90s Klondike solitaire on green felt with a glossy bubble card back: drag cards and runs between piles, double-click to send a card home, draw from the stock, undo, and win to get the famous bouncing-card cascade that smears trails across the whole table. Left alone it deals a seeded game its own solver can finish and plays it to the cascade. Hard because every card face is drawn procedurally (pip layouts, corner indices, framed court cards), cards ease to layout targets so every move animates for free, drops pick the legal pile with the biggest overlap, and the cascade paints onto a canvas that is never cleared."/>
+<meta name="prompt" content="Build late-90s Klondike solitaire in one HTML file on canvas: procedurally drawn card faces with real pip layouts and a generic glossy card back, green felt, stock/waste/foundations/tableau with drag-and-drop of runs, double-click to foundation, draw-one with recycling, classic scoring, timer and undo. Winning launches the bouncing-card cascade that leaves trails on a never-cleared overlay canvas. Add a greedy solver, deal a seed it can finish and auto-play it as an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/solitaire-win-cascade.html
+ * PURPOSE: Klondike solitaire with procedural cards, greedy-solver attract and the bouncing win cascade
+ * UI: Render Studio > Frutiger Aero > Card Solitaire
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__solitaire (deal, state, cascade, solves, step, next, cards)
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b5a22; font: 12px "Segoe UI", Tahoma, sans-serif; user-select: none; -webkit-user-select: none; }
+#win { position: fixed; inset: 0; display: flex; flex-direction: column; }
+#title { height: 30px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px 0 10px; color: #fff; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 50%), linear-gradient(90deg, #3a7fd0, #7fc1f2 60%, #4a9be0); border-bottom: 1px solid #1d4f8a; }
+#title i { display: inline-flex; gap: 3px; }
+#title i b { width: 26px; height: 18px; border-radius: 4px; border: 1px solid rgba(0, 0, 0, 0.35); background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.3)); }
+#title i b:last-child { width: 40px; background: linear-gradient(180deg, #f9a08e, #d9452a 50%, #e8735a); }
+#menu { height: 28px; display: flex; gap: 2px; align-items: center; padding: 0 4px; background: linear-gradient(180deg, #f7fbff, #dde9f6); border-bottom: 1px solid #a9bdd4; }
+#menu button { font: inherit; padding: 3px 10px; border: 1px solid transparent; border-radius: 3px; background: none; cursor: pointer; }
+#menu button:hover { border-color: #7fb0e0; background: linear-gradient(180deg, #eef7ff, #cde5fb); }
+#stage { position: relative; flex: 1; min-height: 0; }
+#stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+#trail { pointer-events: none; }
+#msg { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); padding: 10px 18px; border-radius: 10px; color: #fff; font-size: 15px; font-weight: 600; background: rgba(0, 40, 20, 0.55); border: 1px solid rgba(255, 255, 255, 0.35); display: none; pointer-events: none; }
+#status { height: 24px; display: flex; gap: 18px; justify-content: flex-end; align-items: center; padding: 0 12px; background: linear-gradient(180deg, #f2f6fb, #d6e2ef); border-top: 1px solid #a9bdd4; color: #23384f; }
+</style>
+</head>
+<body>
+<div id="win">
+  <div id="title"><span>Card Solitaire</span><i><b></b><b></b><b></b></i></div>
+  <div id="menu"><button id="deal">Deal</button><button id="undo">Undo</button><button id="auto">Auto Finish</button></div>
+  <div id="stage"><canvas id="cv"></canvas><canvas id="trail"></canvas><div id="msg">You win! Click to deal again</div></div>
+  <div id="status"><span id="sDeal"></span><span id="sScore"></span><span id="sTime"></span></div>
+</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const cv = $('#cv'), cx = cv.getContext('2d'), tr = $('#trail'), tx = tr.getContext('2d');
+const SUITS = ['♠', '♥', '♦', '♣'], RANKS = ['', 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const red = (c) => c.s === 1 || c.s === 2, peek = (p) => p[p.length - 1];
+const mulberry = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const CAPTURE = new URLSearchParams(location.search).has('capture');
+
+// Cards > procedural faces and glossy bubble back
+const PIPS = { 1: [[0.5, 0.5]], 2: [[0.5, 0.2], [0.5, 0.8]], 3: [[0.5, 0.2], [0.5, 0.5], [0.5, 0.8]], 4: [[0.32, 0.2], [0.68, 0.2], [0.32, 0.8], [0.68, 0.8]] };
+PIPS[5] = [...PIPS[4], [0.5, 0.5]]; PIPS[6] = [...PIPS[4], [0.32, 0.5], [0.68, 0.5]]; PIPS[7] = [...PIPS[6], [0.5, 0.35]]; PIPS[8] = [...PIPS[7], [0.5, 0.65]];
+PIPS[9] = [...PIPS[4], [0.32, 0.4], [0.68, 0.4], [0.32, 0.6], [0.68, 0.6], [0.5, 0.5]]; PIPS[10] = [...PIPS[4], [0.32, 0.4], [0.68, 0.4], [0.32, 0.6], [0.68, 0.6], [0.5, 0.3], [0.5, 0.7]];
+let W = 0, H = 0, DPR = 1, cw = 80, ch = 112, gap = 10, y1 = 0, faces = {}, back = null;
+function cardCanvas() { const c = document.createElement('canvas'); c.width = Math.ceil(cw * DPR); c.height = Math.ceil(ch * DPR); const g = c.getContext('2d'); g.scale(DPR, DPR); return [c, g]; }
+function shape(g, fill) { g.beginPath(); g.roundRect(0.5, 0.5, cw - 1, ch - 1, cw * 0.07); g.fillStyle = fill; g.fill(); g.strokeStyle = '#6d6d6d'; g.lineWidth = 1; g.stroke(); }
+function drawFace(s, r) {
+  const [c, g] = cardCanvas(), w = cw, h = ch, col = s === 1 || s === 2 ? '#c8102e' : '#141414';
+  const bg = g.createLinearGradient(0, 0, 0, h); bg.addColorStop(0, '#fff'); bg.addColorStop(1, '#efefe8'); shape(g, bg);
+  g.fillStyle = col; g.textAlign = 'center'; g.textBaseline = 'middle';
+  const corner = () => { g.font = `700 ${w * 0.2}px Georgia, serif`; g.fillText(RANKS[r], w * 0.13, h * 0.11); g.font = `${w * 0.17}px Georgia, serif`; g.fillText(SUITS[s], w * 0.13, h * 0.23); };
+  corner(); g.save(); g.translate(w, h); g.rotate(Math.PI); corner(); g.restore();
+  if (r <= 10) {
+    g.font = `${r === 1 ? w * 0.5 : w * 0.24}px Georgia, serif`;
+    for (const [px, py] of PIPS[r]) { const X = w * px, Y = h * (0.1 + py * 0.8); if (py > 0.5) { g.save(); g.translate(X, Y); g.rotate(Math.PI); g.fillText(SUITS[s], 0, 0); g.restore(); } else g.fillText(SUITS[s], X, Y); }
+  } else {
+    const fx = w * 0.24, fy = h * 0.15, fw = w * 0.52, fh = h * 0.7, tint = { 11: ['#e6ffd9', '#77c45f'], 12: ['#dcefff', '#6ea7f2'], 13: ['#fff1c4', '#eaa43a'] }[r];
+    const fg = g.createLinearGradient(0, fy, 0, fy + fh); fg.addColorStop(0, tint[0]); fg.addColorStop(1, tint[1]);
+    g.beginPath(); g.roundRect(fx, fy, fw, fh, w * 0.06); g.fillStyle = fg; g.fill(); g.strokeStyle = col; g.lineWidth = 1.2; g.stroke();
+    g.save(); g.clip(); g.fillStyle = 'rgba(255,255,255,0.45)'; g.beginPath(); g.ellipse(fx + fw / 2, fy, fw * 0.7, fh * 0.42, 0, 0, Math.PI * 2); g.fill(); g.restore();
+    g.fillStyle = col; g.font = `700 ${w * 0.36}px Georgia, serif`; g.fillText(RANKS[r], w / 2, h * 0.43); g.font = `${w * 0.26}px Georgia, serif`; g.fillText(SUITS[s], w / 2, h * 0.67);
+  }
+  return c;
+}
+function drawBack() {
+  const [c, g] = cardCanvas(), R = mulberry(7); shape(g, '#fff');
+  const ix = cw * 0.08, iw = cw - ix * 2, ih = ch - ix * 2, bg = g.createLinearGradient(0, ix, 0, ix + ih); bg.addColorStop(0, '#3d9bf0'); bg.addColorStop(1, '#0a3f8f');
+  g.beginPath(); g.roundRect(ix, ix, iw, ih, cw * 0.05); g.fillStyle = bg; g.fill(); g.save(); g.clip();
+  for (let i = 0; i < 14; i++) { const x = ix + R() * iw, y = ix + R() * ih, rr = cw * (0.05 + R() * 0.12), rg = g.createRadialGradient(x - rr * 0.35, y - rr * 0.35, rr * 0.1, x, y, rr); rg.addColorStop(0, 'rgba(255,255,255,0.75)'); rg.addColorStop(0.6, 'rgba(160,220,255,0.18)'); rg.addColorStop(1, 'rgba(255,255,255,0.45)'); g.fillStyle = rg; g.beginPath(); g.arc(x, y, rr, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = 'rgba(255,255,255,0.28)'; g.beginPath(); g.ellipse(cw / 2, ix, iw * 0.75, ih * 0.3, 0, 0, Math.PI * 2); g.fill(); g.restore();
+  return c;
+}
+function resize() {
+  const r = cv.getBoundingClientRect(); W = r.width; H = r.height; DPR = Math.min(2, devicePixelRatio || 1);
+  for (const c of [cv, tr]) { c.width = W * DPR; c.height = H * DPR; }
+  cx.setTransform(DPR, 0, 0, DPR, 0, 0); tx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gap = Math.max(5, Math.min(16, W * 0.012)); cw = Math.min(100, (W - gap * 8) / 7, (H - gap * 3) / (1.4 * 3)); ch = cw * 1.4; y1 = gap + ch + gap * 1.4;
+  faces = {}; for (let s = 0; s < 4; s++) for (let r = 1; r <= 13; r++) faces[s * 13 + r] = drawFace(s, r); back = drawBack();
+}
+const X = (i) => gap + i * (cw + gap);
+const img = (c) => (c.up ? faces[c.s * 13 + c.r] : back);
+
+// Rules > shared by live game and solver
+const canTab = (c, p) => (!p.length ? c.r === 13 : peek(p).up && red(peek(p)) !== red(c) && peek(p).r === c.r + 1);
+const canFound = (c, p) => (!p.length ? c.r === 1 : peek(p).s === c.s && peek(p).r === c.r - 1);
+function newState(sd) {
+  const R = mulberry(sd), d = [];
+  for (let s = 0; s < 4; s++) for (let r = 1; r <= 13; r++) d.push({ s, r, up: false, x: 0, y: 0, tx: 0, ty: 0 });
+  for (let i = d.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [d[i], d[j]] = [d[j], d[i]]; }
+  const st = { stock: [], waste: [], f: [[], [], [], []], t: [[], [], [], [], [], [], []], all: d.slice() };
+  for (let i = 0; i < 7; i++) for (let j = i; j < 7; j++) st.t[j].push(d.pop());
+  st.t.forEach((p) => (peek(p).up = true)); st.stock = d;
+  return st;
+}
+const pileOf = (st, ref) => (ref.k === 'w' ? st.waste : ref.k === 'f' ? st.f[ref.i] : st.t[ref.i]);
+function doMove(st, m) {
+  if (m.draw) { const c = st.stock.pop(); c.up = true; st.waste.push(c); return 0; }
+  if (m.recycle) { while (st.waste.length) { const c = st.waste.pop(); c.up = false; st.stock.push(c); } return -100; }
+  const src = pileOf(st, m.from), cards = src.splice(src.length - m.n, m.n); pileOf(st, m.to).push(...cards);
+  let pts = m.to.k === 'f' ? 10 : m.from.k === 'w' ? 5 : m.from.k === 'f' ? -15 : 0;
+  if (m.from.k === 't' && src.length && !peek(src).up) { peek(src).up = true; pts += 5; }
+  return pts;
+}
+function nextMove(st) {
+  const w = peek(st.waste), fi = (c) => st.f.findIndex((p) => canFound(c, p));
+  if (w && fi(w) >= 0) return { from: { k: 'w' }, n: 1, to: { k: 'f', i: fi(w) } };
+  for (let j = 0; j < 7; j++) { const c = peek(st.t[j]); if (c && fi(c) >= 0) return { from: { k: 't', i: j }, n: 1, to: { k: 'f', i: fi(c) } }; }
+  for (let j = 0; j < 7; j++) { const p = st.t[j], k = p.findIndex((c) => c.up); if (k > 0) for (let d = 0; d < 7; d++) if (d !== j && canTab(p[k], st.t[d])) return { from: { k: 't', i: j }, n: p.length - k, to: { k: 't', i: d } }; }
+  if (w) for (let d = 0; d < 7; d++) if (canTab(w, st.t[d])) return { from: { k: 'w' }, n: 1, to: { k: 't', i: d } };
+  if (st.stock.length) return { draw: true };
+  if (st.waste.length) return { recycle: true };
+  return null;
+}
+const isWon = (st) => st.f.every((p) => p.length === 13);
+function solves(sd) {
+  const st = newState(sd); let idle = 0;
+  for (let n = 0; n < 4000; n++) { const m = nextMove(st); if (!m) return false; doMove(st, m); idle = m.draw || m.recycle ? idle + 1 : 0; if (idle > 27) return false; if (isWon(st)) return true; }
+  return false;
+}
+const nextSolvable = (from) => { for (let s = from; s < from + 400; s++) if (solves(s)) return s; return from; };
+
+// Game > live state, undo, scoring
+let S, seed = 1, score = 0, t0 = 0, tEnd = 0, undo = [], cascade = null, drag = null, idleDraws = 0, lastTap = { t: 0, c: null };
+function deal(sd) {
+  seed = sd; S = newState(sd); score = 0; t0 = performance.now(); tEnd = 0; undo = []; cascade = null; idleDraws = 0;
+  S.all.forEach((c) => { c.x = X(0); c.y = gap; }); tx.clearRect(0, 0, W, H); $('#msg').style.display = 'none'; sfx('shuffle');
+}
+function snapshot() { return { stock: S.stock.slice(), waste: S.waste.slice(), f: S.f.map((p) => p.slice()), t: S.t.map((p) => p.slice()), up: S.all.map((c) => c.up), score }; }
+function play(m) {
+  undo.push(snapshot()); if (undo.length > 200) undo.shift();
+  score = Math.max(0, score + doMove(S, m)); sfx(m.draw || m.recycle ? 'flick' : 'place');
+  if (isWon(S) && !cascade) { tEnd = performance.now(); fanfare(); setTimeout(startCascade, 700); cascade = { pending: true }; }
+}
+function doUndo() { const u = undo.pop(); if (!u || cascade) return; Object.assign(S, { stock: u.stock, waste: u.waste, f: u.f, t: u.t }); S.all.forEach((c, i) => (c.up = u.up[i])); score = u.score; sfx('flick'); }
+function autoHome(ref) { const p = pileOf(S, ref), c = peek(p); if (!c || !c.up) return false; const i = S.f.findIndex((f) => canFound(c, f)); if (i < 0) return false; play({ from: ref, n: 1, to: { k: 'f', i } }); return true; }
+let autoFinish = false;
+function homeStep() { if (S.waste.length && autoHome({ k: 'w' })) return true; for (let j = 0; j < 7; j++) if (autoHome({ k: 't', i: j })) return true; return false; }
+
+// Layout > targets each frame; cards ease toward them
+function layout() {
+  S.stock.forEach((c, i) => { c.tx = X(0) + Math.floor(i / 8) * 1.5; c.ty = gap - Math.floor(i / 8) * 1.5; });
+  S.waste.forEach((c) => { c.tx = X(1); c.ty = gap; });
+  S.f.forEach((p, i) => p.forEach((c) => { c.tx = X(3 + i); c.ty = gap; }));
+  S.t.forEach((p, i) => {
+    const step = (k) => (p[k - 1].up ? ch * 0.27 : ch * 0.12); let need = 0; for (let k = 1; k < p.length; k++) need += step(k);
+    const avail = H - y1 - ch - gap, k0 = need > avail ? avail / need : 1; let y = y1;
+    p.forEach((c, k) => { if (k) y += step(k) * k0; c.tx = X(i); c.ty = y; });
+  });
+}
+
+// Input > drag runs, double-click home, stock clicks
+const pt = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+cv.addEventListener('pointerdown', (e) => {
+  input(); if (cascade && !cascade.pending) { deal(Math.floor(Math.random() * 1e6)); return; }
+  if (cascade) return;
+  const [px, py] = pt(e), inR = (x, y) => px >= x && px <= x + cw && py >= y && py <= y + ch;
+  if (inR(X(0), gap)) { if (S.stock.length) play({ draw: true }); else if (S.waste.length) play({ recycle: true }); return; }
+  let pick = null;
+  if (S.waste.length && inR(X(1), gap)) pick = { from: { k: 'w' }, idx: S.waste.length - 1 };
+  S.f.forEach((p, i) => { if (p.length && inR(X(3 + i), gap)) pick = { from: { k: 'f', i }, idx: p.length - 1 }; });
+  S.t.forEach((p, i) => { for (let k = p.length - 1; k >= 0; k--) if (inR(p[k].tx, p[k].ty)) { if (p[k].up) pick = { from: { k: 't', i }, idx: k }; break; } });
+  if (!pick) return;
+  const cards = pileOf(S, pick.from).slice(pick.idx);
+  drag = { ...pick, cards, offs: cards.map((c) => [c.x - px, c.y - py]), sx: px, sy: py, moved: false };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return; const [px, py] = pt(e);
+  if (Math.hypot(px - drag.sx, py - drag.sy) > 5) drag.moved = true;
+  if (drag.moved) drag.cards.forEach((c, k) => { c.x = px + drag.offs[k][0]; c.y = py + drag.offs[k][1]; });
+});
+cv.addEventListener('pointerup', () => {
+  if (!drag) return; const d = drag; drag = null; const c = d.cards[0];
+  if (!d.moved) { const now = performance.now(); if (lastTap.c === c && now - lastTap.t < 400 && d.cards.length === 1) { autoHome(d.from); lastTap.c = null; } else lastTap = { t: now, c }; return; }
+  const ov = (x, y, h) => Math.max(0, Math.min(c.x + cw, x + cw) - Math.max(c.x, x)) * Math.max(0, Math.min(c.y + ch, y + h) - Math.max(c.y, y));
+  let best = null, bestA = 0;
+  if (d.cards.length === 1) S.f.forEach((p, i) => { const a = ov(X(3 + i), gap, ch); if (a > bestA && canFound(c, p)) { best = { k: 'f', i }; bestA = a; } });
+  S.t.forEach((p, i) => { if (d.from.k === 't' && d.from.i === i) return; const ty = p.length ? peek(p).ty : y1, a = ov(X(i), ty, ch); if (a > bestA && canTab(c, p)) { best = { k: 't', i }; bestA = a; } });
+  if (best) play({ from: d.from, n: d.cards.length, to: best });
+});
+$('#deal').onclick = () => { input(); deal(Math.floor(Math.random() * 1e6)); };
+$('#undo').onclick = () => { input(); doUndo(); };
+$('#auto').onclick = () => { input(); autoFinish = true; };
+
+// Cascade > bouncing cards stamped onto a never-cleared canvas
+function startCascade() { cascade = { flying: [], next: 0, launched: 0, doneT: 0 }; tx.clearRect(0, 0, W, H); }
+function stepCascade(dt, now) {
+  const C = cascade;
+  if (C.launched < 52 && C.flying.length < 3 && (now > C.next || !C.flying.length)) {
+    const i = C.launched % 4, c = S.f[i].pop();
+    if (c) C.flying.push({ c, x: X(3 + i), y: gap, vx: (Math.random() < 0.6 ? -1 : 1) * (160 + Math.random() * 320), vy: -Math.random() * 380 });
+    C.launched++; C.next = now + 1100;
+  }
+  for (const f of C.flying) {
+    f.vy += 1600 * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+    if (f.y > H - ch) { f.y = H - ch; f.vy = -f.vy * 0.74; }
+    tx.drawImage(faces[f.c.s * 13 + f.c.r], f.x, f.y, cw, ch);
+  }
+  C.flying = C.flying.filter((f) => f.x > -cw && f.x < W);
+  if (C.launched >= 52 && !C.flying.length) { if (!C.doneT) { C.doneT = now; $('#msg').style.display = 'block'; } else if (now - lastInput > 8000 && now - C.doneT > 2500) deal(nextSolvable(seed + 1)); }
+}
+
+// Audio > card flicks, places, fanfare
+let ac = null;
+addEventListener('pointerdown', () => { ac ??= new AudioContext(); }, { capture: true });
+function noise(d, f, type, vol) { if (!ac) return; const t = ac.currentTime, b = ac.createBuffer(1, Math.ceil(ac.sampleRate * d), ac.sampleRate), ch0 = b.getChannelData(0); for (let i = 0; i < ch0.length; i++) ch0[i] = (Math.random() * 2 - 1) * (1 - i / ch0.length) ** 2; const s = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = b; fl.type = type; fl.frequency.value = f; g.gain.value = vol; s.connect(fl).connect(g).connect(ac.destination); s.start(t); }
+function sfx(k) { if (k === 'flick') noise(0.05, 3200, 'bandpass', 0.25); else if (k === 'place') noise(0.03, 1400, 'lowpass', 0.4); else if (k === 'shuffle') for (let i = 0; i < 8; i++) setTimeout(() => noise(0.04, 2600, 'bandpass', 0.15), i * 45); }
+function fanfare() { if (!ac) return; [523, 659, 784, 1047, 784, 1047].forEach((f, i) => { const t = ac.currentTime + i * 0.12, o = ac.createOscillator(), g = ac.createGain(); o.type = 'triangle'; o.frequency.value = f; g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3); o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.32); }); }
+
+// Attract > solver plays a winnable deal when idle
+let lastInput = -1e9, nextAuto = 0;
+function input() { lastInput = performance.now(); }
+
+function felt() {
+  const g = cx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.4, Math.max(W, H) * 0.75); g.addColorStop(0, '#2aa04a'); g.addColorStop(1, '#0b5a22');
+  cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+  cx.strokeStyle = 'rgba(255,255,255,0.28)'; cx.lineWidth = 1.5;
+  const slot = (x, y) => { cx.beginPath(); cx.roundRect(x + 1, y + 1, cw - 2, ch - 2, cw * 0.07); cx.stroke(); };
+  slot(X(0), gap); for (let i = 0; i < 4; i++) slot(X(3 + i), gap); for (let i = 0; i < 7; i++) slot(X(i), y1);
+  if (!S.stock.length) { cx.beginPath(); cx.arc(X(0) + cw / 2, gap + ch / 2, cw * 0.22, 0, Math.PI * 2); cx.strokeStyle = 'rgba(120,255,140,0.6)'; cx.lineWidth = cw * 0.06; cx.stroke(); }
+}
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  if (!cascade && !drag && (autoFinish || now - lastInput > 8000) && now > nextAuto) {
+    if (autoFinish) { if (!homeStep()) autoFinish = false; nextAuto = now + 90; }
+    else { const m = nextMove(S); idleDraws = m && (m.draw || m.recycle) ? idleDraws + 1 : 0; if (!m || idleDraws > 27) deal(nextSolvable(seed + 1)); else play(m); nextAuto = now + (m && m.draw ? 70 : 140); }
+  }
+  layout(); felt();
+  const k = Math.min(1, dt * 16), fly = [], dragged = drag && drag.moved ? drag.cards : [];
+  const order = [...S.stock, ...S.waste, ...S.f.flat(), ...S.t.flat()];
+  for (const c of order) {
+    if (dragged.includes(c)) continue;
+    c.x += (c.tx - c.x) * k; c.y += (c.ty - c.y) * k;
+    if (Math.abs(c.tx - c.x) + Math.abs(c.ty - c.y) > 3) fly.push(c); else cx.drawImage(img(c), c.x, c.y, cw, ch);
+  }
+  cx.save(); cx.shadowColor = 'rgba(0,0,0,0.35)'; cx.shadowBlur = 10; cx.shadowOffsetY = 4;
+  for (const c of [...fly, ...dragged]) cx.drawImage(img(c), c.x, c.y, cw, ch);
+  cx.restore();
+  if (cascade && !cascade.pending) stepCascade(dt, now);
+  $('#sDeal').textContent = `Deal #${seed}`; $('#sScore').textContent = `Score: ${score}`; $('#sTime').textContent = `Time: ${Math.floor(((tEnd || now) - t0) / 1000)}`;
+  requestAnimationFrame(frame);
+}
+
+function finishNow() { S.f = [0, 1, 2, 3].map((s) => S.all.filter((c) => c.s === s).sort((a, b) => a.r - b.r)); S.all.forEach((c) => (c.up = true)); S.stock = []; S.waste = []; S.t = S.t.map(() => []); tEnd = performance.now(); fanfare(); cascade = { pending: true }; setTimeout(startCascade, 500); }
+resize(); addEventListener('resize', () => { resize(); if (cascade) tx.clearRect(0, 0, W, H); });
+deal(nextSolvable(1));
+if (CAPTURE) setTimeout(finishNow, 300);
+requestAnimationFrame(frame);
+
+window.__solitaire = { deal, cascade: finishNow, solves, next: () => nextMove(S), cards: () => S.t.map((p) => p.map((c) => ({ r: c.r, s: c.s, up: c.up, x: c.tx, y: c.ty }))), step: () => { const m = nextMove(S); if (m) play(m); return m; }, state: () => ({ seed, score, found: S.f.map((p) => p.length), stock: S.stock.length, waste: S.waste.length, tableau: S.t.map((p) => p.length), cascading: !!cascade }) };
+</script>
+</body>
+</html>

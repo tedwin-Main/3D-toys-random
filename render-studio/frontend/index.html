@@ -24,13 +24,16 @@
   /* Home > category tabs, grouped rows */
   #filters { max-width: 1240px; margin: 0 auto; padding: 0 24px 24px; display: grid; gap: 10px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .row .g { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); width: 92px; flex: none; }
   #filters button { border: 1px solid var(--line); background: var(--card); padding: 7px 13px; border-radius: 999px; cursor: pointer; font-size: 13.5px; font-weight: 600; }
   #filters button:hover { border-color: #3a4052; }
   #filters button.on { background: var(--accent); border-color: var(--accent); color: #1a1408; }
   #filters button .n { opacity: 0.6; font-weight: 500; margin-left: 4px; }
   #filters button.zero { opacity: 0.45; }
-  @media (max-width: 560px) { .row .g { width: 100%; } }
+  .row.sub { padding: 10px 0 0; border-top: 1px dashed var(--line); }
+  .row.sub.types { border-top: 0; padding-top: 0; }
+  .row.sub button { padding: 5px 11px; font-size: 12.5px; }
+  .row[hidden] { display: none; }
+  @media (max-width: 560px) { .row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -24px; padding-left: 24px; padding-right: 24px; } #filters button { flex: none; } }
   #empty { max-width: 1240px; margin: 0 auto 32px; padding: 48px 24px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 18px; }
   #empty[hidden], .card[hidden], #menu button[hidden] { display: none; }
   /* Home > grid cards */
@@ -132,13 +135,29 @@ const $ = (id) => document.getElementById(id);
 const stage = $('stage'), nav = $('nav'), menu = $('menu'), tab = $('tab'), info = $('info');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const ICON = { model: '🧊', video: '🎬', image: '🖼️', page: '✨', link: '🧸' };
-const GROUPS = [['live', 'Live demos'], ['rendered', 'Rendered']];
+const CHIP = { scenes: 'Scenes', generative: 'Generative', apps: 'Apps', models: 'Models' };
 const HINT = { models: '.glb / .gltf', 'blender-renders': '.mp4 / .png', 'remotion-videos': '.mp4', videos: '.mp4 / .webm / .mov', images: '.png / .jpg / .webp' };
 const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
 
-let CATS = [], ASSETS = [], list = [], filter = 'all', current = null, sig = '';
-const label = (id) => CATS.find((c) => c.id === id)?.label ?? id;
-const match = (a, f) => f === 'all' ? a.kind !== 'link' : a.category === f;
+let CATS = [], TABS = [], ASSETS = [], list = [], filter = 'all', current = null, sig = '';
+const catName = (id) => CATS.find((x) => x.id === id)?.label ?? id;
+const styleName = (id) => CATS.find((x) => x.id === 'aero')?.subs?.find((x) => x.id === id)?.label ?? id;
+const tabOf = (cat) => TABS.find((t) => t.cats.includes(cat));
+const famById = (t, id) => t?.families?.find((x) => x.id === id);
+const famOf = (t, c) => famById(t, c) ?? t?.families?.find((x) => x.styles.includes(c));
+const label = (f) => { const [t, c] = f.split(':'), tab = TABS.find((x) => x.id === t); return !c ? tab?.label ?? f : famById(tab, c)?.label ?? (tab?.families ? styleName(c) : CHIP[c] ?? catName(c)); };
+// filter = 'all' | <tab> | <tab>:<chip>; chip = category id, or aero era / style id
+const match = (a, f) => {
+  if (f === 'all') return a.kind !== 'link';
+  const [t, c] = f.split(':'), tab = TABS.find((x) => x.id === t);
+  if (!tab?.cats.includes(a.category)) return false;
+  if (!c) return true;
+  const fam = famById(tab, c);
+  return fam ? fam.styles.includes(a.style) : tab.families ? a.style === c : a.category === c;
+};
+const valid = (f) => { const [t, c] = f.split(':'), tab = TABS.find((x) => x.id === t); return !!tab && (!c || tab.cats.includes(c) || !!famOf(tab, c)); };
+// old links: bare category or <category>:<style> to tab form
+const normalize = (f) => { if (f === 'all' || valid(f)) return f; const [c, s] = f.split(':'), tab = tabOf(c); if (!tab) return 'all'; const n = tab.families && s ? `${tab.id}:${s}` : tab.cats.length > 1 ? `${tab.id}:${c}` : tab.id; return valid(n) ? n : tab.id; };
 const icon = (a) => a.emoji ?? ICON[a.kind];
 
 // Studio > screen load: fetch asset list, rebuild only when files changed
@@ -148,6 +167,7 @@ async function load() {
   if (next === sig) return;
   sig = next;
   CATS = data.categories;
+  TABS = data.tabs;
   ASSETS = data.assets;
   build();
   route();
@@ -165,15 +185,24 @@ function tabBtn(id, text) {
 
 function build() {
   const live = ASSETS.filter((a) => a.kind === 'page').length;
-  $('count').textContent = `${live} live demos, ${ASSETS.filter((a) => !['page', 'link'].includes(a.kind)).length} rendered files`;
-  // Home > Tabs: All + one row per group (live / rendered / links); hash #c=<id> so Back restores tab
-  const rows = GROUPS.map(([g, text]) => {
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.innerHTML = `<span class="g">${text}</span>`;
-    if (g === 'live') row.append(tabBtn('all', 'All'));
-    row.append(...CATS.filter((c) => c.group === g).map((c) => tabBtn(c.id, c.label)));
-    return row;
+  $('count').textContent = `${live} live · ${ASSETS.filter((a) => !['page', 'link'].includes(a.kind)).length} rendered`;
+  // Home > Tabs: one row (All + TABS); hash #c=<tab>[:<chip>] so Back restores tab
+  const mk = (cls, parent, fam) => { const r = Object.assign(document.createElement('div'), { className: `row ${cls}` }); if (parent) r.dataset.parent = parent; if (fam) r.dataset.fam = fam; return r; };
+  const top = mk('');
+  top.append(tabBtn('all', 'All'), ...TABS.map((t) => tabBtn(t.id, t.label)));
+  const rows = [top];
+  // Home > Chip rows: shown only while parent tab active; aero gets era row, then type row per era
+  TABS.forEach((t) => {
+    const chips = t.families ? t.families.map((f) => [f.id, f.label]) : t.cats.length > 1 ? t.cats.map((c) => [c, CHIP[c] ?? catName(c)]) : null;
+    if (!chips) return;
+    const r = mk('sub', t.id);
+    r.append(tabBtn(t.id, 'All'), ...chips.map(([id, l]) => tabBtn(`${t.id}:${id}`, l)));
+    rows.push(r);
+    t.families?.filter((f) => f.styles.length > 1).forEach((f) => {
+      const r2 = mk('sub types', t.id, f.id);
+      r2.append(tabBtn(`${t.id}:${f.id}`, `All ${f.label}`), ...f.styles.map((s) => tabBtn(`${t.id}:${s}`, styleName(s))));
+      rows.push(r2);
+    });
   });
   $('filters').replaceChildren(...rows);
   // Home > Grid: cards; live preview mounts on hover only so at most one WebGL context / decoder runs
@@ -200,7 +229,7 @@ function card(a) {
     : '';
   const tags = a.kind === 'page' ? a.tags.slice(0, 4)
     : a.kind === 'link' ? ['3D Toy Box', 'needs :5055']
-    : [label(a.category), fmtSize(a.size), new Date(a.mtime).toLocaleDateString()];
+    : [catName(a.category), fmtSize(a.size), new Date(a.mtime).toLocaleDateString()];
   el.innerHTML = `<div class="preview"><span class="num"></span><span class="fmt">${a.kind === 'link' ? '↗ toy box' : esc(a.ext)}</span>${icon(a)}${still}</div>
     <div class="body"><h2 title="${esc(a.title)}">${esc(a.title)}</h2>${a.desc ? `<p class="desc">${esc(a.desc)}</p>` : ''}
     ${a.prompt ? `<button class="pbtn" type="button">Prompt ▾</button><pre class="ptext">${esc(a.prompt)}</pre>` : ''}
@@ -231,9 +260,12 @@ function card(a) {
 }
 
 function setFilter(f) {
-  filter = f === 'all' || CATS.some((c) => c.id === f) ? f : 'all';
+  filter = normalize(f);
   list = ASSETS.filter((a) => match(a, filter) && a.kind !== 'link');
-  $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
+  const [ft, fc] = filter.split(':'), tab = TABS.find((x) => x.id === ft), fam = fc && famOf(tab, fc);
+  // Home > Chips: active = exact, parent tab on top row, era chip while one of its types is active
+  $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter || (!b.closest('.sub') && b.dataset.f === ft) || (!!fam && !b.closest('.types') && b.dataset.f === `${ft}:${fam.id}`)));
+  $('filters').querySelectorAll('.sub').forEach((r) => (r.hidden = r.dataset.parent !== ft || (!!r.dataset.fam && r.dataset.fam !== fam?.id)));
   let n = 0;
   $('grid').querySelectorAll('.card').forEach((el) => {
     const a = ASSETS.find((x) => x.id === el.dataset.id);
@@ -245,9 +277,10 @@ function setFilter(f) {
   // Home > Empty state: tell user which folder to fill
   const shown = ASSETS.filter((a) => match(a, filter)).length;
   $('empty').hidden = shown > 0;
-  $('empty').innerHTML = HINT[filter]
-    ? `No ${esc(label(filter))} yet. Drop ${HINT[filter]} files into <code>media/${esc(filter)}/</code>.`
-    : `Nothing here yet. Add single-file demos to <code>frontend/demos/</code> with <code>&lt;meta name="category" content="${esc(filter)}"&gt;</code>.`;
+  const cat = tab?.cats.includes(fc) ? fc : tab?.cats[0];
+  $('empty').innerHTML = HINT[cat]
+    ? `No ${esc(label(filter))} yet. Drop ${HINT[cat]} files into <code>media/${esc(cat)}/</code>.`
+    : `Nothing here yet. Add single-file demos to <code>frontend/demos/</code> with <code>&lt;meta name="category" content="${esc(cat ?? 'shaders')}"&gt;</code>${tab?.families && fc && !famById(tab, fc) ? ` and <code>&lt;meta name="style" content="${esc(fc)}"&gt;</code>` : ''}.`;
 }
 
 // Viewer > Stage: swap element by asset kind
@@ -294,9 +327,9 @@ function route() {
   const h = location.hash.slice(1);
   menu.classList.remove('open');
   const id = h.startsWith('a=') ? decodeURIComponent(h.slice(2)) : null;
-  if (!id) setFilter(h.startsWith('c=') ? h.slice(2) : 'all');
-  // deep link outside active tab: widen to its own category so prev/next contain it
-  else if (!list.some((a) => a.id === id)) setFilter(ASSETS.find((a) => a.id === id)?.category ?? 'all');
+  if (!id) { setFilter(h.startsWith('c=') ? h.slice(2) : 'all'); if (h.startsWith('c=') && homeHash() !== h) history.replaceState(null, '', `#${homeHash()}`); }
+  // deep link outside active tab: widen to its own tab so prev/next contain it
+  else if (!list.some((a) => a.id === id)) setFilter(tabOf(ASSETS.find((a) => a.id === id)?.category)?.id ?? 'all');
   const i = list.findIndex((a) => a.id === id);
   if (i < 0) {
     current = null;

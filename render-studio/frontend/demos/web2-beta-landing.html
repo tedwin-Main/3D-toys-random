@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Beta Landing Page</title>
+<meta name="category" content="aero" />
+<meta name="style" content="vectorheart" />
+<meta name="order" content="5" />
+<meta name="capture" content="3800" />
+<meta name="tags" content="Web 2.0, glossy UI, CSS reflections, yellow fade, 2006 era" />
+<meta name="description" content="A pitch-perfect 2006 startup landing page for a made-up social site called 'bubblr'. It has a glossy header with a reflected logo, an orange BETA starburst, rounded tabs and a gel sign-up button. There is a live AJAX feed that slides in updates with the classic yellow-fade highlight, a tag cloud, a ticking counter and a row of tiny 80x15 pixel badges. Hard because each gloss (header, tabs, buttons, badges, reflection) is a separate CSS gradient trick, all from one stylesheet, and it still has to work at phone width." />
+<meta name="prompt" content="Build a 2006 Web 2.0 startup landing page in one HTML file for a made-up beta product, with no images. Glossy gradient header with a reflected rounded logo, an orange BETA starburst, rounded tabs, a big gel sign-up button with a working inline form, a live AJAX-style feed with spinner and yellow-fade highlights, a tag cloud, glossy round feature icons, a ticking signup counter and 80x15 pixel badges. Add stripey backgrounds and an attract mode." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/web2-beta-landing.html
+ * PURPOSE: 2006 Web 2.0 landing page: glossy header, reflected logo, BETA starburst, gel signup, AJAX feed with yellow fade, tag cloud, pixel badges
+ * UI: Render Studio > Frutiger Aero > Beta Landing Page
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__web2 (signup, pushFeed)
+ */
+:root { --round: "Arial Rounded MT Bold", "Helvetica Rounded", "Nunito", "Trebuchet MS", sans-serif; --body: "Lucida Grande", "Trebuchet MS", Verdana, sans-serif; --blue: #2a8bd8; --lime: #73c41d; }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font: 13px/1.5 var(--body); color: #333; background: repeating-linear-gradient(135deg, #eaf5fc 0 12px, #f6fbfe 12px 24px); min-height: 100vh; overflow-x: hidden; }
+a { color: var(--blue); text-decoration: none; }
+.wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+
+/* Header > glossy band, reflected logo, starburst */
+header { background: linear-gradient(#5fb8f5, #2b8ad9 50%, #1d76c4 51%, #3d9be2); border-bottom: 3px solid #145d9c; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 3px 8px rgba(0, 40, 80, 0.25); }
+.hrow { display: flex; align-items: flex-end; justify-content: space-between; padding-top: 16px; gap: 14px; position: relative; }
+.logo { position: relative; font: 54px/1 var(--round); letter-spacing: -2px; padding-bottom: 6px; }
+.logo span { background: linear-gradient(#fff, #e3f4ff 50%, #b6e0ff 51%, #fff); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 1px rgba(0, 40, 90, 0.5)); }
+.logo i { font-style: normal; background: linear-gradient(#d6ff9e, #8fd43a 50%, #6cb51e 51%, #b3ef6a); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 2px 1px rgba(0, 40, 90, 0.5)); }
+/* reflection: flipped copy, masked fade */
+.logo::after { content: 'bubblr'; position: absolute; left: 0; top: 100%; transform: scaleY(-1); transform-origin: top; color: #fff; opacity: 0.22; -webkit-mask-image: linear-gradient(transparent 55%, #000); mask-image: linear-gradient(transparent 55%, #000); pointer-events: none; }
+.burst { position: absolute; left: 228px; top: 4px; width: 74px; height: 74px; display: grid; place-items: center; transform: rotate(-14deg); animation: wob 3s ease-in-out infinite; }
+.burst::before { content: ''; position: absolute; inset: 0; clip-path: polygon(50% 0, 59% 14%, 75% 7%, 77% 24%, 93% 25%, 86% 40%, 100% 50%, 86% 60%, 93% 75%, 77% 76%, 75% 93%, 59% 86%, 50% 100%, 41% 86%, 25% 93%, 23% 76%, 7% 75%, 14% 60%, 0 50%, 14% 40%, 7% 25%, 23% 24%, 25% 7%, 41% 14%); background: radial-gradient(circle at 40% 35%, #ffe08a, #ff9a1a 55%, #e25d00); }
+.burst b { position: relative; font: 17px var(--round); color: #fff; text-shadow: 0 1px 1px #a33f00; }
+@keyframes wob { 50% { transform: rotate(-6deg) scale(1.06); } }
+nav { display: flex; gap: 4px; }
+nav a { padding: 8px 16px 7px; border-radius: 9px 9px 0 0; font: 14px var(--round); color: #fff; text-shadow: 0 -1px 0 rgba(0, 40, 90, 0.5); background: linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0) 51%, rgba(255, 255, 255, 0.12)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+nav a.on { background: #fff; color: var(--blue); text-shadow: none; box-shadow: 0 -2px 4px rgba(0, 40, 80, 0.2); }
+nav a:hover:not(.on) { background: linear-gradient(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.25) 50%, rgba(255, 255, 255, 0.1) 51%, rgba(255, 255, 255, 0.3)); }
+
+/* Hero > tagline, gel button, product shot with floor reflection */
+.hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 30px; padding: 34px 0 10px; align-items: center; }
+h1 { font: 38px/1.08 var(--round); color: #1a5f99; margin: 0 0 12px; letter-spacing: -1px; text-shadow: 0 1px 0 #fff; }
+h1 em { font-style: normal; color: var(--lime); }
+.lead { font-size: 15px; color: #4a5a68; margin: 0 0 20px; }
+form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input[type=email] { flex: 1; min-width: 170px; height: 42px; border-radius: 21px; border: 2px solid #9cc9ea; padding: 0 18px; font: 15px var(--body); background: linear-gradient(#f2f8fc, #fff 40%); outline: none; box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.08); }
+input[type=email]:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(42, 139, 216, 0.2); }
+.gel { position: relative; height: 46px; padding: 0 26px; border: 0; border-radius: 23px; font: 19px var(--round); color: #fff; text-shadow: 0 -1px 0 rgba(30, 80, 0, 0.6); cursor: pointer; background: linear-gradient(#b6ef6e, #79cc22 50%, #5cad0d 51%, #95e03d); box-shadow: inset 0 0 0 1px rgba(40, 90, 0, 0.6), inset 0 -3px 6px rgba(220, 255, 160, 0.7), 0 3px 6px rgba(40, 90, 0, 0.35); }
+.gel::before { content: ''; position: absolute; left: 10px; right: 10px; top: 2px; height: 46%; border-radius: 20px 20px 12px 12px; background: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.15)); }
+.gel:hover { filter: brightness(1.08) saturate(1.1); }
+.gel:active { transform: translateY(1px); }
+.gel.pulse { animation: gpulse 1.4s ease-in-out infinite; }
+@keyframes gpulse { 50% { box-shadow: inset 0 0 0 1px rgba(40, 90, 0, 0.6), inset 0 -3px 6px rgba(220, 255, 160, 0.7), 0 0 18px rgba(130, 220, 40, 0.8); } }
+.small { font-size: 11px; color: #789; margin-top: 8px; }
+.shot { position: relative; }
+.screen { border-radius: 10px; background: #fff; border: 1px solid #b9d3e6; box-shadow: 0 10px 26px rgba(20, 70, 120, 0.25); overflow: hidden; }
+.screen .chrome { height: 22px; background: linear-gradient(#f0f4f7, #d5dde4); border-bottom: 1px solid #b8c4ce; display: flex; align-items: center; gap: 5px; padding: 0 8px; }
+.screen .chrome i { width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 50% 30%, #fff, #9fb0bf); }
+.screen .chrome span { flex: 1; height: 13px; margin-left: 8px; border-radius: 7px; background: #fff; border: 1px solid #c6d2dc; }
+.reflect { height: 70px; margin-top: 2px; transform: scaleY(-1); opacity: 0.25; -webkit-mask-image: linear-gradient(transparent 20%, #000); mask-image: linear-gradient(transparent 20%, #000); overflow: hidden; border-radius: 10px; pointer-events: none; }
+
+/* Feed > AJAX list, spinner, yellow fade */
+.feed { list-style: none; margin: 0; padding: 8px 10px; height: 214px; overflow: hidden; }
+.feed li { display: flex; gap: 10px; align-items: center; padding: 7px 6px; border-bottom: 1px dashed #d6e4ee; animation: slide 0.4s ease-out, yfade 2.4s ease-out; }
+@keyframes slide { from { opacity: 0; transform: translateY(-14px); } }
+@keyframes yfade { 0%, 30% { background: #fff6a6; } 100% { background: transparent; } }
+.av { width: 30px; height: 30px; border-radius: 6px; flex: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); position: relative; overflow: hidden; }
+.av::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 50%; background: linear-gradient(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.1)); }
+.feed b { color: var(--blue); font-weight: 700; }
+.feed small { color: #9aa; display: block; font-size: 10.5px; }
+.loading { display: flex; gap: 8px; align-items: center; padding: 6px 12px; color: #889; font-size: 11px; border-top: 1px solid #e3ecf2; background: #f7fbfe; }
+.spin { width: 16px; height: 16px; border-radius: 50%; background: conic-gradient(#2a8bd8, rgba(42, 139, 216, 0) 75%); -webkit-mask: radial-gradient(circle, transparent 4px, #000 5px); mask: radial-gradient(circle, transparent 4px, #000 5px); animation: rot 0.8s steps(12) infinite; }
+@keyframes rot { to { transform: rotate(360deg); } }
+
+/* Features > glossy round icons */
+.feats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 26px 0; }
+.card { background: #fff; border: 1px solid #cfe2ef; border-radius: 12px; padding: 18px; box-shadow: 0 2px 0 #e1eef7; display: flex; gap: 14px; }
+.orb { width: 54px; height: 54px; border-radius: 50%; flex: none; position: relative; display: grid; place-items: center; color: #fff; font: 24px var(--round); text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.3); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25), inset 0 -4px 8px rgba(255, 255, 255, 0.5), 0 3px 5px rgba(0, 0, 0, 0.2); }
+.orb::before { content: ''; position: absolute; left: 8px; right: 8px; top: 3px; height: 45%; border-radius: 50%; background: linear-gradient(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.1)); }
+.o1 { background: linear-gradient(#ffc56b, #ff8a00 50%, #ef7400 51%, #ffb341); }
+.o2 { background: linear-gradient(#9fd6ff, #2a8bd8 50%, #1a74c2 51%, #6fc0ff); }
+.o3 { background: linear-gradient(#ff9fd1, #e8338e 50%, #d21c78 51%, #ff70b6); }
+.card h3 { margin: 0 0 4px; font: 16px var(--round); color: #1a5f99; }
+.card p { margin: 0; color: #5a6b78; font-size: 12px; }
+
+/* Tag cloud + stats */
+.lower { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+.box { background: #fff; border: 1px solid #cfe2ef; border-radius: 12px; padding: 14px 18px; }
+.box h4 { margin: 0 0 8px; font: 15px var(--round); color: #1a5f99; }
+.cloud { line-height: 1.9; text-align: center; }
+.cloud a { margin: 0 5px; display: inline-block; transition: transform 0.15s; font-family: var(--round); }
+.cloud a:hover, .cloud a.hot { transform: scale(1.15); background: #fff6a6; border-radius: 4px; }
+.count { font: 34px var(--round); color: var(--lime); text-shadow: 0 1px 0 #2d6b00, 0 2px 4px rgba(0, 0, 0, 0.15); letter-spacing: -1px; }
+
+/* Footer > pixel badges */
+footer { margin: 26px 0 0; padding: 18px 0 30px; border-top: 1px solid #c7dcea; text-align: center; color: #89a; font-size: 11px; }
+.badges { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+.bd { display: inline-flex; height: 15px; font: 9px/15px Verdana, sans-serif; border: 1px solid #555; image-rendering: pixelated; }
+.bd span { padding: 0 3px; color: #fff; }
+.bd span:last-child { color: #222; background: #fff; flex: 1; }
+.thanks { margin-top: 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid #e5d36a; background: #fff6a6; display: none; animation: yfade 3s ease-out forwards; }
+.thanks.on { display: block; }
+
+@media (max-width: 760px) {
+  .hrow { flex-direction: column; align-items: flex-start; }
+  .logo { font-size: 44px; }
+  .burst { left: 186px; top: 6px; width: 62px; height: 62px; }
+  .burst b { font-size: 14px; }
+  nav { overflow-x: auto; max-width: 100%; }
+  nav a { padding: 7px 11px 6px; font-size: 13px; }
+  .hero, .lower { grid-template-columns: 1fr; }
+  .feats { grid-template-columns: 1fr; }
+  h1 { font-size: 30px; }
+  .reflect { display: none; }
+}
+</style>
+</head>
+<body>
+<header><div class="wrap hrow">
+  <div class="logo"><span>bubbl</span><i>r</i></div>
+  <div class="burst"><b>BETA</b></div>
+  <nav><a class="on" href="#">Home</a><a href="#">Tour</a><a href="#">Blog</a><a href="#">Pricing</a><a href="#">Log in</a></nav>
+</div></header>
+
+<main class="wrap">
+  <section class="hero">
+    <div>
+      <h1>Share your <em>bubbles</em> with the whole wide web.</h1>
+      <p class="lead">bubblr is the easiest way to post tiny updates, tag them, and watch your friends' bubbles float by in real time. No page reloads. Ever.</p>
+      <form id="f"><input type="email" id="em" placeholder="you@example.com" autocomplete="off" /><button class="gel pulse" id="go">Sign up free!</button></form>
+      <div class="small">Invite-only beta · 100% free · No credit card</div>
+      <div class="thanks" id="thanks"></div>
+    </div>
+    <div class="shot">
+      <div class="screen" id="screen"><div class="chrome"><i></i><i></i><i></i><span></span></div><ul class="feed" id="feed"></ul><div class="loading"><div class="spin"></div>Checking for new bubbles…</div></div>
+      <div class="reflect" id="reflect"></div>
+    </div>
+  </section>
+
+  <section class="feats">
+    <div class="card"><div class="orb o1">≈</div><div><h3>Subscribe anywhere</h3><p>Every page has a feed. Pipe your friends into any reader you like.</p></div></div>
+    <div class="card"><div class="orb o2">#</div><div><h3>Tag everything</h3><p>Folksonomy beats folders. Tag a bubble and it joins the cloud.</p></div></div>
+    <div class="card"><div class="orb o3">★</div><div><h3>Mash it up</h3><p>Open API, widgets for your blog, and drag-and-drop everything.</p></div></div>
+  </section>
+
+  <section class="lower">
+    <div class="box"><h4>Popular tags</h4><div class="cloud" id="cloud"></div></div>
+    <div class="box"><h4>Bubbles shared so far</h4><div class="count" id="count">1,284,903</div><div class="small">and counting, live from our servers</div></div>
+  </section>
+
+  <footer>
+    <div class="badges">
+      <span class="bd"><span style="background:#ff6600">RSS</span><span>FEED</span></span>
+      <span class="bd"><span style="background:#2a8bd8">XHTML</span><span>1.0</span></span>
+      <span class="bd"><span style="background:#73c41d">CSS</span><span>VALID</span></span>
+      <span class="bd"><span style="background:#e8338e">AJAX</span><span>POWERED</span></span>
+      <span class="bd"><span style="background:#555">WEB</span><span>2.0</span></span>
+      <span class="bd"><span style="background:#8a5cd6">MADE</span><span>W/ LOVE</span></span>
+    </div>
+    © 2006 bubblr (a made-up company) · About · Blog · API · Jobs · Terms · Privacy
+  </footer>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+// Feed > fake friends posting, newest slides in with a yellow fade
+const PEOPLE = [['mandy', '#ff9ac9'], ['joel', '#7fc8ff'], ['kat', '#b6ef6e'], ['dev_ed', '#ffc56b'], ['lisa_b', '#c9a6ff'], ['tom', '#7fe0d0']];
+const POSTS = ['just tagged 14 photos #sunset', 'is in love with rounded corners', 'added a widget to my blog!', 'found the perfect gradient', 'invites left, anyone?', 'is drinking a latte and refreshing nothing because AJAX', 'made a mashup of maps + bubbles', 'reflections on everything', 'loves the new tag cloud', 'subscribed to 300 feeds, help'];
+const feed = $('#feed');
+let ago = 0;
+function pushFeed(text) {
+  const [n, c] = PEOPLE[Math.floor(Math.random() * PEOPLE.length)];
+  const li = document.createElement('li');
+  li.innerHTML = `<div class="av" style="background:${c}"></div><div><b>${n}</b> ${text ?? POSTS[Math.floor(Math.random() * POSTS.length)]}<small>less than a minute ago</small></div>`;
+  feed.prepend(li);
+  while (feed.children.length > 6) feed.lastChild.remove();
+  mirror();
+}
+// reflection under the product shot is a live copy of the screen
+function mirror() { const r = $('#reflect'), c = $('#screen').cloneNode(true); c.removeAttribute('id'); c.querySelector('#feed').removeAttribute('id'); r.replaceChildren(c); }
+for (let i = 0; i < 5; i++) pushFeed();
+
+// Tag cloud > sizes by weight, colours cycle through the palette
+const TAGS = [['ajax', 5], ['beta', 4], ['blog', 3], ['bubbles', 5], ['design', 3], ['folksonomy', 2], ['friends', 4], ['gradient', 3], ['mashup', 4], ['music', 2], ['photos', 4], ['rss', 3], ['social', 5], ['tags', 2], ['travel', 2], ['web2.0', 5], ['widgets', 3], ['wiki', 2]];
+const COLS = ['#2a8bd8', '#73c41d', '#ff8a00', '#e8338e', '#1a5f99'];
+$('#cloud').innerHTML = TAGS.map(([t, w], i) => `<a href="#" style="font-size:${11 + w * 4}px;color:${COLS[i % COLS.length]}">${t}</a>`).join(' ');
+$('#cloud').onclick = (e) => { e.preventDefault(); const a = e.target.closest('a'); if (a) pushFeed(`is browsing #${a.textContent}`); };
+
+// Counter > ticks upward like a live stat
+let count = 1284903;
+const fmt = (n) => n.toLocaleString('en-US');
+
+// Signup > inline form, fake waitlist position
+let spot = 10233;
+function signup(email) {
+  const v = email ?? $('#em').value.trim();
+  const t = $('#thanks');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { t.textContent = 'Oops! That email looks a little off. Try again?'; }
+  else { spot += 1 + Math.floor(Math.random() * 4); t.innerHTML = `<b>Woohoo!</b> ${v.replace(/[<>&]/g, '')} is #${fmt(spot)} on the beta waitlist. Check your inbox for an invite.`; pushFeed('just joined the beta!'); $('#em').value = ''; }
+  t.classList.remove('on'); void t.offsetWidth; t.classList.add('on');
+  ding();
+}
+$('#f').onsubmit = (e) => { e.preventDefault(); signup(); };
+
+// Audio > soft two-tone ding on new feed items + signup
+let ac = null;
+addEventListener('pointerdown', () => { if (!ac) try { ac = new AudioContext(); } catch {} }, { once: true });
+function ding() {
+  if (!ac) return;
+  const t = ac.currentTime;
+  [[1046.5, 0], [1568, 0.08]].forEach(([f, d]) => { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.value = f; g.gain.setValueAtTime(0.06, t + d); g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.4); o.connect(g).connect(ac.destination); o.start(t + d); o.stop(t + d + 0.45); });
+}
+
+// Attract > feed keeps arriving, cloud tags highlight, demo signup types itself
+let lastInput = -1e9, feedT = 0, tagT = 0, typeT = 0, typing = null;
+['pointerdown', 'keydown'].forEach((ev) => addEventListener(ev, (e) => { if (e.isTrusted) lastInput = performance.now(); }, { capture: true }));
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  feedT += dt; tagT += dt;
+  if (feedT > 2.2) { feedT = 0; pushFeed(); }
+  if (Math.random() < dt * 3) { count += 1 + Math.floor(Math.random() * 3); $('#count').textContent = fmt(count); }
+  if (tagT > 1.1) { tagT = 0; const a = [...document.querySelectorAll('.cloud a')]; a.forEach((x) => x.classList.remove('hot')); a[Math.floor(Math.random() * a.length)].classList.add('hot'); }
+  if (now - lastInput > 10000) {
+    typeT += dt;
+    const demo = 'hello@bubbles.example';
+    if (typeT > 3 && typeT < 3 + demo.length * 0.08) $('#em').value = demo.slice(0, Math.floor((typeT - 3) / 0.08) + 1);
+    if (typeT > 5.6) { signup(demo); typeT = -6; }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__web2 = { signup, pushFeed };
+</script>
+</body>
+</html>

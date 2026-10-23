@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Underwater Reef</title>
+<meta name="category" content="aero" />
+<meta name="style" content="aquatic" />
+<meta name="order" content="41" />
+<meta name="capture" content="3200" />
+<meta name="tags" content="three.js, boids, InstancedMesh, onBeforeCompile tail wiggle, caustics shader, god rays, merged procedural coral" />
+<meta name="description" content="Aquatic Aero at its most saturated: a sunlit coral reef seen through clear turquoise water, with dancing caustics on rippled sand, shafts of god rays, swaying kelp and anemones, branching, brain and tube corals, a sea turtle gliding laps, rising glossy bubbles, drifting marine snow and three schools of tropical fish flocking as boids. Tap to startle the nearest school into a scatter and a burst of bubbles. Hard because 140 fish run separation, alignment, cohesion and flee forces every frame, their tails wiggle in the vertex shader per instance, the caustics are an iterative shader on displaced sand, and every coral is generated and merged into single meshes."/>
+<meta name="prompt" content="Build a Frutiger Aquatic coral reef in three.js, one HTML file: a gradient underwater dome with exp fog, displaced sand with an iterative caustics shader, additive god-ray planes, procedural merged branching coral, brain coral, tube sponges, swaying kelp and anemones, a sea turtle with flapping flippers gliding a loop, rising bubbles, marine snow and three species of fish as instanced boids with per-instance tail wiggle in the vertex shader. Clicking scatters the nearest school with a flee force and a bubble burst; slow auto-orbit camera." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/underwater-reef.html
+ * PURPOSE: Aquatic Aero reef: boid fish schools, caustic sand, god rays, procedural coral, turtle, bubbles
+ * UI: Render Studio > Frutiger Aero > Aquatic Aero > Underwater Reef
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__reef (scatter, fish, turtle)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0e6a9a; }
+canvas { display: block; touch-action: none; }
+#hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; color: #e8fbff; font: 13px "Segoe UI", system-ui, sans-serif; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.35); backdrop-filter: blur(8px); white-space: nowrap; pointer-events: none; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="hint">tap to startle the fish · drag to look around</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x0e6a9a, 0.032);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 300);
+camera.position.set(0, 5, innerWidth / innerHeight < 0.8 ? 27 : 18);
+const controls = new OrbitControls(camera, renderer.domElement); controls.target.set(0, 3, 0); controls.enableDamping = true; controls.enablePan = false;
+controls.minDistance = 8; controls.maxDistance = 32; controls.maxPolarAngle = 1.62; controls.autoRotate = true; controls.autoRotateSpeed = 0.35;
+let seed = 7; const R = () => ((seed = (seed * 16807) % 2147483647) / 2147483647), rr = (a, b) => a + R() * (b - a);
+const uTime = { value: 0 };
+
+// Water > gradient dome matching fog at the horizon
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(120, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { uTime },
+  vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'uniform float uTime; varying vec3 vP; void main(){ float h = vP.y; vec3 hor = vec3(0.055,0.416,0.604); vec3 c = h > 0.0 ? mix(hor, vec3(0.45,0.88,0.97), pow(h, 0.8)) : mix(hor, vec3(0.02,0.16,0.32), pow(-h, 0.6)); c += vec3(0.9,1.0,1.0)*pow(max(h,0.0),6.0)*(0.25+0.08*sin(uTime*2.0+vP.x*20.0)); gl_FragColor = vec4(c,1.0); }' })));
+scene.add(new THREE.HemisphereLight(0xa8ecff, 0x1a4a6a, 1.3));
+const sun = new THREE.DirectionalLight(0xe6fbff, 1.6); sun.position.set(3, 12, 4); scene.add(sun);
+
+// Sand > dunes + iterative caustics, own fog
+const sand = new THREE.Mesh(new THREE.PlaneGeometry(140, 140, 160, 160).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({ uniforms: { uTime }, extensions: { derivatives: true },
+  vertexShader: 'varying vec3 vW; void main(){ vec3 p = position; p.y += sin(p.x*0.35)*0.35 + cos(p.z*0.28+p.x*0.1)*0.3 + sin(p.x*1.7+p.z*1.3)*0.05; vec4 w = modelMatrix*vec4(p,1.0); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }',
+  fragmentShader: `uniform float uTime; varying vec3 vW;
+    float caustic(vec2 uv, float time){ vec2 p = mod(uv*6.28318, 6.28318) - 250.0; vec2 i = p; float c = 1.0; float inten = 0.005;
+      for (int n = 0; n < 4; n++) { float t = time * (1.0 - (3.5 / float(n+1))); i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x)); c += 1.0/length(vec2(p.x / (sin(i.x+t)/inten), p.y / (cos(i.y+t)/inten))); }
+      c /= 4.0; c = 1.17 - pow(c, 1.4); return pow(abs(c), 8.0); }
+    void main(){ vec3 n = normalize(cross(dFdx(vW), dFdy(vW))); if (n.y < 0.0) n = -n;
+      vec3 base = vec3(0.86,0.80,0.62); float l = 0.45 + 0.55*max(dot(n, normalize(vec3(0.3,1.0,0.4))), 0.0);
+      float ca = caustic(vW.xz*0.07, uTime*0.45); vec3 col = base*l*vec3(0.72,0.9,0.95) + vec3(0.75,0.95,1.0)*ca*0.55;
+      float d = length(vW - cameraPosition); float f = 1.0 - exp(-pow(d*0.032, 2.0)); gl_FragColor = vec4(mix(col, vec3(0.055,0.416,0.604), f), 1.0); }` }));
+scene.add(sand);
+
+// Rays > additive shafts from the surface
+const rayMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uTime },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+  fragmentShader: 'uniform float uTime; varying vec2 vUv; void main(){ float a = smoothstep(0.0,0.7,vUv.y) * pow(sin(vUv.x*3.14159),2.0) * 0.11; a *= 0.7 + 0.3*sin(uTime*0.8 + vUv.x*6.0); gl_FragColor = vec4(0.85,1.0,1.0,a); }' });
+const rays = [];
+for (let i = 0; i < 9; i++) { const m = new THREE.Mesh(new THREE.PlaneGeometry(rr(1.5, 3.5), 26), rayMat); m.position.set(rr(-14, 14), 9, rr(-10, 6)); m.userData = { tilt: rr(-0.25, 0.25), ph: rr(0, 6) }; scene.add(m); rays.push(m); }
+
+// Corals > generated, merged per kind
+const grounded = (x, z) => Math.sin(x * 0.35) * 0.35 + Math.cos(z * 0.28 + x * 0.1) * 0.3;
+function branchCoral(x, z, col) {
+  const parts = [], up = new THREE.Vector3(0, 1, 0);
+  const grow = (p, dir, len, rad, d) => { const g = new THREE.CylinderGeometry(rad * 0.7, rad, len, 7); g.translate(0, len / 2, 0); const q = new THREE.Quaternion().setFromUnitVectors(up, dir); g.applyQuaternion(q); g.translate(p.x, p.y, p.z); parts.push(g); const end = p.clone().addScaledVector(dir, len);
+    if (d < 3) for (let k = 0; k < (d === 0 ? 4 : 2 + Math.floor(R() * 2)); k++) { const nd = dir.clone().add(new THREE.Vector3(rr(-0.8, 0.8), rr(0.1, 0.7), rr(-0.8, 0.8))).normalize(); grow(end, nd, len * 0.72, rad * 0.68, d + 1); }
+    else { const tip = new THREE.SphereGeometry(rad * 0.9, 6, 4); tip.translate(end.x, end.y, end.z); parts.push(tip); } };
+  grow(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0), 1.3, 0.22, 0);
+  const m = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6 })); m.position.set(x, grounded(x, z) - 0.1, z); scene.add(m); return m;
+}
+function brainCoral(x, z, r, col) {
+  const g = new THREE.SphereGeometry(r, 48, 24, 0, Math.PI * 2, 0, Math.PI / 2), p = g.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); const n = 1 + 0.06 * Math.sin(v.x * 9 + Math.sin(v.z * 7) * 2) * Math.cos(v.z * 9); v.multiplyScalar(n); v.y *= 0.7; p.setXYZ(i, v.x, v.y, v.z); }
+  g.computeVertexNormals(); const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: col, roughness: 0.8 })); m.position.set(x, grounded(x, z) - 0.15, z); scene.add(m);
+}
+function tubes(x, z, col) {
+  const parts = []; for (let k = 0; k < 6; k++) { const h = rr(0.8, 2.4), g = new THREE.CylinderGeometry(rr(0.18, 0.3), rr(0.22, 0.32), h, 14, 1, true); g.translate(rr(-0.6, 0.6), h / 2, rr(-0.6, 0.6)); parts.push(g); }
+  const m = new THREE.Mesh(mergeGeometries(parts), new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, side: THREE.DoubleSide })); m.position.set(x, grounded(x, z) - 0.1, z); scene.add(m);
+}
+function rock(x, z, s) {
+  const g = new THREE.IcosahedronGeometry(s, 2), p = g.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); v.multiplyScalar(1 + 0.18 * Math.sin(v.x * 3 + v.y * 2) * Math.cos(v.z * 2.5)); v.y *= 0.6; p.setXYZ(i, v.x, v.y, v.z); }
+  g.computeVertexNormals(); const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x6f6a86, roughness: 0.9, flatShading: true })); m.position.set(x, grounded(x, z) - 0.2, z); scene.add(m);
+}
+[[-6, -2, 2.4], [7, -4, 2.8], [1, -7, 3.2], [-10, 4, 1.8]].forEach((a) => rock(...a));
+[[-5, -1.4, 0xff7a6a], [-3.2, 1.5, 0xffa24a], [6, -2.5, 0xff5fa2], [3.5, 2.5, 0xffb36b], [-8, -5, 0xe86aff], [9, 1, 0xff8a5a]].forEach((a) => branchCoral(...a));
+[[-1.5, -2.5, 1.3, 0xe0a060], [8.5, -5.5, 1.1, 0xd9c26a], [-9, 2, 1.0, 0xc98bd9]].forEach((a) => brainCoral(...a));
+[[2.2, -4.5, 0x8a4fd0], [-6.5, 3.5, 0x3fb7d9], [10, 4, 0xffcf4a]].forEach((a) => tubes(...a));
+
+// Kelp > ribbons swaying in the vertex shader
+const sway = (mat, amp) => { mat.onBeforeCompile = (sh) => { sh.uniforms.uTime = uTime; sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\n vec4 wp = modelMatrix*vec4(0.0,0.0,0.0,1.0); float k = max(position.y,0.0); transformed.x += sin(uTime*0.9 + k*0.45 + wp.x) * ${amp.toFixed(2)} * k*0.12; transformed.z += cos(uTime*0.7 + k*0.35 + wp.z) * ${amp.toFixed(2)} * k*0.08;`); }; return mat; };
+const kelpMat = sway(new THREE.MeshStandardMaterial({ color: 0x5f9a3a, roughness: 0.7, side: THREE.DoubleSide }), 1.0);
+for (let i = 0; i < 10; i++) { const h = rr(6, 11), g = new THREE.PlaneGeometry(0.5, h, 1, 24); g.translate(0, h / 2, 0); const p = g.attributes.position; for (let k = 0; k < p.count; k++) p.setX(k, p.getX(k) * (1 + Math.sin(p.getY(k) * 1.4) * 0.5)); const m = new THREE.Mesh(g, kelpMat); const x = rr(-14, -6) * (i % 2 ? 1 : -1), z = rr(-12, -3); m.position.set(x, grounded(x, z) - 0.2, z); m.rotation.y = rr(0, 3); scene.add(m); }
+
+// Anemones > tentacle cones swaying
+const anemMat = sway(new THREE.MeshStandardMaterial({ color: 0xff9ad0, roughness: 0.5, emissive: 0x401028 }), 2.2);
+[[0.5, 1.2], [-3, -4], [5, 4.5]].forEach(([x, z]) => { const parts = [new THREE.CylinderGeometry(0.45, 0.55, 0.4, 16).translate(0, 0.2, 0)]; for (let k = 0; k < 46; k++) { const a = R() * Math.PI * 2, rd = R() * 0.45, g = new THREE.ConeGeometry(0.05, rr(0.6, 1.1), 5); g.translate(0, 0.5, 0); g.rotateX(rr(-0.5, 0.5)); g.rotateZ(rr(-0.5, 0.5)); g.translate(Math.cos(a) * rd, 0.35, Math.sin(a) * rd); parts.push(g); } const m = new THREE.Mesh(mergeGeometries(parts), anemMat); m.position.set(x, grounded(x, z) - 0.05, z); scene.add(m); });
+
+// Fish > three species, instanced, tail wiggle per instance
+function fishGeo(stripes, tall = 0.8) {
+  const body = new THREE.SphereGeometry(0.5, 16, 10); body.scale(0.3, tall, 1.2);
+  const tail = new THREE.BufferGeometry(); tail.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -0.5, 0, 0.42, -1.0, 0, -0.42, -1.0, 0, 0, -0.5, 0, -0.42, -1.0, 0, 0.42, -1.0], 3)); tail.computeVertexNormals();
+  const fin = new THREE.BufferGeometry(); fin.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.35, 0.2, 0, 0.62, -0.25, 0, 0.3, -0.35, 0, 0.35, 0.2, 0, 0.3, -0.35, 0, 0.62, -0.25], 3)); fin.computeVertexNormals();
+  const bn = body.toNonIndexed(); bn.deleteAttribute('uv'); const g = mergeGeometries([bn, tail, fin]), p = g.attributes.position, c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) { const col = stripes(p.getX(i), p.getY(i), p.getZ(i)); c.set(col, i * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3)); return g;
+}
+const SPECIES = [
+  { n: 60, geo: fishGeo((x, y, z) => (z < -0.5 ? [1, 0.97, 0.8] : [1, 0.93, 0.15])), scale: 0.55, home: new THREE.Vector3(-4, 5, 0) },
+  { n: 50, geo: fishGeo((x, y, z) => (z < -0.5 ? [1, 0.85, 0.1] : Math.abs(y - 0.1 + z * 0.4) < 0.08 ? [0.05, 0.08, 0.2] : [0.15, 0.4, 0.95])), scale: 0.6, home: new THREE.Vector3(5, 6, -2) },
+  { n: 30, geo: fishGeo((x, y, z) => (Math.abs(z - 0.25) < 0.08 || Math.abs(z + 0.25) < 0.08 || z < -0.95 ? [1, 1, 1] : [1, 0.45, 0.05]), 0.5), scale: 0.5, home: new THREE.Vector3(1, 2.5, 2) },
+];
+const fishMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.1, side: THREE.DoubleSide, emissive: 0x2a2a2a });
+fishMat.onBeforeCompile = (sh) => { sh.uniforms.uTime = uTime; sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n float tw = smoothstep(0.2, -1.0, position.z); transformed.x += sin(uTime*11.0 + float(gl_InstanceID)*1.7 + position.z*4.0) * 0.16 * tw;'); };
+const fish = [], dummy = new THREE.Object3D();
+SPECIES.forEach((sp, si) => { sp.mesh = new THREE.InstancedMesh(sp.geo, fishMat, sp.n); sp.mesh.frustumCulled = false; scene.add(sp.mesh);
+  sp.target = sp.home.clone(); for (let i = 0; i < sp.n; i++) fish.push({ s: si, i, p: sp.home.clone().add(new THREE.Vector3(rr(-3, 3), rr(-1.5, 1.5), rr(-3, 3))), v: new THREE.Vector3(rr(-1, 1), rr(-0.2, 0.2), rr(-1, 1)).normalize().multiplyScalar(2) }); });
+let flee = null;
+const tmp = new THREE.Vector3(), sep = new THREE.Vector3(), ali = new THREE.Vector3(), coh = new THREE.Vector3();
+function boids(dt, t) {
+  SPECIES.forEach((sp, si) => sp.target.set(sp.home.x + Math.sin(t * 0.13 + si * 2) * 7, sp.home.y + Math.sin(t * 0.21 + si) * 1.5, sp.home.z + Math.cos(t * 0.11 + si * 3) * 6));
+  for (const f of fish) {
+    sep.set(0, 0, 0); ali.set(0, 0, 0); coh.set(0, 0, 0); let n = 0;
+    for (const o of fish) { if (o === f) continue; tmp.subVectors(f.p, o.p); const d2 = tmp.lengthSq(); if (d2 < 0.5) sep.addScaledVector(tmp, 1 / (d2 + 0.05)); if (o.s === f.s && d2 < 3.2) { ali.add(o.v); coh.add(o.p); n++; } }
+    const acc = tmp.set(0, 0, 0).addScaledVector(sep, 1.2);
+    if (n) { acc.addScaledVector(ali.divideScalar(n).sub(f.v), 0.9); acc.addScaledVector(coh.divideScalar(n).sub(f.p), 0.6); }
+    acc.addScaledVector(sep.copy(SPECIES[f.s].target).sub(f.p), 0.25);
+    if (f.p.y < 1.2) acc.y += (1.2 - f.p.y) * 4; if (f.p.y > 11) acc.y -= (f.p.y - 11) * 4;
+    let vmax = 3.2;
+    if (flee && flee.t > t) { sep.subVectors(f.p, flee.p); const d = sep.length(); if (d < 7) { acc.addScaledVector(sep.normalize(), 30 * (1 - d / 7)); vmax = 9; } }
+    f.v.addScaledVector(acc, dt); const sp = f.v.length(); if (sp > vmax) f.v.multiplyScalar(vmax / sp); if (sp < 1.2) f.v.multiplyScalar(1.2 / Math.max(sp, 1e-3));
+    f.p.addScaledVector(f.v, dt);
+    dummy.position.copy(f.p); dummy.lookAt(tmp.copy(f.p).add(f.v)); dummy.scale.setScalar(SPECIES[f.s].scale); dummy.updateMatrix(); SPECIES[f.s].mesh.setMatrixAt(f.i, dummy.matrix);
+  }
+  SPECIES.forEach((sp) => (sp.mesh.instanceMatrix.needsUpdate = true));
+}
+
+// Turtle > hex-plate shell, flapping flippers, gliding loop
+const tc = document.createElement('canvas'); tc.width = tc.height = 256; { const g = tc.getContext('2d'); g.fillStyle = '#6b5a2e'; g.fillRect(0, 0, 256, 256); for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) { const cx = x * 46 + (y % 2) * 23, cy = y * 44; g.fillStyle = `hsl(${38 + (x * y) % 9},45%,${30 + ((x + y) % 3) * 5}%)`; g.beginPath(); for (let k = 0; k < 6; k++) g.lineTo(cx + Math.cos(k * 1.047) * 20, cy + Math.sin(k * 1.047) * 20); g.fill(); g.strokeStyle = '#3c2f14'; g.lineWidth = 3; g.stroke(); } }
+const turtle = new THREE.Group(); scene.add(turtle);
+const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(tc), roughness: 0.5 })); shell.scale.set(1.15, 0.42, 1.45); turtle.add(shell);
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xa8bb72, roughness: 0.6 });
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), skinMat); head.scale.set(1, 0.85, 1.25); head.position.set(0, 0.05, 1.65); turtle.add(head);
+const flippers = [[0.9, 0.7, 1.25, 0.45], [-0.9, 0.7, 1.25, 0.45], [0.7, -0.9, 0.55, 0.3], [-0.7, -0.9, 0.55, 0.3]].map(([x, z, len, w]) => { const pv = new THREE.Group(); pv.position.set(x, -0.05, z); const f = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 8), skinMat); f.scale.set(len, 0.07, w); f.position.x = Math.sign(x) * len * 0.85; f.rotation.y = -Math.sign(x) * 0.5; pv.add(f); turtle.add(pv); return pv; });
+let turtleA = 0;
+
+// Bubbles > rising glossy spheres + click bursts
+const NB = 120, bubbles = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 14, 10), new THREE.MeshStandardMaterial({ color: 0xe8fbff, roughness: 0.05, metalness: 0.2, transparent: true, opacity: 0.45, emissive: 0x2a6f8a }), NB);
+bubbles.frustumCulled = false; scene.add(bubbles);
+const VENTS = [[0.5, 1.2], [-3, -4], [5, 4.5], [-1.5, -2.5]], bub = Array.from({ length: NB }, (_, i) => ({ p: new THREE.Vector3(0, -50, 0), r: 0.1, v: 1, ph: R() * 6, next: R() * 6 }));
+function spawnBubble(b, at) { const v = VENTS[Math.floor(R() * VENTS.length)]; b.p.set(at ? at.x + rr(-0.5, 0.5) : v[0] + rr(-0.3, 0.3), at ? at.y : 0.5, at ? at.z + rr(-0.5, 0.5) : v[1] + rr(-0.3, 0.3)); b.r = rr(0.05, 0.18); b.v = rr(1.2, 2.4); }
+bub.forEach((b, i) => { if (i < 70) { spawnBubble(b); b.p.y = rr(0.5, 12); } });
+
+// Snow > drifting particles
+const NS = 600, sg = new THREE.BufferGeometry(), sp = new Float32Array(NS * 3); for (let i = 0; i < NS; i++) sp.set([rr(-25, 25), rr(0, 16), rr(-25, 25)], i * 3);
+sg.setAttribute('position', new THREE.BufferAttribute(sp, 3)); const snow = new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xdff8ff, size: 0.06, transparent: true, opacity: 0.7, depthWrite: false })); scene.add(snow);
+
+// Input > tap scatters the nearest school
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); let down = null, lastInput = -1e9, clockT = 0;
+function scatter(point) {
+  if (!point) { const sp = SPECIES[Math.floor(R() * 3)]; point = sp.target.clone(); }
+  flee = { p: point.clone(), t: clockT + 1.8 }; let k = 0; for (const b of bub) { if (b.p.y > 14 || b.p.y < 0) { spawnBubble(b, point); if (++k > 14) break; } }
+}
+renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; lastInput = performance.now(); controls.autoRotate = false; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return; down = null;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  let best = null, bd = 1e9; for (const sp of SPECIES) { const d = ray.ray.distanceSqToPoint(sp.target); if (d < bd) { bd = d; best = sp; } }
+  const pt = new THREE.Vector3(); ray.ray.closestPointToPoint(best.target, pt); scatter(pt);
+});
+
+let last = performance.now(), nextAuto = 6;
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now; clockT += dt; uTime.value = clockT;
+  if (now - lastInput > 10000) { controls.autoRotate = true; if (clockT > nextAuto) { nextAuto = clockT + 9; scatter(); } }
+  boids(dt, clockT);
+  // turtle
+  turtleA += dt * 0.09; const tr = 9; turtle.position.set(Math.cos(turtleA) * tr, 6.5 + Math.sin(turtleA * 2) * 0.8, Math.sin(turtleA) * tr * 0.7);
+  turtle.lookAt(Math.cos(turtleA + 0.05) * tr, 6.5 + Math.sin((turtleA + 0.05) * 2) * 0.8, Math.sin(turtleA + 0.05) * tr * 0.7); turtle.rotateZ(0.18);
+  const fl = Math.sin(clockT * 1.6); flippers.forEach((f, i) => (f.rotation.z = (i % 2 ? -1 : 1) * fl * (i < 2 ? 0.55 : 0.25)));
+  // bubbles
+  bub.forEach((b, i) => { if (b.p.y > 14) { b.p.y = -50; b.next = clockT + rr(0, 4); } if (b.p.y < -10 && i < 90 && clockT > b.next) spawnBubble(b);
+    if (b.p.y > -10) { b.p.y += b.v * dt; b.p.x += Math.sin(clockT * 3 + b.ph) * 0.01; b.r *= 1 + dt * 0.04; }
+    dummy.position.copy(b.p); dummy.rotation.set(0, 0, 0); dummy.scale.setScalar(b.r); dummy.updateMatrix(); bubbles.setMatrixAt(i, dummy.matrix); });
+  bubbles.instanceMatrix.needsUpdate = true;
+  // snow + rays
+  for (let i = 0; i < NS; i++) { let y = sp[i * 3 + 1] - dt * 0.15; if (y < 0) y = 16; sp[i * 3 + 1] = y; sp[i * 3] += Math.sin(clockT * 0.3 + i) * dt * 0.05; }
+  sg.attributes.position.needsUpdate = true;
+  rays.forEach((r) => { r.rotation.set(0, Math.atan2(camera.position.x - r.position.x, camera.position.z - r.position.z), r.userData.tilt + Math.sin(clockT * 0.3 + r.userData.ph) * 0.05); });
+  controls.update(); renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+window.__reef = { scatter: () => scatter(), fish: () => fish.length, turtle: () => turtle.position.toArray().map((v) => +v.toFixed(2)) };
+</script>
+</body>
+</html>

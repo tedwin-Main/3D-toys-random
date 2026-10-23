@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glass Weather Gadget</title>
+<meta name="category" content="aero" />
+<meta name="style" content="core" />
+<meta name="order" content="27" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="canvas 2D, fake refraction, particle weather, glass UI, WebAudio noise" />
+<meta name="description" content="A late-2000s desktop sidebar weather gadget: a frosted glass card over a matching wallpaper, with a live sky panel (sun showers, glossy clouds, rain, thunderstorms with lightning, snow and frost), a big glossy icon, temperature and a 5-day forecast strip. Raindrops bead on the glass, merge and slide down, each one refracting an upside-down copy of the sky behind it. Click the sky to change the weather, pick a day, flip to options for city and units, drag the gadget. Hard because the droplets sample the live sky canvas as tiny inverted lenses every frame, and two full weather scenes cross-fade on two canvases at once." />
+<meta name="prompt" content="Build a late-2000s glass desktop weather gadget in one HTML file with canvas 2D: a frosted glass card over a matching wallpaper, a live sky panel with five weather states (sun shower, sunny, partly cloudy, thunderstorm with lightning, snow) cross-fading, glossy clouds and hills, and raindrops on the glass that merge, slide and refract an inverted copy of the sky. Add a big glossy icon, temperature, 5-day forecast strip, °C/°F and city options on a flipped back face, synthesized rain, wind and thunder, a draggable card, and an attract mode that tours the forecast." />
+<style>
+/**
+ * FILE: render-studio/frontend/demos/weather-gadget.html
+ * PURPOSE: glass sidebar weather gadget: cross-faded canvas weather scenes, refracting raindrops on glass, forecast strip
+ * UI: Render Studio > Frutiger Aero > Glass Weather Gadget
+ * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
+ * KEY EXPORTS: window.__weather (set, day, city, state, unit, drops)
+ */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2a7fd0; font-family: "Segoe UI", "Frutiger", "Myriad Pro", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#gad { --k: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(var(--k)); width: min(300px, calc(100vw - 64px)); }
+@media (min-width: 900px) and (min-height: 700px) { #gad { --k: 1.4; } }
+#card { position: relative; border-radius: 14px; padding: 8px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.1) 45%, rgba(255, 255, 255, 0.18)), rgba(20, 70, 130, 0.3); border: 1px solid rgba(255, 255, 255, 0.7); box-shadow: 0 14px 44px rgba(0, 25, 60, 0.45), inset 0 1px 0 #fff, inset 0 -1px 0 rgba(255, 255, 255, 0.35); backdrop-filter: blur(14px) saturate(1.5); -webkit-backdrop-filter: blur(14px) saturate(1.5); transition: transform 0.16s ease-in; }
+.skywrap { position: relative; height: 170px; border-radius: 9px; overflow: hidden; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0, 30, 60, 0.35), 0 1px 0 rgba(255, 255, 255, 0.6); }
+.skywrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.skywrap::after { content: ""; position: absolute; left: -10%; right: -10%; top: -60%; height: 105%; border-radius: 50%; background: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.04)); pointer-events: none; }
+.loc { position: absolute; left: 10px; top: 8px; z-index: 2; color: #fff; text-shadow: 0 1px 3px rgba(0, 20, 50, 0.8); pointer-events: none; }
+.loc b { display: block; font-size: 15px; } .loc span { font-size: 11px; opacity: 0.9; }
+.now { display: flex; align-items: center; gap: 6px; padding: 8px 4px 4px; color: #fff; text-shadow: 0 1px 3px rgba(0, 20, 50, 0.7); }
+#bigicon { width: 64px; height: 64px; flex: none; }
+#temp { font-size: 44px; font-weight: 300; line-height: 1; cursor: pointer; letter-spacing: -1px; }
+#temp small { font-size: 18px; vertical-align: top; opacity: 0.85; }
+.info { display: flex; flex-direction: column; font-size: 11px; min-width: 0; margin-left: 4px; }
+.info b { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#days { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin-top: 4px; }
+.day { text-align: center; padding: 5px 0 6px; border-radius: 8px; color: #fff; text-shadow: 0 1px 2px rgba(0, 20, 50, 0.8); font-size: 11px; cursor: pointer; background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04)); border: 1px solid rgba(255, 255, 255, 0.3); transition: background 0.2s, box-shadow 0.2s; }
+.day canvas { display: block; width: 36px; height: 36px; margin: 2px auto; }
+.day i { font-style: normal; opacity: 0.75; margin-left: 3px; }
+.day.on { background: linear-gradient(180deg, rgba(160, 230, 255, 0.65), rgba(60, 160, 230, 0.35)); box-shadow: 0 0 12px rgba(140, 220, 255, 0.8), inset 0 1px 0 #fff; }
+.src { font-size: 10px; color: rgba(255, 255, 255, 0.85); text-align: right; padding: 5px 4px 0; text-shadow: 0 1px 2px rgba(0, 20, 50, 0.7); }
+#gad.small #days, #gad.small .src, #gad.small .info span { display: none; }
+.back { display: none; position: absolute; inset: 8px; border-radius: 9px; padding: 12px; color: #fff; text-shadow: 0 1px 2px rgba(0, 20, 50, 0.8); background: linear-gradient(180deg, rgba(20, 70, 130, 0.75), rgba(10, 40, 90, 0.85)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+#card.showback .back { display: block; } #card.showback .front { visibility: hidden; }
+.back h3 { margin: 0 0 10px; font-weight: 400; font-size: 18px; }
+.back .lbl { font-size: 12px; opacity: 0.85; margin: 10px 0 4px; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button, .gel { font: inherit; font-size: 12px; color: #fff; border: 1px solid rgba(255, 255, 255, 0.45); border-radius: 12px; padding: 4px 10px; cursor: pointer; background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.05) 50%, rgba(0, 0, 0, 0.1) 51%, rgba(255, 255, 255, 0.08)); text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5); }
+.seg button.on { background: linear-gradient(180deg, #9fe6ff, #3fa6ee 50%, #1f7fd6 51%, #47b4ff); box-shadow: 0 0 8px rgba(120, 210, 255, 0.9); }
+.gel { position: absolute; right: 12px; bottom: 12px; padding: 5px 20px; background: linear-gradient(180deg, #b9f07a, #5fbf2a 50%, #3f9f12 51%, #6fd23a); }
+.ctl { position: absolute; right: -26px; top: 6px; display: flex; flex-direction: column; gap: 3px; opacity: 0; transition: opacity 0.25s; }
+#gad:hover .ctl, #gad.touch .ctl { opacity: 1; }
+.ctl button { width: 20px; height: 20px; padding: 0; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.6); background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.12)); color: #fff; font: 700 13px/1 system-ui, sans-serif; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); cursor: pointer; display: grid; place-items: center; box-shadow: 0 2px 6px rgba(0, 20, 50, 0.35); }
+.ctl .grip { cursor: grab; height: 30px; background-image: radial-gradient(circle, #fff 1.2px, transparent 1.6px), linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.12)); background-size: 6px 6px, 100% 100%; touch-action: none; }
+#hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: rgba(255, 255, 255, 0.85); font-size: 12px; text-shadow: 0 1px 3px rgba(0, 20, 50, 0.8); white-space: nowrap; pointer-events: none; }
+@media (max-width: 480px) { #hint { font-size: 11px; } #temp { font-size: 38px; } }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="gad">
+  <div id="card">
+    <div class="front">
+      <div class="skywrap" id="skywrap"><canvas id="sky"></canvas><canvas id="glass"></canvas><div class="loc"><b id="city">Harbour City</b><span id="clock"></span></div></div>
+      <div class="now"><canvas id="bigicon" width="128" height="128"></canvas><div id="temp">--</div><div class="info"><b id="cond">--</b><span id="hl"></span><span id="ex"></span></div></div>
+      <div id="days"></div>
+      <div class="src">Forecast · updated <span id="upd"></span></div>
+    </div>
+    <div class="back">
+      <h3>Weather options</h3>
+      <div class="lbl">Location</div><div class="seg" id="cities"></div>
+      <div class="lbl">Show temperature in</div><div class="seg" id="units"><button data-u="C">Celsius</button><button data-u="F">Fahrenheit</button></div>
+      <button class="gel" id="done">OK</button>
+    </div>
+  </div>
+  <div class="ctl"><button id="size" title="Smaller size">–</button><button id="opt" title="Options"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M8.6 1a2.6 2.6 0 0 0-2.4 3.5L1.4 9.3a1 1 0 0 0 1.3 1.4l4.8-4.9A2.6 2.6 0 0 0 11 3.4L9.4 5 7.6 4.4 7 2.6 8.6 1z" fill="#fff"/></svg></button><button class="grip" id="grip" title="Drag gadget"></button></div>
+</div>
+<div id="hint">click the sky to change weather · pick a day · drag the grip</div>
+<script>
+const $ = (s) => document.querySelector(s);
+const bg = $('#bg'), bx = bg.getContext('2d'), sky = $('#sky'), sx = sky.getContext('2d'), glass = $('#glass'), gx = glass.getContext('2d'), big = $('#bigicon'), bix = big.getContext('2d');
+const R = Math.random, TAU = Math.PI * 2;
+
+// States > look + base temp per weather
+const ST = [
+  { id: 'shower', name: 'Sun Showers', sky: ['#3b78b8', '#7fb2dc', '#d6ecf8'], sun: 0.6, clouds: 4, cloud: ['#ffffff', '#b8c6d6'], rain: 0.7, snow: 0, hill: ['#8fd85a', '#2f8f34'], bokeh: 0.14, temp: 17, hum: 78, wind: 14 },
+  { id: 'sunny', name: 'Sunny', sky: ['#0f6fe0', '#55b4ff', '#cdf2ff'], sun: 1, clouds: 1, cloud: ['#ffffff', '#d6ecff'], rain: 0, snow: 0, hill: ['#a6e85e', '#3aa63a'], bokeh: 0.2, temp: 26, hum: 41, wind: 8 },
+  { id: 'cloudy', name: 'Partly Cloudy', sky: ['#3a7cc2', '#88b9e3', '#dceaf5'], sun: 0.75, clouds: 5, cloud: ['#ffffff', '#c4d2e0'], rain: 0, snow: 0, hill: ['#92d65a', '#35963a'], bokeh: 0.12, temp: 21, hum: 55, wind: 12 },
+  { id: 'storm', name: 'Thunderstorms', sky: ['#121a29', '#2d3a50', '#5b6a82'], sun: 0, clouds: 7, cloud: ['#8e98ab', '#353e52'], rain: 1.5, snow: 0, hill: ['#477a46', '#1b3d22'], bokeh: 0.03, temp: 14, hum: 92, wind: 31 },
+  { id: 'snow', name: 'Light Snow', sky: ['#7d9bbd', '#b8cde2', '#f0f6fb'], sun: 0, clouds: 5, cloud: ['#ffffff', '#cfd9e4'], rain: 0, snow: 1, hill: ['#ffffff', '#bfd3e8'], bokeh: 0.16, temp: -2, hum: 70, wind: 18 },
+];
+const CITIES = [
+  { name: 'Harbour City', off: 0, seq: [0, 1, 2, 3, 4] },
+  { name: 'Pine Valley', off: -5, seq: [4, 4, 2, 1, 0] },
+  { name: 'Coral Bay', off: 6, seq: [1, 2, 1, 0, 3] },
+];
+const DOFF = [0, 2, -1, 1, -2];
+let city = 0, sel = 0, unit = 'C', from = 0, to = 0, mix = 1;
+const fc = CITIES.map((c) => c.seq.slice());
+const deg = (c) => Math.round(unit === 'C' ? c : (c * 9) / 5 + 32);
+const tempOf = (d) => ST[fc[city][d]].temp + CITIES[city].off + DOFF[d];
+
+// Particles > per-canvas sets, normalized coords
+function makeP(nr, ns) {
+  return {
+    clouds: Array.from({ length: 8 }, (_, i) => ({ x: R() * 1.3 - 0.15, y: 0.1 + R() * 0.32, s: 0.7 + R() * 0.6, v: 0.008 + R() * 0.014, o: i })),
+    rain: Array.from({ length: nr }, () => ({ x: R() * 1.2, y: R() * 1.2 - 0.1, l: 0.03 + R() * 0.05, v: 1.1 + R() * 0.7 })),
+    snow: Array.from({ length: ns }, () => ({ x: R(), y: R(), r: 1 + R() * 2.6, v: 0.04 + R() * 0.08, f: 0.6 + R(), ph: R() * TAU })),
+    bokeh: Array.from({ length: 16 }, () => ({ x: R(), y: R() * 0.8, r: 20 + R() * 70, v: 0.005 + R() * 0.01 })),
+  };
+}
+const PB = makeP(260, 160), PS = makeP(90, 60);
+function stepP(P, dt) {
+  for (const c of P.clouds) { c.x += c.v * dt; if (c.x > 1.25) c.x = -0.25; }
+  for (const p of P.rain) { p.y += p.v * dt; p.x -= p.v * dt * 0.12; if (p.y > 1.1) { p.y = -0.1 - R() * 0.1; p.x = R() * 1.2; } }
+  for (const p of P.snow) { p.y += p.v * dt; if (p.y > 1.05) { p.y = -0.05; p.x = R(); } }
+  for (const b of P.bokeh) { b.x += b.v * dt; if (b.x > 1.1) b.x = -0.1; }
+}
+
+// Paint > sun, cloud, hills, precipitation
+function sunDisc(x, cx, cy, r) {
+  const d = x.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+  d.addColorStop(0, '#fffdea'); d.addColorStop(0.5, '#ffe04f'); d.addColorStop(1, '#ffa412');
+  x.fillStyle = d; x.beginPath(); x.arc(cx, cy, r, 0, TAU); x.fill();
+  const h = x.createLinearGradient(0, cy - r, 0, cy); h.addColorStop(0, 'rgba(255,255,255,0.85)'); h.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = h; x.beginPath(); x.ellipse(cx, cy - r * 0.45, r * 0.68, r * 0.42, 0, 0, TAU); x.fill();
+}
+function sun(x, cx, cy, r, t, k) {
+  const g = x.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 4.5);
+  g.addColorStop(0, `rgba(255,250,215,${0.9 * k})`); g.addColorStop(0.3, `rgba(255,240,170,${0.32 * k})`); g.addColorStop(1, 'rgba(255,240,170,0)');
+  x.fillStyle = g; x.fillRect(cx - r * 4.5, cy - r * 4.5, r * 9, r * 9);
+  x.save(); x.translate(cx, cy); x.rotate(t * 0.08); x.fillStyle = `rgba(255,255,235,${0.16 * k})`;
+  for (let i = 0; i < 12; i++) { x.beginPath(); x.moveTo(0, 0); x.arc(0, 0, r * 3.4, (i * TAU) / 12 - 0.06, (i * TAU) / 12 + 0.06); x.fill(); }
+  x.restore(); sunDisc(x, cx, cy, r);
+}
+function cloud(x, cx, cy, s, top, bot) {
+  const g = x.createLinearGradient(0, cy - s, 0, cy + s * 0.55); g.addColorStop(0, top); g.addColorStop(1, bot);
+  x.fillStyle = g; x.beginPath();
+  for (const [ox, oy, r] of [[-0.85, 0.05, 0.5], [-0.3, -0.32, 0.66], [0.38, -0.16, 0.58], [0.92, 0.08, 0.42]]) { x.moveTo(cx + ox * s + r * s, cy + oy * s); x.arc(cx + ox * s, cy + oy * s, r * s, 0, TAU); }
+  x.moveTo(cx + 1.25 * s, cy + 0.15 * s); x.ellipse(cx, cy + 0.15 * s, 1.25 * s, 0.38 * s, 0, 0, TAU); x.fill();
+  const h = x.createLinearGradient(0, cy - s, 0, cy - s * 0.2); h.addColorStop(0, 'rgba(255,255,255,0.75)'); h.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = h; x.beginPath(); x.ellipse(cx - 0.3 * s, cy - 0.55 * s, 0.45 * s, 0.26 * s, 0, 0, TAU); x.fill();
+}
+function hills(x, w, h, S) {
+  let g = x.createLinearGradient(0, h * 0.68, 0, h); g.addColorStop(0, S.hill[0]); g.addColorStop(1, S.hill[1]);
+  x.fillStyle = g; x.beginPath(); x.moveTo(0, h * 0.8); x.bezierCurveTo(w * 0.3, h * 0.66, w * 0.55, h * 0.74, w, h * 0.7); x.lineTo(w, h); x.lineTo(0, h); x.fill();
+  g = x.createLinearGradient(0, h * 0.78, 0, h); g.addColorStop(0, S.hill[0]); g.addColorStop(1, S.hill[1]);
+  x.fillStyle = g; x.beginPath(); x.moveTo(0, h * 0.92); x.bezierCurveTo(w * 0.25, h * 0.78, w * 0.6, h * 0.8, w, h * 0.95); x.lineTo(w, h); x.lineTo(0, h); x.fill();
+  x.strokeStyle = 'rgba(255,255,255,0.4)'; x.lineWidth = 2; x.beginPath(); x.moveTo(0, h * 0.92); x.bezierCurveTo(w * 0.25, h * 0.78, w * 0.6, h * 0.8, w, h * 0.95); x.stroke();
+}
+function paint(x, w, h, s, a, P, t, wide) {
+  const S = ST[s]; x.globalAlpha = a;
+  const g = x.createLinearGradient(0, 0, 0, h); g.addColorStop(0, S.sky[0]); g.addColorStop(0.62, S.sky[1]); g.addColorStop(1, S.sky[2]);
+  x.fillStyle = g; x.fillRect(0, 0, w, h);
+  if (wide) {
+    for (const b of P.bokeh) { const r = b.r * (h / 800 + 0.4), bg = x.createRadialGradient(b.x * w, b.y * h, 0, b.x * w, b.y * h, r); bg.addColorStop(0, `rgba(255,255,255,${S.bokeh})`); bg.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = bg; x.fillRect(b.x * w - r, b.y * h - r, r * 2, r * 2); }
+    for (let i = 0; i < 3; i++) {
+      x.fillStyle = `rgba(255,255,255,${0.06 + S.bokeh * 0.3})`; x.beginPath();
+      for (let X = 0; X <= w + 20; X += 20) x.lineTo(X, h * (0.36 + i * 0.07) + Math.sin(X * 0.004 + t * 0.25 + i * 1.7) * h * 0.06);
+      for (let X = w + 20; X >= 0; X -= 20) x.lineTo(X, h * (0.38 + i * 0.07) + Math.sin(X * 0.0047 + t * 0.21 + i * 1.7) * h * 0.06 + h * 0.012 * (1 + i));
+      x.fill();
+    }
+  }
+  if (S.sun) sun(x, w * (wide ? 0.78 : 0.74), h * (wide ? 0.2 : 0.3), Math.min(w, h) * (wide ? 0.06 : 0.15), t, S.sun);
+  for (const c of P.clouds) if (c.o < S.clouds) cloud(x, c.x * w, c.y * h * (wide ? 0.9 : 1), c.s * Math.min(w, h) * (wide ? 0.09 : 0.16), S.cloud[0], S.cloud[1]);
+  hills(x, w, h, S);
+  if (S.rain) {
+    x.strokeStyle = `rgba(225,238,255,${0.5 * Math.min(1, S.rain)})`; x.lineWidth = wide ? 1.3 : 1; x.beginPath();
+    const n = Math.floor((P.rain.length * S.rain) / 1.5);
+    for (let i = 0; i < n; i++) { const p = P.rain[i], X = p.x * w, Y = p.y * h, L = p.l * h; x.moveTo(X, Y); x.lineTo(X - L * 0.12, Y + L); }
+    x.stroke();
+  }
+  if (S.snow) {
+    x.fillStyle = 'rgba(255,255,255,0.92)'; x.beginPath();
+    for (const p of P.snow) { const X = (p.x + Math.sin(t * p.f + p.ph) * 0.02) * w, r = p.r * (wide ? 1.3 : 0.8); x.moveTo(X + r, p.y * h); x.arc(X, p.y * h, r, 0, TAU); }
+    x.fill();
+  }
+  x.globalAlpha = 1;
+}
+
+// Lightning > bolt shared by both canvases
+let bolt = null, flash = 0, nextBolt = 1.2;
+function makeBolt() {
+  const pts = [[0.2 + R() * 0.6, 0.05]];
+  while (pts[pts.length - 1][1] < 0.75) { const [px, py] = pts[pts.length - 1]; pts.push([px + (R() - 0.5) * 0.08, py + 0.04 + R() * 0.05]); }
+  bolt = { pts, life: 1 }; flash = 1; setTimeout(thunder, 250 + R() * 600);
+}
+function drawBolt(x, w, h) {
+  if (flash > 0) { x.fillStyle = `rgba(230,240,255,${flash * 0.45})`; x.fillRect(0, 0, w, h); }
+  if (!bolt) return;
+  x.save(); x.strokeStyle = `rgba(255,255,255,${bolt.life})`; x.shadowColor = '#8cf'; x.shadowBlur = 14; x.lineWidth = Math.max(1.5, h * 0.004) * bolt.life + 0.5; x.lineJoin = 'round';
+  x.beginPath(); bolt.pts.forEach(([px, py], i) => (i ? x.lineTo(px * w, py * h) : x.moveTo(px * w, py * h))); x.stroke(); x.restore();
+}
+
+// Glass > raindrops refracting inverted sky
+const drops = [];
+let dpr = 1, SW = 300, SH = 170;
+function spawnDrop(r) { drops.push({ x: R() * SW, y: R() * SH, r: r || 1.4 + R() ** 2 * 5, vy: 0, trail: 0 }); }
+function stepDrops(dt, rain) {
+  if (rain > 0.05) { let n = dt * 14 * rain; while (n > 0) { if (R() < n && drops.length < 90) spawnDrop(); n -= 1; } }
+  for (const d of drops) {
+    if (rain < 0.05) d.r -= dt * 0.9;
+    if (!d.vy && d.r > 4.3 && R() < dt * 0.6) d.vy = 18 + R() * 30;
+    if (d.vy) { d.y += d.vy * dt; d.x += Math.sin(d.y * 0.2) * 0.15; d.r -= dt * 0.35; d.trail += d.vy * dt; if (d.trail > 9) { d.trail = 0; drops.push({ x: d.x + (R() - 0.5) * 1.5, y: d.y - d.r * 1.2, r: d.r * 0.33, vy: 0, trail: 0 }); } }
+  }
+  for (let i = 0; i < drops.length; i++) for (let j = i + 1; j < drops.length; j++) {
+    const a = drops[i], b = drops[j]; if (a.r <= 0 || b.r <= 0) continue;
+    const dx = a.x - b.x, dy = a.y - b.y; if (dx * dx + dy * dy < ((a.r + b.r) * 0.75) ** 2) { const [k, l] = a.r >= b.r ? [a, b] : [b, a]; k.r = Math.min(8, Math.hypot(k.r, l.r)); k.vy = Math.max(k.vy, l.vy); l.r = 0; }
+  }
+  for (let i = drops.length - 1; i >= 0; i--) if (drops[i].r < 0.7 || drops[i].y - drops[i].r > SH) drops.splice(i, 1);
+}
+function drawGlass(frost) {
+  gx.setTransform(dpr, 0, 0, dpr, 0, 0); gx.clearRect(0, 0, SW, SH);
+  for (const d of drops) {
+    const { x, y, r } = d;
+    gx.fillStyle = 'rgba(0,20,45,0.16)'; gx.beginPath(); gx.ellipse(x, y + r * 0.28, r, r * 0.96, 0, 0, TAU); gx.fill();
+    gx.save(); gx.beginPath(); gx.arc(x, y, r, 0, TAU); gx.clip(); gx.translate(x, y); gx.scale(1, -1);
+    gx.drawImage(sky, (x - r * 3) * dpr, (y - r * 3) * dpr, r * 6 * dpr, r * 6 * dpr, -r, -r, r * 2, r * 2); gx.restore();
+    const rim = gx.createRadialGradient(x, y - r * 0.2, r * 0.45, x, y, r); rim.addColorStop(0, 'rgba(0,30,60,0)'); rim.addColorStop(1, 'rgba(0,30,60,0.38)');
+    gx.fillStyle = rim; gx.beginPath(); gx.arc(x, y, r, 0, TAU); gx.fill();
+    gx.fillStyle = 'rgba(255,255,255,0.9)'; gx.beginPath(); gx.ellipse(x - r * 0.32, y - r * 0.42, r * 0.28, r * 0.18, -0.5, 0, TAU); gx.fill();
+    gx.strokeStyle = 'rgba(255,255,255,0.35)'; gx.lineWidth = Math.max(0.6, r * 0.12); gx.beginPath(); gx.arc(x, y, r * 0.78, 0.4, 2.6); gx.stroke();
+  }
+  if (frost > 0.01) {
+    const g = gx.createRadialGradient(SW / 2, SH / 2, SH * 0.35, SW / 2, SH / 2, SW * 0.62); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, `rgba(240,248,255,${0.75 * frost})`);
+    gx.fillStyle = g; gx.fillRect(0, 0, SW, SH);
+  }
+}
+
+// Icons > glossy weather glyphs for strip + big icon
+function icon(x, s, k, t) {
+  x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, s, s); x.setTransform(s, 0, 0, s, 0, 0);
+  const id = ST[k].id;
+  if (id === 'sunny') { x.save(); x.translate(0.5, 0.5); x.rotate(t * 0.4); x.fillStyle = 'rgba(255,215,60,0.85)'; for (let i = 0; i < 10; i++) { x.rotate(TAU / 10); x.beginPath(); x.moveTo(0.3, -0.04); x.lineTo(0.44, 0); x.lineTo(0.3, 0.04); x.fill(); } x.restore(); sunDisc(x, 0.5, 0.5, 0.26); return; }
+  if (id === 'cloudy' || id === 'shower') sunDisc(x, 0.64, 0.36, 0.2);
+  const dark = id === 'storm';
+  cloud(x, 0.47, id === 'cloudy' ? 0.6 : 0.46, 0.27, dark ? '#a3acbd' : '#ffffff', dark ? '#4a5469' : '#b9c9da');
+  if (id === 'shower' || id === 'storm') {
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 1.4 + i * 0.33) % 1, X = 0.3 + i * 0.18 - ph * 0.04, Y = 0.72 + ph * 0.16;
+      x.globalAlpha = 1 - ph; const g = x.createLinearGradient(0, Y - 0.06, 0, Y + 0.05); g.addColorStop(0, '#bfe9ff'); g.addColorStop(1, '#1d8fe8');
+      x.fillStyle = g; x.beginPath(); x.moveTo(X, Y - 0.07); x.quadraticCurveTo(X + 0.045, Y, X, Y + 0.04); x.quadraticCurveTo(X - 0.045, Y, X, Y - 0.07); x.fill(); x.globalAlpha = 1;
+    }
+  }
+  if (dark) {
+    const on = (t * 0.7) % 1 < 0.6; const g = x.createLinearGradient(0, 0.55, 0, 0.95); g.addColorStop(0, '#fff6a0'); g.addColorStop(1, '#ffb400');
+    x.fillStyle = g; x.globalAlpha = on ? 1 : 0.5; x.beginPath(); x.moveTo(0.52, 0.56); x.lineTo(0.4, 0.78); x.lineTo(0.5, 0.78); x.lineTo(0.44, 0.97); x.lineTo(0.64, 0.7); x.lineTo(0.54, 0.7); x.lineTo(0.62, 0.56); x.closePath(); x.fill(); x.globalAlpha = 1;
+  }
+  if (id === 'snow') {
+    x.strokeStyle = '#fff'; x.lineWidth = 0.025; x.shadowColor = '#6ac'; x.shadowBlur = s * 0.04;
+    for (let i = 0; i < 3; i++) { const X = 0.3 + i * 0.2, Y = 0.78 + Math.sin(t * 2 + i) * 0.04; x.beginPath(); for (let a = 0; a < 3; a++) { const ang = (a * Math.PI) / 3 + t * 0.5; x.moveTo(X + Math.cos(ang) * 0.06, Y + Math.sin(ang) * 0.06); x.lineTo(X - Math.cos(ang) * 0.06, Y - Math.sin(ang) * 0.06); } x.stroke(); }
+    x.shadowBlur = 0;
+  }
+}
+
+// UI > text, forecast strip, options
+const daysEl = $('#days'), DN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayEls = [0, 1, 2, 3, 4].map((d) => {
+  const el = document.createElement('div'); el.className = 'day'; el.innerHTML = `<span>${d ? DN[(new Date().getDay() + d) % 7] : 'Today'}</span><canvas width="72" height="72"></canvas><b></b><i></i>`;
+  el.onclick = (e) => { e.stopPropagation(); input(); pick(d); }; daysEl.append(el); return el;
+});
+function render() {
+  const k = fc[city][sel], c = tempOf(sel), S = ST[k];
+  $('#city').textContent = CITIES[city].name; $('#cond').textContent = S.name;
+  $('#temp').innerHTML = `${deg(c)}°<small>${unit}</small>`;
+  $('#hl').textContent = `High ${deg(c + 3)}° · Low ${deg(c - 6)}°`;
+  $('#ex').textContent = `Humidity ${S.hum}% · Wind ${unit === 'C' ? S.wind + ' km/h' : Math.round(S.wind * 0.62) + ' mph'}`;
+  dayEls.forEach((el, d) => { el.classList.toggle('on', d === sel); el.querySelector('b').textContent = deg(tempOf(d) + 3) + '°'; el.querySelector('i').textContent = deg(tempOf(d) - 6) + '°'; });
+  document.querySelectorAll('#cities button').forEach((b, i) => b.classList.toggle('on', i === city));
+  document.querySelectorAll('#units button').forEach((b) => b.classList.toggle('on', b.dataset.u === unit));
+}
+function goTo(k) { if (k === to) return; from = mix < 0.5 ? from : to; to = k; mix = 0; ambience(); chime(); }
+function pick(d) { sel = d; goTo(fc[city][d]); render(); }
+function setCity(c) { city = c; pick(sel); }
+$('#skywrap').onclick = () => { input(); fc[city][sel] = (fc[city][sel] + 1) % ST.length; pick(sel); };
+$('#temp').onclick = () => { input(); unit = unit === 'C' ? 'F' : 'C'; render(); };
+CITIES.forEach((c, i) => { const b = document.createElement('button'); b.textContent = c.name; b.onclick = () => { input(); setCity(i); }; $('#cities').append(b); });
+document.querySelectorAll('#units button').forEach((b) => (b.onclick = () => { input(); unit = b.dataset.u; render(); }));
+function flip() { const card = $('#card'); card.style.transform = 'scaleX(0)'; setTimeout(() => { card.classList.toggle('showback'); card.style.transform = ''; }, 170); }
+$('#opt').onclick = () => { input(); flip(); }; $('#done').onclick = () => { input(); flip(); };
+$('#size').onclick = () => { input(); const s = $('#gad').classList.toggle('small'); $('#size').textContent = s ? '+' : '–'; };
+$('#upd').textContent = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
+// Drag > grip moves gadget
+{
+  const gad = $('#gad'), grip = $('#grip'); let ox = 0, oy = 0, on = false;
+  grip.onpointerdown = (e) => { input(); on = true; grip.setPointerCapture(e.pointerId); const r = gad.getBoundingClientRect(); ox = e.clientX - (r.left + r.width / 2); oy = e.clientY - (r.top + r.height / 2); };
+  grip.onpointermove = (e) => { if (!on) return; gad.style.left = Math.max(0, Math.min(innerWidth, e.clientX - ox)) + 'px'; gad.style.top = Math.max(0, Math.min(innerHeight, e.clientY - oy)) + 'px'; };
+  grip.onpointerup = () => (on = false);
+}
+addEventListener('touchstart', () => $('#gad').classList.add('touch'), { once: true });
+
+// Audio > noise rain, wind, thunder, chime
+let ac = null, rainG, windG, noise;
+function audio() {
+  if (ac) return; ac = new AudioContext();
+  noise = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate); const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = R() * 2 - 1;
+  const loop = (f) => { const s = ac.createBufferSource(); s.buffer = noise; s.loop = true; s.connect(f); s.start(); };
+  const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2200; bp.Q.value = 0.5; rainG = ac.createGain(); rainG.gain.value = 0; loop(bp); bp.connect(rainG).connect(ac.destination);
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380; windG = ac.createGain(); windG.gain.value = 0; loop(lp); lp.connect(windG).connect(ac.destination);
+  ambience();
+}
+function ambience() { if (!ac) return; const S = ST[to]; rainG.gain.setTargetAtTime(Math.min(1, S.rain) * 0.07, ac.currentTime, 0.5); windG.gain.setTargetAtTime(S.wind / 31 * 0.12, ac.currentTime, 0.6); }
+function thunder() {
+  if (!ac) return; const t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  s.buffer = noise; s.loop = true; f.type = 'lowpass'; f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(90, t + 0.6);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.6, t + 0.04); g.gain.exponentialRampToValueAtTime(0.25, t + 0.5); g.gain.exponentialRampToValueAtTime(0.0001, t + 3);
+  s.connect(f).connect(g).connect(ac.destination); s.start(t); s.stop(t + 3.1);
+}
+function chime() {
+  if (!ac) return; const t = ac.currentTime;
+  [1046.5, 1568].forEach((fq, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = fq; g.gain.setValueAtTime(0.0001, t + i * 0.07); g.gain.exponentialRampToValueAtTime(0.05, t + i * 0.07 + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.07 + 0.6); o.connect(g).connect(ac.destination); o.start(t + i * 0.07); o.stop(t + i * 0.07 + 0.7); });
+}
+addEventListener('pointerdown', audio); addEventListener('keydown', audio);
+
+// Attract > tour days, then next city
+let lastInput = performance.now(), nextTour = 0;
+function input() { lastInput = performance.now(); }
+addEventListener('keydown', (e) => {
+  input();
+  if (e.key === 'ArrowRight') pick((sel + 1) % 5); else if (e.key === 'ArrowLeft') pick((sel + 4) % 5); else if (e.key === ' ' || e.key === 'Enter') $('#skywrap').onclick();
+});
+
+// Loop > step, paint both canvases, glass, icons
+function fit() {
+  bg.width = innerWidth; bg.height = innerHeight; dpr = Math.min(2, devicePixelRatio || 1);
+  const r = sky.getBoundingClientRect(); SW = r.width; SH = r.height;
+  for (const c of [sky, glass]) { c.width = Math.round(SW * dpr); c.height = Math.round(SH * dpr); }
+}
+fit(); addEventListener('resize', fit);
+pick(0); mix = 1; from = to;
+for (let i = 0; i < 45; i++) spawnDrop();
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000), t = now / 1000; last = now;
+  mix = Math.min(1, mix + dt / 0.9); if (mix >= 1) from = to;
+  const lvl = (key) => ST[from][key] * (1 - mix) + ST[to][key] * mix;
+  stepP(PB, dt); stepP(PS, dt);
+  if (ST[to].id === 'storm' && mix > 0.5) { nextBolt -= dt; if (nextBolt < 0) { makeBolt(); nextBolt = 2 + R() * 3.5; } }
+  flash = Math.max(0, flash - dt * 3); if (bolt && (bolt.life -= dt * 2.5) <= 0) bolt = null;
+  paint(bx, bg.width, bg.height, from, 1, PB, t, true); if (mix < 1) paint(bx, bg.width, bg.height, to, mix, PB, t, true);
+  drawBolt(bx, bg.width, bg.height);
+  sx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  paint(sx, SW, SH, from, 1, PS, t, false); if (mix < 1) paint(sx, SW, SH, to, mix, PS, t, false);
+  drawBolt(sx, SW, SH);
+  stepDrops(dt, lvl('rain')); drawGlass(lvl('snow'));
+  icon(bix, 128, fc[city][sel], t);
+  dayEls.forEach((el, d) => icon(el.querySelector('canvas').getContext('2d'), 72, fc[city][d], t + d));
+  $('#clock').textContent = new Date().toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  if (now - lastInput > 7000 && now > nextTour) { nextTour = now + 4500; if (sel === 4) { city = (city + 1) % CITIES.length; pick(0); } else pick(sel + 1); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+window.__weather = { set: (k) => { fc[city][sel] = typeof k === 'number' ? k : ST.findIndex((s) => s.id === k); pick(sel); }, day: (d) => pick(d), city: (c) => setCity(c), state: () => ST[to].id, unit: () => unit, drops: () => drops.length };
+</script>
+</body>
+</html>
