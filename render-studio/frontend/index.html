@@ -33,7 +33,14 @@
   .row.sub.types { border-top: 0; padding-top: 0; }
   .row.sub button { padding: 5px 11px; font-size: 12.5px; }
   .row[hidden] { display: none; }
-  @media (max-width: 560px) { .row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -24px; padding-left: 24px; padding-right: 24px; } #filters button { flex: none; } }
+  /* Home > tech dropdown: right of tab row on desktop, own line above tabs on phone; lit while a stack is picked */
+  #filters { grid-template-columns: 1fr auto; }
+  #filters .row { grid-column: 1; }
+  #tech { grid-column: 2; grid-row: 1; align-self: start; border: 1px solid var(--line); background: var(--card); color: inherit; padding: 7px 30px 7px 13px; border-radius: 999px; cursor: pointer; font-family: inherit; font-size: 13.5px; font-weight: 600; appearance: none; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+  #tech:hover { border-color: #3a4052; }
+  #tech.on { border-color: var(--accent); color: var(--accent); }
+  #tech option, #tech optgroup { background: var(--card); color: #e8e8ee; }
+  @media (max-width: 560px) { #filters { grid-template-columns: 1fr; } #tech { grid-column: 1; justify-self: start; } .row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -24px; padding-left: 24px; padding-right: 24px; } #filters button { flex: none; } }
   #empty { max-width: 1240px; margin: 0 auto 32px; padding: 48px 24px; color: var(--muted); text-align: center; border: 1px dashed var(--line); border-radius: 18px; }
   #empty[hidden], .card[hidden], #menu button[hidden] { display: none; }
   /* Home > grid cards */
@@ -139,7 +146,7 @@ const CHIP = { scenes: 'Scenes', generative: 'Generative', apps: 'Apps', models:
 const HINT = { models: '.glb / .gltf', 'blender-renders': '.mp4 / .png', 'remotion-videos': '.mp4', videos: '.mp4 / .webm / .mov', images: '.png / .jpg / .webp' };
 const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
 
-let CATS = [], TABS = [], ASSETS = [], list = [], filter = 'all', current = null, sig = '';
+let CATS = [], TABS = [], STACKS = [], ASSETS = [], list = [], filter = 'all', tech = '', current = null, sig = '';
 const catName = (id) => CATS.find((x) => x.id === id)?.label ?? id;
 const styleName = (id) => CATS.find((x) => x.id === 'aero')?.subs?.find((x) => x.id === id)?.label ?? id;
 const tabOf = (cat) => TABS.find((t) => t.cats.includes(cat));
@@ -159,6 +166,13 @@ const valid = (f) => { const [t, c] = f.split(':'), tab = TABS.find((x) => x.id 
 // old links: bare category or <category>:<style> to tab form
 const normalize = (f) => { if (f === 'all' || valid(f)) return f; const [c, s] = f.split(':'), tab = tabOf(c); if (!tab) return 'all'; const n = tab.families && s ? `${tab.id}:${s}` : tab.cats.length > 1 ? `${tab.id}:${c}` : tab.id; return valid(n) ? n : tab.id; };
 const icon = (a) => a.emoji ?? ICON[a.kind];
+// tech = '' | stack id; card shows when tab filter and stack both match
+const usesTech = (a, t = tech) => !t || !!a.stack?.includes(t);
+const shows = (a, f = filter) => match(a, f) && usesTech(a);
+const techName = (id) => STACKS.find((s) => s.id === id)?.label ?? id;
+// hash = c=<filter>&t=<tech> | a=<asset id>
+const params = (h) => Object.fromEntries(h.split('&').filter((x) => x.includes('=')).map((x) => { const i = x.indexOf('='); return [x.slice(0, i), decodeURIComponent(x.slice(i + 1))]; }));
+const hashOf = (f, t) => [f !== 'all' && `c=${f}`, t && `t=${encodeURIComponent(t)}`].filter(Boolean).join('&');
 
 // Studio > screen load: fetch asset list, rebuild only when files changed
 async function load() {
@@ -168,6 +182,7 @@ async function load() {
   sig = next;
   CATS = data.categories;
   TABS = data.tabs;
+  STACKS = data.stacks ?? [];
   ASSETS = data.assets;
   build();
   route();
@@ -175,11 +190,10 @@ async function load() {
 
 function tabBtn(id, text) {
   const b = document.createElement('button');
-  const n = ASSETS.filter((a) => match(a, id)).length;
   b.dataset.f = id;
-  b.className = n ? '' : 'zero';
-  b.innerHTML = `${esc(text)}<span class="n">${n}</span>`;
-  b.onclick = () => go(id === 'all' ? '' : `c=${id}`);
+  // count filled by setFilter so it follows the tech pick
+  b.innerHTML = `${esc(text)}<span class="n"></span>`;
+  b.onclick = () => go(hashOf(id, tech));
   return b;
 }
 
@@ -190,7 +204,11 @@ function build() {
   const mk = (cls, parent, fam) => { const r = Object.assign(document.createElement('div'), { className: `row ${cls}` }); if (parent) r.dataset.parent = parent; if (fam) r.dataset.fam = fam; return r; };
   const top = mk('');
   top.append(tabBtn('all', 'All'), ...TABS.map((t) => tabBtn(t.id, t.label)));
-  const rows = [top];
+  // Home > Tech dropdown: options rebuilt per filter in setFilter
+  const sel = Object.assign(document.createElement('select'), { id: 'tech', title: 'Filter by tech stack' });
+  sel.setAttribute('aria-label', 'Tech stack');
+  sel.onchange = () => go(hashOf(filter, sel.value));
+  const rows = [top, sel];
   // Home > Chip rows: shown only while parent tab active; aero gets era row, then type row per era
   TABS.forEach((t) => {
     const chips = t.families ? t.families.map((f) => [f.id, f.label]) : t.cats.length > 1 ? t.cats.map((c) => [c, CHIP[c] ?? catName(c)]) : null;
@@ -259,9 +277,18 @@ function card(a) {
   return el;
 }
 
-function setFilter(f) {
+function setFilter(f, t = tech) {
   filter = normalize(f);
-  list = ASSETS.filter((a) => match(a, filter) && a.kind !== 'link');
+  tech = STACKS.some((s) => s.id === t) ? t : '';
+  list = ASSETS.filter((a) => shows(a) && a.kind !== 'link');
+  // Home > Counts: every tab/chip counts within current tech
+  $('filters').querySelectorAll('button[data-f]').forEach((b) => { const n = ASSETS.filter((a) => shows(a, b.dataset.f)).length; b.querySelector('.n').textContent = n; b.classList.toggle('zero', !n); });
+  // Home > Tech dropdown: grouped options, counts within current tab/chip, empty ones disabled
+  const inTab = ASSETS.filter((a) => match(a, filter)), sel = $('tech');
+  const opt = (id, text, n) => `<option value="${esc(id)}"${!n && id !== tech ? ' disabled' : ''}>${esc(text)} · ${n}</option>`;
+  sel.innerHTML = opt('', 'All tech', inTab.length) + [...new Set(STACKS.map((s) => s.group))].map((g) => `<optgroup label="${esc(g)}">${STACKS.filter((s) => s.group === g).map((s) => opt(s.id, s.label, inTab.filter((a) => usesTech(a, s.id)).length)).join('')}</optgroup>`).join('');
+  sel.value = tech;
+  sel.classList.toggle('on', !!tech);
   const [ft, fc] = filter.split(':'), tab = TABS.find((x) => x.id === ft), fam = fc && famOf(tab, fc);
   // Home > Chips: active = exact, parent tab on top row, era chip while one of its types is active
   $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter || (!b.closest('.sub') && b.dataset.f === ft) || (!!fam && !b.closest('.types') && b.dataset.f === `${ft}:${fam.id}`)));
@@ -269,16 +296,18 @@ function setFilter(f) {
   let n = 0;
   $('grid').querySelectorAll('.card').forEach((el) => {
     const a = ASSETS.find((x) => x.id === el.dataset.id);
-    const show = match(a, filter);
+    const show = shows(a);
     el.hidden = !show;
     if (show) el.querySelector('.num').textContent = ++n;
   });
   menu.querySelectorAll('button').forEach((b) => (b.hidden = !list.some((a) => a.id === b.dataset.id)));
   // Home > Empty state: tell user which folder to fill
-  const shown = ASSETS.filter((a) => match(a, filter)).length;
+  const shown = ASSETS.filter((a) => shows(a)).length;
   $('empty').hidden = shown > 0;
   const cat = tab?.cats.includes(fc) ? fc : tab?.cats[0];
-  $('empty').innerHTML = HINT[cat]
+  // only the tech pick emptied it: say so, offer clear
+  if (tech && inTab.length) $('empty').innerHTML = `Nothing in ${esc(filter === 'all' ? 'the studio' : label(filter))} uses ${esc(techName(tech))} yet. <a href="#${hashOf(filter, '')}">Clear tech</a>`;
+  else $('empty').innerHTML = HINT[cat]
     ? `No ${esc(label(filter))} yet. Drop ${HINT[cat]} files into <code>media/${esc(cat)}/</code>.`
     : `Nothing here yet. Add single-file demos to <code>frontend/demos/</code> with <code>&lt;meta name="category" content="${esc(cat ?? 'shaders')}"&gt;</code>${tab?.families && fc && !famById(tab, fc) ? ` and <code>&lt;meta name="style" content="${esc(fc)}"&gt;</code>` : ''}.`;
 }
@@ -316,20 +345,20 @@ $('copy').onclick = async () => {
   setTimeout(() => ($('copy').textContent = 'Copy prompt'), 1400);
 };
 
-// Viewer > Routing: #a=<id> opens asset, #c=<id> or empty = home
+// Viewer > Routing: #a=<id> opens asset, #c=<filter>&t=<tech> or empty = home
 function go(h) { location.hash = h; }
 function step(d) {
   const i = list.findIndex((a) => a.id === current);
   if (list.length) go(`a=${encodeURIComponent(list[(i + d + list.length) % list.length].id)}`);
 }
-const homeHash = () => (filter === 'all' ? '' : `c=${filter}`);
+const homeHash = () => hashOf(filter, tech);
 function route() {
   const h = location.hash.slice(1);
   menu.classList.remove('open');
-  const id = h.startsWith('a=') ? decodeURIComponent(h.slice(2)) : null;
-  if (!id) { setFilter(h.startsWith('c=') ? h.slice(2) : 'all'); if (h.startsWith('c=') && homeHash() !== h) history.replaceState(null, '', `#${homeHash()}`); }
-  // deep link outside active tab: widen to its own tab so prev/next contain it
-  else if (!list.some((a) => a.id === id)) setFilter(tabOf(ASSETS.find((a) => a.id === id)?.category)?.id ?? 'all');
+  const p = params(h), id = p.a ?? null;
+  if (!id) { setFilter(p.c ?? 'all', p.t ?? ''); if (homeHash() !== h) history.replaceState(null, '', `#${homeHash()}`); }
+  // deep link outside active filter: widen to its own tab, drop tech it lacks, so prev/next contain it
+  else if (!list.some((a) => a.id === id)) { const a = ASSETS.find((x) => x.id === id); setFilter(tabOf(a?.category)?.id ?? 'all', usesTech(a ?? {}) ? tech : ''); }
   const i = list.findIndex((a) => a.id === id);
   if (i < 0) {
     current = null;

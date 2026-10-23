@@ -3,9 +3,9 @@
  * PURPOSE: build gallery list: live html demos, rendered media files, 3d-toys simulations (games stay on /3d-toys/)
  * UI: Render Studio home grid, category tabs, viewer
  * USED BY: backend/start-server.js (GET /api/assets), backend/capture-demos.js
- * KEY EXPORTS: CATEGORIES, listAssets, listDemos
+ * KEY EXPORTS: CATEGORIES, TABS, STACKS, listAssets, listDemos
  */
-import { readdir, readFile, stat, open } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, basename } from 'node:path';
 import { SIMS } from '../../3d-toys/components/toy-list.js';
 
@@ -51,6 +51,45 @@ export const TABS = [
   { id: 'rendered', label: 'Rendered', cats: ['models', 'blender-renders', 'remotion-videos', 'videos', 'images'] },
 ];
 
+// Studio > Tech dropdown: detected from source (meta tags stripped so prose never counts); css = nothing else matched
+export const STACKS = [
+  { id: 'three', label: 'Three.js', group: 'Libraries', re: /from\s*['"]three['"]|three@\d|three(\.module)?(\.min)?\.js/ },
+  { id: 'rapier', label: 'Rapier', group: 'Libraries', re: /@dimforge\/rapier|rapier[23]d/i },
+  { id: 'cannon', label: 'cannon-es', group: 'Libraries', re: /cannon-es|cannon(\.min)?\.js/i },
+  { id: 'd3', label: 'D3.js', group: 'Libraries', re: /d3@\d|from\s*['"]d3['"]|\/d3(\.v\d)?(\.min)?\.js/ },
+  { id: 'gsap', label: 'GSAP', group: 'Libraries', re: /gsap@\d|from\s*['"]gsap|gsap(\.min)?\.js/ },
+  { id: 'p5', label: 'p5.js', group: 'Libraries', re: /p5@\d|p5(\.min)?\.js/ },
+  { id: 'tone', label: 'Tone.js', group: 'Libraries', re: /tone@\d|Tone(\.min)?\.js|from\s*['"]tone['"]/ },
+  { id: 'lottie', label: 'Lottie', group: 'Libraries', re: /lottie-web|lottie(\.min)?\.js|lottie-player|dotlottie/i },
+  { id: 'react', label: 'React', group: 'Libraries', re: /react@\d|from\s*['"]react['"]|react-dom/ },
+  { id: 'next', label: 'Next.js', group: 'Libraries', re: /from\s*['"]next\/|next@\d/ },
+  { id: 'webgl', label: 'Raw WebGL / GLSL', group: 'Web APIs', re: /getContext\(\s*['"](webgl2?|experimental-webgl)['"]/ },
+  { id: 'canvas', label: 'Canvas 2D', group: 'Web APIs', re: /getContext\(\s*['"]2d['"]/ },
+  { id: 'webaudio', label: 'Web Audio', group: 'Web APIs', re: /AudioContext/ },
+  { id: 'svg', label: 'SVG', group: 'Web APIs', re: /<svg[\s>]|createElementNS/ },
+  { id: 'css', label: 'HTML + CSS only', group: 'Web APIs' },
+  { id: 'blender', label: 'Blender', group: 'Pipelines' },
+  { id: 'remotion', label: 'Remotion', group: 'Pipelines' },
+  { id: 'gltf', label: 'glTF model', group: 'Pipelines' },
+];
+const MEDIA_STACK = { 'blender-renders': ['blender'], 'remotion-videos': ['remotion', 'react'], models: ['gltf'] };
+export function stackOf(src) {
+  const text = src.replace(/<meta[^>]*>/gi, '');
+  const hit = STACKS.filter((s) => s.re?.test(text)).map((s) => s.id);
+  return hit.length ? hit : ['css'];
+}
+// sim folder: every html/js file, nested folders included
+async function readTree(dir) {
+  let out = '';
+  for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out += await readTree(p);
+    else if (/\.(html|js|mjs)$/.test(e.name)) out += await readFile(p, 'utf8');
+  }
+  return out;
+}
+
 // Studio > Sim cards: prompts for sims that started as frontier-model tests; others show description only
 const SIM_PROMPTS = {
   'black-hole-lensing': 'Write a full-screen WebGL shader that raymarches light around a Schwarzschild black hole: bent rays, thin turbulent accretion disk with Doppler beaming, photon ring, starfield, bloom.',
@@ -71,11 +110,9 @@ export async function listDemos(demosRoot) {
   const names = new Set(files);
   const out = [];
   for (const f of files.filter((x) => x.endsWith('.html'))) {
-    const fh = await open(join(demosRoot, f));
-    const { buffer, bytesRead } = await fh.read(Buffer.alloc(8192), 0, 8192, 0);
-    const st = await fh.stat();
-    await fh.close();
-    const html = buffer.subarray(0, bytesRead).toString('utf8');
+    // whole file: library imports sit far below the head
+    const html = await readFile(join(demosRoot, f), 'utf8');
+    const st = await stat(join(demosRoot, f));
     const base = basename(f, '.html');
     out.push({
       id: `demos/${f}`,
@@ -90,6 +127,7 @@ export async function listDemos(demosRoot) {
       prompt: meta(html, 'prompt'),
       style: meta(html, 'style'),
       tags: meta(html, 'tags').split(',').map((t) => t.trim()).filter(Boolean),
+      stack: stackOf(html),
       order: Number(meta(html, 'order')) || 99,
       capture: Number(meta(html, 'capture')) || 0,
       mtime: st.mtimeMs,
@@ -126,6 +164,7 @@ async function listMedia(mediaRoot) {
         title: notes[f]?.title ?? titleOf(f),
         desc: notes[f]?.about ?? '',
         prompt: notes[f]?.prompt ?? '',
+        stack: MEDIA_STACK[cat.id] ?? [],
         size: st.size,
         mtime: st.mtimeMs,
       });
@@ -138,8 +177,8 @@ async function listMedia(mediaRoot) {
 export async function listAssets(root) {
   // sim posters come from `npm run capture -- --toys`; missing ones fall back to the emoji
   const shots = new Set(await readdir(join(root, 'media', 'toy-posters')).catch(() => []));
-  const sims = SIMS.map((t) => ({ id: `sims/${t.dir}`, category: t.studio, kind: 'page', ext: '3d', url: `3d-toys/${t.dir}/`, title: t.title, emoji: t.emoji,
-    desc: t.desc, prompt: SIM_PROMPTS[t.dir] ?? '', tags: t.tags ?? [],
-    poster: shots.has(`${t.dir}.png`) ? `media/toy-posters/${t.dir}.png` : null }));
+  const sims = await Promise.all(SIMS.map(async (t) => ({ id: `sims/${t.dir}`, category: t.studio, kind: 'page', ext: '3d', url: `3d-toys/${t.dir}/`, title: t.title, emoji: t.emoji,
+    desc: t.desc, prompt: SIM_PROMPTS[t.dir] ?? '', tags: t.tags ?? [], stack: stackOf(await readTree(join(root, '..', '3d-toys', t.dir))),
+    poster: shots.has(`${t.dir}.png`) ? `media/toy-posters/${t.dir}.png` : null })));
   return [...(await listDemos(join(root, 'frontend', 'demos'))), ...sims, ...(await listMedia(join(root, 'media')))];
 }

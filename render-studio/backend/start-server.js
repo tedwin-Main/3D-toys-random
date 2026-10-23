@@ -10,7 +10,7 @@ import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
-import { CATEGORIES, TABS, listAssets } from './list-assets.js';
+import { CATEGORIES, TABS, STACKS, listAssets } from './list-assets.js';
 import { createRoomRelay } from '../../3d-toys/backend/room-relay.js';
 
 const PORT = Number(process.env.PORT ?? 5066);
@@ -96,7 +96,7 @@ const http = createServer(async (req, res) => {
     if (path === '/api/assets') {
       const assets = await listAssets(ROOT);
       const categories = CATEGORIES.map(({ id, label, group, subs }) => ({ id, label, group, subs }));
-      return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }).end(JSON.stringify({ categories, tabs: TABS, assets }));
+      return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-cache' }).end(JSON.stringify({ categories, tabs: TABS, stacks: STACKS.filter((s) => assets.some((a) => a.stack?.includes(s.id))).map(({ re, ...s }) => s), assets }));
     }
     let file = resolve(path);
     if (!file) return res.writeHead(404).end('not found');
