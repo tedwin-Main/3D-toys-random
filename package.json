@@ -3,17 +3,22 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "workspaces": [
-    "3d-toys",
-    "render-studio"
-  ],
   "scripts": {
     "setup": "npm install",
-    "start": "node render-studio/backend/start-server.js",
-    "dev": "node --watch render-studio/backend/start-server.js",
-    "toys": "npm start --prefix 3d-toys",
-    "test": "npm test --prefix 3d-toys",
-    "capture": "npm run capture --prefix render-studio --"
+    "start": "node src/features/studio-server/start-server.js",
+    "dev": "node --watch src/features/studio-server/start-server.js",
+    "toys": "node src/features/multiplayer-rooms/start-server.js",
+    "test": "node --test src/features/toy-box/common/ src/features/toy-box/eight-ball-pool/ src/features/toy-box/physics-portfolio-builder/",
+    "load-test": "node src/features/multiplayer-rooms/room-load-test.js",
+    "capture": "node src/features/demo-capture/capture-demos.js",
+    "instagram": "node src/features/demo-capture/capture-instagram-reels.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "playwright": "^1.49.1"
   },
   "engines": {
     "node": ">=20"

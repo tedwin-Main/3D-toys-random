@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/pages/viewer-page.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/viewer-page.js
  * PURPOSE: published portfolio: scroll-scrubbed break hero, settled scene as nav, work list, contact, project drawer
  * UI: Viewer (whole page)
  * USED BY: viewer-main.js

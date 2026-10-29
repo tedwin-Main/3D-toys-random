@@ -1,9 +1,9 @@
 node_modules
 .DS_Store
 .env*
-render-studio/python-textures/.venv/
-render-studio/.capture/
-render-studio/remotion-promos/out/
-render-studio/.install-*.log
-render-studio/.instagram-capture/
-for-Instagram/
+src/features/texture-generator/.venv/
+src/features/demo-capture/.capture/
+src/features/remotion-promos/out/
+.install-*.log
+src/features/demo-capture/.instagram-capture/
+src/features/instagram-posts/

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/bake-client.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/bake-client.js
  * PURPOSE: promise wrapper over bake worker, one shared worker per tab
  * UI: Builder > Preview
  * USED BY: builder-page.js

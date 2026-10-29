@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/scene-recording.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/scene-recording.js
  * PURPOSE: baked break format: pack/unpack Int16 frames, sample any time, map scroll progress to sim time
  * UI: Viewer > Hero (scroll scrub), Builder > Preview (scrub slider)
  * USED BY: scene-presets.js, frontend scene-renderer.js, viewer-page.js, builder-page.js

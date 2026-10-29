@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/break-stage.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/break-stage.js
  * PURPOSE: React shell for scene renderer: canvas, projected project labels (also keyboard targets), WebGL fallback
  * UI: Viewer > Hero > stage, Builder > Preview > stage
  * USED BY: viewer-page.js, preview-panel.js

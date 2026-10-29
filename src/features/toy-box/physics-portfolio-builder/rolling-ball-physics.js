@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/rolling-ball-physics.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/rolling-ball-physics.js
  * PURPOSE: deterministic rolling-ball sim (pool, marbles): swept contacts, cloth friction, spin, first-hit log
  * UI: none (baked in builder worker, sampled by viewer)
  * USED BY: scene-presets.js

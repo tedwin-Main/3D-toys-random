@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/backend/room-load-test.js
+ * FILE: src/features/multiplayer-rooms/room-load-test.js
  * PURPOSE: load-tests room relay: N fake players in one room, host snapshots 20 Hz, guest inputs 20 Hz to host, reports guest-host-guest RTT
  * UI: none (cli)
  * USED BY: npm run load-test (3d-toys/package.json)

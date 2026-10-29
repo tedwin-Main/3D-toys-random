@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/scene-presets.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/scene-presets.js
  * PURPOSE: three break scenes (pool, marbles, dominoes): layout per project count, seeded jitter, bake to recording
  * UI: Builder > Style > Scene picker, Builder > Preview
  * USED BY: frontend bake-worker.js, tests

@@ -1,5 +1,5 @@
 """
-FILE: render-studio/python-textures/make-textures.py
+FILE: src/features/texture-generator/make-textures.py
 PURPOSE: procedural texture pack with numpy + Pillow (seamless marble, stained-glass voronoi, terrain heightmap + shaded relief, pixel spaceship sprite sheet); writes PNGs + notes.json
 UI: Render Studio > Images tab
 USED BY: run by hand: python-textures/.venv/bin/python python-textures/make-textures.py
@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-OUT = Path(__file__).resolve().parent.parent / "media" / "images"
+OUT = Path(__file__).resolve().parents[2] / "media" / "images"
 rng = np.random.default_rng(8)
 
 

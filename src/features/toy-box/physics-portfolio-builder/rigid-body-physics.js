@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/rigid-body-physics.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/rigid-body-physics.js
  * PURPOSE: deterministic 3D rigid-body bake (dominoes) on Rapier WASM, same output shape as rolling sim
  * UI: none (baked in builder worker, sampled by viewer)
  * USED BY: scene-presets.js

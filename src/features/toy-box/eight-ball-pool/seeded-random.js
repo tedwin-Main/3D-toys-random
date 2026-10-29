@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/seeded-random.js
+ * FILE: src/features/toy-box/eight-ball-pool/seeded-random.js
  * PURPOSE: deterministic random numbers for rack jitter, bot aim noise, texture grain
  * UI: none
  * USED BY: pool-game-physics.js, pool-shot-worker.js, pool-table-scene.js, ball-textures.js

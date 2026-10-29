@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/bake-worker.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/bake-worker.js
  * PURPOSE: off-main-thread physics bake: preset + project count + seeds in, encoded recordings out
  * UI: Builder > Preview (Baking… status)
  * USED BY: bake-client.js

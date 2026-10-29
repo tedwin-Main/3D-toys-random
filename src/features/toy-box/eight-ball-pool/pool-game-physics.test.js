@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-game-physics.test.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-game-physics.test.js
  * PURPOSE: game table contracts: legal rack, straight pot, scratch, first contact, determinism, respot, aim ray
  * UI: none
  * USED BY: npm test

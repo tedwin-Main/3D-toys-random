@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/viewer-main.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/viewer-main.js
  * PURPOSE: viewer entry: fetch site data, mount page or error card (fonts + styles linked in viewer.html)
  * UI: Viewer
  * USED BY: viewer.html

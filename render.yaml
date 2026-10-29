@@ -1,5 +1,5 @@
 # Render Blueprint for the whole repo: Render Studio at /, 3D Toy Box at /3d-toys/, room relay at /3d-toys/rooms.
-# One Node server (render-studio/backend/start-server.js) serves both folders.
+# One Node server (src/features/studio-server/start-server.js) serves both folders.
 # Keep ONE instance: multiplayer rooms live in server memory,
 # so a second replica would split players across servers that cannot see each other.
 # Free web services sleep after 15 min idle; the first visit cold-starts (~30-60 s).
@@ -11,7 +11,7 @@ services:
     # players on Singapore VPN: relay next to them
     region: singapore
     branch: main
-    # npm workspaces: one root lockfile installs 3d-toys + render-studio
+    # one root package + lockfile installs everything
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health

@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
-  FILE: 3d-toys/eight-ball-pool/index.html
+  FILE: src/features/toy-box/eight-ball-pool/index.html
   PURPOSE: 8-Ball page shell: CDN import map (three, react, htm), fonts, styles, mount point
   UI: Back Room 8-Ball page
-  USED BY: 3d-toys/index.html (iframe viewer)
+  USED BY: src/features/toy-box/index.html (iframe viewer)
   KEY EXPORTS: none
 -->
 <html lang="en">
@@ -16,7 +16,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&family=Space+Grotesk:wght@500..700&display=swap" />
-    <link rel="stylesheet" href="frontend/components/play.css" />
+    <link rel="stylesheet" href="play.css" />
     <!-- no build: CDN modules; react-dom marks react external so one React instance -->
     <script type="importmap">
     { "imports": {
@@ -31,6 +31,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="frontend/main.js"></script>
+    <script type="module" src="main.js"></script>
   </body>
 </html>

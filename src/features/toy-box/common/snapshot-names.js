@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/components/snapshot-names.js
+ * FILE: src/features/toy-box/common/snapshot-names.js
  * PURPOSE: keeps nick + color out of every snapshot: host stamps a name table on roster change + once per second, guests cache it
  * UI: every multiplayer toy that sends host snapshots
  * USED BY: multiplayer toy pages (snapshot() + applySnap())

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/preset-info.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/preset-info.js
  * PURPOSE: scene labels and project limits, no physics imports (keeps Rapier out of viewer bundle)
  * UI: Builder > Style > Scene picker
  * USED BY: scene-presets.js, site-schema.js, style-editor.js

@@ -1,5 +1,5 @@
 /**
- * FILE: render-studio/backend/capture-demos.js
+ * FILE: src/features/demo-capture/capture-demos.js
  * PURPOSE: headless QA + poster capture for live demos: console errors, fps, poster png, optional mobile shot + video clips + ffmpeg demo reel
  * UI: Render Studio home grid posters, Videos tab (demo reel), Images tab (reel gif)
  * USED BY: npm run capture [-- names... --mobile --clips --reel --toys]
@@ -12,9 +12,9 @@ import { join } from 'node:path';
 import { listDemos } from '../studio-server/list-assets.js';
 import { TOYS, SIMS } from '../toy-box/common/toy-list.js';
 
-const ROOT = join(import.meta.dirname, '..');
-const DEMOS = join(ROOT, 'frontend', 'demos');
-const TMP = join(ROOT, '.capture');
+const ROOT = join(import.meta.dirname, '..', '..');
+const DEMOS = join(ROOT, 'features', 'demo-gallery', 'demos');
+const TMP = join(import.meta.dirname, '.capture');
 const BASE = 'http://localhost:5066';
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -24,7 +24,7 @@ const only = args.filter((a) => !a.startsWith('--'));
 async function ensureServer() {
   const up = await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false);
   if (up) return null;
-  const child = spawn(process.execPath, [join(ROOT, 'backend', 'start-server.js')], { stdio: 'ignore' });
+  const child = spawn(process.execPath, [join(ROOT, 'features', 'studio-server', 'start-server.js')], { stdio: 'ignore' });
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 150));
     if (await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false)) return child;

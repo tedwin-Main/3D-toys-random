@@ -1,7 +1,7 @@
 /**
- * FILE: render-studio/backend/capture-instagram-reels.js
+ * FILE: src/features/demo-capture/capture-instagram-reels.js
  * PURPOSE: record every Frutiger Aero demo in 9:16 portrait with scripted mouse motion, build Instagram reels: one per demo, one per style, one master
- * UI: none (output to ../for-Instagram; raw clips kept in .instagram-capture)
+ * UI: none (output to src/features/instagram-posts; raw clips kept in demo-capture/.instagram-capture)
  * USED BY: npm run instagram [-- names... --build-only]
  * KEY EXPORTS: none (cli script)
  */
@@ -11,10 +11,10 @@ import { mkdir, readdir, rm, writeFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { listDemos, CATEGORIES } from '../studio-server/list-assets.js';
 
-const ROOT = join(import.meta.dirname, '..');
-const DEMOS = join(ROOT, 'frontend', 'demos');
-const TMP = join(ROOT, '.instagram-capture');
-const OUT = join(ROOT, '..', 'for-Instagram');
+const ROOT = join(import.meta.dirname, '..', '..');
+const DEMOS = join(ROOT, 'features', 'demo-gallery', 'demos');
+const TMP = join(import.meta.dirname, '.instagram-capture');
+const OUT = join(ROOT, 'features', 'instagram-posts');
 const BASE = 'http://localhost:5066';
 const W = 1080, H = 1920, FPS = 30;
 const RAW_MS = 9000;
@@ -32,7 +32,7 @@ const exists = (p) => access(p).then(() => true, () => false);
 async function ensureServer() {
   const up = await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false);
   if (up) return null;
-  const child = spawn(process.execPath, [join(ROOT, 'backend', 'start-server.js')], { stdio: 'ignore' });
+  const child = spawn(process.execPath, [join(ROOT, 'features', 'studio-server', 'start-server.js')], { stdio: 'ignore' });
   for (let i = 0; i < 40; i++) {
     await new Promise((r) => setTimeout(r, 150));
     if (await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false)) return child;

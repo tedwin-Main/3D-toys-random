@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/site-template-files.test.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/site-template-files.test.js
  * PURPOSE: export template list matches every local file reachable from viewer.html
  * UI: none
  * USED BY: npm test (3d-toys root)
@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 import { TEMPLATE_FILES } from './site-template-files.js'
 
-const ROOT = join( import.meta.dirname, '..', '..' )
+const ROOT = import.meta.dirname
 // html: plain relative paths; js: only ./ ../ (bare names go through import map to CDN)
 const isLocal = ( spec, fromHtml ) => fromHtml ? !spec.includes( ':' ) && /\.(js|css)$/.test( spec ) : spec.startsWith( '.' )
 

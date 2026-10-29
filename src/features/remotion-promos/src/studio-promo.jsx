@@ -1,5 +1,5 @@
 /**
- * FILE: render-studio/remotion-promos/src/studio-promo.jsx
+ * FILE: src/features/remotion-promos/src/studio-promo.jsx
  * PURPOSE: 15 s Render Studio promo: rolling 8-ball + kinetic title, poster montage with labels, tilted poster wall, outro
  * UI: Render Studio > Remotion Videos tab (studio-promo.mp4)
  * USED BY: remotion-promos/src/index.jsx

@@ -1,5 +1,5 @@
 """
-FILE: render-studio/blender-scenes/eight-ball-product-shot.py
+FILE: src/features/blender-scenes/eight-ball-product-shot.py
 PURPOSE: headless Blender scene: procedural 8-ball on pool felt; Cycles hero still, EEVEE turntable mp4 (frames + ffmpeg), GLB export; writes notes.json entries
 UI: Render Studio > Blender Renders + 3D Models tabs
 USED BY: run by hand: /Applications/Blender.app/Contents/MacOS/Blender -b -P blender-scenes/eight-ball-product-shot.py
@@ -17,7 +17,7 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 RENDERS, MODELS = ROOT / "media" / "blender-renders", ROOT / "media" / "models"
 QUICK = "--quick" in sys.argv  # low samples + 24 frames for iteration
 

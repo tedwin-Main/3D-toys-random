@@ -1,8 +1,8 @@
 /**
- * FILE: 3d-toys/components/toy-list.js
+ * FILE: src/features/toy-box/common/toy-list.js
  * PURPOSE: single source of toy metadata: TOYS = games (Toy Box), SIMS = simulations (Render Studio tabs)
  * UI: 3D Toy Box home grid, viewer nav pill + dropdown; Render Studio sim cards
- * USED BY: 3d-toys/index.html, render-studio/backend/list-assets.js, render-studio/backend/capture-demos.js
+ * USED BY: src/features/toy-box/index.html, src/features/studio-server/list-assets.js, src/features/demo-capture/capture-demos.js
  * KEY EXPORTS: TOYS, SIMS
  */
 // Toy Box > Data: one entry per toy folder (newest last); dir = folder name = hash route

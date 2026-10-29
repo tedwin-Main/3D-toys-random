@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/project-drawer.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/project-drawer.js
  * PURPOSE: side panel with one project's image, details and outbound link
  * UI: Viewer > Project drawer (opened from ball click, label, or work grid)
  * USED BY: viewer-page.js

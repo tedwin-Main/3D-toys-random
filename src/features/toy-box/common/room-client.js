@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/components/room-client.js
+ * FILE: src/features/toy-box/common/room-client.js
  * PURPOSE: browser side of room relay: join/create room by code, roster + host tracking, send to all, one peer, or host
  * UI: every multiplayer toy (through room-lobby.js)
  * USED BY: components/room-lobby.js, multiplayer toy pages

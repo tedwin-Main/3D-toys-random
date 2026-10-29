@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/scene-presets.test.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/scene-presets.test.js
  * PURPOSE: every preset bakes deterministic, contained, fully hit, non-overlapping breaks
  * UI: none
  * USED BY: npm test (3d-toys root)

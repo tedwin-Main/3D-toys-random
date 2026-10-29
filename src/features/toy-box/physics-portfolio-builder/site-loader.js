@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/site-loader.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/site-loader.js
  * PURPOSE: viewer data source: published site.json + one random baked break, or builder draft (?draft=1)
  * UI: Viewer > page load
  * USED BY: viewer-main.js

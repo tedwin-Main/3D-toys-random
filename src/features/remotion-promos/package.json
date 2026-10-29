@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "studio": "remotion studio src/index.jsx --public-dir ../frontend/demos",
-    "render": "remotion render src/index.jsx StudioPromo ../media/remotion-videos/studio-promo.mp4 --codec h264 --public-dir ../frontend/demos"
+    "studio": "remotion studio src/index.jsx --public-dir ../demo-gallery/demos",
+    "render": "remotion render src/index.jsx StudioPromo ../../media/remotion-videos/studio-promo.mp4 --codec h264 --public-dir ../demo-gallery/demos"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",

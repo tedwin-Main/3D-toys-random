@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/camera-path.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/camera-path.js
  * PURPOSE: camera choreography: low POV behind striker, swing up to framed overview of settled scene
  * UI: Viewer > Hero, Builder > Preview
  * USED BY: scene-renderer.js, camera-path.test.js

@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  FILE: 3d-toys/physics-portfolio-builder/viewer.html
+  FILE: src/features/toy-box/physics-portfolio-builder/viewer.html
   PURPOSE: published portfolio shell: CDN import map, fonts, styles, mount; exported as zip index.html
   UI: Viewer
   USED BY: Builder > Top bar > Preview site (?draft=1), export-site.js (template entry)
@@ -18,8 +18,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:wght@100..900&family=Inter:wght@100..900&family=JetBrains+Mono:wght@100..800&family=Space+Grotesk:wght@300..700&display=swap" />
-    <link rel="stylesheet" href="frontend/components/shared.css" />
-    <link rel="stylesheet" href="frontend/components/viewer.css" />
+    <link rel="stylesheet" href="shared.css" />
+    <link rel="stylesheet" href="viewer.css" />
     <!-- no build: CDN modules; react-dom marks react external so one React instance -->
     <script type="importmap">
     { "imports": {
@@ -38,6 +38,6 @@
   <body>
     <div id="root"></div>
     <noscript>This portfolio needs JavaScript for its 3D scene.</noscript>
-    <script type="module" src="frontend/viewer-main.js"></script>
+    <script type="module" src="viewer-main.js"></script>
   </body>
 </html>

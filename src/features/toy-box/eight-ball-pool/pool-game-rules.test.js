@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-game-rules.test.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-game-rules.test.js
  * PURPOSE: 8-ball rule contracts: fouls, groups, turn keep/pass, 8-ball win/loss, break respot, practice clear
  * UI: none
  * USED BY: npm test

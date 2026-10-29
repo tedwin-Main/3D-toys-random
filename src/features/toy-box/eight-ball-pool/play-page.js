@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/pages/play-page.js
+ * FILE: src/features/toy-box/eight-ball-pool/play-page.js
  * PURPOSE: 8-ball game screen: menu, turn flow (you / bot), shots via worker, ball in hand, replay, game over
  * UI: Play (whole page: menu, table, HUD, game over)
  * USED BY: main.js

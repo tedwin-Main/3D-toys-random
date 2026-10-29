@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/body-textures.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/body-textures.js
  * PURPOSE: canvas textures for bodies (pool balls, marbles, domino faces) and surfaces (felt, wood, marble ring)
  * UI: Viewer > Hero scene, Builder > Preview scene
  * USED BY: scene-renderer.js

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/site-bundle.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/site-bundle.js
  * PURPOSE: assemble static site file list: viewer template + site.json + baked breaks + project images
  * UI: Builder > Top bar > Export zip
  * USED BY: frontend export-site.js, tests

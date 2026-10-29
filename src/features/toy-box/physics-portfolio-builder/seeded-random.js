@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/seeded-random.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/seeded-random.js
  * PURPOSE: deterministic random numbers for rack jitter and break variants
  * UI: none
  * USED BY: scene-presets.js, rigid-body-physics.js, body-textures.js

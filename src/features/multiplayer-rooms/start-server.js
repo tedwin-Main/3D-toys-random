@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/backend/start-server.js
+ * FILE: src/features/multiplayer-rooms/start-server.js
  * PURPOSE: one-port server for whole toy box: static toys under /3d-toys/, room relay socket for multiplayer toys
  * UI: every 3D Toy Box page (static), multiplayer toys (websocket)
  * USED BY: npm start (3d-toys/package.json)
@@ -12,7 +12,7 @@ import { networkInterfaces } from 'node:os';
 import { createRoomRelay } from './room-relay.js';
 
 const PORT = Number(process.env.PORT ?? 5055);
-const ROOT = join(import.meta.dirname, '..');
+const ROOT = join(import.meta.dirname, '..', 'toy-box');
 const BASE = '/3d-toys/';
 
 const MIME = {

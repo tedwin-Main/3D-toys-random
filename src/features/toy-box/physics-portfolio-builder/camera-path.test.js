@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/camera-path.test.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/camera-path.test.js
  * PURPOSE: camera choreography contracts for every preset and screen shape
  * UI: none
  * USED BY: npm test (3d-toys root)

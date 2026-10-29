@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/draft-store.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/draft-store.js
  * PURPOSE: builder draft persistence: site JSON in localStorage, baked breaks + images in IndexedDB
  * UI: Builder (autosave), Viewer ?draft=1 (live preview of unsaved draft)
  * USED BY: builder-page.js, site-loader.js, export-site.js

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-controls.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-controls.js
  * PURPOSE: game HUD pieces: pull-down power bar, cue-ball spin pad, player cards with ball chips
  * UI: Play > HUD (power bar, spin pad, players)
  * USED BY: play-page.js

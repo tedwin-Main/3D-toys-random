@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/rolling-ball-physics.test.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/rolling-ball-physics.test.js
  * PURPOSE: rolling sim contracts: momentum transfer, energy never grows, walls hold, first hit logged
  * UI: none
  * USED BY: npm test (3d-toys root)

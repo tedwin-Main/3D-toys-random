@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-shot-worker.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-shot-worker.js
  * PURPOSE: off-main-thread shot sim + bot thinking, so long shots never freeze table
  * UI: Play > shot, Play > vs Bot (bot turn)
  * USED BY: pool-shot-client.js

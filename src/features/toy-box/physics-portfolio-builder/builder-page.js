@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/pages/builder-page.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/builder-page.js
  * PURPOSE: builder shell: draft state, autosave, bake on scene change, image URLs, three-panel layout
  * UI: Builder (whole page)
  * USED BY: builder-main.js

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/scene-recording.test.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/scene-recording.test.js
  * PURPOSE: recording pack/unpack precision, sampler interpolation, scroll timeline shape
  * UI: none
  * USED BY: npm test (3d-toys root)

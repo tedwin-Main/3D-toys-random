@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-game-rules.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-game-rules.js
  * PURPOSE: pure 8-ball rules: break, open table, groups, fouls, ball in hand, 8-ball win/loss, practice mode
  * UI: Play > HUD (turn, groups, toasts), Play > ball in hand
  * USED BY: play-page.jsx, pool-bot.js, pool-game-rules.test.js

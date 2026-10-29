@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/scene-renderer.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/scene-renderer.js
  * PURPOSE: three.js stage for any baked break: surface, bodies, lights, camera swing, hover/pick, label projection
  * UI: Viewer > Hero, Builder > Preview
  * USED BY: break-stage.js
@@ -22,7 +22,7 @@ const FLASH_IN = 0.08
 const FLASH_HOLD = 0.9
 const FLASH_OUT = 0.5
 
-// viewer export zip ships builder files only, so stage helpers live here, not in shared components/
+// viewer export zip ships builder files only, so stage helpers live here, not in toy-box common/
 // Run engine: sRGB + ACES tone map + soft shadows; pixel ratio capped lower on touch
 function createStageRenderer( canvas, { exposure = 1 } = {} ) {
   const renderer = new THREE.WebGLRenderer( { canvas, antialias: true, powerPreference: 'high-performance' } )

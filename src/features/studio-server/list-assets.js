@@ -1,5 +1,5 @@
 /**
- * FILE: render-studio/backend/list-assets.js
+ * FILE: src/features/studio-server/list-assets.js
  * PURPOSE: build gallery list: live html demos, rendered media files, 3d-toys simulations (games stay on /3d-toys/)
  * UI: Render Studio home grid, category tabs, viewer
  * USED BY: backend/start-server.js (GET /api/assets), backend/capture-demos.js
@@ -104,7 +104,7 @@ const kindOf = (ext) => (MODEL.includes(ext) ? 'model' : VIDEO.includes(ext) ? '
 const titleOf = (file) => basename(file, extname(file)).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 const meta = (html, name) => html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`, 'i'))?.[1] ?? '';
 
-// Studio > Live tabs: frontend/demos/*.html, metadata from head tags
+// Studio > Live tabs: demo-gallery/demos/*.html, metadata from head tags
 export async function listDemos(demosRoot) {
   const files = await readdir(demosRoot).catch(() => []);
   const names = new Set(files);
@@ -178,7 +178,7 @@ export async function listAssets(root) {
   // sim posters come from `npm run capture -- --toys`; missing ones fall back to the emoji
   const shots = new Set(await readdir(join(root, 'media', 'toy-posters')).catch(() => []));
   const sims = await Promise.all(SIMS.map(async (t) => ({ id: `sims/${t.dir}`, category: t.studio, kind: 'page', ext: '3d', url: `3d-toys/${t.dir}/`, title: t.title, emoji: t.emoji,
-    desc: t.desc, prompt: SIM_PROMPTS[t.dir] ?? '', tags: t.tags ?? [], stack: stackOf(await readTree(join(root, '..', '3d-toys', t.dir))),
+    desc: t.desc, prompt: SIM_PROMPTS[t.dir] ?? '', tags: t.tags ?? [], stack: stackOf(await readTree(join(root, 'features', 'toy-box', t.dir))),
     poster: shots.has(`${t.dir}.png`) ? `media/toy-posters/${t.dir}.png` : null })));
-  return [...(await listDemos(join(root, 'frontend', 'demos'))), ...sims, ...(await listMedia(join(root, 'media')))];
+  return [...(await listDemos(join(root, 'features', 'demo-gallery', 'demos'))), ...sims, ...(await listMedia(join(root, 'media')))];
 }

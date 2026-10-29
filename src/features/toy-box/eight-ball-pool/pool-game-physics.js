@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-game-physics.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-game-physics.js
  * PURPOSE: playable 8-ball table on top of pool-table-physics: rack, cue strike, shot recording, aim ray, ball-in-hand checks
  * UI: Play > table, Play > aim overlay
  * USED BY: pool-bot.js, pool-shot-worker.js, pool-table-scene.js, play-page.jsx, pool-game-physics.test.js

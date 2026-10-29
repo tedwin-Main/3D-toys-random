@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-bot.test.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-bot.test.js
  * PURPOSE: bot contracts: finds straight-in pot, chosen shot pots legal ball, places cue on ball in hand, breaks at rack
  * UI: none
  * USED BY: npm test

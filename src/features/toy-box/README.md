@@ -12,7 +12,7 @@ npm start       # http://localhost:5066/ (studio) and http://localhost:5066/3d-t
 npm test        # pool + Break Builder engine tests (node --test)
 ```
 
-Toys alone: `npm run toys` from the root (or `npm start` inside `3d-toys/`) serves only the toy box on http://localhost:5055/3d-toys/.
+Toys alone: `npm run toys` from the root serves only the toy box on http://localhost:5055/3d-toys/.
 
 Both servers serve every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:<port>/3d-toys/`. Needs Node >= 20.
 
@@ -30,7 +30,7 @@ Notes:
 
 ## 3D toys
 
-- ``: one project. `index.html` = gallery (All / Single player / Multiplayer filter) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `components/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
+- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
 - `pelican-on-bicycle/`: pelican rides a bike over hills; WASD, bell, fish pickups.
 - `horse-race-track/`: 2-lap horse derby with betting, cheering, multi-camera.
 - `tiny-planet-world/`: walkable mini planet with day/night, villages, boats, tree planting.
@@ -57,12 +57,12 @@ Notes:
 - `jelly-playground/`: verlet soft bodies (edge + radial springs, volume pressure), OBB/peg colliders, spatial-hash body contacts, grab-to-stretch, transmissive jelly material, blinking eyes, boing audio.
 - `synthwave-night-drive/`: endless synthwave drive with traffic near-miss scoring, procedural music, bloom + CRT pass
 - `bonsai-garden/`: Bonsai Bench: procedural bonsai (maple / cherry / pine), click-to-prune with tumbling cut branches, season scrub with falling leaves, petals and snow, wind sway.
-- `eight-ball-pool/`: Back Room 8-Ball: real-physics pool (pockets + jaws, spin, 240 Hz), full 8-ball rules, practice or Easy / Pro bot that simulates its shots; ES modules + module worker, tests via `node --test eight-ball-pool/backend/`.
+- `eight-ball-pool/`: Back Room 8-Ball: real-physics pool (pockets + jaws, spin, 240 Hz), full 8-ball rules, practice or Easy / Pro bot that simulates its shots; ES modules + module worker, tests via `node --test eight-ball-pool/`.
 - `physics-portfolio-builder/`: Break Builder: no-code portfolio where each project is a ball, marble or domino in a baked physics break (custom rolling-ball engine + Rapier in a module worker); scroll plays the break, settled scene is the nav; Export zip = static no-build site. Old Vite history in tedwin-Main/physics-portfolio-builder.
 
 ## Multiplayer
 
-Rooms via `backend/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test.
+Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test.
 
 - `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
 - `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick

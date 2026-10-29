@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/ball-textures.js
+ * FILE: src/features/toy-box/eight-ball-pool/ball-textures.js
  * PURPOSE: canvas textures for pool balls, cue ball, felt and wood
  * UI: 8-Ball > table (balls, cloth, rails)
  * USED BY: pool-table-scene.js

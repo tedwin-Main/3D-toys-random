@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/game-icons.js
+ * FILE: src/features/toy-box/eight-ball-pool/game-icons.js
  * PURPOSE: 5 inline Phosphor icons (one fixed weight each) so page needs no icon package
  * UI: 8-Ball > HUD top bar (menu, camera, replay, new rack), Skip button
  * USED BY: play-page.js

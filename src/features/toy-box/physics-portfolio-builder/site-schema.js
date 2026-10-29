@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/backend/site-schema.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/site-schema.js
  * PURPOSE: site.json shape: palettes, font pairs, default draft, normalize untrusted input
  * UI: Builder > Projects + Style panels, Viewer (theme tokens)
  * USED BY: builder-page.js, viewer-page.js, site-bundle.js, tests

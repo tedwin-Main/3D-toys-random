@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/main.js
+ * FILE: src/features/toy-box/eight-ball-pool/main.js
  * PURPOSE: 8-Ball entry: mount game (fonts + styles linked from index.html)
  * UI: 8-Ball
  * USED BY: eight-ball-pool/index.html

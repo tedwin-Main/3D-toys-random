@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/image-upload.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/image-upload.js
  * PURPOSE: shrink uploaded project image to max 1600 px WebP, store in IndexedDB, return file name
  * UI: Builder > Projects > card > Image dropzone
  * USED BY: project-editor.js

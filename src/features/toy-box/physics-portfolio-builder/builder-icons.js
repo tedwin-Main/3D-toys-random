@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/builder-icons.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/builder-icons.js
  * PURPOSE: inline Phosphor icons (one fixed weight each) so pages need no icon package
  * UI: Builder > Top bar, Preview controls, Projects, Style; Viewer > Work list, Project drawer
  * USED BY: top-bar.js, preview-panel.js, project-editor.js, style-editor.js, project-grid.js, project-drawer.js

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/builder-main.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/builder-main.js
  * PURPOSE: builder entry: mount builder page (fonts + styles linked in index.html)
  * UI: Builder
  * USED BY: index.html

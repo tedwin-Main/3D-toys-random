@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/play-hint.js
+ * FILE: src/features/toy-box/eight-ball-pool/play-hint.js
  * PURPOSE: picks HUD hint line for current play phase, ball in hand, pointer type, camera
  * UI: Play > HUD hint
  * USED BY: play-page.js

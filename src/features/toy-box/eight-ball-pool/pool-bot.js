@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-bot.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-bot.js
  * PURPOSE: 8-ball bot: ghost-ball pot candidates, clear-path checks, simulate best few, score with real rules, then miss on purpose by difficulty
  * UI: Play > vs Bot (bot turn)
  * USED BY: pool-shot-worker.js, pool-bot.test.js

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-shot-client.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-shot-client.js
  * PURPOSE: promise wrapper over pool shot worker, one shared worker per tab
  * UI: Play > shot, Play > vs Bot
  * USED BY: play-page.js

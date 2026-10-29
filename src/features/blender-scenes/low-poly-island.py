@@ -1,5 +1,5 @@
 """
-FILE: render-studio/blender-scenes/low-poly-island.py
+FILE: src/features/blender-scenes/low-poly-island.py
 PURPOSE: headless Blender scene: procedural low-poly island (noise terrain, height colours, trees, rocks, lighthouse, clouds, faceted water); Cycles still, EEVEE turntable mp4, GLB export; writes notes.json entries
 UI: Render Studio > Blender Renders + 3D Models tabs
 USED BY: run by hand: /Applications/Blender.app/Contents/MacOS/Blender -b -P blender-scenes/low-poly-island.py [-- --quick | --glb-only]
@@ -18,7 +18,7 @@ import bmesh
 import bpy
 from mathutils import Matrix, Vector, noise
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 RENDERS, MODELS = ROOT / "media" / "blender-renders", ROOT / "media" / "models"
 QUICK = "--quick" in sys.argv  # low samples + 24 frames for iteration
 GLB_ONLY = "--glb-only" in sys.argv  # re-export model without re-rendering

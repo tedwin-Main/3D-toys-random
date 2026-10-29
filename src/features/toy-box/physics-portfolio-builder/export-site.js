@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/export-site.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/export-site.js
  * PURPOSE: gather viewer template + draft into static site files; download as zip
  * UI: Builder > Top bar > Export zip
  * USED BY: top-bar.js
@@ -13,7 +13,7 @@ import { loadImage } from './draft-store.js'
 import { TEMPLATE_FILES } from './site-template-files.js'
 
 // builder root: viewer source files double as export template
-const TEMPLATE_BASE = new URL( '../../', import.meta.url )
+const TEMPLATE_BASE = new URL( './', import.meta.url )
 
 const fetchBytes = async ( url ) => {
   const response = await fetch( url )

@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/frontend/components/pool-table-scene.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-table-scene.js
  * PURPOSE: three.js 8-ball table: felt, cushions + pockets built from physics geometry, balls, cue stick, aim guide, shot playback, camera
  * UI: Play > table (menu backdrop, aiming, shot playback, ball in hand)
  * USED BY: play-page.js

@@ -1,8 +1,8 @@
 /**
- * FILE: render-studio/backend/start-server.js
+ * FILE: src/features/studio-server/start-server.js
  * PURPOSE: one-port server for whole repo: studio gallery, media with Range streaming, asset list api, 3d-toys static under /3d-toys/, multiplayer room relay
  * UI: every Render Studio screen, every 3D Toy Box page, multiplayer toys (websocket)
- * USED BY: npm start (root package.json, render-studio/package.json), render.yaml
+ * USED BY: npm start (root package.json), render.yaml
  * KEY EXPORTS: none (boots http server on PORT, default 5066)
  */
 import { createServer } from 'node:http';
@@ -14,13 +14,13 @@ import { CATEGORIES, TABS, STACKS, listAssets } from './list-assets.js';
 import { createRoomRelay } from '../multiplayer-rooms/room-relay.js';
 
 const PORT = Number(process.env.PORT ?? 5066);
-const ROOT = join(import.meta.dirname, '..');
-const FRONTEND = join(ROOT, 'frontend');
+const ROOT = join(import.meta.dirname, '..', '..');
+const FRONTEND = join(ROOT, 'features', 'demo-gallery');
 const MEDIA = join(ROOT, 'media');
-const TOYS = join(ROOT, '..', '3d-toys');
+const TOYS = join(ROOT, 'features', 'toy-box');
 const TOYS_BASE = '/3d-toys/';
-// toy server code + deps stay private
-const TOYS_PRIVATE = ['backend', 'node_modules', 'package.json', 'package-lock.json'];
+// toy deps stay private; room server code lives outside toy-box
+const TOYS_PRIVATE = ['node_modules', 'package.json', 'package-lock.json'];
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -69,7 +69,7 @@ function sendFile(req, res, file, size) {
   req.method === 'HEAD' ? res.end() : createReadStream(file).pipe(res);
 }
 
-// Run engine: map url to a file: /media/ and /3d-toys/ get their own roots, rest is frontend/; null = blocked
+// Run engine: map url to a file: /media/ and /3d-toys/ get their own roots, rest is demo-gallery/; null = blocked
 function resolve(path) {
   if (path.startsWith('/media/')) return safeJoin(MEDIA, path.slice('/media/'.length));
   if (path.startsWith(TOYS_BASE)) {
@@ -79,7 +79,7 @@ function resolve(path) {
   return safeJoin(FRONTEND, path.slice(1));
 }
 
-// Run engine: allowlist only frontend/, media/ and 3d-toys/; tool source + backends stay private
+// Run engine: allowlist only demo-gallery/, media/ and toy-box/; tool source + backends stay private
 const http = createServer(async (req, res) => {
   const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
   if (path === '/health') return res.writeHead(200).end('ok');

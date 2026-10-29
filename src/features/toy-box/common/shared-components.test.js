@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/components/shared-components.test.js
+ * FILE: src/features/toy-box/common/shared-components.test.js
  * PURPOSE: lobby invite link contracts and game audio unlock / burst gating with stubbed Web Audio
  * UI: none
  * USED BY: npm test (3d-toys root)

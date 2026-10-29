@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/html.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/html.js
  * PURPOSE: htm tagged template bound to React, JSX stand-in so page runs with no build
  * UI: every Builder + Viewer screen
  * USED BY: builder-main.js, viewer-main.js, pages, components, builder-icons.js

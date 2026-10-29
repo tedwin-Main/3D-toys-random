@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/style-editor.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/style-editor.js
  * PURPOSE: site identity, scene picker, palette, type pair, contact links
  * UI: Builder > Style panel
  * USED BY: builder-page.js

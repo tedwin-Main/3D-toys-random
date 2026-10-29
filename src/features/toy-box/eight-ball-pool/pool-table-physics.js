@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/eight-ball-pool/backend/pool-table-physics.js
+ * FILE: src/features/toy-box/eight-ball-pool/pool-table-physics.js
  * PURPOSE: pool table engine core copied from 8Ball_Studio pool-break-physics.js: 6 pockets + jaws, swept ball/cushion contacts, cloth friction, spin
  * UI: Play > table (via pool-game-physics.js)
  * USED BY: pool-game-physics.js

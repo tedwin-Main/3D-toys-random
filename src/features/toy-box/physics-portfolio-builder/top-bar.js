@@ -1,5 +1,5 @@
 /**
- * FILE: 3d-toys/physics-portfolio-builder/frontend/components/top-bar.js
+ * FILE: src/features/toy-box/physics-portfolio-builder/top-bar.js
  * PURPOSE: builder header: brand, open full preview, export zip, result toast
  * UI: Builder > Top bar
  * USED BY: builder-page.js
