@@ -57,6 +57,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, night stadium, floodlights
@@ -514,6 +515,14 @@ function snapshot() {
   }, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepCar(p, dt); events = keep; },
+  live: () => true,
+  seed: () => {},
+  merge: (p, host) => { p.boost = host.boost; p.h = blendAngle(p.h, host.h, 0.2); },
+  angle: 'h',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck, score: s.sc, over: !!s.ov });
@@ -526,6 +535,7 @@ function applySnap(s) {
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1), team);
     if (p.team !== team) { p.team = team; const g = cars3d.get(id); if (g) g.userData.paint.color.set(TEAM[team]); }
     Object.assign(p, { x: px, z: pz, h, vx: pvx, vz: pvz, steer, boosting: !!(fl & 2), boost, goals });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -636,6 +646,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.players.get(room.me), { inGas: local.gas, inSteer: local.steer, inBoost: local.boost }, dt, 1 / 60);
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: +local.gas.toFixed(2), s: +local.steer.toFixed(2), b: local.boost }); }
   }
@@ -652,10 +663,11 @@ function loop() {
   for (const p of world.players.values()) {
     let g = cars3d.get(p.id);
     if (!g) { g = makeCar(p); cars3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
-    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
-    let dh = p.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    let dh = v.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     g.rotation.y += dh * (hostSim ? 1 : Math.min(1, dt * 16));
     const u = g.userData;
     u.flame.visible = p.boosting;

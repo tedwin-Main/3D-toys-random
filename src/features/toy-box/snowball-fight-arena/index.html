@@ -64,6 +64,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, winter sky, low sun
@@ -489,6 +490,13 @@ function snapshot() {
   }, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
+  live: (p) => !(p.frozen > 0),
+  seed: (p) => { p.pending = []; },
+  angle: 'face',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck });
@@ -502,6 +510,7 @@ function applySnap(s) {
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -625,6 +634,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.players.get(room.me), { mx: local.mx, mz: local.mz, fire: 0 }, dt, 1 / 60);
     const me = world.players.get(room.me);
     // guest throttles its own throws; host still checks ammo + cooldown
     if (local.fire && now >= local.nextFire && me && me.ammo >= 1 && me.frozen <= 0 && world.phase === 'play') {
@@ -647,10 +657,11 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeKid(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
-    const moving = p.frozen <= 0 && world.phase === 'play', tx = p.x + (moving ? p.vx * age : 0), tz = p.z + (moving ? p.vz * age : 0), a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const moving = p.frozen <= 0 && world.phase === 'play', tx = v.x + (moving ? v.vx * va : 0), tz = v.z + (moving ? v.vz * va : 0), a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
-    let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     g.rotation.y += dh * Math.min(1, dt * 18);
     const u = g.userData, sp = Math.hypot(p.vx, p.vz);
     u.body.position.y = p.frozen > 0 ? 0 : Math.abs(Math.sin(time * 13 + p.id)) * 0.12 * Math.min(sp / SPEED, 1);

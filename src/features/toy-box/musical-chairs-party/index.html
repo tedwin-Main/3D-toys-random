@@ -54,6 +54,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 
 // Scene > Renderer, dark club, disco ball, sweeping colored spots
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -501,6 +502,13 @@ function snapshot() {
   }, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
+  live: (p) => p.seat < 0,
+  seed: () => {},
+  angle: 'face',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, winner: s.wn });
@@ -511,6 +519,7 @@ function applySnap(s) {
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 2));
     Object.assign(p, { x, z, vx, vz, face, seat, out: !!(fl & 1), dashT: fl & 4 ? 0.1 : 0, dashCd, place });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -612,6 +621,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.players.get(room.me), { mx: local.mx, mz: local.mz, dash: 0 }, dt, 1 / 60);
     dashLocal = 0;
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), dq: dashSeq }); }
@@ -658,13 +668,14 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeBean(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
-    const tx = p.x + (p.seat < 0 ? p.vx * age : 0), tz = p.z + (p.seat < 0 ? p.vz * age : 0), a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + (p.seat < 0 ? v.vx * va : 0), tz = v.z + (p.seat < 0 ? v.vz * va : 0), a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 5) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
     const seatC = p.seat >= 0 ? world.chairs[p.seat] : null;
     const targetY = p.out ? 1.2 + Math.sin(time * 2 + p.id) * 0.2 : seatC ? 0.55 : 0;
     g.position.y += (targetY - g.position.y) * Math.min(1, dt * 10);
-    const face = seatC ? seatC.h : p.face;
+    const face = seatC ? seatC.h : v.face;
     let dh = face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     g.rotation.y += dh * Math.min(1, dt * 14);
     const u = g.userData;

@@ -57,6 +57,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -413,6 +414,13 @@ function snapshot() {
   }, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
+  live: (p) => !(p.fall > 0),
+  seed: (p) => { p.lastDash = local.dashSeq; },
+  angle: 'face',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, zone: s.z, next: s.nz, hopT: s.ht, hold: s.h, crowd: s.n, winner: s.win });
@@ -422,6 +430,7 @@ function applySnap(s) {
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, y, z, vx, vz, face, fall: fl & 2 ? 1 : 0, dashT: fl & 4 ? 0.1 : 0, stun: fl & 8 ? 0.1 : 0, pts, falls });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -504,6 +513,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z, dashSeq: local.dashSeq }, dt, 1 / 60);
     if (world.phase === 'play') { world.left -= dt; world.hopT -= dt; }
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
@@ -522,11 +532,12 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeKnight(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
-    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) g.position.set(tx, p.y, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
     g.position.y += (p.y - g.position.y) * (hostSim ? 1 : a);
-    let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     g.rotation.y += dh * Math.min(1, dt * 14);
     const u = g.userData, sp = Math.hypot(p.vx, p.vz);
     u.body.position.y = p.fall ? 0 : Math.abs(Math.sin(time * 14 + p.id)) * Math.min(sp / SPEED, 1) * 0.18;

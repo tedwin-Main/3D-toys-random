@@ -58,6 +58,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, gradient sky dome, glow void below
@@ -235,7 +236,7 @@ function stepPlayer(p, dt) {
   p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
   if (p.ground) {
     const i = hexAt(p.x, p.z, layerOf(py));
-    if (i >= 0 && tiles[i].state !== 2) { p.y = tiles[i].y; p.vy = 0; if (world.phase === 'play' && triggerTile(i)) trig.push(i); }
+    if (i >= 0 && tiles[i].state !== 2) { p.y = tiles[i].y; p.vy = 0; if (!p.ghost && world.phase === 'play' && triggerTile(i)) trig.push(i); }
     else p.ground = false;
   } else if (p.vy <= 0) {
     for (let L = 0; L < LAYERS.length; L++) {
@@ -246,8 +247,10 @@ function stepPlayer(p, dt) {
       }
     }
   }
+  // ghost = guest prediction copy: never touches tiles or placings
   if (p.y < OUT_Y) {
     p.alive = false;
+    if (p.ghost) return;
     p.pts += world.outCount;
     world.outCount++;
     p.place = world.players.size - world.outCount + 1;
@@ -394,6 +397,13 @@ function snapshot(withKf) {
   return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
+  live: (p) => p.alive,
+  seed: (p) => { p.lastJump = local.jumpSeq; p.ghost = true; },
+  pos: ['x', 'z', 'y'], vel: ['vx', 'vz', 'vy'], angle: 'face',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
@@ -403,6 +413,7 @@ function applySnap(s) {
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, y, z, vx, vy, vz, face, alive: !!(fl & 2), ground: !!(fl & 4), pts, wins, place });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   for (const i of s.tr) triggerTile(i);
@@ -512,6 +523,7 @@ function simTick(dt) {
       }
     } else { playEvents(events); events = []; trig = []; }
   } else {
+    if (room && world.mode === 'match') pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z, jumpSeq: local.jumpSeq }, dt, 1 / 60);
     stepTiles(dt);
     if (world.mode === 'match' && room) {
       sendT -= dt;
@@ -532,11 +544,12 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeBean(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
-    const tx = p.x + p.vx * age, ty = p.ground ? p.y : p.y + p.vy * age - 0.5 * GRAV * age * age, tz = p.z + p.vz * age;
-    const a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + v.vx * va, ty = v.ground ? v.y : v.y + v.vy * va - 0.5 * GRAV * va * va, tz = v.z + v.vz * va;
+    const a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (g.position.distanceTo(_v.set(tx, ty, tz)) > 6) g.position.set(tx, ty, tz);
     g.position.x += (tx - g.position.x) * a; g.position.y += (ty - g.position.y) * a; g.position.z += (tz - g.position.z) * a;
-    let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     g.rotation.y += dh * Math.min(1, dt * 14);
     // squash on the ground, stretch in the air, waddle when running
     const u = g.userData, sp = Math.hypot(p.vx, p.vz);

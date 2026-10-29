@@ -58,6 +58,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -311,21 +312,25 @@ function resolve(p) {
 
 // Run engine > step: roll with terrain speed, paint trail, bombs, bumps
 const STEP = 1 / 60;
+// one blob's drive: own paint fast, enemy paint slow; shared by host sim and guest prediction
+function moveBlob(p, dt, play) {
+  p.bombCD = Math.max(0, p.bombCD - dt);
+  let ix = play ? p.inX : 0, iz = play ? p.inZ : 0;
+  const l = Math.hypot(ix, iz); if (l > 1) { ix /= l; iz /= l; }
+  const k = tileIdx(p.x, p.z), own = k >= 0 && grid[k] === p.slot, enemy = k >= 0 && grid[k] && !own;
+  const max = own ? 12.5 : enemy ? 6.5 : 9.5;
+  p.vx += ix * 40 * dt; p.vz += iz * 40 * dt;
+  const drag = Math.exp(-(l > 0.1 ? 3 : 6) * dt); p.vx *= drag; p.vz *= drag;
+  const sp = Math.hypot(p.vx, p.vz); if (sp > max) { p.vx *= max / sp; p.vz *= max / sp; }
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  resolve(p);
+  if (sp > 0.5) { let d = Math.atan2(p.vx, p.vz) - p.face; d = Math.atan2(Math.sin(d), Math.cos(d)); p.face += d * Math.min(1, dt * 10); }
+}
 function physics(dt) {
   const ps = [...world.players.values()];
   const play = world.phase === 'play';
   for (const p of ps) {
-    p.bombCD = Math.max(0, p.bombCD - dt);
-    let ix = play ? p.inX : 0, iz = play ? p.inZ : 0;
-    const l = Math.hypot(ix, iz); if (l > 1) { ix /= l; iz /= l; }
-    const k = tileIdx(p.x, p.z), own = k >= 0 && grid[k] === p.slot, enemy = k >= 0 && grid[k] && !own;
-    const max = own ? 12.5 : enemy ? 6.5 : 9.5;
-    p.vx += ix * 40 * dt; p.vz += iz * 40 * dt;
-    const drag = Math.exp(-(l > 0.1 ? 3 : 6) * dt); p.vx *= drag; p.vz *= drag;
-    const sp = Math.hypot(p.vx, p.vz); if (sp > max) { p.vx *= max / sp; p.vz *= max / sp; }
-    p.x += p.vx * dt; p.z += p.vz * dt;
-    resolve(p);
-    if (sp > 0.5) { let d = Math.atan2(p.vx, p.vz) - p.face; d = Math.atan2(Math.sin(d), Math.cos(d)); p.face += d * Math.min(1, dt * 10); }
+    moveBlob(p, dt, play);
     if (play) paint(p.x, p.z, 1.35, p.slot);
     if (play && p.bombSeq !== p.lastBomb) {
       p.lastBomb = p.bombSeq;
@@ -495,6 +500,8 @@ function snapshot(withKey) {
   return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own blob moves on local input at once (no paint, no bombs)
+const pred = createPrediction({ step: (p, dt) => moveBlob(p, dt, world.phase === 'play'), live: () => true, angle: 'face' });
 function applySnap(s) {
   names.read(s);
   if (s.seed !== world.seed) { world.seed = s.seed; buildArena(s.seed); }
@@ -510,6 +517,7 @@ function applySnap(s) {
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, vx, vz, face, slot, bombCD });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   world.bombs = s.B.map(([sx, sz, tx, tz, t, dur, color]) => ({ sx, sz, tx, tz, t, dur, color }));
@@ -604,6 +612,7 @@ function simTick(dt) {
       }
     } else { playEvents(events); events = []; deltas = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.players.get(room.me), { inX: local.x, inZ: local.z }, dt, 1 / 60);
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: f2(local.x), z: f2(local.z), b: local.bombSeq }); }
   }
@@ -622,10 +631,11 @@ function loop() {
   for (const p of world.players.values()) {
     let b = blobs.get(p.id);
     if (!b) { b = makeBlob(p); blobs.set(p.id, b); b.position.set(p.x, 0, p.z); }
-    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, k = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     b.position.x += (tx - b.position.x) * k; b.position.z += (tz - b.position.z) * k;
     const sp = Math.hypot(p.vx, p.vz);
-    let da = p.face - b.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    let da = v.face - b.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     b.rotation.y += da * Math.min(1, dt * 12);
     const u = b.userData;
     u.squash = Math.max(0, u.squash - dt * 3);

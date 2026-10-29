@@ -62,6 +62,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -371,7 +372,8 @@ function stepKart(p, dt) {
   if (p.idx > NS * 0.45 && p.idx < NS * 0.55) p.half = true;
   if (p.half && p.idx < NS * 0.1 && p.lastIdx > NS * 0.9) {
     p.half = false;
-    if (racing) {
+    // ghost = guest prediction copy: laps + finish order stay host-only
+    if (racing && !p.ghost) {
       p.lap++;
       if (p.lap >= LAPS) { p.finished = true; p.finishT = world.raceT; world.order.push(p.id); events.push(['F', p.id]); }
       else events.push(['L', p.id, p.lap]);
@@ -558,6 +560,14 @@ function snapshot() {
   }, world.karts.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepKart(p, dt); events = keep; },
+  live: (p) => !p.finished,
+  seed: (p) => { p.ghost = true; p.lastReset = p.resetSeq = 0; },
+  merge: (p, host) => { Object.assign(p, { lap: host.lap, half: host.half, boost: host.boost, spin: host.spin }); p.h = blendAngle(p.h, host.h, 0.2); },
+  angle: 'h',
+});
 function applySnap(s) {
   names.read(s);
   if (s.seed !== world.seed) { world.seed = s.seed; buildTrack(s.seed); }
@@ -569,6 +579,7 @@ function applySnap(s) {
     if (!world.karts.has(id) && !names.name(id)) continue;
     const p = world.karts.get(id) ?? addKart(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, vx, vz, steer, lap, idx, finished: !!(fl & 2), half: !!(fl & 4), boost, item, place, finishT, spin, prog });
+    if (id === lobby.room.me) pred.correct(p);
     const fx = Math.sin(h), fz = Math.cos(h);
     p.vf = vx * fx + vz * fz; p.vl = vx * fz - vz * fx;
   }
@@ -706,6 +717,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.karts.get(room.me), { inGas: local.gas, inSteer: local.steer, inDrift: local.drift }, dt, 1 / 60);
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: local.gas, s: local.steer, d: local.drift, it: local.itemSeq, r: local.resetSeq }); }
   }
@@ -723,10 +735,11 @@ function loop() {
   for (const p of world.karts.values()) {
     let k = karts3d.get(p.id);
     if (!k) { k = makeKart(p); karts3d.set(p.id, k); k.position.set(p.x, 0, p.z); k.rotation.y = p.h; }
-    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 18);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 18);
     if (Math.hypot(tx - k.position.x, tz - k.position.z) > 10) k.position.set(tx, 0, tz);
     k.position.x += (tx - k.position.x) * a; k.position.z += (tz - k.position.z) * a;
-    let dh = p.h - k.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    let dh = v.h - k.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
     k.rotation.y += dh * (hostSim ? 1 : Math.min(1, dt * 16));
     const u = k.userData;
     // followed kart's own tag would sit in the middle of the chase view

@@ -63,6 +63,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -375,20 +376,24 @@ function kill(victim, killerId) {
 
 // Run engine > step: drive, shells, crates, phases
 const STEP = 1 / 60;
+// one tank's drive + turret swing; shared by host sim and guest prediction
+function driveTank(p, dt) {
+  const sp = (p.inT >= 0 ? 9 : 6) * (p.speed > 0 ? 1.5 : 1);
+  p.ang += THREE.MathUtils.clamp(p.inR, -1, 1) * 2.7 * dt;
+  const th = THREE.MathUtils.clamp(p.inT, -1, 1);
+  p.x += Math.sin(p.ang) * th * sp * dt; p.z += Math.cos(p.ang) * th * sp * dt;
+  p.moved = th;
+  pushOut(p, TANK_R);
+  let da = p.aim - p.tur; da = Math.atan2(Math.sin(da), Math.cos(da));
+  p.tur += THREE.MathUtils.clamp(da, -7 * dt, 7 * dt);
+}
 function physics(dt) {
   const playing = world.phase === 'play';
   for (const p of world.tanks.values()) {
     if (!p.alive) { if (playing && (p.respawn -= dt) <= 0 && p.inRound !== false) spawn(p); continue; }
     p.cd = Math.max(0, p.cd - dt); p.inv = Math.max(0, p.inv - dt); p.triple = Math.max(0, p.triple - dt); p.speed = Math.max(0, p.speed - dt);
     if (!playing) continue;
-    const sp = (p.inT >= 0 ? 9 : 6) * (p.speed > 0 ? 1.5 : 1);
-    p.ang += THREE.MathUtils.clamp(p.inR, -1, 1) * 2.7 * dt;
-    const th = THREE.MathUtils.clamp(p.inT, -1, 1);
-    p.x += Math.sin(p.ang) * th * sp * dt; p.z += Math.cos(p.ang) * th * sp * dt;
-    p.moved = th;
-    pushOut(p, TANK_R);
-    let da = p.aim - p.tur; da = Math.atan2(Math.sin(da), Math.cos(da));
-    p.tur += THREE.MathUtils.clamp(da, -7 * dt, 7 * dt);
+    driveTank(p, dt);
     if (p.fireSeq !== p.lastFire) { p.lastFire = p.fireSeq; fire(p); }
   }
   // tank vs tank separation
@@ -573,6 +578,13 @@ function snapshot() {
   }, world.tanks.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own tank drives on local input at once (no firing)
+const pred = createPrediction({
+  step: (p, dt) => { if (world.phase === 'play') driveTank(p, dt); },
+  live: (p) => p.alive,
+  vel: [], angle: 'ang',
+  merge: (p, host) => { p.speed = host.speed; p.ang = blendAngle(p.ang, host.ang, 0.2); },
+});
 function applySnap(s) {
   names.read(s);
   if (s.seed !== world.seed) { world.seed = s.seed; useMaze(s.seed); }
@@ -584,6 +596,7 @@ function applySnap(s) {
     if (!world.tanks.has(id) && !names.name(id)) continue;
     const p = world.tanks.get(id) ?? addTank(id, ...names.name(id), !!(fl & 8));
     Object.assign(p, { x, z, ang, tur, alive: !!(fl & 1), shield: !!(fl & 2), inv: fl & 4 ? 1 : 0, kills, deaths, triple, speed, moved, respawn });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.tanks.keys()]) if (!seen.has(id)) removeTank(id);
   world.shells = s.S.map(([x, z, vx, vz]) => ({ x, z, vx, vz }));
@@ -736,6 +749,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(world.tanks.get(room.me), { inT: local.t, inR: local.r, aim: local.aim }, dt, 1 / 60);
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', t: f2(local.t), r: f2(local.r), a: f2(local.aim), f: local.fireSeq }); }
   }
@@ -755,12 +769,13 @@ function loop() {
     let t = tanks3d.get(p.id);
     if (!t) { t = makeTank(p); tanks3d.set(p.id, t); t.position.set(p.x, 0, p.z); }
     t.visible = p.alive;
-    const k = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     const sp = (p.moved ?? 0) * 9;
-    const tx = p.x + (hostSim ? 0 : Math.sin(p.ang) * sp * age), tz = p.z + (hostSim ? 0 : Math.cos(p.ang) * sp * age);
+    const tx = v.x + (hostSim ? 0 : Math.sin(p.ang) * sp * va), tz = v.z + (hostSim ? 0 : Math.cos(p.ang) * sp * va);
     if (t.position.distanceTo(new THREE.Vector3(tx, 0, tz)) > 6) t.position.set(tx, 0, tz);
     t.position.x += (tx - t.position.x) * k; t.position.z += (tz - t.position.z) * k;
-    let da = p.ang - t.userData.body.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    let da = v.ang - t.userData.body.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     t.userData.body.rotation.y += da * Math.min(1, dt * 14);
     // own turret follows local aim instantly so aiming feels lag-free
     const tur = p.id === myId && world.mode === 'match' ? local.aim : p.tur;

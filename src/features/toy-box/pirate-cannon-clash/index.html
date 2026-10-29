@@ -64,6 +64,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -442,6 +443,14 @@ function snapshot() {
   }, ships.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
+const pred = createPrediction({
+  step: (p, dt) => { const keep = events; events = []; stepShip(p, dt); events = keep; },
+  live: (p) => !p.sunk,
+  seed: (p) => { p.lastL = p.seqL; p.lastR = p.seqR; },
+  vel: [], merge: (p, host) => { p.speed += (host.speed - p.speed) * 0.2; p.h = blendAngle(p.h, host.h, 0.2); },
+  angle: 'h',
+});
 function applySnap(s) {
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, winner: s.win });
@@ -452,6 +461,7 @@ function applySnap(s) {
     if (!ships.has(id) && !names.name(id)) continue;
     const p = ships.get(id) ?? addShip(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, speed, hp, sunk, inv: fl & 4 ? 1 : 0, kills, deaths, cdL, cdR });
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...ships.keys()]) if (!seen.has(id)) removeShip(id);
   playEvents(s.ev);
@@ -571,6 +581,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
+    pred.tick(ships.get(room.me), { thr: local.thr, turn: local.turn }, dt, 1 / 60);
     if (world.phase === 'play') world.left -= dt;
     for (let i = balls.length - 1; i >= 0; i--) { const b = balls[i]; b.t += dt; b.vy -= G * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; if (b.y < 0 || b.t > 3) balls.splice(i, 1); }
     sendT -= dt;
@@ -599,10 +610,11 @@ function loop() {
   for (const p of ships.values()) {
     let g = ships3d.get(p.id);
     if (!g) { g = makeShip(p); ships3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
-    const tx = p.x + Math.sin(p.h) * p.speed * age, tz = p.z + Math.cos(p.h) * p.speed * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 12);
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const tx = v.x + Math.sin(p.h) * p.speed * va, tz = v.z + Math.cos(p.h) * p.speed * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 12);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, g.position.y, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
-    g.rotation.y += wrap(p.h - g.rotation.y) * (hostSim ? 1 : a);
+    g.rotation.y += wrap(v.h - g.rotation.y) * (hostSim || v !== p ? 1 : a);
     const u = g.userData, w0 = wave(g.position.x, g.position.z, time);
     // bob + pitch/roll from the local wave slope; sinking ships list and slide under
     const sx = wave(g.position.x + 1, g.position.z, time) - w0, sz = wave(g.position.x, g.position.z + 1, time) - w0;

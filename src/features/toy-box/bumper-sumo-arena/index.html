@@ -52,6 +52,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -475,31 +476,20 @@ function applySnap(s) {
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 8));
     Object.assign(p, { x, z, vx, vz, ang, y, vy, alive: !!(fl & 1), falling: !!(fl & 2), inRound: !!(fl & 4), dashT, wins, dashCD });
     if (p.falling && p.y < -2.6) p.splashed = true;
-    if (pred && id === lobby.room.me) correctPred(p);
+    if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
   snapAt = performance.now();
 }
 // Multiplayer > Guest prediction: my car moves on local input at once, host snapshots pull it back
-let pred = null, predAcc = 0;
-const PRED_LEAD = 0.04; // s; snapshot is ~half a round trip old
-function stepPred(me, dt) {
-  if (!me?.alive || me.falling || !me.inRound) { pred = null; return; }
+const pred = createPrediction({
+  step: (p, dt) => moveCar(p, dt, world.phase === 'fight'),
+  live: (me) => me.alive && !me.falling && me.inRound,
   // lastDash = current seq so joining mid-press does not fire a dash
-  if (!pred) pred = { ...me, lastDash: local.dashSeq };
-  Object.assign(pred, { inX: local.x, inZ: local.z, dashSeq: local.dashSeq });
-  for (predAcc += dt; predAcc >= STEP; predAcc -= STEP) moveCar(pred, STEP, world.phase === 'fight');
-}
-// big error (bump, respawn) snaps; small drift blends 20% per snapshot
-function correctPred(host) {
-  const tx = host.x + host.vx * PRED_LEAD, tz = host.z + host.vz * PRED_LEAD;
-  const k = Math.hypot(tx - pred.x, tz - pred.z) > 2.5 ? 1 : 0.2;
-  const kv = Math.hypot(host.vx - pred.vx, host.vz - pred.vz) > 4 ? 1 : 0.2;
-  pred.x += (tx - pred.x) * k; pred.z += (tz - pred.z) * k;
-  pred.vx += (host.vx - pred.vx) * kv; pred.vz += (host.vz - pred.vz) * kv;
-  pred.dashCD = Math.max(pred.dashCD, host.dashCD);
-}
+  seed: (p) => { p.lastDash = local.dashSeq; },
+  merge: (p, host) => { p.dashCD = Math.max(p.dashCD, host.dashCD); },
+});
 function playEvents(evs) {
   for (const e of evs) {
     if (e[0] === 'b') { sfx.bump(e[3]); for (let i = 0; i < 6; i++) puff(e[1], 0.8, e[2], (rng() - 0.5) * 6, rng() * 3, (rng() - 0.5) * 6, 0xfff3c8, 0.4, 0.8); }
@@ -577,7 +567,7 @@ function simTick(dt) {
       if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
-    stepPred(world.players.get(room.me), dt);
+    pred.tick(world.players.get(room.me), { inX: local.x, inZ: local.z, dashSeq: local.dashSeq }, dt, STEP);
     sendT -= dt;
     if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
   }
@@ -596,12 +586,12 @@ function loop() {
     let c = cars.get(p.id);
     if (!c) { c = makeCar(p); cars.set(p.id, c); c.position.set(p.x, p.y, p.z); }
     // own car on guest: drawn straight from prediction
-    const mine = !hostSim && pred && p.id === lobby.room?.me;
-    const tx = mine ? pred.x : p.x + p.vx * age, tz = mine ? pred.z : p.z + p.vz * age, ty = p.falling ? p.y + p.vy * age : p.y;
+    const mine = !hostSim && pred.state && p.id === lobby.room?.me;
+    const tx = mine ? pred.state.x : p.x + p.vx * age, tz = mine ? pred.state.z : p.z + p.vz * age, ty = p.falling ? p.y + p.vy * age : p.y;
     const k = hostSim || mine ? 1 : 1 - Math.exp(-dt * 18);
     c.position.x += (tx - c.position.x) * k; c.position.z += (tz - c.position.z) * k; c.position.y += (ty - c.position.y) * k;
     if (world.mode === 'match' && !p.inRound) c.position.set(0, -40, 0);
-    let da = (mine ? pred.ang : p.ang) - c.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    let da = (mine ? pred.state.ang : p.ang) - c.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     c.rotation.y += da * Math.min(1, dt * 12);
     const sp = Math.hypot(p.vx, p.vz);
     c.userData.tilt.rotation.x = -Math.min(sp / 26, 0.25) + (p.dashT > 0 ? -0.15 : 0);
