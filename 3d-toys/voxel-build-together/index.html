@@ -55,6 +55,7 @@
  */
 import * as THREE from 'three';
 import { createLobby } from '../components/room-lobby.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, camera, sky, lights, grass plate with grid
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
@@ -199,17 +200,8 @@ function remoteCursor(id) {
 function dropCursor(id) { const c = cursors.get(id); if (c) { scene.remove(c.g); cursors.delete(id); } }
 
 // Audio > soft place/erase blips
-let actx = null;
-function audio() { if (!actx) actx = new AudioContext(); }
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine') {
-  if (!actx) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
+const gameAudio = createGameAudio({ noiseSeconds: 0 });
+const { tone } = gameAudio;
 const sfx = {
   place(y, v = 1) { const f = 420 + y * 22; tone(f, f * 1.5, 0.07, 0.08 * v, 'triangle'); },
   erase(v = 1) { tone(500, 160, 0.09, 0.07 * v, 'square'); },
@@ -299,7 +291,7 @@ function localEdit(ops) {
   if (!undo.length) return false;
   undoStack.push(undo);
   if (undoStack.length > 200) undoStack.shift();
-  if (room.isHost) outbox.push(...ops.map((o) => [...o.slice(0, 4), room.me])); else room.send({ g: 'op', o: ops });
+  if (room.isHost) outbox.push(...ops.map((o) => [...o.slice(0, 4), room.me])); else room.toHost({ g: 'op', o: ops });
   return true;
 }
 setInterval(() => {

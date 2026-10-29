@@ -62,6 +62,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, camera, lights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -280,29 +282,8 @@ function boom(x, z, color) {
 }
 
 // Audio > fire thump, explosion, ricochet ping, pickup chime
-let actx = null, noiseBuf = null;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine') {
-  if (!actx) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
 // volume falls off with distance from camera focus so 14 tanks don't turn into noise
 const focus = new THREE.Vector3();
 const near = (x, z) => Math.max(0.15, 1 - Math.hypot(x - focus.x, z - focus.z) / 60);
@@ -581,23 +562,27 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events,
-    T: [...world.tanks.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.ang), f2(p.tur), (p.alive ? 1 : 0) | (p.shield ? 2 : 0) | (p.inv > 0 ? 4 : 0) | (p.bot ? 8 : 0), p.kills, p.deaths, p.nick, p.color, Math.ceil(p.triple), Math.ceil(p.speed), f2(p.moved ?? 0), f2(p.respawn)]),
+    T: [...world.tanks.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.ang), f2(p.tur), (p.alive ? 1 : 0) | (p.shield ? 2 : 0) | (p.inv > 0 ? 4 : 0) | (p.bot ? 8 : 0), p.kills, p.deaths, Math.ceil(p.triple), Math.ceil(p.speed), f2(p.moved ?? 0), f2(p.respawn)]),
     S: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.vx), f2(s.vz)]),
     C: world.crates.map((c) => [c.id, c.x, c.z, c.type]),
-  };
+  }, world.tanks.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   if (s.seed !== world.seed) { world.seed = s.seed; useMaze(s.seed); }
   Object.assign(world, { phase: s.ph, t: s.t, winner: s.win });
   const seen = new Set();
   for (const a of s.T) {
-    const [id, x, z, ang, tur, fl, kills, deaths, nick, color, triple, speed, moved, respawn] = a;
+    const [id, x, z, ang, tur, fl, kills, deaths, triple, speed, moved, respawn] = a;
     seen.add(id);
-    const p = world.tanks.get(id) ?? addTank(id, nick, color, !!(fl & 8));
+    if (!world.tanks.has(id) && !names.name(id)) continue;
+    const p = world.tanks.get(id) ?? addTank(id, ...names.name(id), !!(fl & 8));
     Object.assign(p, { x, z, ang, tur, alive: !!(fl & 1), shield: !!(fl & 2), inv: fl & 4 ? 1 : 0, kills, deaths, triple, speed, moved, respawn });
   }
   for (const id of [...world.tanks.keys()]) if (!seen.has(id)) removeTank(id);
@@ -752,7 +737,7 @@ function simTick(dt) {
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', t: f2(local.t), r: f2(local.r), a: f2(local.aim), f: local.fireSeq }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', t: f2(local.t), r: f2(local.r), a: f2(local.aim), f: local.fireSeq }); }
   }
 }
 startTicker(60, simTick);

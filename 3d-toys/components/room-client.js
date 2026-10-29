@@ -1,6 +1,6 @@
 /**
  * FILE: 3d-toys/components/room-client.js
- * PURPOSE: browser side of room relay: join/create room by code, roster + host tracking, send to all or one peer
+ * PURPOSE: browser side of room relay: join/create room by code, roster + host tracking, send to all, one peer, or host
  * UI: every multiplayer toy (through room-lobby.js)
  * USED BY: components/room-lobby.js, multiplayer toy pages
  * KEY EXPORTS: connectRoom, startTicker
@@ -25,6 +25,8 @@ export function connectRoom({ game, nick, room }) {
       send(data, opts = {}) {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'send', data, to: opts.to, sticky: !!opts.sticky }));
       },
+      // guest input: host only, other guests never read it
+      toHost(data) { this.send(data, { to: this.host }); },
       on(type, fn) { handlers[type].add(fn); return () => handlers[type].delete(fn); },
       leave() { ws.close(); },
     };

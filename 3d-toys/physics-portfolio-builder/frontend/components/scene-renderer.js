@@ -22,10 +22,33 @@ const FLASH_IN = 0.08
 const FLASH_HOLD = 0.9
 const FLASH_OUT = 0.5
 
-const initialOf = ( title ) => ( title?.trim()?.[ 0 ] || '•' ).toUpperCase()
+// viewer export zip ships builder files only, so stage helpers live here, not in shared components/
+// Run engine: sRGB + ACES tone map + soft shadows; pixel ratio capped lower on touch
+function createStageRenderer( canvas, { exposure = 1 } = {} ) {
+  const renderer = new THREE.WebGLRenderer( { canvas, antialias: true, powerPreference: 'high-performance' } )
+  renderer.setPixelRatio( Math.min( window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2 ) )
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = exposure
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFShadowMap
+  return renderer
+}
 
-// Run engine: free every GPU resource under a group
-const disposeTree = ( root ) => {
+// Run engine: prefiltered room light for reflections; returns disposer
+function addRoomEnvironment( renderer, scene, intensity ) {
+  const pmrem = new THREE.PMREMGenerator( renderer )
+  const environment = pmrem.fromScene( new RoomEnvironment(), 0.04 ).texture
+  scene.environment = environment
+  scene.environmentIntensity = intensity
+  return () => {
+    environment.dispose()
+    pmrem.dispose()
+  }
+}
+
+// Run engine: free every geometry, material and texture under root
+function disposeTree( root ) {
   root.traverse( ( node ) => {
     node.geometry?.dispose()
     const materials = Array.isArray( node.material ) ? node.material : node.material ? [ node.material ] : []
@@ -35,6 +58,17 @@ const disposeTree = ( root ) => {
     }
   } )
 }
+
+// Run engine: canvas box from parent (fallback canvas), never below 1px
+function readCanvasSize( canvas ) {
+  const parent = canvas.parentElement
+  return {
+    width: Math.max( 1, parent?.clientWidth || canvas.clientWidth ),
+    height: Math.max( 1, parent?.clientHeight || canvas.clientHeight ),
+  }
+}
+
+const initialOf = ( title ) => ( title?.trim()?.[ 0 ] || '•' ).toUpperCase()
 
 // Preview > surface: pool table (felt, cushions, wood rails, sights, apron)
 const buildPoolTable = ( group, bounds, palette ) => {
@@ -166,21 +200,100 @@ const buildBody = ( body, index, recording, site, palette, fontFamily, requestRe
   return new THREE.Mesh( geometry, new THREE.MeshPhysicalMaterial( { map, roughness: 0.14, clearcoat: 1, clearcoatRoughness: 0.05 } ) )
 }
 
+// Preview > stage: floor + surface + bodies for one recording; lights/fog set to surface reach
+const buildWorld = ( { scene, lights, recording, site, requestRender } ) => {
+  const world = new THREE.Group()
+  const palette = PALETTES[ site.palette ] || PALETTES.felt
+  const fontFamily = ( FONT_PAIRS[ site.fontPair ] || FONT_PAIRS.grotesk ).display
+  scene.background = new THREE.Color( palette.bg )
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry( 80, 80 ),
+    new THREE.MeshStandardMaterial( { color: new THREE.Color( palette.bg ).lerp( new THREE.Color( palette.surface ), 0.08 ), roughness: 1 } ),
+  )
+  floor.rotation.x = -Math.PI / 2
+  floor.position.y = recording.preset === 'pool' ? -0.7 : -0.002
+  floor.receiveShadow = true
+  world.add( floor )
+
+  const { reach } = ( SURFACES[ recording.preset ] || buildPoolTable )( world, recording.bounds, palette )
+  const { hemisphere, key, lamp } = lights
+  scene.fog = new THREE.Fog( palette.bg, reach * 3, reach * 9 )
+  hemisphere.groundColor.set( palette.bg )
+  key.position.set( -reach * 0.9, reach * 2.6, reach * 0.7 )
+  Object.assign( key.shadow.camera, { left: -reach - 0.3, right: reach + 0.3, top: reach + 0.3, bottom: -reach - 0.3, near: 0.1, far: reach * 6 } )
+  key.shadow.camera.updateProjectionMatrix()
+  // billiard lamp pool over pool table only
+  lamp.intensity = recording.preset === 'pool' ? 9 : 0
+  lamp.position.set( 0, 1.6, 0 )
+  key.intensity = recording.preset === 'pool' ? 1.6 : 2.6
+
+  const meshes = recording.bodies.map( ( body, index ) => {
+    const mesh = buildBody( body, index, recording, site, palette, fontFamily, requestRender )
+    mesh.castShadow = true
+    mesh.userData.bodyIndex = index
+    world.add( mesh )
+    return mesh
+  } )
+  return { world, meshes }
+}
+
+// Run engine: canvas pointer listeners; returns detach
+const attachPointer = ( canvas, handlers ) => {
+  for ( const [ type, handler ] of Object.entries( handlers ) ) canvas.addEventListener( type, handler )
+  return () => {
+    for ( const [ type, handler ] of Object.entries( handlers ) ) canvas.removeEventListener( type, handler )
+  }
+}
+
+// Preview > bodies: pose from recording sample + hover lift + glow; returns true while lift still easing
+const updateBodies = ( { meshes, lifts, recording, site, sample, settled, hovered, focused } ) => {
+  let animating = false
+  for ( let index = 0; index < meshes.length; index += 1 ) {
+    const target = settled && ( index === hovered || index === focused ) ? 1 : 0
+    lifts[ index ] += ( target - lifts[ index ] ) * 0.18
+    if ( Math.abs( target - lifts[ index ] ) > 0.002 ) animating = true
+    else lifts[ index ] = target
+    const body = recording.bodies[ index ]
+    const liftHeight = body.kind === 'ball' ? body.radius * 0.9 : 0.05
+    const mesh = meshes[ index ]
+    mesh.position.set( sample.positions[ index * 3 ], sample.positions[ index * 3 + 1 ] + lifts[ index ] * liftHeight, sample.positions[ index * 3 + 2 ] )
+    mesh.quaternion.set( sample.quaternions[ index * 4 ], sample.quaternions[ index * 4 + 1 ], sample.quaternions[ index * 4 + 2 ], sample.quaternions[ index * 4 + 3 ] )
+    const emissive = mesh.material.emissive
+    if ( emissive ) {
+      const project = index > 0 ? site.projects[ index - 1 ] : null
+      emissive.set( project?.color || '#000000' ).multiplyScalar( lifts[ index ] * 0.35 )
+    }
+  }
+  return animating
+}
+
+const projected = new THREE.Vector3()
+// labels: flash after first hit, then only hovered/focused (or all, builder toggle) once settled
+const projectLabels = ( { labels, meshes, lifts, recording, state, camera, size, showAllLabels, hovered, focused } ) => {
+  for ( const label of labels ) {
+    const hit = recording.firstHit[ label.body ]
+    const since = state.time - hit
+    let opacity = hit >= 0 && since >= 0
+      ? clamp( since / FLASH_IN ) * ( 1 - clamp( ( since - FLASH_HOLD ) / FLASH_OUT ) )
+      : 0
+    const showAll = showAllLabels === 'auto' ? labels.length <= 8 : showAllLabels
+    if ( state.settled ) opacity = Math.max( opacity, showAll ? 0.92 : 0, lifts[ label.body ] )
+    const mesh = meshes[ label.body ]
+    const body = recording.bodies[ label.body ]
+    const top = body.kind === 'ball' ? body.radius * 1.6 : 0.16
+    projected.set( mesh.position.x, mesh.position.y + top, mesh.position.z ).project( camera )
+    label.x = ( projected.x * 0.5 + 0.5 ) * size.width
+    label.y = ( -projected.y * 0.5 + 0.5 ) * size.height
+    label.opacity = projected.z < 1 ? opacity : 0
+    label.active = label.body === hovered || label.body === focused
+  }
+}
+
 // Viewer > Hero + Builder > Preview: create stage on canvas. Throws if WebGL unavailable.
 export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = () => {}, onSelect = () => {} } ) {
-  const renderer = new THREE.WebGLRenderer( { canvas, antialias: true, powerPreference: 'high-performance' } )
-  renderer.setPixelRatio( Math.min( window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2 ) )
-  renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.05
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
-
+  const renderer = createStageRenderer( canvas, { exposure: 1.05 } )
   const scene = new THREE.Scene()
-  const pmrem = new THREE.PMREMGenerator( renderer )
-  const environment = pmrem.fromScene( new RoomEnvironment(), 0.04 ).texture
-  scene.environment = environment
-  scene.environmentIntensity = 0.5
+  const disposeEnvironment = addRoomEnvironment( renderer, scene, 0.5 )
   const camera = new THREE.PerspectiveCamera( 38, 1, 0.02, 60 )
 
   const hemisphere = new THREE.HemisphereLight( '#ffffff', '#000000', 0.55 )
@@ -209,7 +322,6 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
   let disposed = false
   const pointer = { x: 0, y: 0, targetX: 0, targetY: 0 }
   const labels = []
-  const projected = new THREE.Vector3()
   const raycaster = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
 
@@ -226,37 +338,9 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
       scene.remove( world )
       disposeTree( world )
     }
-    world = new THREE.Group()
-    const palette = PALETTES[ site.palette ] || PALETTES.felt
-    const fontFamily = ( FONT_PAIRS[ site.fontPair ] || FONT_PAIRS.grotesk ).display
-    scene.background = new THREE.Color( palette.bg )
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry( 80, 80 ),
-      new THREE.MeshStandardMaterial( { color: new THREE.Color( palette.bg ).lerp( new THREE.Color( palette.surface ), 0.08 ), roughness: 1 } ),
-    )
-    floor.rotation.x = -Math.PI / 2
-    floor.position.y = recording.preset === 'pool' ? -0.7 : -0.002
-    floor.receiveShadow = true
-    world.add( floor )
-
-    const { reach } = ( SURFACES[ recording.preset ] || buildPoolTable )( world, recording.bounds, palette )
-    scene.fog = new THREE.Fog( palette.bg, reach * 3, reach * 9 )
-    hemisphere.groundColor.set( palette.bg )
-    key.position.set( -reach * 0.9, reach * 2.6, reach * 0.7 )
-    Object.assign( key.shadow.camera, { left: -reach - 0.3, right: reach + 0.3, top: reach + 0.3, bottom: -reach - 0.3, near: 0.1, far: reach * 6 } )
-    key.shadow.camera.updateProjectionMatrix()
-    // billiard lamp pool over pool table only
-    lamp.intensity = recording.preset === 'pool' ? 9 : 0
-    lamp.position.set( 0, 1.6, 0 )
-    key.intensity = recording.preset === 'pool' ? 1.6 : 2.6
-
-    meshes = recording.bodies.map( ( body, index ) => {
-      const mesh = buildBody( body, index, recording, site, palette, fontFamily, invalidate )
-      mesh.castShadow = true
-      mesh.userData.bodyIndex = index
-      world.add( mesh )
-      return mesh
-    } )
+    const built = buildWorld( { scene, lights: { hemisphere, key, lamp }, recording, site, requestRender: invalidate } )
+    world = built.world
+    meshes = built.meshes
     lifts = meshes.map( () => 0 )
     sample = createSample( recording )
     opening = startPose( recording )
@@ -314,15 +398,15 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
     if ( body > 0 ) onSelect( body - 1 )
   }
   const handlePointerLeave = () => setHovered( -1 )
-  canvas.addEventListener( 'pointermove', handlePointerMove )
-  canvas.addEventListener( 'pointerdown', handlePointerDown )
-  canvas.addEventListener( 'pointerup', handlePointerUp )
-  canvas.addEventListener( 'pointerleave', handlePointerLeave )
+  const detachPointer = attachPointer( canvas, {
+    pointermove: handlePointerMove,
+    pointerdown: handlePointerDown,
+    pointerup: handlePointerUp,
+    pointerleave: handlePointerLeave,
+  } )
 
   const resize = () => {
-    const parent = canvas.parentElement
-    const width = Math.max( 1, parent?.clientWidth || canvas.clientWidth )
-    const height = Math.max( 1, parent?.clientHeight || canvas.clientHeight )
+    const { width, height } = readCanvasSize( canvas )
     renderer.setSize( width, height, false )
     camera.aspect = width / height
     invalidate()
@@ -341,22 +425,7 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
     if ( Math.abs( pointer.targetX - pointer.x ) + Math.abs( pointer.targetY - pointer.y ) > 0.002 ) animating = true
 
     sampleRecording( recording, state.time, sample )
-    for ( let index = 0; index < meshes.length; index += 1 ) {
-      const target = state.settled && ( index === hovered || index === focused ) ? 1 : 0
-      lifts[ index ] += ( target - lifts[ index ] ) * 0.18
-      if ( Math.abs( target - lifts[ index ] ) > 0.002 ) animating = true
-      else lifts[ index ] = target
-      const body = recording.bodies[ index ]
-      const liftHeight = body.kind === 'ball' ? body.radius * 0.9 : 0.05
-      const mesh = meshes[ index ]
-      mesh.position.set( sample.positions[ index * 3 ], sample.positions[ index * 3 + 1 ] + lifts[ index ] * liftHeight, sample.positions[ index * 3 + 2 ] )
-      mesh.quaternion.set( sample.quaternions[ index * 4 ], sample.quaternions[ index * 4 + 1 ], sample.quaternions[ index * 4 + 2 ], sample.quaternions[ index * 4 + 3 ] )
-      const emissive = mesh.material.emissive
-      if ( emissive ) {
-        const project = index > 0 ? site.projects[ index - 1 ] : null
-        emissive.set( project?.color || '#000000' ).multiplyScalar( lifts[ index ] * 0.35 )
-      }
-    }
+    if ( updateBodies( { meshes, lifts, recording, site, sample, settled: state.settled, hovered, focused } ) ) animating = true
 
     const pose = blendPose( opening, endPose( recording, camera.aspect, opening.azimuth ), state.cameraBlend )
     pose.azimuth += pointer.x * 0.05
@@ -368,26 +437,8 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
     camera.updateProjectionMatrix()
     renderer.render( scene, camera )
 
-    // labels: flash after first hit, then only hovered/focused (or all, builder toggle) once settled
-    const width = renderer.domElement.clientWidth
-    const height = renderer.domElement.clientHeight
-    for ( const label of labels ) {
-      const hit = recording.firstHit[ label.body ]
-      const since = state.time - hit
-      let opacity = hit >= 0 && since >= 0
-        ? clamp( since / FLASH_IN ) * ( 1 - clamp( ( since - FLASH_HOLD ) / FLASH_OUT ) )
-        : 0
-      const showAll = showAllLabels === 'auto' ? labels.length <= 8 : showAllLabels
-      if ( state.settled ) opacity = Math.max( opacity, showAll ? 0.92 : 0, lifts[ label.body ] )
-      const mesh = meshes[ label.body ]
-      const body = recording.bodies[ label.body ]
-      const top = body.kind === 'ball' ? body.radius * 1.6 : 0.16
-      projected.set( mesh.position.x, mesh.position.y + top, mesh.position.z ).project( camera )
-      label.x = ( projected.x * 0.5 + 0.5 ) * width
-      label.y = ( -projected.y * 0.5 + 0.5 ) * height
-      label.opacity = projected.z < 1 ? opacity : 0
-      label.active = label.body === hovered || label.body === focused
-    }
+    const size = { width: renderer.domElement.clientWidth, height: renderer.domElement.clientHeight }
+    projectLabels( { labels, meshes, lifts, recording, state, camera, size, showAllLabels, hovered, focused } )
     onLabels( labels, state )
     if ( animating ) invalidate()
   }
@@ -411,13 +462,9 @@ export function createSceneRenderer( { canvas, onLabels = () => {}, onHover = ()
       disposed = true
       cancelAnimationFrame( frameHandle )
       observer.disconnect()
-      canvas.removeEventListener( 'pointermove', handlePointerMove )
-      canvas.removeEventListener( 'pointerdown', handlePointerDown )
-      canvas.removeEventListener( 'pointerup', handlePointerUp )
-      canvas.removeEventListener( 'pointerleave', handlePointerLeave )
+      detachPointer()
       if ( world ) disposeTree( world )
-      environment.dispose()
-      pmrem.dispose()
+      disposeEnvironment()
       renderer.dispose()
     },
   }

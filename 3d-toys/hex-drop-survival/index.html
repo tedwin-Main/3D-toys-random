@@ -57,6 +57,8 @@
 import * as THREE from 'three';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, camera, gradient sky dome, glow void below
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -176,17 +178,8 @@ function makeBean(p) {
 }
 
 // Audio > jump boop, out whistle, countdown, win fanfare
-let actx = null;
-function audio() { if (!actx) actx = new AudioContext(); }
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
+const gameAudio = createGameAudio({ noiseSeconds: 0 });
+const { tone } = gameAudio;
 const sfx = {
   jump(v) { tone(300, 620, 0.14, 0.09 * v, 'triangle'); },
   land(v) { tone(140, 90, 0.07, 0.07 * v, 'sine'); },
@@ -390,21 +383,25 @@ function onData(d, from) {
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let kfDirty = true, kfT = 0;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot(withKf) {
   const s = {
     g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events, tr: trig,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vy), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.ground ? 4 : 0), p.pts, p.wins, p.place, p.nick, p.color]),
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vy), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.ground ? 4 : 0), p.pts, p.wins, p.place]),
   };
   if (withKf) s.K = tiles.map((t) => t.state).join('');
-  return s;
+  return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
   const seen = new Set();
-  for (const [id, x, y, z, vx, vy, vz, face, fl, pts, wins, place, nick, color] of s.P) {
+  for (const [id, x, y, z, vx, vy, vz, face, fl, pts, wins, place] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, y, z, vx, vy, vz, face, alive: !!(fl & 2), ground: !!(fl & 4), pts, wins, place });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -518,7 +515,7 @@ function simTick(dt) {
     stepTiles(dt);
     if (world.mode === 'match' && room) {
       sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), j: local.jumpSeq }); }
+      if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), j: local.jumpSeq }); }
     }
   }
 }

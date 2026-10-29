@@ -63,6 +63,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, winter sky, low sun
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -220,29 +222,8 @@ arcPts.frustumCulled = false; arcPts.visible = false;
 scene.add(arcPts);
 
 // Audio > throw whoosh, splat, hit thud, freeze chime, unfreeze crack, beeps
-let actx = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1, type = 'lowpass') {
-  if (!actx || vol < 0.003) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = type; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio({ minNoiseVol: 0.003 });
+const { tone, noise } = gameAudio;
 const sfx = {
   throw(v) { noise(0.18, 0.09 * v, 600, 2400, 'bandpass'); },
   splat(v) { noise(0.14, 0.14 * v, 1800, 300); },
@@ -497,25 +478,29 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), ev: events,
     W: world.walls.map((s) => s.hp),
     B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)]),
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.face), f2(p.vx), f2(p.vz), p.hits, f2(p.frozen), f2(p.inv), p.score, p.dealt, p.ammo, p.bot ? 1 : 0, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.face), f2(p.vx), f2(p.vz), p.hits, f2(p.frozen), f2(p.inv), p.score, p.dealt, p.ammo, p.bot ? 1 : 0]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck });
   s.W.forEach((hp, i) => (world.walls[i].hp = hp));
   const seenB = new Set();
   for (const [id, x, y, z, vx, vy, vz] of s.B) { seenB.add(id); const b = world.balls.get(id) ?? { id }; Object.assign(b, { x, y, z, vx, vy, vz }); world.balls.set(id, b); }
   for (const id of [...world.balls.keys()]) if (!seenB.has(id)) world.balls.delete(id);
   const seen = new Set();
-  for (const [id, x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo, bot, nick, color] of s.P) {
+  for (const [id, x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo, bot] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!bot);
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -647,7 +632,7 @@ function simTick(dt) {
       local.nextFire = now + CD + 0.03;
     }
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), ax: f2(local.ax), az: f2(local.az), q: local.q }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), ax: f2(local.ax), az: f2(local.az), q: local.q }); }
   }
 }
 startTicker(60, simTick);

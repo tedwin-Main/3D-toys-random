@@ -61,7 +61,9 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
 import { createTouchPad } from '../components/touch-joystick.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, camera, sky, sun that follows the camera focus
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -282,33 +284,17 @@ let smokeNext = 0;
 function puff(x, z, vx, vz, y = 0.4) { const i = smokeNext++ % SMOKE; smokePos.set([x, y, z], i * 3); smokeVel.set([vx * 0.2 + (Math.random() - 0.5), 0.8 + Math.random(), vz * 0.2 + (Math.random() - 0.5)], i * 3); smokeLife[i] = 1; }
 
 // Audio > own engine drone + one-shots
-let actx = null, eng1, eng2, engGain, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
-  engGain = actx.createGain(); engGain.gain.value = 0;
-  eng1 = actx.createOscillator(); eng1.type = 'sawtooth'; eng2 = actx.createOscillator(); eng2.type = 'square';
-  eng1.connect(lp); eng2.connect(lp); lp.connect(engGain).connect(actx.destination); eng1.start(); eng2.start();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine') {
-  if (!actx) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+let eng1, eng2, engGain;
+// kart engine, pitch + gain driven by speed
+const gameAudio = createGameAudio({
+  onUnlock: (ctx) => {
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
+    engGain = ctx.createGain(); engGain.gain.value = 0;
+    eng1 = ctx.createOscillator(); eng1.type = 'sawtooth'; eng2 = ctx.createOscillator(); eng2.type = 'square';
+    eng1.connect(lp); eng2.connect(lp); lp.connect(engGain).connect(ctx.destination); eng1.start(); eng2.start();
+  },
+});
+const { tone, noise } = gameAudio;
 const sfx = {
   box() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => tone(f, f, 0.08, 0.08, 'square'), i * 45)); },
   boost() { tone(200, 900, 0.45, 0.14); },
@@ -560,24 +546,28 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), seed: world.seed, ord: world.order, ev: events,
-    K: [...world.karts.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), p.lap, p.idx, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), f2(p.boost), p.item, p.place, f2(p.finishT), p.nick, p.color, f2(p.spin), Math.round(p.prog)]),
+    K: [...world.karts.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), p.lap, p.idx, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), f2(p.boost), p.item, p.place, f2(p.finishT), f2(p.spin), Math.round(p.prog)]),
     Bx: track.boxes.map((b) => (b.t > 0 ? 1 : 0)),
     Ba: world.bananas.map((b) => [f2(b.x), f2(b.z)]),
     Sh: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.h)]),
-  };
+  }, world.karts.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   if (s.seed !== world.seed) { world.seed = s.seed; buildTrack(s.seed); }
   Object.assign(world, { phase: s.ph, t: s.t, raceT: s.rt, order: s.ord });
   const seen = new Set();
   for (const a of s.K) {
-    const [id, x, z, h, vx, vz, steer, lap, idx, fl, boost, item, place, finishT, nick, color, spin, prog] = a;
+    const [id, x, z, h, vx, vz, steer, lap, idx, fl, boost, item, place, finishT, spin, prog] = a;
     seen.add(id);
-    const p = world.karts.get(id) ?? addKart(id, nick, color, !!(fl & 1));
+    if (!world.karts.has(id) && !names.name(id)) continue;
+    const p = world.karts.get(id) ?? addKart(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, vx, vz, steer, lap, idx, finished: !!(fl & 2), half: !!(fl & 4), boost, item, place, finishT, spin, prog });
     const fx = Math.sin(h), fz = Math.cos(h);
     p.vf = vx * fx + vz * fz; p.vl = vx * fz - vz * fx;
@@ -717,7 +707,7 @@ function simTick(dt) {
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', g2: local.gas, s: local.steer, d: local.drift, it: local.itemSeq, r: local.resetSeq }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: local.gas, s: local.steer, d: local.drift, it: local.itemSeq, r: local.resetSeq }); }
   }
 }
 startTicker(60, simTick);
@@ -779,11 +769,11 @@ function loop() {
     camera.fov += (62 + Math.min(speed, 40) * 0.35 + follow.boost * 8 - camera.fov) * (1 - Math.exp(-dt * 4));
     camera.updateProjectionMatrix();
     sun.position.set(px + 30, 60, pz + 20); sun.target.position.set(px, 0, pz);
-    if (actx && follow === me) {
+    if (gameAudio.ctx && follow === me) {
       const rpm = 0.25 + (speed % 11) / 11 * 0.75 + Math.floor(speed / 11) * 0.08;
       eng1.frequency.value = 55 + rpm * 120; eng2.frequency.value = 55.5 + rpm * 121;
       engGain.gain.value = 0.03 + Math.min(speed / 40, 1) * 0.035;
-    } else if (actx) engGain.gain.value = 0;
+    } else if (gameAudio.ctx) engGain.gain.value = 0;
   }
   shake = Math.max(0, shake - dt);
   camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));

@@ -16,7 +16,8 @@ export function createRoomRelay() {
   const rooms = new Map();
   let nextId = 1;
 
-  const send = (ws, msg) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg)); };
+  const sendRaw = (ws, str) => { if (ws.readyState === ws.OPEN) ws.send(str); };
+  const send = (ws, msg) => sendRaw(ws, JSON.stringify(msg));
   function makeCode(game) {
     let code;
     do code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
@@ -25,7 +26,8 @@ export function createRoomRelay() {
   }
   function roster(room) {
     const players = [...room.players.values()].map((p) => ({ id: p.id, nick: p.nick, color: p.color, slot: p.slot }));
-    for (const p of room.players.values()) send(p.ws, { t: 'roster', host: room.host, players });
+    const str = JSON.stringify({ t: 'roster', host: room.host, players });
+    for (const p of room.players.values()) sendRaw(p.ws, str);
   }
 
   // Cloud Sync > room join: create or join, pick free color slot, first player hosts
@@ -74,11 +76,11 @@ export function createRoomRelay() {
       if (msg.t === 'join') { if (!ws.room) join(ws, msg); return; }
       const room = ws.room;
       if (!room) return;
-      // Cloud Sync > relay: to one peer, or everyone else; host may pin a sticky state for joiners
+      // Cloud Sync > relay: to one peer, or everyone else; stringify once per message, not per peer; host may pin a sticky state for joiners
       if (msg.t === 'send') {
-        const out = { t: 'data', from: ws.player.id, data: msg.data };
-        if (msg.to != null) { const p = room.players.get(msg.to); if (p) send(p.ws, out); }
-        else for (const p of room.players.values()) if (p.id !== ws.player.id) send(p.ws, out);
+        const out = JSON.stringify({ t: 'data', from: ws.player.id, data: msg.data });
+        if (msg.to != null) { const p = room.players.get(msg.to); if (p) sendRaw(p.ws, out); }
+        else for (const p of room.players.values()) if (p.id !== ws.player.id) sendRaw(p.ws, out);
         if (msg.sticky && ws.player.id === room.host) room.state = msg.data;
       } else if (msg.t === 'leave') leave(ws);
     });

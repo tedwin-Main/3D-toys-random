@@ -16,6 +16,7 @@ import { applyShot, createGame, legalTargets } from '../../backend/pool-game-rul
 import { createPoolTableScene } from '../components/pool-table-scene.js'
 import { attachAimInput } from '../components/pool-aim-input.js'
 import { chooseBotShot, simulateShotAsync } from '../components/pool-shot-client.js'
+import { hintFor } from '../components/play-hint.js'
 import { PlayerCards, PowerBar, SpinPad } from '../components/pool-controls.js'
 
 const RADIUS = GAME_CONFIG.ball.radius
@@ -46,51 +47,33 @@ const MODES = [
   { mode: 'bot', difficulty: 'pro', label: 'vs Bot · Pro', note: 'Plans position. Rarely misses.' },
 ]
 
-// Play > whole page
-export function PlayPage() {
-  const canvasRef = useRef( null )
-  const sceneRef = useRef( null )
-  const topRef = useRef( null )
-  const controlsRef = useRef( null )
-  const [ failed, setFailed ] = useState( false )
-  const [ game, setGame ] = useState( null )
-  const [ phase, setPhase ] = useState( 'menu' )
-  const [ power, setPowerState ] = useState( 0 )
-  const [ spin, setSpinState ] = useState( 0 )
-  const [ cameraMode, setCameraModeState ] = useState( 'overhead' )
-  const [ toast, setToast ] = useState( null )
-  const [ canReplay, setCanReplay ] = useState( false )
-  // live values read by pointer handlers and async turn flow; React state only mirrors them for HUD
-  const live = useRef( {
-    balls: null, game: null, phase: 'menu', angle: START_ANGLE, power: 0, spin: 0,
-    cameraMode: 'overhead', placeValid: true, lastValid: null, lastShot: null, run: 0,
-  } )
-
+// Play > turn flow + HUD actions; live ref holds truth, React setters mirror for HUD
+function createPlayActions( { live, sceneRef, ui } ) {
   const setPhaseBoth = ( next ) => {
     live.current.phase = next
-    setPhase( next )
+    ui.setPhase( next )
   }
   const setPower = ( value ) => {
     live.current.power = value
-    setPowerState( value )
+    ui.setPower( value )
     sceneRef.current?.setAim( { power: value } )
   }
   const setSpin = ( value ) => {
     live.current.spin = value
-    setSpinState( value )
+    ui.setSpin( value )
   }
   const setAngle = ( value ) => {
     live.current.angle = value
     sceneRef.current?.setAim( { angle: value } )
   }
-  const showToast = ( text ) => setToast( { text, key: performance.now() } )
+  const showToast = ( text ) => ui.setToast( { text, key: performance.now() } )
   const commitBalls = ( balls ) => {
     live.current.balls = balls
     sceneRef.current?.setBalls( balls )
   }
   const commitGame = ( state ) => {
     live.current.game = state
-    setGame( state )
+    ui.setGame( state )
   }
 
   // Play > turn start: human aims, bot thinks, finished game shows result
@@ -155,7 +138,7 @@ export function PlayPage() {
     if ( run !== live.current.run ) return
     scene.setAim( { stickOnly: false } )
     live.current.lastShot = { before, result }
-    setCanReplay( true )
+    ui.setCanReplay( true )
     await scene.playShot( result )
     if ( run !== live.current.run ) return
     finishShot( result )
@@ -231,7 +214,7 @@ export function PlayPage() {
   const toggleCamera = () => {
     const next = live.current.cameraMode === 'overhead' ? 'cue' : 'overhead'
     live.current.cameraMode = next
-    setCameraModeState( next )
+    ui.setCameraMode( next )
     sceneRef.current?.setCameraMode( next )
   }
 
@@ -240,7 +223,7 @@ export function PlayPage() {
     live.current.run += 1
     const state = createGame( { mode, difficulty } )
     live.current.lastShot = null
-    setCanReplay( false )
+    ui.setCanReplay( false )
     setAngle( START_ANGLE )
     setPower( 0 )
     setSpin( 0 )
@@ -282,19 +265,23 @@ export function PlayPage() {
 
   const skip = () => sceneRef.current?.skipShot()
 
+  return { setPower, setSpin, setAngle, commitBalls, shoot, placeCue, endPlace, toggleCamera, startGame, toMenu, replay, skip }
+}
+
+// Play > table: build scene once, wire pointer aim; first-render actions stay valid (refs + setters only)
+function usePoolScene( { canvasRef, sceneRef, live, actions, onFail } ) {
   useEffect( () => {
     let scene
     try {
       scene = createPoolTableScene( { canvas: canvasRef.current } )
     } catch ( error ) {
       console.warn( 'WebGL unavailable:', error )
-      setFailed( true )
+      onFail()
       return undefined
     }
     sceneRef.current = scene
-    commitBalls( createRack( 1 ) )
+    actions.commitBalls( createRack( 1 ) )
     scene.setAim( { angle: START_ANGLE, visible: false } )
-    // handlers only touch refs + setters, so first-render closures stay correct
     const detach = attachAimInput( {
       canvas: canvasRef.current,
       scene,
@@ -306,12 +293,12 @@ export function PlayPage() {
         cameraMode: live.current.cameraMode,
         ballInHand: Boolean( live.current.game?.ballInHand ),
       } ),
-      onAim: setAngle,
-      onPower: setPower,
-      onShoot: shoot,
-      onPlace: placeCue,
-      onPlaceEnd: endPlace,
-      onToggleCamera: toggleCamera,
+      onAim: actions.setAngle,
+      onPower: actions.setPower,
+      onShoot: actions.shoot,
+      onPlace: actions.placeCue,
+      onPlaceEnd: actions.endPlace,
+      onToggleCamera: actions.toggleCamera,
     } )
     return () => {
       live.current.run += 1
@@ -320,15 +307,19 @@ export function PlayPage() {
       sceneRef.current = null
     }
   }, [] )
+}
 
+// Play > toast: clear after 2.8s
+function useToastTimeout( toast, setToast ) {
   useEffect( () => {
     if ( !toast ) return undefined
     const timer = setTimeout( () => setToast( null ), 2800 )
     return () => clearTimeout( timer )
   }, [ toast ] )
+}
 
-  const inGame = Boolean( game ) && phase !== 'menu'
-  // Play > HUD layout: tell table which screen edges HUD covers, so whole table stays visible
+// Play > HUD layout: tell table which screen edges HUD covers, so whole table stays visible
+function useHudInsets( { sceneRef, topRef, controlsRef, inGame, mode } ) {
   useLayoutEffect( () => {
     const measure = () => {
       const scene = sceneRef.current
@@ -347,21 +338,104 @@ export function PlayPage() {
     measure()
     window.addEventListener( 'resize', measure )
     return () => window.removeEventListener( 'resize', measure )
-  }, [ inGame, game?.mode ] )
+  }, [ inGame, mode ] )
+}
+
+// Play > menu: pick mode
+function PlayMenu( { onStart } ) {
+  return html`
+    <div className="play-menu">
+      <div className="play-panel">
+        <p className="play-kicker">Back room</p>
+        <h1>8-Ball</h1>
+        <p className="play-lede">Real table physics. Break, run the rack, sink the 8.</p>
+        <div className="play-modes">
+          ${ MODES.map( ( item ) => html`
+            <button key=${ item.label } type="button" className="play-mode" onClick=${ () => onStart( item.mode, item.difficulty ) }>
+              <span>${ item.label }</span>
+              <small>${ item.note }</small>
+            </button>
+          ` ) }
+        </div>
+        <p className="play-keys">${ FINE_POINTER ? 'Mouse aims · press and pull back to shoot · C swaps camera' : 'Tap to aim · drag to fine-tune · pull the power bar' }</p>
+      </div>
+    </div>
+  `
+}
+
+// Play > HUD top bar: back, players, camera / replay / new rack
+function PlayTopBar( { topRef, game, cameraMode, replayDisabled, onMenu, onToggleCamera, onReplay, onRack } ) {
+  return html`
+    <header ref=${ topRef } className="play-top">
+      <button type="button" className="play-icon" onClick=${ onMenu } aria-label="Back to menu"><${ X } size=${ 18 } /></button>
+      <${ PlayerCards } game=${ game } />
+      <div className="play-tools">
+        <button type="button" className="play-icon" onClick=${ onToggleCamera } aria-label=${ cameraMode === 'overhead' ? 'Cue camera' : 'Overhead camera' } aria-pressed=${ cameraMode === 'cue' }>
+          <${ CameraRotate } size=${ 18 } />
+        </button>
+        <button type="button" className="play-icon" onClick=${ onReplay } disabled=${ replayDisabled } aria-label="Replay last shot">
+          <${ ArrowCounterClockwise } size=${ 18 } />
+        </button>
+        <button type="button" className="play-icon" onClick=${ onRack } aria-label="New rack">
+          <${ ArrowsClockwise } size=${ 18 } />
+        </button>
+      </div>
+    </header>
+  `
+}
+
+// Play > game over: result + rematch
+function GameOverPanel( { game, canReplay, onRack, onReplay, onMenu } ) {
+  return html`
+    <div className="play-menu">
+      <div className="play-panel">
+        <p className="play-kicker">${ game.mode === 'practice' ? 'Table cleared' : 'Game over' }</p>
+        <h1>${ game.message }</h1>
+        <div className="play-modes">
+          <button type="button" className="play-mode" onClick=${ onRack }><span>Rack again</span></button>
+          <button type="button" className="play-mode" onClick=${ onReplay } disabled=${ !canReplay }><span>Replay last shot</span></button>
+          <button type="button" className="play-mode" onClick=${ onMenu }><span>Menu</span></button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// Play > whole page
+export function PlayPage() {
+  const canvasRef = useRef( null )
+  const sceneRef = useRef( null )
+  const topRef = useRef( null )
+  const controlsRef = useRef( null )
+  const [ failed, setFailed ] = useState( false )
+  const [ game, setGame ] = useState( null )
+  const [ phase, setPhase ] = useState( 'menu' )
+  const [ power, setPowerState ] = useState( 0 )
+  const [ spin, setSpinState ] = useState( 0 )
+  const [ cameraMode, setCameraModeState ] = useState( 'overhead' )
+  const [ toast, setToast ] = useState( null )
+  const [ canReplay, setCanReplay ] = useState( false )
+  // live values read by pointer handlers and async turn flow; React state only mirrors them for HUD
+  const live = useRef( {
+    balls: null, game: null, phase: 'menu', angle: START_ANGLE, power: 0, spin: 0,
+    cameraMode: 'overhead', placeValid: true, lastValid: null, lastShot: null, run: 0,
+  } )
+  const actions = createPlayActions( {
+    live,
+    sceneRef,
+    ui: { setPhase, setPower: setPowerState, setSpin: setSpinState, setCameraMode: setCameraModeState, setToast, setCanReplay, setGame },
+  } )
+  const { startGame, toMenu, replay, skip, toggleCamera, shoot, setPower, setSpin } = actions
+
+  usePoolScene( { canvasRef, sceneRef, live, actions, onFail: () => setFailed( true ) } )
+  useToastTimeout( toast, setToast )
+  const inGame = Boolean( game ) && phase !== 'menu'
+  useHudInsets( { sceneRef, topRef, controlsRef, inGame, mode: game?.mode } )
 
   const playing = phase === 'shooting' || phase === 'replay'
   const canAct = phase === 'aim'
-  const hint = phase === 'bot'
-    ? 'Bot is lining up…'
-    : playing
-      ? 'Tap table to skip'
-      : canAct && game?.ballInHand
-        ? 'Ball in hand: drag the cue ball, then shoot'
-        : canAct
-          ? FINE_POINTER && cameraMode === 'overhead'
-            ? 'Move to aim · press, pull back, release · ← → fine aim'
-            : 'Tap or drag to aim · pull power bar down, release'
-          : ''
+  const hint = hintFor( { phase, ballInHand: game?.ballInHand, finePointer: FINE_POINTER, cameraMode } )
+  const rackAgain = () => startGame( game.mode, game.difficulty )
 
   return html`
     <main className="play" data-phase=${ phase }>
@@ -376,42 +450,19 @@ export function PlayPage() {
         </div>
       ` }
 
-      ${ phase === 'menu' && !failed && html`
-        <!-- Play > menu: pick mode -->
-        <div className="play-menu">
-          <div className="play-panel">
-            <p className="play-kicker">Back room</p>
-            <h1>8-Ball</h1>
-            <p className="play-lede">Real table physics. Break, run the rack, sink the 8.</p>
-            <div className="play-modes">
-              ${ MODES.map( ( item ) => html`
-                <button key=${ item.label } type="button" className="play-mode" onClick=${ () => startGame( item.mode, item.difficulty ) }>
-                  <span>${ item.label }</span>
-                  <small>${ item.note }</small>
-                </button>
-              ` ) }
-            </div>
-            <p className="play-keys">${ FINE_POINTER ? 'Mouse aims · press and pull back to shoot · C swaps camera' : 'Tap to aim · drag to fine-tune · pull the power bar' }</p>
-          </div>
-        </div>
-      ` }
+      ${ phase === 'menu' && !failed && html`<${ PlayMenu } onStart=${ startGame } />` }
 
       ${ game && phase !== 'menu' && html`
-        <header ref=${ topRef } className="play-top">
-          <button type="button" className="play-icon" onClick=${ toMenu } aria-label="Back to menu"><${ X } size=${ 18 } /></button>
-          <${ PlayerCards } game=${ game } />
-          <div className="play-tools">
-            <button type="button" className="play-icon" onClick=${ toggleCamera } aria-label=${ cameraMode === 'overhead' ? 'Cue camera' : 'Overhead camera' } aria-pressed=${ cameraMode === 'cue' }>
-              <${ CameraRotate } size=${ 18 } />
-            </button>
-            <button type="button" className="play-icon" onClick=${ replay } disabled=${ !canReplay || !( phase === 'aim' || phase === 'over' ) } aria-label="Replay last shot">
-              <${ ArrowCounterClockwise } size=${ 18 } />
-            </button>
-            <button type="button" className="play-icon" onClick=${ () => startGame( game.mode, game.difficulty ) } aria-label="New rack">
-              <${ ArrowsClockwise } size=${ 18 } />
-            </button>
-          </div>
-        </header>
+        <${ PlayTopBar }
+          topRef=${ topRef }
+          game=${ game }
+          cameraMode=${ cameraMode }
+          replayDisabled=${ !canReplay || !( phase === 'aim' || phase === 'over' ) }
+          onMenu=${ toMenu }
+          onToggleCamera=${ toggleCamera }
+          onReplay=${ replay }
+          onRack=${ rackAgain }
+        />
 
         <div className="play-toast" aria-live="polite">
           ${ toast && html`<span key=${ toast.key }>${ toast.text }</span>` }
@@ -429,20 +480,7 @@ export function PlayPage() {
         ` }
         ${ hint && html`<p className="play-hint">${ hint }</p>` }
 
-        ${ phase === 'over' && html`
-          <!-- Play > game over: result + rematch -->
-          <div className="play-menu">
-            <div className="play-panel">
-              <p className="play-kicker">${ game.mode === 'practice' ? 'Table cleared' : 'Game over' }</p>
-              <h1>${ game.message }</h1>
-              <div className="play-modes">
-                <button type="button" className="play-mode" onClick=${ () => startGame( game.mode, game.difficulty ) }><span>Rack again</span></button>
-                <button type="button" className="play-mode" onClick=${ replay } disabled=${ !canReplay }><span>Replay last shot</span></button>
-                <button type="button" className="play-mode" onClick=${ toMenu }><span>Menu</span></button>
-              </div>
-            </div>
-          </div>
-        ` }
+        ${ phase === 'over' && html`<${ GameOverPanel } game=${ game } canReplay=${ canReplay } onRack=${ rackAgain } onReplay=${ replay } onMenu=${ toMenu } />` }
       ` }
     </main>
   `

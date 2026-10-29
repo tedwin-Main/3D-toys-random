@@ -56,7 +56,9 @@
 import * as THREE from 'three';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
 import { createTouchPad } from '../components/touch-joystick.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, sky, floating grass island, cliffs, sea, hill mounds under each ring spot
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -204,29 +206,8 @@ function burst(x, y, z, n, spd) {
 }
 
 // Audio > score ding, shove thump, fall whistle, ring move, countdown, fanfare
-let actx = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
 const sfx = {
   point() { tone(1320, 1320, 0.08, 0.05, 'triangle'); },
   shove(me) { noise(0.18, me ? 0.3 : 0.12, 900, 120); tone(160, 70, 0.18, me ? 0.2 : 0.08); },
@@ -423,19 +404,23 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), z: world.zone, nz: world.next, ht: f2(world.hopT), h: world.hold, n: world.crowd, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.fall ? 2 : 0) | (p.dashT > 0 ? 4 : 0) | (p.stun > 0 ? 8 : 0), f2(p.pts), p.falls, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.fall ? 2 : 0) | (p.dashT > 0 ? 4 : 0) | (p.stun > 0 ? 8 : 0), f2(p.pts), p.falls]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, zone: s.z, next: s.nz, hopT: s.ht, hold: s.h, crowd: s.n, winner: s.win });
   const seen = new Set();
-  for (const [id, x, y, z, vx, vz, face, fl, pts, falls, nick, color] of s.P) {
+  for (const [id, x, y, z, vx, vz, face, fl, pts, falls] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, y, z, vx, vz, face, fall: fl & 2 ? 1 : 0, dashT: fl & 4 ? 0.1 : 0, stun: fl & 8 ? 0.1 : 0, pts, falls });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -466,7 +451,7 @@ addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
-const pad = createTouchPad({ buttons: [{ id: 'shove', label: 'SHOVE', color: 'rgba(255, 210, 63, 0.7)' }], onStart: audio });
+const pad = createTouchPad({ buttons: [{ id: 'shove', label: 'SHOVE', color: 'rgba(255, 210, 63, 0.7)' }], onStart: gameAudio.unlock });
 pad.onPress('shove', () => local.dashSeq++);
 function readInput() {
   local.x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x;
@@ -521,7 +506,7 @@ function simTick(dt) {
   } else if (world.mode === 'match' && room) {
     if (world.phase === 'play') { world.left -= dt; world.hopT -= dt; }
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
   }
 }
 startTicker(60, simTick);

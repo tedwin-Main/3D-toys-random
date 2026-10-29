@@ -34,6 +34,51 @@ const OUTER_Z = TABLE.halfLength + CUSHION_DEPTH + RAIL_WIDTH
 const LEGAL_RING = '#f2f1e9'
 const ILLEGAL_RING = '#ff5a4f'
 
+// Run engine: sRGB + ACES tone map + soft shadows; pixel ratio capped lower on touch
+function createStageRenderer( canvas, { exposure = 1 } = {} ) {
+  const renderer = new THREE.WebGLRenderer( { canvas, antialias: true, powerPreference: 'high-performance' } )
+  renderer.setPixelRatio( Math.min( window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2 ) )
+  renderer.outputColorSpace = THREE.SRGBColorSpace
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = exposure
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFShadowMap
+  return renderer
+}
+
+// Run engine: prefiltered room light for reflections; returns disposer
+function addRoomEnvironment( renderer, scene, intensity ) {
+  const pmrem = new THREE.PMREMGenerator( renderer )
+  const environment = pmrem.fromScene( new RoomEnvironment(), 0.04 ).texture
+  scene.environment = environment
+  scene.environmentIntensity = intensity
+  return () => {
+    environment.dispose()
+    pmrem.dispose()
+  }
+}
+
+// Run engine: free every geometry, material and texture under root
+function disposeTree( root ) {
+  root.traverse( ( node ) => {
+    node.geometry?.dispose()
+    const materials = Array.isArray( node.material ) ? node.material : node.material ? [ node.material ] : []
+    for ( const material of materials ) {
+      for ( const value of Object.values( material ) ) if ( value?.isTexture ) value.dispose()
+      material.dispose()
+    }
+  } )
+}
+
+// Run engine: canvas box from parent (fallback canvas), never below 1px
+function readCanvasSize( canvas ) {
+  const parent = canvas.parentElement
+  return {
+    width: Math.max( 1, parent?.clientWidth || canvas.clientWidth ),
+    height: Math.max( 1, parent?.clientHeight || canvas.clientHeight ),
+  }
+}
+
 const near = ( a, b ) => Math.abs( a - b ) < 1e-9
 
 // Run engine: shape points are (x, -z) so rotateX(-90deg) lays extrusion on table with height up +y
@@ -200,25 +245,8 @@ const buildCue = () => {
   return group
 }
 
-// Play > table: renderer + world; page drives it through returned methods
-export function createPoolTableScene( { canvas } ) {
-  const renderer = new THREE.WebGLRenderer( { canvas, antialias: true, powerPreference: 'high-performance' } )
-  renderer.setPixelRatio( Math.min( window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2 ) )
-  renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.0
-  renderer.shadowMap.enabled = true
-  renderer.shadowMap.type = THREE.PCFShadowMap
-
-  const scene = new THREE.Scene()
-  scene.background = new THREE.Color( '#050806' )
-  scene.fog = new THREE.Fog( '#050806', 4, 11 )
-  const pmrem = new THREE.PMREMGenerator( renderer )
-  const environment = pmrem.fromScene( new RoomEnvironment(), 0.04 ).texture
-  scene.environment = environment
-  scene.environmentIntensity = 0.32
-  const camera = new THREE.PerspectiveCamera( 40, 1, 0.02, 40 )
-
+// Play > table lights: soft hemi fill, shadow key, twin bar lamps
+const addTableLights = ( scene ) => {
   scene.add( new THREE.HemisphereLight( '#d6efe0', '#050806', 0.35 ) )
   const key = new THREE.DirectionalLight( '#fff1dc', 1.3 )
   key.position.set( 0.5, 3.2, 0.7 )
@@ -237,26 +265,29 @@ export function createPoolTableScene( { canvas } ) {
     lamp.target.position.set( 0, 0, z )
     scene.add( lamp, lamp.target )
   }
+}
 
-  scene.add( buildTable() )
-
-  // Play > balls: shared sphere, per-ball texture; base turn so numbers start face-up at random yaw
+// Play > balls: shared sphere, per-ball texture; base turn so numbers start face-up at random yaw
+const buildBallMeshes = ( scene, requestRender ) => {
   const fontFamily = '"Space Grotesk", sans-serif'
   const sphere = new THREE.SphereGeometry( RADIUS, IS_TOUCH ? 32 : 48, IS_TOUCH ? 20 : 32 )
   const random = createRandom( 77 )
-  const ballMeshes = []
+  const meshes = []
   const baseTurns = []
   for ( let id = 0; id < 16; id += 1 ) {
-    const map = id === 0 ? cueBallTexture() : poolBallTexture( id, BALL_COLORS[ id - 1 ], fontFamily, () => invalidate() )
+    const map = id === 0 ? cueBallTexture() : poolBallTexture( id, BALL_COLORS[ id - 1 ], fontFamily, requestRender )
     const material = new THREE.MeshPhysicalMaterial( { map, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.04 } )
     const mesh = new THREE.Mesh( sphere, material )
     mesh.castShadow = true
     scene.add( mesh )
-    ballMeshes.push( mesh )
+    meshes.push( mesh )
     baseTurns.push( new THREE.Quaternion().setFromEuler( new THREE.Euler( -Math.PI / 2 + random.signed() * 0.5, random() * Math.PI * 2, 0, 'YXZ' ) ) )
   }
+  return { meshes, baseTurns }
+}
 
-  // Play > aim guide pieces
+// Play > aim guide pieces, cue stick, legal-ball halos, ball-in-hand ring
+const buildAimGuide = ( scene, ballCount ) => {
   const aimGroup = new THREE.Group()
   scene.add( aimGroup )
   const aimLine = createStrip( '#f2f1e9', 0.72 )
@@ -271,11 +302,10 @@ export function createPoolTableScene( { canvas } ) {
   const cue = buildCue()
   scene.add( cue )
 
-  // Play > legal-ball halos + ball-in-hand ring
   const haloGeometry = new THREE.RingGeometry( RADIUS * 1.25, RADIUS * 1.45, 40 )
   haloGeometry.rotateX( -Math.PI / 2 )
   const haloMaterial = new THREE.MeshBasicMaterial( { color: '#f2f1e9', transparent: true, opacity: 0.32, depthWrite: false } )
-  const halos = ballMeshes.map( () => {
+  const halos = Array.from( { length: ballCount }, () => {
     const halo = new THREE.Mesh( haloGeometry, haloMaterial )
     halo.visible = false
     halo.renderOrder = 2
@@ -286,6 +316,132 @@ export function createPoolTableScene( { canvas } ) {
   handRing.visible = false
   handRing.renderOrder = 2
   scene.add( handRing )
+  return { aimGroup, aimLine, objectLine, cueLine, bounceLine, ghost, cue, halos, handRing }
+}
+
+// Play > overhead cam: whole table fitted, long side across wide screens
+const overheadPose = ( aspect ) => {
+  const azimuth = aspect >= 1 ? Math.PI / 2 : 0
+  const fov = aspect < 1 ? 50 : 36
+  const corners = []
+  for ( const x of [ -OUTER_X, OUTER_X ] ) for ( const z of [ -OUTER_Z, OUTER_Z ] ) for ( const y of [ RAIL_BASE, RAIL_TOP ] ) corners.push( [ x, y, z ] )
+  return { target: [ 0, 0, 0 ], azimuth, elevation: OVERHEAD_ELEVATION, distance: fitDistance( corners, azimuth, OVERHEAD_ELEVATION, fov, aspect ), fov }
+}
+
+// Play > cue cam: low behind cue ball, looking down aim line
+const cuePose = ( ball, angle, aspect ) => {
+  if ( !ball || ball.pocketed ) return overheadPose( aspect )
+  const dirX = Math.cos( angle )
+  const dirZ = Math.sin( angle )
+  return {
+    target: [ ball.x + dirX * 0.5, 0, ball.z + dirZ * 0.5 ],
+    azimuth: Math.atan2( -dirX, -dirZ ),
+    elevation: 0.36,
+    distance: aspect < 1 ? 1.35 : 1.05,
+    fov: aspect < 1 ? 58 : 44,
+  }
+}
+
+// Run engine: rough distance between camera poses; tiny gap means blend done
+const poseGap = ( a, b ) => Math.abs( a.azimuth - b.azimuth ) + Math.abs( a.elevation - b.elevation )
+  + Math.abs( Math.log( a.distance / b.distance ) ) + Math.abs( a.fov - b.fov ) / 50
+  + Math.hypot( a.target[ 0 ] - b.target[ 0 ], a.target[ 2 ] - b.target[ 2 ] )
+
+const placeBall = ( ballSet, id, x, y, z, quaternion ) => {
+  const mesh = ballSet.meshes[ id ]
+  mesh.position.set( x, y, z )
+  mesh.quaternion.set( quaternion.x, quaternion.y, quaternion.z, quaternion.w ).multiply( ballSet.baseTurns[ id ] )
+  // fully below felt: hide so it never pokes through cabinet
+  mesh.visible = y > -RADIUS * 1.2
+}
+
+const sampleQuaternion = new THREE.Quaternion()
+const nextQuaternion = new THREE.Quaternion()
+// Play > shot playback: balls at fractional frame, position lerp + rotation slerp
+const showFrame = ( ballSet, result, exact ) => {
+  const last = result.frameCount - 1
+  const frame = Math.min( last, Math.floor( exact ) )
+  const next = Math.min( last, frame + 1 )
+  const amount = Math.min( 1, exact - frame )
+  const { frames, ballCount } = result
+  for ( let id = 0; id < ballCount; id += 1 ) {
+    const a = ( frame * ballCount + id ) * FRAME_STRIDE
+    const b = ( next * ballCount + id ) * FRAME_STRIDE
+    sampleQuaternion.set( frames[ a + 3 ], frames[ a + 4 ], frames[ a + 5 ], frames[ a + 6 ] )
+    nextQuaternion.set( frames[ b + 3 ], frames[ b + 4 ], frames[ b + 5 ], frames[ b + 6 ] )
+    sampleQuaternion.slerp( nextQuaternion, amount )
+    placeBall(
+      ballSet,
+      id,
+      frames[ a ] + ( frames[ b ] - frames[ a ] ) * amount,
+      frames[ a + 1 ] + ( frames[ b + 1 ] - frames[ a + 1 ] ) * amount,
+      frames[ a + 2 ] + ( frames[ b + 2 ] - frames[ a + 2 ] ) * amount,
+      sampleQuaternion,
+    )
+  }
+}
+
+// Play > aim guide: ray from physics helper, so guide and sim agree
+const updateAimGuide = ( guide, { balls, aim, placement, playing } ) => {
+  const { aimGroup, aimLine, objectLine, cueLine, bounceLine, ghost, cue, halos, handRing } = guide
+  const cueBall = balls?.[ 0 ]
+  const show = aim.visible && cueBall && !cueBall.pocketed && !playing
+  aimGroup.visible = show
+  cue.visible = show || Boolean( aim.stickOnly && cueBall && !cueBall.pocketed && !playing )
+  halos.forEach( ( halo, id ) => {
+    const ball = balls?.[ id ]
+    halo.visible = Boolean( show && ball && !ball.pocketed && aim.halo.includes( id ) )
+    if ( halo.visible ) halo.position.set( ball.x, 0.0011, ball.z )
+  } )
+  handRing.visible = Boolean( placement.active && cueBall && !cueBall.pocketed && !playing )
+  if ( handRing.visible ) {
+    handRing.position.set( cueBall.x, 0.0013, cueBall.z )
+    handRing.material.color.set( placement.valid ? '#7be08f' : ILLEGAL_RING )
+  }
+  if ( !cueBall || cueBall.pocketed ) return
+  const dirX = Math.cos( aim.angle )
+  const dirZ = Math.sin( aim.angle )
+  // butt lifted 5 degrees, like real stroke
+  const tilt = ( 5 * Math.PI ) / 180
+  const along = new THREE.Vector3( dirX * Math.cos( tilt ), -Math.sin( tilt ), dirZ * Math.cos( tilt ) )
+  const pull = RADIUS + 0.012 + aim.power * 0.3
+  cue.position.set( cueBall.x - along.x * pull, RADIUS - along.y * pull, cueBall.z - along.z * pull )
+  cue.quaternion.setFromUnitVectors( new THREE.Vector3( 1, 0, 0 ), along )
+  if ( !show ) return
+
+  const ray = aimRay( balls, cueBall, aim.angle )
+  placeStrip( aimLine, cueBall, dirX, dirZ, ray.distance )
+  ghost.position.set( ray.point.x, 0.0014, ray.point.z )
+  if ( ray.ballId === null ) {
+    ghost.scale.setScalar( 0.5 )
+    ghost.material.color.set( LEGAL_RING )
+    objectLine.visible = false
+    cueLine.visible = false
+    placeStrip( bounceLine, ray.point, ray.cushionDir.x, ray.cushionDir.z, 0.16 )
+    return
+  }
+  ghost.scale.setScalar( 1 )
+  ghost.material.color.set( aim.legal.includes( ray.ballId ) ? LEGAL_RING : ILLEGAL_RING )
+  bounceLine.visible = false
+  const target = balls[ ray.ballId ]
+  const straightness = Math.cos( ray.cut )
+  placeStrip( objectLine, target, ray.objectDir.x, ray.objectDir.z, 0.06 + 0.32 * straightness )
+  if ( ray.cueDir ) placeStrip( cueLine, ray.point, ray.cueDir.x, ray.cueDir.z, 0.04 + 0.22 * Math.sin( ray.cut ) )
+  else cueLine.visible = false
+}
+
+// Play > table: renderer + world; page drives it through returned methods
+export function createPoolTableScene( { canvas } ) {
+  const renderer = createStageRenderer( canvas, { exposure: 1.0 } )
+  const scene = new THREE.Scene()
+  scene.background = new THREE.Color( '#050806' )
+  scene.fog = new THREE.Fog( '#050806', 4, 11 )
+  const disposeEnvironment = addRoomEnvironment( renderer, scene, 0.32 )
+  const camera = new THREE.PerspectiveCamera( 40, 1, 0.02, 40 )
+  addTableLights( scene )
+  scene.add( buildTable() )
+  const ballSet = buildBallMeshes( scene, () => invalidate() )
+  const guide = buildAimGuide( scene, ballSet.meshes.length )
 
   let balls = null
   // legal: ghost ring colour; halo: rings under own group only (whole rack ringed is noise)
@@ -304,30 +460,7 @@ export function createPoolTableScene( { canvas } ) {
     frameHandle = requestAnimationFrame( renderFrame )
   }
 
-  const overheadPose = () => {
-    const azimuth = aspect >= 1 ? Math.PI / 2 : 0
-    const fov = aspect < 1 ? 50 : 36
-    const corners = []
-    for ( const x of [ -OUTER_X, OUTER_X ] ) for ( const z of [ -OUTER_Z, OUTER_Z ] ) for ( const y of [ RAIL_BASE, RAIL_TOP ] ) corners.push( [ x, y, z ] )
-    return { target: [ 0, 0, 0 ], azimuth, elevation: OVERHEAD_ELEVATION, distance: fitDistance( corners, azimuth, OVERHEAD_ELEVATION, fov, aspect ), fov }
-  }
-
-  // Play > cue cam: low behind cue ball, looking down aim line
-  const cuePose = () => {
-    const ball = balls?.[ 0 ]
-    if ( !ball || ball.pocketed ) return overheadPose()
-    const dirX = Math.cos( aim.angle )
-    const dirZ = Math.sin( aim.angle )
-    return {
-      target: [ ball.x + dirX * 0.5, 0, ball.z + dirZ * 0.5 ],
-      azimuth: Math.atan2( -dirX, -dirZ ),
-      elevation: 0.36,
-      distance: aspect < 1 ? 1.35 : 1.05,
-      fov: aspect < 1 ? 58 : 44,
-    }
-  }
-
-  const wantedPose = () => ( cameraMode === 'cue' && !playback ? cuePose() : overheadPose() )
+  const wantedPose = () => ( cameraMode === 'cue' && !playback ? cuePose( balls?.[ 0 ], aim.angle, aspect ) : overheadPose( aspect ) )
   // cue cam holds its framing during shot instead of chasing balls
   let heldPose = null
 
@@ -341,96 +474,14 @@ export function createPoolTableScene( { canvas } ) {
     }
   }
 
-  const poseGap = ( a, b ) => Math.abs( a.azimuth - b.azimuth ) + Math.abs( a.elevation - b.elevation )
-    + Math.abs( Math.log( a.distance / b.distance ) ) + Math.abs( a.fov - b.fov ) / 50
-    + Math.hypot( a.target[ 0 ] - b.target[ 0 ], a.target[ 2 ] - b.target[ 2 ] )
-
-  const placeBall = ( id, x, y, z, quaternion ) => {
-    const mesh = ballMeshes[ id ]
-    mesh.position.set( x, y, z )
-    mesh.quaternion.set( quaternion.x, quaternion.y, quaternion.z, quaternion.w ).multiply( baseTurns[ id ] )
-    // fully below felt: hide so it never pokes through cabinet
-    mesh.visible = y > -RADIUS * 1.2
-  }
-
   const showBalls = () => {
     if ( !balls ) return
     for ( const ball of balls ) {
-      placeBall( ball.id, ball.x, ball.pocketed ? -1 : RADIUS, ball.z, ball.quaternion )
+      placeBall( ballSet, ball.id, ball.x, ball.pocketed ? -1 : RADIUS, ball.z, ball.quaternion )
     }
   }
 
-  const sampleQuaternion = new THREE.Quaternion()
-  const nextQuaternion = new THREE.Quaternion()
-  const showFrame = ( result, exact ) => {
-    const last = result.frameCount - 1
-    const frame = Math.min( last, Math.floor( exact ) )
-    const next = Math.min( last, frame + 1 )
-    const amount = Math.min( 1, exact - frame )
-    const { frames, ballCount } = result
-    for ( let id = 0; id < ballCount; id += 1 ) {
-      const a = ( frame * ballCount + id ) * FRAME_STRIDE
-      const b = ( next * ballCount + id ) * FRAME_STRIDE
-      sampleQuaternion.set( frames[ a + 3 ], frames[ a + 4 ], frames[ a + 5 ], frames[ a + 6 ] )
-      nextQuaternion.set( frames[ b + 3 ], frames[ b + 4 ], frames[ b + 5 ], frames[ b + 6 ] )
-      sampleQuaternion.slerp( nextQuaternion, amount )
-      placeBall(
-        id,
-        frames[ a ] + ( frames[ b ] - frames[ a ] ) * amount,
-        frames[ a + 1 ] + ( frames[ b + 1 ] - frames[ a + 1 ] ) * amount,
-        frames[ a + 2 ] + ( frames[ b + 2 ] - frames[ a + 2 ] ) * amount,
-        sampleQuaternion,
-      )
-    }
-  }
-
-  // Play > aim guide: ray from physics helper, so guide and sim agree
-  const updateAim = () => {
-    const cueBall = balls?.[ 0 ]
-    const show = aim.visible && cueBall && !cueBall.pocketed && !playback
-    aimGroup.visible = show
-    cue.visible = show || Boolean( aim.stickOnly && cueBall && !cueBall.pocketed && !playback )
-    halos.forEach( ( halo, id ) => {
-      const ball = balls?.[ id ]
-      halo.visible = Boolean( show && ball && !ball.pocketed && aim.halo.includes( id ) )
-      if ( halo.visible ) halo.position.set( ball.x, 0.0011, ball.z )
-    } )
-    handRing.visible = Boolean( placement.active && cueBall && !cueBall.pocketed && !playback )
-    if ( handRing.visible ) {
-      handRing.position.set( cueBall.x, 0.0013, cueBall.z )
-      handRing.material.color.set( placement.valid ? '#7be08f' : ILLEGAL_RING )
-    }
-    if ( !cueBall || cueBall.pocketed ) return
-    const dirX = Math.cos( aim.angle )
-    const dirZ = Math.sin( aim.angle )
-    // butt lifted 5 degrees, like real stroke
-    const tilt = ( 5 * Math.PI ) / 180
-    const along = new THREE.Vector3( dirX * Math.cos( tilt ), -Math.sin( tilt ), dirZ * Math.cos( tilt ) )
-    const pull = RADIUS + 0.012 + aim.power * 0.3
-    cue.position.set( cueBall.x - along.x * pull, RADIUS - along.y * pull, cueBall.z - along.z * pull )
-    cue.quaternion.setFromUnitVectors( new THREE.Vector3( 1, 0, 0 ), along )
-    if ( !show ) return
-
-    const ray = aimRay( balls, cueBall, aim.angle )
-    placeStrip( aimLine, cueBall, dirX, dirZ, ray.distance )
-    ghost.position.set( ray.point.x, 0.0014, ray.point.z )
-    if ( ray.ballId === null ) {
-      ghost.scale.setScalar( 0.5 )
-      ghost.material.color.set( LEGAL_RING )
-      objectLine.visible = false
-      cueLine.visible = false
-      placeStrip( bounceLine, ray.point, ray.cushionDir.x, ray.cushionDir.z, 0.16 )
-      return
-    }
-    ghost.scale.setScalar( 1 )
-    ghost.material.color.set( aim.legal.includes( ray.ballId ) ? LEGAL_RING : ILLEGAL_RING )
-    bounceLine.visible = false
-    const target = balls[ ray.ballId ]
-    const straightness = Math.cos( ray.cut )
-    placeStrip( objectLine, target, ray.objectDir.x, ray.objectDir.z, 0.06 + 0.32 * straightness )
-    if ( ray.cueDir ) placeStrip( cueLine, ray.point, ray.cueDir.x, ray.cueDir.z, 0.04 + 0.22 * Math.sin( ray.cut ) )
-    else cueLine.visible = false
-  }
+  const updateAim = () => updateAimGuide( guide, { balls, aim, placement, playing: Boolean( playback ) } )
 
   function renderFrame( now ) {
     frameHandle = 0
@@ -443,13 +494,13 @@ export function createPoolTableScene( { canvas } ) {
       const elapsed = ( ( now - playback.start ) / 1000 ) * playback.speed
       const exact = elapsed * playback.result.fps
       if ( exact >= playback.result.frameCount - 1 || playback.skip ) {
-        showFrame( playback.result, playback.result.frameCount - 1 )
+        showFrame( ballSet, playback.result, playback.result.frameCount - 1 )
         const done = playback.onDone
         playback = null
         updateAim()
         done?.()
       } else {
-        showFrame( playback.result, exact )
+        showFrame( ballSet, playback.result, exact )
         active = true
       }
     }
@@ -482,11 +533,7 @@ export function createPoolTableScene( { canvas } ) {
   }
 
   const resize = () => {
-    const parent = canvas.parentElement
-    size = {
-      width: Math.max( 1, parent?.clientWidth || canvas.clientWidth ),
-      height: Math.max( 1, parent?.clientHeight || canvas.clientHeight ),
-    }
+    size = readCanvasSize( canvas )
     renderer.setSize( size.width, size.height, false )
     applyProjection()
     currentPose = null
@@ -563,16 +610,8 @@ export function createPoolTableScene( { canvas } ) {
       disposed = true
       cancelAnimationFrame( frameHandle )
       observer.disconnect()
-      scene.traverse( ( node ) => {
-        node.geometry?.dispose()
-        const materials = Array.isArray( node.material ) ? node.material : node.material ? [ node.material ] : []
-        for ( const material of materials ) {
-          for ( const value of Object.values( material ) ) if ( value?.isTexture ) value.dispose()
-          material.dispose()
-        }
-      } )
-      environment.dispose()
-      pmrem.dispose()
+      disposeTree( scene )
+      disposeEnvironment()
       renderer.dispose()
     },
   }

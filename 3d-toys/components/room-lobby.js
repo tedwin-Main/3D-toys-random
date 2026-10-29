@@ -3,7 +3,7 @@
  * PURPOSE: drop-in lobby overlay for multiplayer toys: nickname, create/join by code, invite links (local + LAN), roster, host bots + settings + Start, back-to-lobby after a match
  * UI: lobby overlay on every multiplayer toy
  * USED BY: multiplayer toy pages (e.g. bumper-sumo-arena/index.html)
- * KEY EXPORTS: createLobby
+ * KEY EXPORTS: createLobby, buildInviteLinks
  */
 import { connectRoom } from './room-client.js';
 
@@ -49,6 +49,68 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
 
+function injectStyle(id, css) {
+  if (document.getElementById(id)) return;
+  const st = document.createElement('style');
+  st.id = id;
+  st.textContent = css;
+  document.head.append(st);
+}
+
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+// Lobby > Room panel > invite links: this page's toy, plus Same Wi-Fi LAN link when served locally
+export function buildInviteLinks(loc, lan, code) {
+  const dir = loc.pathname.split('/').filter(Boolean).pop();
+  const mk = (host) => `${loc.protocol}//${host}/3d-toys/#${dir}?room=${code}`;
+  const local = LOCAL_HOSTS.includes(loc.hostname);
+  const links = [[local ? 'This computer' : 'Invite link', mk(loc.host)]];
+  if (local && lan?.ip) links.push(['Same Wi-Fi', mk(`${lan.ip}:${loc.port || lan.port}`)]);
+  return links;
+}
+
+function renderInviteLinks(container, links) {
+  for (const [label, link] of links) {
+    const row = document.createElement('div');
+    row.className = 'lb-link';
+    row.innerHTML = `<b style="font-size:11px;color:#8a93a8;white-space:nowrap">${label}</b><span></span><button>Copy</button>`;
+    row.querySelector('span').textContent = link;
+    row.querySelector('button').onclick = (e) => {
+      navigator.clipboard?.writeText(link).then(() => (e.target.textContent = 'Copied!'), () => (e.target.textContent = 'Select + copy'));
+    };
+    container.append(row);
+  }
+}
+
+function renderRoster(container, room) {
+  for (const p of room.players) {
+    const c = document.createElement('div');
+    c.className = 'lb-chip';
+    c.innerHTML = `<i style="background:${p.color}"></i><span></span>${p.id === room.host ? '<small>host</small>' : ''}${p.id === room.me ? '<small>you</small>' : ''}`;
+    c.querySelector('span').textContent = p.nick;
+    container.append(c);
+  }
+}
+
+// Lobby > Room panel > Settings: host selects, guests read-only
+function renderSettings(container, settings, values, room) {
+  for (const s of settings) {
+    const lab = document.createElement('span');
+    lab.textContent = s.label;
+    container.append(lab);
+    if (room.isHost) {
+      const sel = document.createElement('select');
+      for (const [v, l] of s.options) sel.append(new Option(l, v, false, String(v) === String(values[s.key])));
+      sel.onchange = () => { values[s.key] = s.options.find(([v]) => String(v) === sel.value)[0]; room.send({ _lobby: 'settings', values }); };
+      container.append(sel);
+    } else {
+      const b = document.createElement('b');
+      b.textContent = s.options.find(([v]) => String(v) === String(values[s.key]))?.[1] ?? '';
+      container.append(b);
+    }
+  }
+}
+
 /**
  * opts: { game, title, emoji, blurb, accent, maxBots, defaultBots, minPlayers, note,
  *         maxTotal (seat cap, default 14), settings ([{ key, label, options: [[value, label]], value }], host picks),
@@ -57,12 +119,7 @@ const store = {
  */
 export function createLobby(opts) {
   const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 14, note = '', settings = [] } = opts;
-  if (!document.getElementById('lb-style')) {
-    const st = document.createElement('style');
-    st.id = 'lb-style';
-    st.textContent = CSS;
-    document.head.append(st);
-  }
+  injectStyle('lb-style', CSS);
   const wrap = document.createElement('div');
   wrap.className = 'lb-wrap';
   wrap.style.setProperty('--lb-accent', accent);
@@ -105,15 +162,6 @@ export function createLobby(opts) {
     (nick.value ? (urlRoom ? wrap.querySelector('.lb-join') : wrap.querySelector('.lb-create')) : nick).focus();
   }
 
-  function inviteLinks() {
-    const dir = location.pathname.split('/').filter(Boolean).pop();
-    const mk = (host) => `${location.protocol}//${host}/3d-toys/#${dir}?room=${state.room.code}`;
-    const local = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-    const links = [[local ? 'This computer' : 'Invite link', mk(location.host)]];
-    if (local && state.lan?.ip) links.push(['Same Wi-Fi', mk(`${state.lan.ip}:${location.port || state.lan.port}`)]);
-    return links;
-  }
-
   // Lobby > Room panel: code, invite links, roster, host bots + Start
   function renderRoom() {
     const r = state.room;
@@ -135,40 +183,9 @@ export function createLobby(opts) {
       ${note ? `<div class="lb-note">${note}</div>` : ''}
     </div>`;
     wrap.querySelector('.lb-t').textContent = title;
-    for (const [label, link] of inviteLinks()) {
-      const row = document.createElement('div');
-      row.className = 'lb-link';
-      row.innerHTML = `<b style="font-size:11px;color:#8a93a8;white-space:nowrap">${label}</b><span></span><button>Copy</button>`;
-      row.querySelector('span').textContent = link;
-      row.querySelector('button').onclick = (e) => {
-        navigator.clipboard?.writeText(link).then(() => (e.target.textContent = 'Copied!'), () => (e.target.textContent = 'Select + copy'));
-      };
-      wrap.querySelector('.lb-links').append(row);
-    }
-    for (const p of r.players) {
-      const c = document.createElement('div');
-      c.className = 'lb-chip';
-      c.innerHTML = `<i style="background:${p.color}"></i><span></span>${p.id === r.host ? '<small>host</small>' : ''}${p.id === r.me ? '<small>you</small>' : ''}`;
-      c.querySelector('span').textContent = p.nick;
-      wrap.querySelector('.lb-players').append(c);
-    }
-    // Lobby > Room panel > Settings: host selects, guests read-only
-    for (const s of settings) {
-      const set = wrap.querySelector('.lb-set');
-      const lab = document.createElement('span');
-      lab.textContent = s.label;
-      set.append(lab);
-      if (r.isHost) {
-        const sel = document.createElement('select');
-        for (const [v, l] of s.options) sel.append(new Option(l, v, false, String(v) === String(state.settings[s.key])));
-        sel.onchange = () => { state.settings[s.key] = s.options.find(([v]) => String(v) === sel.value)[0]; r.send({ _lobby: 'settings', values: state.settings }); };
-        set.append(sel);
-      } else {
-        const b = document.createElement('b');
-        b.textContent = s.options.find(([v]) => String(v) === String(state.settings[s.key]))?.[1] ?? '';
-        set.append(b);
-      }
-    }
+    renderInviteLinks(wrap.querySelector('.lb-links'), buildInviteLinks(location, state.lan, r.code));
+    renderRoster(wrap.querySelector('.lb-players'), r);
+    if (settings.length) renderSettings(wrap.querySelector('.lb-set'), settings, state.settings, r);
     const bi = wrap.querySelector('.lb-bot-in');
     if (bi) bi.oninput = () => { state.bots = +bi.value; wrap.querySelector('.lb-bot-n').textContent = bi.value; syncStart(); };
     const start = wrap.querySelector('.lb-start');
@@ -194,15 +211,18 @@ export function createLobby(opts) {
       renderRoom();
     });
     r.on('host', () => renderRoom());
-    r.on('data', (d) => {
-      if (!d || !d._lobby) return;
-      if (d._lobby === 'settings') { Object.assign(state.settings, d.values); renderRoom(); }
-      if (d._lobby === 'start') { state.running = true; state.seed = d.seed; state.bots = d.bots; Object.assign(state.settings, d.settings); wrap.hidden = true; opts.onStart?.({ seed: d.seed, bots: d.bots, isHost: r.isHost, late: !!d.late, settings: { ...state.settings } }); }
-      if (d._lobby === 'lobby') { state.running = false; wrap.hidden = false; renderRoom(); opts.onLobby?.(); }
-    });
+    r.on('data', (d) => handleLobbyMessage(r, d));
     r.on('close', () => { state.running = false; state.room = null; wrap.hidden = false; renderJoin('Disconnected from room.'); opts.onLobby?.(); });
     opts.onJoin?.(r);
     renderRoom();
+  }
+
+  // Lobby > control messages from host: settings change, match start, back to lobby
+  function handleLobbyMessage(r, d) {
+    if (!d || !d._lobby) return;
+    if (d._lobby === 'settings') { Object.assign(state.settings, d.values); renderRoom(); }
+    if (d._lobby === 'start') { state.running = true; state.seed = d.seed; state.bots = d.bots; Object.assign(state.settings, d.settings); wrap.hidden = true; opts.onStart?.({ seed: d.seed, bots: d.bots, isHost: r.isHost, late: !!d.late, settings: { ...state.settings } }); }
+    if (d._lobby === 'lobby') { state.running = false; wrap.hidden = false; renderRoom(); opts.onLobby?.(); }
   }
 
   function startMatch() {

@@ -56,6 +56,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, night stadium, floodlights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -235,33 +237,17 @@ function burst(x, z, hex) {
 }
 
 // Audio > engine for own car, ball thump, goal horn, whistle
-let actx = null, eng = null, engGain = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  eng = actx.createOscillator(); eng.type = 'sawtooth'; eng.frequency.value = 60;
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
-  engGain = actx.createGain(); engGain.gain.value = 0;
-  eng.connect(lp).connect(engGain).connect(actx.destination); eng.start();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+let eng = null, engGain = null;
+// car engine, pitch + gain driven by speed
+const gameAudio = createGameAudio({
+  onUnlock: (ctx) => {
+    eng = ctx.createOscillator(); eng.type = 'sawtooth'; eng.frequency.value = 60;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+    engGain = ctx.createGain(); engGain.gain.value = 0;
+    eng.connect(lp).connect(engGain).connect(ctx.destination); eng.start();
+  },
+});
+const { tone, noise } = gameAudio;
 const sfx = {
   kick(v) { tone(180, 70, 0.12, 0.2 * v, 'sine'); noise(0.08, 0.15 * v, 2500, 400); },
   bump() { tone(140, 90, 0.1, 0.08, 'square'); },
@@ -517,23 +503,27 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
   const b = world.ball;
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), sc: world.score, ov: world.over ? 1 : 0, ev: events,
     B: [f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)],
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), (p.bot ? 1 : 0) | (p.boosting ? 2 : 0), p.team, f2(p.boost), p.goals, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), (p.bot ? 1 : 0) | (p.boosting ? 2 : 0), p.team, f2(p.boost), p.goals]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck, score: s.sc, over: !!s.ov });
   const [x, y, z, vx, vy, vz] = s.B;
   Object.assign(world.ball, { x, y, z, vx, vy, vz });
   const seen = new Set();
-  for (const [id, px, pz, h, pvx, pvz, steer, fl, team, boost, goals, nick, color] of s.P) {
+  for (const [id, px, pz, h, pvx, pvz, steer, fl, team, boost, goals] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1), team);
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1), team);
     if (p.team !== team) { p.team = team; const g = cars3d.get(id); if (g) g.userData.paint.color.set(TEAM[team]); }
     Object.assign(p, { x: px, z: pz, h, vx: pvx, vz: pvz, steer, boosting: !!(fl & 2), boost, goals });
   }
@@ -647,7 +637,7 @@ function simTick(dt) {
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', g2: +local.gas.toFixed(2), s: +local.steer.toFixed(2), b: local.boost }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: +local.gas.toFixed(2), s: +local.steer.toFixed(2), b: local.boost }); }
   }
 }
 startTicker(60, simTick);
@@ -704,11 +694,11 @@ function loop() {
     camPos.lerp(_v.set(mg.position.x - (dx / dl) * 11, 5.5, mg.position.z - (dz / dl) * 11), 1 - Math.exp(-dt * 5));
     const lookAt = ballCam ? _w.set(ball3d.position.x, ball3d.position.y * 0.5 + 0.8, ball3d.position.z) : _w.set(mg.position.x + (dx / dl) * 8, 1, mg.position.z + (dz / dl) * 8);
     camLook.lerp(lookAt, 1 - Math.exp(-dt * 8));
-    if (actx) { const sp = Math.hypot(me.vx, me.vz); eng.frequency.value = 55 + sp * 4 + (me.boosting ? 30 : 0); engGain.gain.value = 0.025 + Math.min(sp / 30, 1) * 0.035; }
+    if (gameAudio.ctx) { const sp = Math.hypot(me.vx, me.vz); eng.frequency.value = 55 + sp * 4 + (me.boosting ? 30 : 0); engGain.gain.value = 0.025 + Math.min(sp / 30, 1) * 0.035; }
   } else {
     camPos.lerp(_v.set(ball3d.position.x * 0.5, 34, ball3d.position.z * 0.3 + 40), 1 - Math.exp(-dt * 2));
     camLook.lerp(_w.set(ball3d.position.x * 0.6, 0, ball3d.position.z * 0.5), 1 - Math.exp(-dt * 3));
-    if (actx) engGain.gain.value = 0;
+    if (gameAudio.ctx) engGain.gain.value = 0;
   }
   shake = Math.max(0, shake - dt);
   camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));

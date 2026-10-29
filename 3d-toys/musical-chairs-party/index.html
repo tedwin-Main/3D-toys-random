@@ -53,6 +53,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
 
 // Scene > Renderer, dark club, disco ball, sweeping colored spots
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -490,21 +491,25 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), rd: world.round, wn: world.winner, ev: events,
     C: world.chairs.map((c) => [c.x, c.z, c.h, c.by ?? 0]),
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), p.seat, (p.out ? 1 : 0) | (p.bot ? 2 : 0) | (p.dashT > 0 ? 4 : 0), f2(p.dashCd), p.place, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), p.seat, (p.out ? 1 : 0) | (p.bot ? 2 : 0) | (p.dashT > 0 ? 4 : 0), f2(p.dashCd), p.place]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, winner: s.wn });
   world.chairs = s.C.map(([x, z, h, by]) => ({ x, z, h, by: by || null }));
   const seen = new Set();
-  for (const [id, x, z, vx, vz, face, seat, fl, dashCd, place, nick, color] of s.P) {
+  for (const [id, x, z, vx, vz, face, seat, fl, dashCd, place] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 2));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 2));
     Object.assign(p, { x, z, vx, vz, face, seat, out: !!(fl & 1), dashT: fl & 4 ? 0.1 : 0, dashCd, place });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -609,7 +614,7 @@ function simTick(dt) {
   } else if (world.mode === 'match' && room) {
     dashLocal = 0;
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), dq: dashSeq }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), dq: dashSeq }); }
   }
 }
 startTicker(60, simTick);

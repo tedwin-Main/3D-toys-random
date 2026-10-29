@@ -64,6 +64,8 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, camera, sky, lights, sea far below the floating holes
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -449,29 +451,8 @@ function burst(x, z, color, n = 60) {
 for (let i = 0; i < CONF; i++) confPos[i * 3 + 1] = -99;
 
 // Audio > putt tick, wall clack, cup jingle, splash, bumper boing
-let actx = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine') {
-  if (!actx) return;
-  const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1, type = 'lowpass') {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = type; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
 const sfx = {
   putt(v) { noise(0.06, 0.25 * v, 4000, 1500, 'bandpass'); tone(1300, 900, 0.05, 0.08 * v, 'triangle'); },
   wall(v) { tone(320, 180, 0.07, 0.07 * v, 'triangle'); },
@@ -646,22 +627,26 @@ function onData(d, from) {
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let cardT = 0;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot(withCard) {
   const s = {
     g: 's', ph: world.phase, t: f2(world.t), hole: world.hole, ht: f2(world.ht), ev: events,
-    B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.z), f2(b.vx), f2(b.vz), (b.bot ? 1 : 0) | (b.holed ? 2 : 0) | (b.done ? 4 : 0), b.strokes, b.nick, b.color]),
+    B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.z), f2(b.vx), f2(b.vz), (b.bot ? 1 : 0) | (b.holed ? 2 : 0) | (b.done ? 4 : 0), b.strokes]),
   };
   if (withCard) s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null)]);
-  return s;
+  return names.stamp(s, world.balls.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   if (!H || s.hole !== H.i) setHole(s.hole);
   Object.assign(world, { phase: s.ph, t: s.t, hole: s.hole, ht: s.ht });
   const seen = new Set();
-  for (const [id, x, z, vx, vz, fl, strokes, nick, color] of s.B) {
+  for (const [id, x, z, vx, vz, fl, strokes] of s.B) {
     seen.add(id);
-    const b = world.balls.get(id) ?? addBall(id, nick, color, !!(fl & 1));
+    if (!world.balls.has(id) && !names.name(id)) continue;
+    const b = world.balls.get(id) ?? addBall(id, ...names.name(id), !!(fl & 1));
     Object.assign(b, { x, z, vx, vz, strokes, holed: !!(fl & 2), done: !!(fl & 4) });
     // resting spot doubles as water-reset point if this tab inherits host
     if (!vx && !vz) { b.lastX = x; b.lastZ = z; }
@@ -718,7 +703,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   aim = null;
   if (p < 0.04 || !canAim()) return;
   if (lobby.room.isHost) shoot(myBall(), a, p);
-  else lobby.room.send({ g: 'p', seq: ++shotSeq, a: +a.toFixed(4), p: +p.toFixed(3) });
+  else lobby.room.toHost({ g: 'p', seq: ++shotSeq, a: +a.toFixed(4), p: +p.toFixed(3) });
 });
 renderer.domElement.addEventListener('pointercancel', () => (aim = null));
 addEventListener('keydown', (e) => { if (e.code === 'Escape') aim = null; if (e.code === 'KeyF' && !e.repeat) follow = !follow; });

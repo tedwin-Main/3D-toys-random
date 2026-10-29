@@ -57,7 +57,9 @@
 import * as THREE from 'three';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
 import { createTouchPad } from '../components/touch-joystick.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, sky, ice sheet, snow banks, lake past the back edge, mountains, trees, igloo
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -233,29 +235,8 @@ snow.frustumCulled = false;
 scene.add(snow);
 
 // Audio > launch whoosh, knock clack, splash, sweep brush, points, countdown, fanfare
-let actx = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
 const sfx = {
   launch(me) { noise(0.5, me ? 0.16 : 0.04, 2600, 500); },
   knock(s, me) { const v = Math.min(1, s / 10) * (me ? 0.3 : 0.12); tone(300, 130, 0.14, v, 'triangle'); noise(0.08, v, 1800, 300); },
@@ -489,19 +470,23 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), rd: world.round, rs: world.rounds, hx: f2(world.hx), hz: f2(world.hz), b: world.best, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0), p.score, p.last, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0), p.score, p.last]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, rounds: s.rs, hx: s.hx, hz: s.hz, best: s.b, winner: s.win });
   const seen = new Set();
-  for (const [id, x, z, vx, vz, aim, pow, fl, score, last, nick, color] of s.P) {
+  for (const [id, x, z, vx, vz, aim, pow, fl, score, last] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, vx, vz, aim, pow, launched: !!(fl & 2), out: !!(fl & 4), charging: !!(fl & 8), sweep: !!(fl & 16), score, last });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -532,7 +517,7 @@ addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', (e) => (keys[e.code] = false));
-const pad = createTouchPad({ buttons: [{ id: 'slide', label: 'SLIDE', color: 'rgba(58, 134, 255, 0.75)' }], onStart: audio });
+const pad = createTouchPad({ buttons: [{ id: 'slide', label: 'SLIDE', color: 'rgba(58, 134, 255, 0.75)' }], onStart: gameAudio.unlock });
 function readInput() {
   local.x = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x, -1, 1);
   local.held = !!(keys.Space || keys.KeyW || keys.ArrowUp || pad.held.slide);
@@ -591,7 +576,7 @@ function simTick(dt) {
     } else { playEvents(events); events = []; }
   } else if (world.mode === 'match' && room) {
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), h: local.held ? 1 : 0 }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), h: local.held ? 1 : 0 }); }
   }
 }
 startTicker(60, simTick);

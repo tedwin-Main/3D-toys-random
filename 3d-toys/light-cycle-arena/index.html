@@ -60,7 +60,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
 import { createTouchPad } from '../components/touch-joystick.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer + bloom, neon grid floor, arena walls
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -169,24 +171,18 @@ function explode(x, z, hex) {
 }
 
 // Audio > hum, turn chirp, crash, countdown, win
-let actx = null, hum = null, humGain = null;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  hum = actx.createOscillator(); hum.type = 'sawtooth'; hum.frequency.value = 70;
-  const lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
-  humGain = actx.createGain(); humGain.gain.value = 0;
-  hum.connect(lp).connect(humGain).connect(actx.destination); hum.start();
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
+let hum = null, humGain = null;
+// engine hum, gain driven by speed
+const gameAudio = createGameAudio({
+  noiseSeconds: 0,
+  onUnlock: (ctx) => {
+    hum = ctx.createOscillator(); hum.type = 'sawtooth'; hum.frequency.value = 70;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 500;
+    humGain = ctx.createGain(); humGain.gain.value = 0;
+    hum.connect(lp).connect(humGain).connect(ctx.destination); hum.start();
+  },
+});
+const { tone } = gameAudio;
 const sfx = {
   turn() { tone(900, 1300, 0.05, 0.05, 'square'); },
   crash(me) { tone(320, 40, 0.8, me ? 0.22 : 0.08, 'sawtooth'); tone(120, 30, 0.6, me ? 0.2 : 0.06, 'square'); },
@@ -404,21 +400,25 @@ function onData(d, from) {
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let kfDirty = true, kfT = 0;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot(withKf) {
   const s = {
     g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), p.dir, (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.boost ? 4 : 0), f2(p.energy), p.pts, p.wins, p.place, p.nick, p.color]),
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), p.dir, (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.boost ? 4 : 0), f2(p.energy), p.pts, p.wins, p.place]),
   };
   if (withKf) s.K = [...world.players.values()].map((p) => [p.id, p.corners]);
-  return s;
+  return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
   const seenIds = new Set();
-  for (const [id, x, z, dir, fl, energy, pts, wins, place, nick, color] of s.P) {
+  for (const [id, x, z, dir, fl, energy, pts, wins, place] of s.P) {
     seenIds.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, dir, alive: !!(fl & 2), boost: !!(fl & 4), energy, pts, wins, place });
   }
   for (const id of [...world.players.keys()]) if (!seenIds.has(id)) removePlayer(id);
@@ -475,7 +475,7 @@ const pad = createTouchPad({
     else if (Math.abs(x) < 0.3) flickArmed = true;
   },
 });
-function sendInput() { lobby.room?.send({ g: 'i', b: local.boost ? 1 : 0, n: local.n, q: local.turnLog }); }
+function sendInput() { lobby.room?.toHost({ g: 'i', b: local.boost ? 1 : 0, n: local.n, q: local.turnLog }); }
 
 // HUD > alive counter, energy, standings, banner, minimap
 const bigEl = document.getElementById('big');
@@ -626,7 +626,7 @@ function loop() {
   }
   camera.position.copy(camPos);
   camera.lookAt(camLook);
-  if (actx) {
+  if (gameAudio.ctx) {
     const meAlive = me?.alive && world.phase === 'play';
     humGain.gain.value = meAlive ? (me.boost ? 0.07 : 0.045) : 0;
     hum.frequency.value = me?.boost ? 110 : 72;

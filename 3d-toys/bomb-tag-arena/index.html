@@ -61,6 +61,8 @@
 import * as THREE from 'three';
 import { createLobby } from '../components/room-lobby.js';
 import { startTicker } from '../components/room-client.js';
+import { createNameSync } from '../components/snapshot-names.js';
+import { createGameAudio } from '../components/game-audio.js';
 
 // Scene > Renderer, warm sky, island arena with low rim, candy pillars, bushes
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -199,29 +201,8 @@ function explode(x, z, color) {
 }
 
 // Audio > ticking fuse, pass whoosh, boom, dash, countdown, win
-let actx = null, noiseBuf;
-function audio() {
-  if (actx) return;
-  actx = new AudioContext();
-  noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
-  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-}
-addEventListener('pointerdown', audio, { once: true });
-addEventListener('keydown', audio, { once: true });
-function tone(f0, f1, len, vol, type = 'sine', delay = 0) {
-  if (!actx) return;
-  const t = actx.currentTime + delay, o = actx.createOscillator(), g = actx.createGain();
-  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  o.connect(g).connect(actx.destination); o.start(t); o.stop(t + len);
-}
-function noise(len, vol, f0, f1) {
-  if (!actx) return;
-  const t = actx.currentTime, s = actx.createBufferSource(), fl = actx.createBiquadFilter(), g = actx.createGain();
-  s.buffer = noiseBuf; fl.type = 'lowpass'; fl.frequency.setValueAtTime(f0, t); fl.frequency.exponentialRampToValueAtTime(f1, t + len);
-  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + len);
-  s.connect(fl).connect(g).connect(actx.destination); s.start(t); s.stop(t + len);
-}
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
 const sfx = {
   tick(hot) { tone(hot ? 1400 : 1000, hot ? 1400 : 1000, 0.03, 0.05, 'square'); },
   pass(me) { tone(500, 1100, 0.15, me ? 0.12 : 0.05, 'triangle'); },
@@ -444,19 +425,23 @@ function onData(d, from) {
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
 function snapshot() {
-  return {
+  return names.stamp({
     g: 's', ph: world.phase, t: f2(world.t), rd: world.round, fu: f2(world.fuse), fm: f2(world.fuseMax), oc: world.outCount, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.bomb ? 4 : 0) | (p.dashT > 0 ? 8 : 0), p.pts, p.wins, p.place, p.nick, p.color]),
-  };
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.bomb ? 4 : 0) | (p.dashT > 0 ? 8 : 0), p.pts, p.wins, p.place]),
+  }, world.players.values());
 }
 let snapAt = 0;
 function applySnap(s) {
+  names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, fuse: s.fu, fuseMax: s.fm, outCount: s.oc, winner: s.win });
   const seen = new Set();
-  for (const [id, x, z, vx, vz, face, fl, pts, wins, place, nick, color] of s.P) {
+  for (const [id, x, z, vx, vz, face, fl, pts, wins, place] of s.P) {
     seen.add(id);
-    const p = world.players.get(id) ?? addPlayer(id, nick, color, !!(fl & 1));
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, vx, vz, face, alive: !!(fl & 2), bomb: !!(fl & 4), dashT: fl & 8 ? 0.1 : 0, pts, wins, place });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
@@ -469,7 +454,7 @@ function playEvents(evs) {
   for (const e of evs) {
     const p = world.players.get(e[1]);
     if (e[0] === 'p') { sfx.pass(e[1] === me || e[2] === me); if (e[2] === me && match) flash('<small>pass it on!</small>💣 YOU', 1.2); else if (e[1] === me && match) flash('<small>phew</small>passed!', 0.9); }
-    else if (e[0] === 'b' && p) { explode(e[2], e[3], p.color); if (actx) sfx.boom(); shake = 0.6; if (e[1] === me && match) flash('<small>kaboom</small>💥 You blew up', 2.2); }
+    else if (e[0] === 'b' && p) { explode(e[2], e[3], p.color); if (gameAudio.ctx) sfx.boom(); shake = 0.6; if (e[1] === me && match) flash('<small>kaboom</small>💥 You blew up', 2.2); }
     else if (e[0] === 'd' && e[1] === me) sfx.dash();
     else if (e[0] === 'a' && match) flash(`<small>wave · ${e[1]} bomb${e[1] > 1 ? 's' : ''} lit</small>🔥 RUN!`, 1.2);
     else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
@@ -551,7 +536,7 @@ function simTick(dt) {
   } else if (world.mode === 'match' && room) {
     world.fuse -= dt;
     sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.send({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
   }
 }
 startTicker(60, simTick);
