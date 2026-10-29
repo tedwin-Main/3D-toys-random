@@ -1,6 +1,6 @@
 /**
  * FILE: src/features/multiplayer-rooms/room-load-test.js
- * PURPOSE: load-tests room relay: N fake players in one room, host snapshots 20 Hz, guest inputs 20 Hz to host, reports guest-host-guest RTT
+ * PURPOSE: load-tests room relay: N fake players in one room, host snapshots 20 Hz, guest inputs 20 Hz to host, reports server echo RTT + guest-host-guest RTT
  * UI: none (cli)
  * USED BY: npm run load-test (3d-toys/package.json)
  * KEY EXPORTS: none (run: node backend/room-load-test.js [ws-url] [players=14] [seconds=30])
@@ -16,7 +16,7 @@ const HZ = 20;
 const fakeSnap = () => ({ g: 's', ph: 'fight', t: 12.34, ring: 14.2, rd: 2, win: null, ev: [],
   P: Array.from({ length: PLAYERS }, (_, i) => [i + 1, 3.21, -4.56, 1.23, -2.34, 1.57, 0.5, 5, 0, 1, 0.42, 0]) });
 
-const rtts = [];
+const rtts = [], echoes = [];
 let received = 0;
 
 // Load test > one fake player: resolves with { ws, id, host } once seated
@@ -33,6 +33,7 @@ function joinPlayer(room) {
       else if (m.t === 'roster') me.host = m.host;
       else if (m.t === 'error') reject(new Error(m.message));
       else if (m.t === 'data' && m.data.g === 'ping' && me.id === me.host) send(me, { g: 'pong', ts: m.data.ts }, m.from);
+      else if (m.t === 'echo') echoes.push(performance.now() - m.ts);
       else if (m.t === 'data' && m.data.g === 'pong') rtts.push(performance.now() - m.data.ts);
     });
   });
@@ -51,13 +52,18 @@ const timers = [
   setInterval(() => send(host, fakeSnap()), 1000 / HZ),
   setInterval(() => guests.forEach((g) => send(g, { g: 'i', x: 0.71, z: -0.71, d: 3 }, g.host)), 1000 / HZ),
   setInterval(() => guests.forEach((g) => send(g, { g: 'ping', ts: performance.now() }, g.host)), 500),
+  setInterval(() => guests.forEach((g) => g.ws.send(JSON.stringify({ t: 'echo', ts: performance.now() }))), 500),
 ];
 const t0 = performance.now();
 await new Promise((r) => setTimeout(r, SECONDS * 1000));
 timers.forEach(clearInterval);
 [host, ...guests].forEach((p) => p.ws.close());
 
-const sorted = rtts.sort((a, b) => a - b);
 const fmt = (v) => `${v.toFixed(1)} ms`;
-console.log(`rtt guest>host>guest  n=${sorted.length}  p50=${fmt(percentile(sorted, 0.5))}  p95=${fmt(percentile(sorted, 0.95))}  max=${fmt(sorted.at(-1) ?? NaN)}`);
+function report(label, list) {
+  const sorted = list.sort((a, b) => a - b);
+  console.log(`${label}  n=${sorted.length}  p50=${fmt(percentile(sorted, 0.5))}  p95=${fmt(percentile(sorted, 0.95))}  max=${fmt(sorted.at(-1) ?? NaN)}`);
+}
+report('echo client>server>client (1 hop)', echoes);
+report('rtt guest>host>guest     (2 hops)', rtts);
 console.log(`messages received/s: ${(received / ((performance.now() - t0) / 1000)).toFixed(0)}`);

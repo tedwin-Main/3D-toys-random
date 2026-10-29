@@ -73,6 +73,8 @@ export function createRoomRelay() {
       ws.lastSeen = Date.now();
       let msg;
       try { msg = JSON.parse(String(raw)); } catch { return; }
+      // latency probe: bounce straight back, no room work (load test splits network vs relay time)
+      if (msg.t === 'echo') return sendRaw(ws, String(raw));
       if (msg.t === 'join') { if (!ws.room) join(ws, msg); return; }
       const room = ws.room;
       if (!room) return;
