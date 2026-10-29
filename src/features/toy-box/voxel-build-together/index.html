@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Block Party</title>
+<style>
+  :root { --ink: #fff; --card: rgba(16, 24, 38, 0.66); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfe4ff; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 9px 13px; font-size: 13px; display: none; }
+  #info b { color: #ffd23f; }
+  #builders { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 150px; }
+  #builders .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #builders .row i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  #builders .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #builders .row em { font-style: normal; opacity: 0.75; font-variant-numeric: tabular-nums; }
+  #builders .row.me span { color: #ffd23f; font-weight: 800; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffd23f; }
+  #top button, #bar button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  #top button:hover, #bar button:hover { background: rgba(255, 255, 255, 0.22); }
+  #bar { left: 50%; bottom: 14px; transform: translateX(-50%); padding: 7px; display: none; gap: 8px; align-items: center; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
+  #tools { display: flex; gap: 4px; }
+  #tools button.on { background: #ffd23f; color: #1a1a1a; }
+  #pal { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; }
+  #pal button { width: 26px; height: 26px; padding: 0; border-radius: 7px; border: 2px solid transparent; }
+  #pal button.on { border-color: #fff; transform: translateY(-3px); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3); }
+  #hint { bottom: 70px; left: 14px; padding: 8px 12px; font-size: 12px; opacity: 0.85; display: none; max-width: 300px; }
+  #big { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(26px, 5vw, 52px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.25); pointer-events: none; text-align: center; color: #fff; }
+  #big small { display: block; font-size: 0.4em; font-weight: 700; }
+  @media (pointer: coarse) { #hint { display: none !important; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"></div>
+<div id="builders" class="card"></div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="saveBtn" title="Save build in this browser">Save</button><button id="loadBtn" title="Load saved build">Load</button><button id="clearBtn">Clear</button><button id="lobbyBtn">Lobby</button></div>
+<div id="bar" class="card"><div id="tools"></div><div id="pal"></div></div>
+<div id="hint" class="card"><b>Click</b> place · <b>right-click</b> erase · <b>drag</b> orbit · <b>wheel</b> zoom · <b>WASD</b> pan · <b>B/E/P/I</b> tools · <b>1-9</b> colors · <b>Ctrl+Z</b> undo</div>
+<div id="big"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/voxel-build-together/index.html
+ * PURPOSE: shared voxel sandbox for up to 14 builders: place, erase, paint and pick blocks together, live colored cursors, host-ordered edits, save/load in browser
+ * UI: Block Party page (lobby overlay, tool + palette bar, builders list, room bar with save/load/clear)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, sky, lights, grass plate with grid
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe4ff);
+scene.fog = new THREE.Fog(0xbfe4ff, 80, 180);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 400);
+scene.add(new THREE.HemisphereLight(0xf2f8ff, 0x7a8a6a, 1.5));
+const sun = new THREE.DirectionalLight(0xfff2e0, 2.2);
+sun.position.set(26, 48, 18);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0004;
+Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
+scene.add(sun);
+const GX = 40, GY = 30, GZ = 40, OX = -GX / 2, OZ = -GZ / 2, MAX_BLOCKS = 12000;
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const plateTex = canvasTex(512, 512, (g, w, h) => {
+  g.fillStyle = '#6cc35a'; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 6000; i++) { g.fillStyle = `hsla(${95 + Math.random() * 20},45%,${38 + Math.random() * 16}%,0.45)`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+  g.strokeStyle = 'rgba(255,255,255,0.18)'; g.lineWidth = 1;
+  for (let i = 0; i <= GX; i++) { const p = (i / GX) * w; g.beginPath(); g.moveTo(p, 0); g.lineTo(p, h); g.stroke(); g.beginPath(); g.moveTo(0, p); g.lineTo(w, p); g.stroke(); }
+});
+const plate = new THREE.Mesh(new THREE.BoxGeometry(GX, 1, GZ), [
+  new THREE.MeshStandardMaterial({ color: 0x8a5a3c }), new THREE.MeshStandardMaterial({ color: 0x8a5a3c }),
+  new THREE.MeshStandardMaterial({ map: plateTex, roughness: 1 }), new THREE.MeshStandardMaterial({ color: 0x6b4430 }),
+  new THREE.MeshStandardMaterial({ color: 0x8a5a3c }), new THREE.MeshStandardMaterial({ color: 0x8a5a3c }),
+]);
+plate.position.y = -0.5;
+plate.receiveShadow = true;
+scene.add(plate);
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(600, 600).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x59b7f0, roughness: 0.3 }));
+sea.position.y = -3;
+scene.add(sea);
+
+// Blocks > instanced voxels with bevel texture, 16-color palette
+const PALETTE = ['#f8fafc', '#94a3b8', '#334155', '#111827', '#ef4444', '#f97316', '#facc15', '#84cc16', '#22c55e', '#14b8a6', '#38bdf8', '#3b82f6', '#8b5cf6', '#ec4899', '#a16207', '#fcd5b5'];
+const bevelTex = canvasTex(64, 64, (g, w, h) => {
+  g.fillStyle = '#d9d9d9'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#ffffff'; g.fillRect(4, 4, w - 8, h - 8);
+  g.fillStyle = 'rgba(0,0,0,0.04)'; for (let i = 0; i < 200; i++) g.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+});
+const blockMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ map: bevelTex, roughness: 0.75 }), MAX_BLOCKS);
+blockMesh.count = 0;
+blockMesh.castShadow = blockMesh.receiveShadow = true;
+blockMesh.setColorAt(0, new THREE.Color());
+scene.add(blockMesh);
+const cells = new Map();
+let instKeys = [], dirty = true;
+const key = (x, y, z) => (y * GZ + z) * GX + x;
+const unkey = (k) => [k % GX, Math.floor(k / (GX * GZ)), Math.floor(k / GX) % GZ];
+const inBounds = (x, y, z) => x >= 0 && x < GX && y >= 0 && y < GY && z >= 0 && z < GZ;
+// apply one op [x, y, z, c]; c = -1 removes; returns previous value for undo
+function setCell(x, y, z, c) {
+  if (!inBounds(x, y, z)) return undefined;
+  const k = key(x, y, z), prev = cells.has(k) ? cells.get(k) : -1;
+  if (c < 0) cells.delete(k); else if (cells.size < MAX_BLOCKS || cells.has(k)) cells.set(k, c);
+  if (prev !== c) { dirty = true; pops.push([x, y, z, c]); }
+  return prev;
+}
+const pops = [];
+const _m = new THREE.Matrix4(), _c = new THREE.Color();
+function rebuild() {
+  instKeys = [...cells.keys()];
+  instKeys.forEach((k, i) => { const [x, y, z] = unkey(k); blockMesh.setMatrixAt(i, _m.makeTranslation(x + OX + 0.5, y + 0.5, z + OZ + 0.5)); blockMesh.setColorAt(i, _c.set(PALETTE[cells.get(k)])); });
+  blockMesh.count = instKeys.length;
+  blockMesh.instanceMatrix.needsUpdate = true;
+  if (blockMesh.instanceColor) blockMesh.instanceColor.needsUpdate = true;
+  blockMesh.computeBoundingSphere();
+  dirty = false;
+}
+const encode = () => [...cells].flatMap(([k, c]) => [...unkey(k), c]);
+function decodeInto(arr) { cells.clear(); for (let i = 0; i + 3 < arr.length; i += 4) setCell(arr[i], arr[i + 1], arr[i + 2], arr[i + 3]); dirty = true; }
+
+// FX > pop particles where blocks appear or vanish
+const POPS = 500;
+const popGeo = new THREE.BufferGeometry();
+const popPos = new Float32Array(POPS * 3), popCol = new Float32Array(POPS * 3), popVel = new Float32Array(POPS * 3), popLife = new Float32Array(POPS);
+popGeo.setAttribute('position', new THREE.BufferAttribute(popPos, 3));
+popGeo.setAttribute('color', new THREE.BufferAttribute(popCol, 3));
+const popPts = new THREE.Points(popGeo, new THREE.PointsMaterial({ size: 0.18, vertexColors: true }));
+popPts.frustumCulled = false;
+scene.add(popPts);
+for (let i = 0; i < POPS; i++) popPos[i * 3 + 1] = -99;
+let popNext = 0;
+function burst(x, y, z, hex, n = 8) {
+  _c.set(hex);
+  for (let k = 0; k < n; k++) {
+    const i = popNext++ % POPS;
+    popPos.set([x + OX + 0.5, y + 0.5, z + OZ + 0.5], i * 3);
+    popVel.set([(Math.random() - 0.5) * 5, 2 + Math.random() * 3, (Math.random() - 0.5) * 5], i * 3);
+    popCol.set([_c.r, _c.g, _c.b], i * 3);
+    popLife[i] = 0.6;
+  }
+}
+
+// Cursors > own ghost block + remote colored cursors with name tags
+const ghost = new THREE.Mesh(new THREE.BoxGeometry(1.02, 1.02, 1.02), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false }));
+const ghostEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.04, 1.04, 1.04)), new THREE.LineBasicMaterial({ color: 0xffffff }));
+ghost.add(ghostEdge);
+ghost.visible = false;
+scene.add(ghost);
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(16,24,38,0.75)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
+  s.scale.set(2.6, 0.65, 1); s.position.y = 1.3; s.renderOrder = 10;
+  return s;
+}
+const cursors = new Map();
+function remoteCursor(id) {
+  let c = cursors.get(id);
+  const p = lobby.room?.player(id);
+  if (!c && p) {
+    const g = new THREE.Group();
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.06, 1.06, 1.06)), new THREE.LineBasicMaterial({ color: p.color }));
+    const fill = new THREE.Mesh(new THREE.BoxGeometry(1.03, 1.03, 1.03), new THREE.MeshBasicMaterial({ color: p.color, transparent: true, opacity: 0.18, depthWrite: false }));
+    g.add(edge, fill, nameTag(p.nick, p.color));
+    scene.add(g);
+    c = { g, last: 0, target: new THREE.Vector3() };
+    cursors.set(id, c);
+  }
+  return c;
+}
+function dropCursor(id) { const c = cursors.get(id); if (c) { scene.remove(c.g); cursors.delete(id); } }
+
+// Audio > soft place/erase blips
+const gameAudio = createGameAudio({ noiseSeconds: 0 });
+const { tone } = gameAudio;
+const sfx = {
+  place(y, v = 1) { const f = 420 + y * 22; tone(f, f * 1.5, 0.07, 0.08 * v, 'triangle'); },
+  erase(v = 1) { tone(500, 160, 0.09, 0.07 * v, 'square'); },
+  paint(v = 1) { tone(900, 1200, 0.05, 0.05 * v, 'sine'); },
+};
+
+// Game > state: mode, tools, palette, per-builder counts, undo stack
+const state = { mode: 'attract', tool: 'place', color: 6, placed: new Map() };
+const undoStack = [];
+const big = (h) => (document.getElementById('big').innerHTML = h);
+
+// Multiplayer > Lobby: no bots, everyone just builds
+const lobby = createLobby({
+  game: 'block-party', title: 'Block Party', emoji: '🧱', accent: '#facc15',
+  blurb: 'A shared voxel plate for up to 14 builders. Everyone sees each other’s cursors live. Build a castle, a pixel heart, a giant duck.',
+  maxBots: 0, minPlayers: 1,
+  note: 'Up to 14 builders per room. Host can save, load and clear the build.',
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', (players) => { const ids = new Set(players.map((p) => p.id)); for (const id of [...cursors.keys()]) if (!ids.has(id)) dropCursor(id); syncTop(); });
+    room.on('host', syncTop);
+  },
+  onStart({ isHost }) {
+    state.mode = 'match';
+    attract.stop();
+    cells.clear(); dirty = true; pops.length = 0; undoStack.length = 0; state.placed.clear();
+    ['info', 'builders', 'hint'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    ['top', 'bar'].forEach((id) => (document.getElementById(id).style.display = 'flex'));
+    syncTop();
+    if (!isHost) lobby.room.send({ g: 'hello' }, { to: lobby.room.host });
+    else big('<small>click the plate to start building</small>Build together!');
+    setTimeout(() => big(''), 3500);
+  },
+  onLobby() {
+    state.mode = 'attract';
+    ['info', 'builders', 'top', 'bar', 'hint'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    for (const id of [...cursors.keys()]) dropCursor(id);
+    big('');
+    attract.start();
+  },
+});
+function syncTop() { const h = !!lobby.room?.isHost; ['lobbyBtn', 'clearBtn', 'saveBtn', 'loadBtn'].forEach((id) => (document.getElementById(id).style.display = h ? '' : 'none')); }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+document.getElementById('clearBtn').onclick = () => { if (confirm('Clear the whole build for everyone?')) { cells.clear(); dirty = true; lobby.room.send({ g: 'full', o: [] }); } };
+document.getElementById('saveBtn').onclick = () => { try { localStorage.setItem('block-party-save', JSON.stringify(encode())); big('<small>saved in this browser</small>💾'); setTimeout(() => big(''), 1200); } catch { big('<small>could not save</small>'); } };
+document.getElementById('loadBtn').onclick = () => {
+  let arr = null;
+  try { arr = JSON.parse(localStorage.getItem('block-party-save') || 'null'); } catch { arr = null; }
+  if (!Array.isArray(arr)) { big('<small>nothing saved yet</small>'); setTimeout(() => big(''), 1200); return; }
+  decodeInto(arr);
+  pops.length = 0;
+  lobby.room.send({ g: 'full', o: encode() });
+};
+
+// Multiplayer > Net: guests send edits to host, host applies in order and rebroadcasts; cursors go peer to peer
+const outbox = [];
+function onData(d, from) {
+  if (!d || d._lobby || state.mode !== 'match') return;
+  const room = lobby.room;
+  if (d.g === 'hello' && room.isHost) room.send({ g: 'full', o: encode() }, { to: from });
+  else if (d.g === 'op' && room.isHost) applyOps(d.o, from, true);
+  else if (d.g === 'ops' && !room.isHost) applyOps(d.o, d.by, false);
+  else if (d.g === 'full' && from === room.host) { decodeInto(d.o); pops.length = 0; }
+  else if (d.g === 'cur') {
+    const c = remoteCursor(from);
+    if (c) { c.last = performance.now(); c.g.visible = d.v; if (d.v) c.target.set(d.x + OX + 0.5, d.y + 0.5, d.z + OZ + 0.5); }
+  }
+}
+function applyOps(ops, by, relay) {
+  if (!Array.isArray(ops)) return;
+  for (const o of ops.slice(0, 400)) {
+    const [x, y, z, c] = o, who = relay ? by : o[4] ?? by;
+    if (![x, y, z, c].every(Number.isInteger) || c < -1 || c >= PALETTE.length) continue;
+    const prev = setCell(x, y, z, c);
+    if (prev === undefined) continue;
+    if (c >= 0 && prev < 0) state.placed.set(who, (state.placed.get(who) ?? 0) + 1);
+    // 5th field = author, so every tab can credit the right builder
+    if (relay) outbox.push([x, y, z, c, who]);
+  }
+}
+// edits from this tab: host applies directly; guest applies optimistically and sends to host
+function localEdit(ops) {
+  const room = lobby.room;
+  const undo = [];
+  for (const [x, y, z, c] of ops) { const prev = setCell(x, y, z, c); if (prev !== undefined && prev !== c) { undo.push([x, y, z, prev]); if (c >= 0 && prev < 0) state.placed.set(room.me, (state.placed.get(room.me) ?? 0) + 1); } }
+  if (!undo.length) return false;
+  undoStack.push(undo);
+  if (undoStack.length > 200) undoStack.shift();
+  if (room.isHost) outbox.push(...ops.map((o) => [...o.slice(0, 4), room.me])); else room.toHost({ g: 'op', o: ops });
+  return true;
+}
+setInterval(() => {
+  const room = lobby.room;
+  if (state.mode !== 'match' || !room) return;
+  if (room.isHost && outbox.length) room.send({ g: 'ops', o: outbox.splice(0), by: room.host });
+  sendCursor();
+}, 60);
+let curSent = '';
+function sendCursor() {
+  const v = ghost.visible, s = v ? `${hover.cx},${hover.cy},${hover.cz}` : 'off';
+  if (s === curSent) return;
+  curSent = s;
+  lobby.room.send({ g: 'cur', v, x: hover.cx, y: hover.cy, z: hover.cz });
+}
+
+// Input > orbit camera, hover target, click place / right-click erase, tools, palette, undo
+const orbit = { yaw: 0.7, pitch: 0.62, dist: 30, target: new THREE.Vector3(0, 1, 0) };
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const hover = { ok: false, cx: 0, cy: 0, cz: 0, hx: 0, hy: 0, hz: 0, hit: false };
+let pointer = null;
+const pinch = new Map();
+function pick(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  hover.ok = false;
+  const hits = ray.intersectObjects([blockMesh, plate], false);
+  for (const h of hits) {
+    if (h.object === blockMesh && h.instanceId != null && h.instanceId < instKeys.length) {
+      const [x, y, z] = unkey(instKeys[h.instanceId]), n = h.face.normal;
+      Object.assign(hover, { ok: true, hit: true, hx: x, hy: y, hz: z, cx: x + Math.round(n.x), cy: y + Math.round(n.y), cz: z + Math.round(n.z) });
+      break;
+    }
+    if (h.object === plate && h.point.y > -0.01) {
+      const x = Math.floor(h.point.x - OX), z = Math.floor(h.point.z - OZ);
+      Object.assign(hover, { ok: inBounds(x, 0, z), hit: false, cx: x, cy: 0, cz: z });
+      break;
+    }
+  }
+}
+function act(tool) {
+  if (!hover.ok) return;
+  if (tool === 'place') { if (inBounds(hover.cx, hover.cy, hover.cz) && localEdit([[hover.cx, hover.cy, hover.cz, state.color]])) sfx.place(hover.cy); }
+  else if (tool === 'erase') { if (hover.hit && localEdit([[hover.hx, hover.hy, hover.hz, -1]])) sfx.erase(); }
+  else if (tool === 'paint') { if (hover.hit && localEdit([[hover.hx, hover.hy, hover.hz, state.color]])) sfx.paint(); }
+  else if (tool === 'pick') { if (hover.hit) { setColor(cells.get(key(hover.hx, hover.hy, hover.hz))); setTool('place'); } }
+}
+const cv = renderer.domElement;
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+cv.addEventListener('pointerdown', (e) => {
+  pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  cv.setPointerCapture(e.pointerId);
+  if (pinch.size === 2) { pointer = null; return; }
+  pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, button: e.button, t: performance.now(), moved: false };
+});
+cv.addEventListener('pointermove', (e) => {
+  if (pinch.has(e.pointerId)) {
+    if (pinch.size === 2) {
+      const [a, b] = [...pinch.values()], d0 = Math.hypot(a.x - b.x, a.y - b.y);
+      pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const [c, d] = [...pinch.values()], d1 = Math.hypot(c.x - d.x, c.y - d.y);
+      if (d0 > 0) orbit.dist = THREE.MathUtils.clamp(orbit.dist * (d0 / d1), 8, 90);
+      return;
+    }
+    pinch.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  }
+  if (pointer && e.pointerId === pointer.id) {
+    if (Math.hypot(e.clientX - pointer.sx, e.clientY - pointer.sy) > 6) pointer.moved = true;
+    if (pointer.moved) {
+      orbit.yaw -= (e.clientX - pointer.x) * 0.006;
+      orbit.pitch = THREE.MathUtils.clamp(orbit.pitch + (e.clientY - pointer.y) * 0.005, 0.12, 1.45);
+    }
+    pointer.x = e.clientX; pointer.y = e.clientY;
+  }
+  if (state.mode === 'match' && e.pointerType === 'mouse') pick(e);
+});
+cv.addEventListener('pointerup', (e) => {
+  pinch.delete(e.pointerId);
+  if (!pointer || e.pointerId !== pointer.id) return;
+  const p = pointer;
+  pointer = null;
+  if (p.moved || state.mode !== 'match') return;
+  pick(e);
+  act(p.button === 2 ? 'erase' : state.tool);
+});
+cv.addEventListener('pointercancel', (e) => { pinch.delete(e.pointerId); pointer = null; });
+cv.addEventListener('pointerleave', () => (hover.ok = false));
+addEventListener('wheel', (e) => { orbit.dist = THREE.MathUtils.clamp(orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9), 8, 90); }, { passive: true });
+const keys = {};
+const TOOL_KEYS = { KeyB: 'place', KeyE: 'erase', KeyP: 'paint', KeyI: 'pick' };
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.code] = true;
+  if (state.mode !== 'match') return;
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
+  if (TOOL_KEYS[e.code]) setTool(TOOL_KEYS[e.code]);
+  const n = e.code.startsWith('Digit') ? +e.code.slice(5) : NaN;
+  if (n >= 1 && n <= 9) setColor(n - 1 + (e.shiftKey ? 9 : 0));
+  if (n === 0) setColor(9);
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+function undo() { const u = undoStack.pop(); if (!u) return; localEdit(u); undoStack.pop(); sfx.erase(0.6); }
+
+// HUD > tool buttons, palette, info line, builders list
+const TOOLS = [['place', '🧱 Build'], ['erase', '🧽 Erase'], ['paint', '🖌️ Paint'], ['pick', '💧 Pick']];
+const toolsEl = document.getElementById('tools'), palEl = document.getElementById('pal');
+toolsEl.innerHTML = TOOLS.map(([t, l]) => `<button data-t="${t}">${l}</button>`).join('') + '<button data-t="undo" title="Undo (Ctrl+Z)">↩️</button>';
+toolsEl.querySelectorAll('button').forEach((b) => (b.onclick = () => (b.dataset.t === 'undo' ? undo() : setTool(b.dataset.t))));
+palEl.innerHTML = PALETTE.map((c, i) => `<button data-c="${i}" style="background:${c}" title="${i < 9 ? i + 1 : i === 9 ? '0' : `Shift+${i - 8}`}"></button>`).join('');
+palEl.querySelectorAll('button').forEach((b) => (b.onclick = () => setColor(+b.dataset.c)));
+function setTool(t) { state.tool = t; toolsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === t)); }
+function setColor(c) { if (c == null || c < 0 || c >= PALETTE.length) return; state.color = c; palEl.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.c === c)); if (state.tool === 'erase' || state.tool === 'pick') setTool('place'); }
+setTool('place'); setColor(6);
+let hudT = 0;
+function hud(dt) {
+  if (state.mode !== 'match') return;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.25;
+  const room = lobby.room;
+  document.getElementById('info').innerHTML = `<b>${cells.size}</b> blocks · tool <b>${TOOLS.find((t) => t[0] === state.tool)[1]}</b> · <span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;background:${PALETTE[state.color]}"></span>`;
+  document.getElementById('builders').innerHTML = `<div style="opacity:.6;margin-bottom:3px">Builders (${room.players.length}/14)</div>` + room.players.map((p) => `<div class="row ${p.id === room.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.id === room.host ? ' ⭐' : ''}</span><em>${state.placed.get(p.id) ?? 0}</em></div>`).join('');
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Lobby > attract: an invisible builder raises little scenes behind the lobby card
+const attract = (() => {
+  let every = null, pause = null, queue = [], phase = 0;
+  const scenes = [
+    () => { // castle
+      const q = [];
+      for (let y = 0; y < 5; y++) for (let i = 0; i < 14; i++) for (const [x, z] of [[13 + i, 13], [13 + i, 26], [13, 13 + i], [26, 13 + i]]) if (y < 4 || i % 2 === 0) q.push([x, y, z, 1]);
+      for (const [cx, cz] of [[13, 13], [26, 13], [13, 26], [26, 26]]) for (let y = 0; y < 8; y++) for (const [dx, dz] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]) q.push([cx + dx, y, cz + dz, y === 7 ? 4 : 1]);
+      for (let y = 0; y < 3; y++) q.push([19, y, 13, -1], [20, y, 13, -1]);
+      return q;
+    },
+    () => { // tree
+      const q = [];
+      for (let y = 0; y < 9; y++) q.push([20, y, 20, 14], [21, y, 20, 14], [20, y, 21, 14], [21, y, 21, 14]);
+      for (let x = -5; x <= 6; x++) for (let y = 7; y <= 13; y++) for (let z = -5; z <= 6; z++) { const d = Math.hypot(x - 0.5, (y - 10) * 1.3, z - 0.5); if (d < 5.4 && Math.random() < 0.85) q.push([20 + x, y, 20 + z, Math.random() < 0.15 ? 4 : d < 4 ? 8 : 7]); }
+      return q;
+    },
+    () => { // rainbow pyramid
+      const q = [], rb = [4, 5, 6, 7, 9, 10, 11, 12, 13];
+      for (let y = 0; y < 9; y++) for (let x = y; x < 18 - y; x++) for (let z = y; z < 18 - y; z++) if (x === y || z === y || x === 17 - y || z === 17 - y || y === 8) q.push([11 + x, y, 11 + z, rb[y]]);
+      return q;
+    },
+  ];
+  // build a scene, admire it, demolish it, repeat
+  function next() {
+    if (phase === 1 && cells.size) { queue = [...cells.keys()].sort(() => Math.random() - 0.5).map((k) => [...unkey(k), -1]); phase = 0; }
+    else { queue = scenes[Math.floor(Math.random() * scenes.length)]().sort((a, b) => a[1] - b[1]); phase = 1; }
+  }
+  function tick() {
+    if (!queue.length) {
+      clearInterval(every); every = null;
+      pause = setTimeout(() => { next(); every = setInterval(tick, 16); }, phase ? 3000 : 600);
+      return;
+    }
+    for (let k = 0; k < (phase ? 3 : 14) && queue.length; k++) { const [x, y, z, c] = queue.shift(); setCell(x, y, z, c); }
+  }
+  return {
+    start() { this.stop(); cells.clear(); dirty = true; phase = 0; next(); every = setInterval(tick, 16); },
+    stop() { clearInterval(every); clearTimeout(pause); every = pause = null; },
+  };
+})();
+
+// Run engine > render loop: rebuild instances when dirty, pops, cursors, orbit camera
+const clock = new THREE.Clock();
+const _f = new THREE.Vector3(), _r = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (dirty) rebuild();
+  const me = lobby.room?.me;
+  for (const [x, y, z, c] of pops.splice(0)) burst(x, y, z, c >= 0 ? PALETTE[c] : '#ffffff', c >= 0 ? 6 : 10);
+  for (let i = 0; i < POPS; i++) {
+    if (popLife[i] <= 0) continue;
+    popLife[i] -= dt; popVel[i * 3 + 1] -= 14 * dt;
+    for (let k = 0; k < 3; k++) popPos[i * 3 + k] += popVel[i * 3 + k] * dt;
+    if (popLife[i] <= 0) popPos[i * 3 + 1] = -99;
+  }
+  popGeo.attributes.position.needsUpdate = true; popGeo.attributes.color.needsUpdate = true;
+  const showGhost = state.mode === 'match' && hover.ok && !pointer?.moved;
+  ghost.visible = showGhost;
+  if (showGhost) {
+    const erase = state.tool === 'erase' || state.tool === 'paint' || state.tool === 'pick';
+    const [x, y, z] = erase ? [hover.hx, hover.hy, hover.hz] : [hover.cx, hover.cy, hover.cz];
+    if (erase && !hover.hit) ghost.visible = false;
+    ghost.position.set(x + OX + 0.5, y + 0.5, z + OZ + 0.5);
+    ghost.material.color.set(state.tool === 'erase' ? '#ff4d4d' : PALETTE[state.color]);
+    ghostEdge.material.color.set(state.tool === 'erase' ? '#ff4d4d' : '#ffffff');
+  }
+  const now = performance.now();
+  for (const [id, c] of cursors) {
+    if (id === me) continue;
+    c.g.position.lerp(c.target, 1 - Math.exp(-dt * 18));
+    if (now - c.last > 15000) c.g.visible = false;
+  }
+  // keyboard pan relative to view
+  const pan = 18 * dt * (orbit.dist / 46);
+  _f.set(-Math.sin(orbit.yaw), 0, -Math.cos(orbit.yaw)); _r.set(-_f.z, 0, _f.x);
+  if (keys.KeyW) orbit.target.addScaledVector(_f, pan);
+  if (keys.KeyS) orbit.target.addScaledVector(_f, -pan);
+  if (keys.KeyD) orbit.target.addScaledVector(_r, -pan);
+  if (keys.KeyA) orbit.target.addScaledVector(_r, pan);
+  orbit.target.x = THREE.MathUtils.clamp(orbit.target.x, -GX / 2, GX / 2); orbit.target.z = THREE.MathUtils.clamp(orbit.target.z, -GZ / 2, GZ / 2);
+  if (state.mode === 'attract') orbit.yaw += dt * 0.12;
+  camera.position.set(orbit.target.x + Math.sin(orbit.yaw) * Math.cos(orbit.pitch) * orbit.dist, orbit.target.y + Math.sin(orbit.pitch) * orbit.dist, orbit.target.z + Math.cos(orbit.yaw) * Math.cos(orbit.pitch) * orbit.dist);
+  camera.lookAt(orbit.target);
+  hud(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+attract.start();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lawn Stripes</title>
+<style>
+  :root { --ink: #1c2a1c; --card: rgba(255, 255, 255, 0.84); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfe6ff; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border-radius: 16px; box-shadow: 0 8px 26px rgba(20, 60, 20, 0.18); padding: 12px 16px; user-select: none; }
+  #intro { top: 16px; left: 16px; max-width: 270px; }
+  #intro h1 { margin: 0 0 4px; font-size: 18px; }
+  #intro p { margin: 0; font-size: 12.5px; line-height: 1.6; opacity: 0.8; }
+  kbd { background: #fff; border: 1px solid #ccd; border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; font-size: 11px; }
+  #stats { top: 16px; right: 16px; text-align: right; }
+  #pct { font-size: 34px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+  #sub { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+  .meter { width: 150px; height: 8px; border-radius: 99px; background: #dfe9d9; margin-top: 8px; overflow: hidden; margin-left: auto; }
+  .meter div { height: 100%; width: 0; background: linear-gradient(90deg, #4caf50, #b6e35a); transition: width 0.3s; }
+  #bar { bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 6px; }
+  #bar button { font: inherit; font-size: 13px; font-weight: 700; border: 0; background: transparent; padding: 8px 12px; border-radius: 10px; cursor: pointer; color: var(--ink); }
+  #bar button:hover { background: rgba(0,0,0,0.06); }
+  @media (pointer: coarse) { #intro p { display: none; } }
+</style>
+</head>
+<body>
+<div id="intro" class="card"><h1>Lawn Stripes</h1><p><kbd>W</kbd><kbd>S</kbd> drive · <kbd>A</kbd><kbd>D</kbd> steer · <kbd>C</kbd> camera<br>Mow in straight passes, alternate direction for those satisfying stripes. Grass slowly grows back.</p></div>
+<div id="stats" class="card"><div id="pct">0%</div><div id="sub">lawn mowed · 0 clippings</div><div class="meter"><div id="meter"></div></div></div>
+<div id="bar" class="card"><button id="regrow">🌱 Regrow: on</button><button id="reset">🌾 Fresh lawn</button><button id="cam">🎥 Camera</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/lawn-mower-stripes/index.html
+ * PURPOSE: 175k-blade instanced grass shader; ride-on mower writes cut height + lean direction into a data texture for real lawn stripes
+ * UI: Lawn Stripes page
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createTouchPad } from '../common/touch-joystick.js';
+
+// Scene > Renderer: sky, fog, lights
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const SKY = new THREE.Color(0xbfe6ff);
+const scene = new THREE.Scene();
+scene.background = SKY;
+scene.fog = new THREE.Fog(SKY, 40, 110);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 400);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enabled = false;
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.47;
+const SUN_DIR = new THREE.Vector3(0.5, 0.8, 0.3).normalize();
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x557744, 1.0));
+const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
+sun.position.copy(SUN_DIR).multiplyScalar(60);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 10, far: 140 });
+scene.add(sun);
+
+// Lawn > Cut map: RGBA texels, R = blade height, G/B = mow direction (stripe lean)
+const FIELD = 50, TEX = 256;
+const cutData = new Uint8Array(TEX * TEX * 4);
+const cutTex = new THREE.DataTexture(cutData, TEX, TEX, THREE.RGBAFormat);
+cutTex.magFilter = cutTex.minFilter = THREE.LinearFilter;
+function freshLawn() {
+  for (let i = 0; i < TEX * TEX; i++) { cutData[i * 4] = 255; cutData[i * 4 + 1] = 128; cutData[i * 4 + 2] = 128; cutData[i * 4 + 3] = 255; }
+  cutTex.needsUpdate = true;
+}
+freshLawn();
+const groundY = (x, z) => Math.sin(x * 0.13) * 0.25 + Math.cos(z * 0.11) * 0.25;
+
+// Lawn > Ground: soil plane under grass + surrounding rough
+{
+  const geo = new THREE.PlaneGeometry(220, 220, 120, 120).rotateX(-Math.PI / 2);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setY(i, groundY(p.getX(i), p.getZ(i)) - 0.02);
+  geo.computeVertexNormals();
+  const ground = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x3f6a2a, roughness: 1 }));
+  ground.receiveShadow = true;
+  scene.add(ground);
+}
+
+// Lawn > Grass shader: instanced tapered blades; wind, mower push, cut height, stripe lean
+const BLADES = innerWidth < 700 ? 90000 : 175000;
+const bladeGeo = new THREE.InstancedBufferGeometry();
+{
+  const segs = 4, verts = [], idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const y = i / segs, w = 1 - y * 0.9;
+    verts.push(-0.5 * w, y, 0, 0.5 * w, y, 0);
+  }
+  verts.push(0, 1.08, 0);
+  for (let i = 0; i < segs; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  idx.push(segs * 2, segs * 2 + 1, segs * 2 + 2);
+  bladeGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  bladeGeo.setIndex(idx);
+  const off = new Float32Array(BLADES * 3), rnd = new Float32Array(BLADES * 4);
+  for (let i = 0; i < BLADES; i++) {
+    const x = (Math.random() - 0.5) * FIELD, z = (Math.random() - 0.5) * FIELD;
+    off.set([x, groundY(x, z), z], i * 3);
+    rnd.set([Math.random() * Math.PI * 2, 0.7 + Math.random() * 0.6, Math.random(), Math.random()], i * 4);
+  }
+  bladeGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(off, 3));
+  bladeGeo.setAttribute('aRand', new THREE.InstancedBufferAttribute(rnd, 4));
+  bladeGeo.instanceCount = BLADES;
+}
+const grassUniforms = {
+  uTime: { value: 0 }, uCut: { value: cutTex }, uField: { value: FIELD }, uHeight: { value: 0.55 },
+  uMower: { value: new THREE.Vector2(999, 999) }, uCam: { value: new THREE.Vector3() }, uSun: { value: SUN_DIR },
+  uFogColor: { value: SKY }, uFogNear: { value: 40 }, uFogFar: { value: 110 },
+};
+const grass = new THREE.Mesh(bladeGeo, new THREE.ShaderMaterial({
+  uniforms: grassUniforms,
+  side: THREE.DoubleSide,
+  vertexShader: /* glsl */ `
+    uniform float uTime, uField, uHeight;
+    uniform sampler2D uCut;
+    uniform vec2 uMower;
+    uniform vec3 uCam;
+    attribute vec3 aOffset;
+    attribute vec4 aRand;
+    varying float vY, vStripe, vShade, vHue, vDist;
+    void main() {
+      vec2 uv = aOffset.xz / uField + 0.5;
+      vec4 cut = texture2D(uCut, uv);
+      float grow = cut.r;
+      vec2 lean = cut.gb * 2.0 - 1.0;
+      float H = uHeight * aRand.y * mix(0.18, 1.0, smoothstep(0.15, 1.0, grow));
+      float y01 = position.y;
+      float c = cos(aRand.x), s = sin(aRand.x);
+      vec3 p = vec3(position.x * 0.07 * c, y01 * H, position.x * 0.07 * s);
+      float bend = y01 * y01;
+      float gust = sin(uTime * 0.7 + aOffset.x * 0.08) * 0.5 + 0.5;
+      float w = sin(uTime * 2.2 + aOffset.x * 0.45 + aOffset.z * 0.3 + aRand.w * 6.28) * (0.35 + gust * 0.65);
+      p.xz += vec2(0.8, 0.5) * w * bend * H * 0.45 * grow;
+      float shortness = 1.0 - grow;
+      p.xz += lean * bend * H * 1.4 * shortness;
+      vec2 d = aOffset.xz - uMower;
+      float f = smoothstep(1.7, 0.2, length(d));
+      p.xz += normalize(d + 1e-4) * f * bend * H * 1.2;
+      p.y *= 1.0 - f * 0.35;
+      vec3 world = aOffset + p;
+      vec2 toCam = normalize(uCam.xz - aOffset.xz);
+      vStripe = dot(lean, toCam) * shortness;
+      vY = y01;
+      vHue = aRand.z;
+      vShade = 0.75 + 0.25 * grow;
+      vec4 mv = viewMatrix * vec4(world, 1.0);
+      vDist = -mv.z;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform vec3 uFogColor;
+    uniform float uFogNear, uFogFar;
+    varying float vY, vStripe, vShade, vHue, vDist;
+    void main() {
+      vec3 base = mix(vec3(0.02, 0.07, 0.01), vec3(0.035, 0.1, 0.015), vHue);
+      vec3 tip = mix(vec3(0.16, 0.38, 0.05), vec3(0.26, 0.48, 0.08), vHue);
+      vec3 col = mix(base, tip, smoothstep(0.0, 1.0, vY));
+      col *= 1.0 - vStripe * 0.38;
+      col *= vShade;
+      col = mix(col, uFogColor, smoothstep(uFogNear, uFogFar, vDist));
+      gl_FragColor = vec4(col, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+}));
+grass.frustumCulled = false;
+scene.add(grass);
+
+// Scene > Garden: fence, trees, shed for framing
+{
+  const wood = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.7 });
+  const post = new THREE.BoxGeometry(0.12, 1, 0.12), rail = new THREE.BoxGeometry(1, 0.08, 0.05);
+  const h = FIELD / 2 + 1;
+  const posts = new THREE.InstancedMesh(post, wood, 400), rails = new THREE.InstancedMesh(rail, wood, 800);
+  let pi = 0, ri = 0;
+  const o = new THREE.Object3D();
+  for (const side of [0, 1, 2, 3]) for (let t = -h; t < h; t += 1.5) {
+    const [x, z, ry] = side === 0 ? [t, -h, 0] : side === 1 ? [t, h, 0] : side === 2 ? [-h, t, Math.PI / 2] : [h, t, Math.PI / 2];
+    const y = groundY(x, z);
+    o.position.set(x, y + 0.5, z); o.rotation.set(0, ry, 0); o.scale.set(1, 1, 1); o.updateMatrix();
+    posts.setMatrixAt(pi++, o.matrix);
+    for (const ry2 of [0.4, 0.8]) {
+      o.position.set(x + (ry ? 0 : 0.75), y + ry2, z + (ry ? 0.75 : 0)); o.scale.set(1.5, 1, 1); o.updateMatrix();
+      rails.setMatrixAt(ri++, o.matrix);
+    }
+  }
+  posts.count = pi; rails.count = ri;
+  posts.castShadow = rails.castShadow = true;
+  scene.add(posts, rails);
+  const leaf = new THREE.MeshStandardMaterial({ color: 0x3b7a33, flatShading: true }), bark = new THREE.MeshStandardMaterial({ color: 0x6b4a2b });
+  for (let i = 0; i < 26; i++) {
+    const a = Math.random() * Math.PI * 2, r = FIELD / 2 + 6 + Math.random() * 30;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r, s = 1.2 + Math.random() * 1.6;
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.2 * s, 0.3 * s, 2.4 * s, 6), bark);
+    t.position.set(x, groundY(x, z) + 1.2 * s, z);
+    const l = new THREE.Mesh(new THREE.IcosahedronGeometry(1.8 * s, 1), leaf);
+    l.position.set(x, groundY(x, z) + 3.4 * s, z);
+    t.castShadow = l.castShadow = true;
+    scene.add(t, l);
+  }
+  const shed = new THREE.Group();
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(4, 2.6, 3), new THREE.MeshStandardMaterial({ color: 0x9a5a3a }));
+  walls.position.y = 1.3;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(3.2, 1.4, 4), new THREE.MeshStandardMaterial({ color: 0x3a3a44, flatShading: true }));
+  roof.position.y = 3.3; roof.rotation.y = Math.PI / 4; roof.scale.z = 0.8;
+  walls.castShadow = roof.castShadow = true;
+  shed.add(walls, roof);
+  shed.position.set(-FIELD / 2 - 5, groundY(-FIELD / 2 - 5, -8), -8);
+  scene.add(shed);
+}
+
+// Mower > Model: ride-on mower with driver in straw hat
+const mower = new THREE.Group();
+mower.rotation.order = 'YXZ';
+scene.add(mower);
+const wheels = [];
+{
+  const red = new THREE.MeshStandardMaterial({ color: 0xd8342c, roughness: 0.4, metalness: 0.2 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.6 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xf1c7a1 });
+  const shirt = new THREE.MeshStandardMaterial({ color: 0x3d7fd9 });
+  const add = (geo, m, x, y, z, rx = 0, ry = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, ry, rz); o.castShadow = true; mower.add(o); return o; };
+  add(new THREE.BoxGeometry(1.0, 0.35, 1.7), red, 0, 0.5, 0);
+  add(new THREE.BoxGeometry(0.9, 0.35, 0.7), red, 0, 0.8, 0.45);
+  add(new THREE.BoxGeometry(1.3, 0.12, 1.0), black, 0, 0.25, 0.05);
+  add(new THREE.BoxGeometry(0.55, 0.12, 0.5), black, 0, 0.75, -0.35);
+  add(new THREE.BoxGeometry(0.55, 0.5, 0.1), black, 0, 1.0, -0.6);
+  add(new THREE.CylinderGeometry(0.03, 0.03, 0.6), black, 0, 1.1, 0.25, -0.5);
+  add(new THREE.TorusGeometry(0.16, 0.025, 6, 16), black, 0, 1.38, 0.12, -1.0);
+  for (const [x, z, r] of [[-0.55, -0.55, 0.32], [0.55, -0.55, 0.32], [-0.5, 0.65, 0.2], [0.5, 0.65, 0.2]]) {
+    const w = add(new THREE.CylinderGeometry(r, r, 0.22, 16), black, x, r, z, 0, 0, Math.PI / 2);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.5, r * 0.5, 0.24, 10), yellow);
+    w.add(hub);
+    wheels.push({ w, r });
+  }
+  add(new THREE.BoxGeometry(0.4, 0.5, 0.28), shirt, 0, 1.1, -0.3);
+  add(new THREE.SphereGeometry(0.15, 12, 10), skin, 0, 1.52, -0.28);
+  add(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 18), yellow, 0, 1.62, -0.28);
+  add(new THREE.CylinderGeometry(0.13, 0.15, 0.14, 12), yellow, 0, 1.69, -0.28);
+  for (const s of [-1, 1]) {
+    add(new THREE.BoxGeometry(0.1, 0.1, 0.45), shirt, s * 0.22, 1.18, -0.05, 0.4);
+    add(new THREE.BoxGeometry(0.13, 0.13, 0.5), new THREE.MeshStandardMaterial({ color: 0x2b3550 }), s * 0.12, 0.88, -0.08);
+  }
+}
+
+// Effects > Clippings: green flecks thrown sideways from deck chute
+const CLIP = 1500;
+const clipPos = new Float32Array(CLIP * 3).fill(-100), clipVel = new Float32Array(CLIP * 3), clipLife = new Float32Array(CLIP);
+let clipI = 0;
+const clipPts = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(clipPos, 3)), new THREE.PointsMaterial({ color: 0x6aa83a, size: 0.07 }));
+clipPts.frustumCulled = false;
+scene.add(clipPts);
+function throwClip(x, y, z, rx, rz) {
+  const k = clipI++ % CLIP;
+  clipPos.set([x, y, z], k * 3);
+  clipVel.set([rx * (2 + Math.random() * 2) + (Math.random() - 0.5), 1.5 + Math.random() * 2, rz * (2 + Math.random() * 2) + (Math.random() - 0.5)], k * 3);
+  clipLife[k] = 1.2;
+}
+function updateClips(dt) {
+  for (let k = 0; k < CLIP; k++) {
+    if (clipLife[k] <= 0) continue;
+    clipLife[k] -= dt;
+    clipVel[k * 3 + 1] -= 9 * dt;
+    for (let a = 0; a < 3; a++) clipPos[k * 3 + a] += clipVel[k * 3 + a] * dt;
+    const gy = groundY(clipPos[k * 3], clipPos[k * 3 + 2]) + 0.05;
+    if (clipPos[k * 3 + 1] < gy) { clipPos[k * 3 + 1] = gy; clipVel[k * 3] = clipVel[k * 3 + 1] = clipVel[k * 3 + 2] = 0; }
+    if (clipLife[k] <= 0) clipPos[k * 3 + 1] = -100;
+  }
+  clipPts.geometry.attributes.position.needsUpdate = true;
+}
+
+// Effects > Audio: two-oscillator engine drone pitched by speed
+let engine = null;
+function startEngine() {
+  if (engine) return;
+  const a = new AudioContext(), lp = a.createBiquadFilter(), g = a.createGain();
+  lp.type = 'lowpass'; lp.frequency.value = 600;
+  g.gain.value = 0.05;
+  const o1 = a.createOscillator(), o2 = a.createOscillator();
+  o1.type = 'sawtooth'; o2.type = 'square';
+  o1.frequency.value = 55; o2.frequency.value = 110.5;
+  const g2 = a.createGain(); g2.gain.value = 0.3;
+  o1.connect(lp); o2.connect(g2).connect(lp);
+  lp.connect(g).connect(a.destination);
+  o1.start(); o2.start();
+  engine = { a, o1, o2, g };
+}
+
+// Input > Keys, phone joystick, buttons
+const keys = {};
+let camMode = 0, regrow = true;
+addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; startEngine(); if (e.key.toLowerCase() === 'c') cycleCam(); });
+addEventListener('keyup', (e) => (keys[e.key.toLowerCase()] = false));
+createTouchPad({ onStart: () => startEngine(), onMove: (x, y) => Object.assign(keys, { a: x < -0.35, d: x > 0.35, w: y > 0.35, s: y < -0.35 }) });
+function cycleCam() {
+  camMode = (camMode + 1) % 3;
+  controls.enabled = camMode === 2;
+  if (controls.enabled) controls.target.copy(mower.position);
+}
+document.getElementById('cam').onclick = cycleCam;
+document.getElementById('regrow').onclick = (e) => { regrow = !regrow; e.target.textContent = `🌱 Regrow: ${regrow ? 'on' : 'off'}`; };
+document.getElementById('reset').onclick = () => { freshLawn(); clippings = 0; };
+
+// Run engine: drive, stamp cut map, regrow, stats
+const M = { x: 0, z: -FIELD / 2 + 2, yaw: 0, v: 0, steer: 0, roll: 0 };
+const CUT = 60, RADIUS = 0.75;
+let clippings = 0, regrowT = 0, statT = 0;
+function drive(dt) {
+  const down = (...k) => k.some((x) => keys[x]);
+  const thr = (down('w', 'arrowup') ? 1 : 0) - (down('s', 'arrowdown') ? 1 : 0);
+  const st = (down('a', 'arrowleft') ? 1 : 0) - (down('d', 'arrowright') ? 1 : 0);
+  M.v = THREE.MathUtils.damp(M.v, thr * (thr > 0 ? 5.5 : 2.5), 2.2, dt);
+  M.steer = THREE.MathUtils.damp(M.steer, st, 6, dt);
+  M.yaw += M.steer * dt * 1.8 * Math.sign(M.v || 1) * Math.min(Math.abs(M.v) / 2 + 0.25, 1);
+  M.x += Math.sin(M.yaw) * M.v * dt;
+  M.z += Math.cos(M.yaw) * M.v * dt;
+  const lim = FIELD / 2 - 0.6;
+  M.x = THREE.MathUtils.clamp(M.x, -lim, lim);
+  M.z = THREE.MathUtils.clamp(M.z, -lim, lim);
+  const y = groundY(M.x, M.z);
+  const pitch = Math.atan2(groundY(M.x + Math.sin(M.yaw), M.z + Math.cos(M.yaw)) - y, 1);
+  mower.position.set(M.x, y + Math.sin(performance.now() / 40) * 0.008 * Math.min(Math.abs(M.v), 1), M.z);
+  mower.rotation.set(-pitch, M.yaw, -M.steer * M.v * 0.012);
+  for (const w of wheels) w.w.rotation.x += (M.v * dt) / w.r;
+  grassUniforms.uMower.value.set(M.x, M.z);
+  if (engine) {
+    const sp = Math.abs(M.v);
+    engine.o1.frequency.value = 55 + sp * 9;
+    engine.o2.frequency.value = 110.5 + sp * 18;
+    engine.g.gain.value = 0.035 + sp * 0.008;
+  }
+}
+function stampCut() {
+  if (Math.abs(M.v) < 0.2) return;
+  const dirX = Math.sin(M.yaw) * Math.sign(M.v), dirZ = Math.cos(M.yaw) * Math.sign(M.v);
+  const g = Math.round((dirX * 0.5 + 0.5) * 255), b = Math.round((dirZ * 0.5 + 0.5) * 255);
+  const cx = (M.x / FIELD + 0.5) * TEX, cz = (M.z / FIELD + 0.5) * TEX, rt = (RADIUS / FIELD) * TEX;
+  let cutNow = 0;
+  for (let tz = Math.floor(cz - rt); tz <= Math.ceil(cz + rt); tz++) for (let tx = Math.floor(cx - rt); tx <= Math.ceil(cx + rt); tx++) {
+    if (tx < 0 || tz < 0 || tx >= TEX || tz >= TEX || (tx - cx) ** 2 + (tz - cz) ** 2 > rt * rt) continue;
+    const i = (tz * TEX + tx) * 4;
+    if (cutData[i] > CUT + 25) cutNow++;
+    cutData[i] = Math.min(cutData[i], CUT);
+    cutData[i + 1] = g; cutData[i + 2] = b;
+  }
+  cutTex.needsUpdate = true;
+  if (cutNow) {
+    clippings += cutNow;
+    // chute on right side throws clippings outward
+    const rx = Math.cos(M.yaw), rz = -Math.sin(M.yaw);
+    for (let k = 0; k < Math.min(cutNow, 8); k++) throwClip(M.x - rx * 0.7, groundY(M.x, M.z) + 0.3, M.z - rz * 0.7, -rx, -rz);
+  }
+}
+function regrowStep(dt) {
+  if (!regrow) return;
+  regrowT += dt;
+  if (regrowT < 0.5) return;
+  regrowT = 0;
+  for (let i = 0; i < TEX * TEX * 4; i += 4) if (cutData[i] < 255) cutData[i] = Math.min(255, cutData[i] + 1);
+  cutTex.needsUpdate = true;
+}
+const pctEl = document.getElementById('pct'), subEl = document.getElementById('sub'), meterEl = document.getElementById('meter');
+function stats(dt) {
+  statT += dt;
+  if (statT < 0.4) return;
+  statT = 0;
+  let mowed = 0;
+  for (let i = 0; i < TEX * TEX * 4; i += 4) if (cutData[i] < 140) mowed++;
+  const pct = (mowed / (TEX * TEX)) * 100;
+  pctEl.textContent = `${pct.toFixed(1)}%`;
+  meterEl.style.width = `${pct}%`;
+  subEl.textContent = `lawn mowed · ${clippings.toLocaleString()} clippings`;
+}
+
+// Run engine: camera rigs (chase, high stripe view, free orbit)
+const camGoal = new THREE.Vector3(), look = new THREE.Vector3();
+function updateCamera(dt) {
+  if (camMode === 2) { controls.target.lerp(mower.position, 1 - Math.exp(-dt * 3)); controls.update(); return; }
+  const fx = Math.sin(M.yaw), fz = Math.cos(M.yaw);
+  if (camMode === 0) camGoal.set(M.x - fx * 6.5, mower.position.y + 3.6, M.z - fz * 6.5);
+  else camGoal.set(M.x * 0.4, 32, M.z * 0.4 - 26);
+  camera.position.lerp(camGoal, 1 - Math.exp(-dt * (camMode === 0 ? 3.5 : 1.5)));
+  look.lerp(camMode === 0 ? new THREE.Vector3(M.x + fx * 3, mower.position.y + 0.8, M.z + fz * 3) : new THREE.Vector3(M.x * 0.5, 0, M.z * 0.5), 1 - Math.exp(-dt * 5));
+  camera.lookAt(look);
+}
+
+const clock = new THREE.Clock();
+camera.position.set(0, 6, -FIELD / 2 - 6);
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  grassUniforms.uTime.value += dt;
+  drive(dt);
+  stampCut();
+  regrowStep(dt);
+  updateClips(dt);
+  stats(dt);
+  updateCamera(dt);
+  grassUniforms.uCam.value.copy(camera.position);
+  sun.position.copy(mower.position).addScaledVector(SUN_DIR, 60);
+  sun.target.position.copy(mower.position);
+  sun.target.updateMatrixWorld();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

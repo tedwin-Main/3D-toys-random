@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Splat Turf</title>
+<style>
+  :root { --ink: #fffaf2; --card: rgba(26, 18, 40, 0.6); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1d44; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #share { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); height: 16px; border-radius: 999px; overflow: hidden; display: none; background: rgba(255, 255, 255, 0.15); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); }
+  #share div { height: 100%; float: left; transition: width 0.3s; }
+  #board { top: 14px; left: 14px; padding: 10px 12px; min-width: 180px; font-size: 13.5px; display: none; }
+  #board .hd { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.65; margin-bottom: 4px; }
+  #board .row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+  #board .row i { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  #board .row .n { flex: 1; font-weight: 700; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row .p { font-variant-numeric: tabular-nums; font-weight: 800; }
+  #big { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(34px, 7vw, 80px); font-weight: 900; color: #fff; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffe14d; }
+  #top .clock { font-variant-numeric: tabular-nums; font-weight: 800; padding: 0 6px; font-size: 16px; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  #bomb { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 6px 14px; font-weight: 800; font-size: 14px; display: none; }
+  #stick { position: fixed; left: 24px; bottom: 24px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255, 255, 255, 0.15); border: 2px solid rgba(255, 255, 255, 0.35); display: none; }
+  #stick div { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); pointer-events: none; }
+  #bombBtn { position: fixed; right: 28px; bottom: 34px; width: 96px; height: 96px; border-radius: 50%; border: 0; background: #ff4fa3; color: #fff; font: inherit; font-weight: 900; font-size: 17px; box-shadow: 0 6px 0 #b22f6f; display: none; }
+  @media (pointer: coarse) { #stick, #bombBtn { display: block; } #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="share"></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>WASD / arrows</b> roll · <b>Space</b> paint bomb · roll fast on your own color, slow on enemy paint · most turf in 90 s wins</div>
+<div id="top" class="card"><span class="clock" id="clock"></span><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+<div id="bomb" class="card"></div>
+<div id="stick"><div></div></div>
+<button id="bombBtn">BOMB</button>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/paint-territory/index.html
+ * PURPOSE: online 14-player turf painting: goo blobs roll paint onto a 48x48 floor, paint bombs, speed on own color, 90 s timer, live share bar; host-authoritative grid with delta + keyframe sync
+ * UI: Splat Turf page (lobby overlay, share bar, standings, touch stick)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createNameSync } from '../common/snapshot-names.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, lights
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2b1d44);
+scene.fog = new THREE.Fog(0x2b1d44, 80, 170);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.5, 500);
+scene.add(new THREE.HemisphereLight(0xfff4ff, 0x40306a, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(-18, 40, 22);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 120 });
+scene.add(sun);
+
+// Arena > Paint grid: owner index per tile, uploaded as a color texture
+const G = 48, HALF = G / 2;
+const NONE = 0;
+const grid = new Uint8Array(G * G);
+const solid = new Uint8Array(G * G);
+const texData = new Uint8Array(G * G * 4);
+const paintTex = new THREE.DataTexture(texData, G, G);
+paintTex.magFilter = THREE.LinearFilter;
+paintTex.minFilter = THREE.LinearFilter;
+paintTex.colorSpace = THREE.SRGBColorSpace;
+let palette = ['#e9e4f2'];
+let texDirty = true;
+const tileIdx = (x, z) => { const tx = Math.floor(x + HALF), tz = Math.floor(z + HALF); return tx < 0 || tz < 0 || tx >= G || tz >= G ? -1 : tz * G + tx; };
+function refreshTex() {
+  const cols = palette.map((c) => new THREE.Color(c));
+  for (let i = 0; i < G * G; i++) {
+    const c = cols[grid[i]] ?? cols[0];
+    // texture row 0 is the far edge (z = -HALF) because the plane's v runs opposite to +z
+    const tx = i % G, tz = Math.floor(i / G), j = ((G - 1 - tz) * G + tx) * 4;
+    // bare tiles store black so filtered edges stay premultiplied (shader divides by alpha)
+    const on = grid[i] ? 255 : 0;
+    texData[j] = c.r * on; texData[j + 1] = c.g * on; texData[j + 2] = c.b * on; texData[j + 3] = on;
+  }
+  paintTex.needsUpdate = true;
+  texDirty = false;
+}
+// Arena > Floor shader: base tiles + paint with wobbly edge from alpha threshold + noise, wet gloss
+const floorMat = new THREE.ShaderMaterial({
+  uniforms: { uPaint: { value: paintTex }, uTime: { value: 0 }, uLight: { value: new THREE.Vector3(-18, 40, 22).normalize() } },
+  vertexShader: `varying vec2 vUv; varying vec3 vW; void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+  fragmentShader: `uniform sampler2D uPaint; uniform float uTime; varying vec2 vUv; varying vec3 vW;
+    float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+    float n(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.-2.*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+    void main(){
+      vec2 tile = fract(vW.xz / 2.);
+      float grout = step(0.04, tile.x) * step(0.04, tile.y);
+      vec3 base = mix(vec3(0.62,0.6,0.7), vec3(0.86,0.84,0.92), grout);
+      vec4 p = texture2D(uPaint, vUv);
+      // normalise colour by coverage so blended edges keep full saturation
+      vec3 pc = p.a > 0.01 ? p.rgb / max(p.a, 0.01) : vec3(0.);
+      float wob = n(vW.xz * 2.2) * 0.35 + n(vW.xz * 6.) * 0.15;
+      float cov = smoothstep(0.42, 0.5, p.a + wob - 0.25);
+      float gloss = pow(max(n(vW.xz * 0.7 + uTime * 0.05), 0.), 6.) * 0.5;
+      vec3 col = mix(base, pc * (1.05 + gloss), cov);
+      col += cov * 0.12 * smoothstep(0.5, 0.75, p.a + wob - 0.25);
+      gl_FragColor = vec4(col, 1.);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(G, G).rotateX(-Math.PI / 2), floorMat);
+scene.add(floor);
+// shadow catcher above the shader floor (ShaderMaterial does not receive shadows)
+const shadowCatch = new THREE.Mesh(new THREE.PlaneGeometry(G, G).rotateX(-Math.PI / 2).translate(0, 0.01, 0), new THREE.ShadowMaterial({ opacity: 0.25 }));
+shadowCatch.receiveShadow = true;
+scene.add(shadowCatch);
+// Arena > Rim walls + seeded pillars (block movement and paint)
+const rimMat = new THREE.MeshStandardMaterial({ color: 0x4a3a78, roughness: 0.6 });
+for (const [x, z, w, d] of [[0, -HALF - 0.6, G + 2.4, 1.2], [0, HALF + 0.6, G + 2.4, 1.2], [-HALF - 0.6, 0, 1.2, G], [HALF + 0.6, 0, 1.2, G]]) {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, 1.4, d, 2, 0.3), rimMat); m.position.set(x, 0.5, z); m.castShadow = m.receiveShadow = true; scene.add(m);
+}
+const below = new THREE.Mesh(new THREE.BoxGeometry(G + 2.4, 6, G + 2.4), new THREE.MeshStandardMaterial({ color: 0x35285a }));
+below.position.y = -3.01;
+scene.add(below);
+let pillarGroup = new THREE.Group();
+scene.add(pillarGroup);
+let pillars = [];
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function buildArena(seed) {
+  const r = mulberry(seed);
+  scene.remove(pillarGroup);
+  pillarGroup = new THREE.Group();
+  scene.add(pillarGroup);
+  pillars = [];
+  solid.fill(0);
+  // symmetric layout so no spawn corner is unfair
+  const n = 3 + Math.floor(r() * 3);
+  for (let i = 0; i < n; i++) {
+    const x = 4 + Math.floor(r() * 15), z = 4 + Math.floor(r() * 15), w = 2 + Math.floor(r() * 3), d = 2 + Math.floor(r() * 3);
+    for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) pillars.push({ minx: sx > 0 ? x : -x - w, maxx: sx > 0 ? x + w : -x, minz: sz > 0 ? z : -z - d, maxz: sz > 0 ? z + d : -z });
+  }
+  const hue = r();
+  for (const b of pillars) {
+    const m = new THREE.Mesh(new RoundedBoxGeometry(b.maxx - b.minx, 2.2, b.maxz - b.minz, 2, 0.35), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.35, 0.72), roughness: 0.5 }));
+    m.position.set((b.minx + b.maxx) / 2, 1.1, (b.minz + b.maxz) / 2);
+    m.castShadow = m.receiveShadow = true;
+    pillarGroup.add(m);
+    for (let z = b.minz; z < b.maxz; z++) for (let x = b.minx; x < b.maxx; x++) { const k = tileIdx(x + 0.5, z + 0.5); if (k >= 0) solid[k] = 1; }
+  }
+}
+// Arena > party lights around the rim
+const bulbs = [];
+for (let i = 0; i < 28; i++) {
+  const a = i / 28;
+  const side = Math.floor(a * 4), t = (a * 4) % 1;
+  const x = [-HALF + t * G, HALF + 0.6, HALF - t * G, -HALF - 0.6][side], z = [-HALF - 0.6, -HALF + t * G, HALF + 0.6, HALF - t * G][side];
+  const b = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  b.position.set(x, 1.4, z); scene.add(b); bulbs.push(b);
+}
+
+// Blobs > Model: squishy goo ball with eyes + name tag
+const blobGeo = new THREE.SphereGeometry(0.9, 28, 18);
+const eyeW = new THREE.SphereGeometry(0.24, 12, 10), eyeB = new THREE.SphereGeometry(0.12, 10, 8);
+const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 }), blackM = new THREE.MeshBasicMaterial({ color: 0x111111 });
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(26,18,40,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(3.6, 0.9, 1); s.position.y = 2.4; s.renderOrder = 5;
+  return s;
+}
+function makeBlob(p) {
+  const g = new THREE.Group();
+  const body = new THREE.Group();
+  const mat = new THREE.MeshPhysicalMaterial({ color: p.color, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.1, sheen: 0.5 });
+  const ball = new THREE.Mesh(blobGeo, mat); ball.castShadow = true;
+  const face = new THREE.Group();
+  for (const sx of [-1, 1]) { const w = new THREE.Mesh(eyeW, white), b = new THREE.Mesh(eyeB, blackM); w.position.set(sx * 0.3, 0.25, 0.72); b.position.set(sx * 0.3, 0.25, 0.92); face.add(w, b); }
+  body.add(ball, face);
+  body.position.y = 0.9;
+  g.add(body, nameTag(p.nick, p.color));
+  g.userData = { body, face, squash: 0 };
+  scene.add(g);
+  return g;
+}
+// Bombs > in-flight paint blobs
+const bombGeo = new THREE.SphereGeometry(0.45, 14, 10);
+const bombMeshes = [];
+function bombMesh(i, color) {
+  while (bombMeshes.length <= i) { const m = new THREE.Mesh(bombGeo, new THREE.MeshStandardMaterial({ roughness: 0.2 })); m.castShadow = true; scene.add(m); bombMeshes.push(m); }
+  bombMeshes[i].material.color.set(color);
+  return bombMeshes[i];
+}
+
+// FX > droplets
+const fxGeo = new THREE.SphereGeometry(0.18, 8, 6);
+const fx = [];
+function drop(x, y, z, vx, vy, vz, color, life = 0.7, s = 1) {
+  let f = fx.find((q) => q.life <= 0);
+  if (!f) { if (fx.length > 400) return; f = { mesh: new THREE.Mesh(fxGeo, new THREE.MeshStandardMaterial({ roughness: 0.2 })) }; scene.add(f.mesh); fx.push(f); }
+  f.mesh.position.set(x, y, z); f.v = new THREE.Vector3(vx, vy, vz); f.life = f.max = life; f.s = s;
+  f.mesh.material.color.set(color); f.mesh.visible = true;
+}
+function updateFx(dt) {
+  for (const f of fx) {
+    if (f.life <= 0) continue;
+    f.life -= dt; f.v.y -= 22 * dt;
+    f.mesh.position.addScaledVector(f.v, dt);
+    if (f.mesh.position.y < 0.1) { f.mesh.position.y = 0.1; f.v.set(0, 0, 0); }
+    f.mesh.scale.setScalar(f.s * Math.min(1, f.life / f.max * 2));
+    if (f.life <= 0) f.mesh.visible = false;
+  }
+}
+
+// Audio > squelch, bomb splat, countdown
+const gameAudio = createGameAudio({ noiseFilter: 'bandpass', noiseQ: 2 });
+const { tone, noise } = gameAudio;
+const focus = new THREE.Vector3();
+const near = (x, z) => Math.max(0.2, 1 - Math.hypot(x - focus.x, z - focus.z) / 50);
+const sfx = {
+  throw(x, z) { tone(300, 700, 0.18, 0.12 * near(x, z), 'triangle'); },
+  splat(x, z) { const v = near(x, z); noise(0.45, 0.6 * v, 1200, 150); tone(160, 60, 0.25, 0.25 * v); },
+  bump() { tone(240, 120, 0.12, 0.12, 'sine'); },
+  beep(hi) { tone(hi ? 880 : 520, hi ? 880 : 520, hi ? 0.4 : 0.15, 0.2, 'square'); },
+};
+
+// Game > World state
+const BOT_NAMES = ['Gloop', 'Splotch', 'Drip', 'Blorb', 'Smudge', 'Goober', 'Squish', 'Puddle', 'Blot', 'Jelly', 'Splash', 'Ooze', 'Smear', 'Glob'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+const MATCH_TIME = 90, R = 0.9;
+const world = { mode: 'attract', phase: 'play', t: 0, players: new Map(), bombs: [], winner: null, seed: 7 };
+const blobs = new Map();
+let events = [], deltas = [];
+const rng = Math.random;
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, slot: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, inX: 0, inZ: 0, bombSeq: 0, lastBomb: 0, bombCD: 0, tiles: 0, ai: { t: 0, tx: 0, tz: 0 } };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) { world.players.delete(id); const b = blobs.get(id); if (b) { scene.remove(b); blobs.delete(id); } }
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); world.bombs = []; }
+function assignSlots() {
+  // paint slot = palette index; slot 0 is bare floor
+  palette = ['#e9e4f2'];
+  let s = 1;
+  for (const p of world.players.values()) { p.slot = s++; palette.push(p.color); }
+  texDirty = true;
+}
+function spawnAll() {
+  const ps = [...world.players.values()];
+  ps.forEach((p, i) => {
+    const a = (i / ps.length) * Math.PI * 2 + Math.PI / 4;
+    let x = Math.cos(a) * 17, z = Math.sin(a) * 17;
+    Object.assign(p, { x, z, vx: 0, vz: 0, bombCD: 2, face: Math.atan2(-x, -z) });
+    resolve(p);
+  });
+}
+function paint(x, z, r, slot) {
+  const r2 = r * r;
+  for (let tz = Math.floor(z - r + HALF); tz <= Math.floor(z + r + HALF); tz++) for (let tx = Math.floor(x - r + HALF); tx <= Math.floor(x + r + HALF); tx++) {
+    if (tx < 0 || tz < 0 || tx >= G || tz >= G) continue;
+    const cx = tx - HALF + 0.5 - x, cz = tz - HALF + 0.5 - z;
+    if (cx * cx + cz * cz > r2) continue;
+    const k = tz * G + tx;
+    if (solid[k] || grid[k] === slot) continue;
+    grid[k] = slot; deltas.push(k, slot); texDirty = true;
+  }
+}
+// Run engine > collisions: arena bounds + pillar boxes
+function resolve(p) {
+  p.x = THREE.MathUtils.clamp(p.x, -HALF + R, HALF - R); p.z = THREE.MathUtils.clamp(p.z, -HALF + R, HALF - R);
+  for (const b of pillars) {
+    const cx = THREE.MathUtils.clamp(p.x, b.minx, b.maxx), cz = THREE.MathUtils.clamp(p.z, b.minz, b.maxz);
+    const dx = p.x - cx, dz = p.z - cz, d2 = dx * dx + dz * dz;
+    if (d2 >= R * R) continue;
+    if (d2 > 1e-8) {
+      const d = Math.sqrt(d2), k = (R - d) / d; p.x += dx * k; p.z += dz * k;
+      const nx = dx / d, nz = dz / d, vn = p.vx * nx + p.vz * nz;
+      if (vn < 0) { p.vx -= nx * vn * 1.5; p.vz -= nz * vn * 1.5; }
+    } else { p.x = b.maxx + R; }
+  }
+}
+
+// Run engine > step: roll with terrain speed, paint trail, bombs, bumps
+const STEP = 1 / 60;
+function physics(dt) {
+  const ps = [...world.players.values()];
+  const play = world.phase === 'play';
+  for (const p of ps) {
+    p.bombCD = Math.max(0, p.bombCD - dt);
+    let ix = play ? p.inX : 0, iz = play ? p.inZ : 0;
+    const l = Math.hypot(ix, iz); if (l > 1) { ix /= l; iz /= l; }
+    const k = tileIdx(p.x, p.z), own = k >= 0 && grid[k] === p.slot, enemy = k >= 0 && grid[k] && !own;
+    const max = own ? 12.5 : enemy ? 6.5 : 9.5;
+    p.vx += ix * 40 * dt; p.vz += iz * 40 * dt;
+    const drag = Math.exp(-(l > 0.1 ? 3 : 6) * dt); p.vx *= drag; p.vz *= drag;
+    const sp = Math.hypot(p.vx, p.vz); if (sp > max) { p.vx *= max / sp; p.vz *= max / sp; }
+    p.x += p.vx * dt; p.z += p.vz * dt;
+    resolve(p);
+    if (sp > 0.5) { let d = Math.atan2(p.vx, p.vz) - p.face; d = Math.atan2(Math.sin(d), Math.cos(d)); p.face += d * Math.min(1, dt * 10); }
+    if (play) paint(p.x, p.z, 1.35, p.slot);
+    if (play && p.bombSeq !== p.lastBomb) {
+      p.lastBomb = p.bombSeq;
+      if (p.bombCD <= 0) {
+        p.bombCD = 5;
+        const fx = Math.sin(p.face), fz = Math.cos(p.face);
+        const tx = THREE.MathUtils.clamp(p.x + fx * 7, -HALF + 1, HALF - 1), tz = THREE.MathUtils.clamp(p.z + fz * 7, -HALF + 1, HALF - 1);
+        world.bombs.push({ owner: p.id, slot: p.slot, color: p.color, sx: p.x, sz: p.z, tx, tz, t: 0, dur: 0.7 });
+        events.push(['t', p.id]);
+      }
+    } else if (!play) p.lastBomb = p.bombSeq;
+  }
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j], dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
+    if (d >= R * 2 || d < 1e-4) continue;
+    const nx = dx / d, nz = dz / d, ov = R * 2 - d;
+    a.x += nx * ov / 2; a.z += nz * ov / 2; b.x -= nx * ov / 2; b.z -= nz * ov / 2;
+    const vrel = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+    if (vrel < 0) { const j2 = -vrel * 0.9; a.vx += j2 * nx; a.vz += j2 * nz; b.vx -= j2 * nx; b.vz -= j2 * nz; if (-vrel > 4) events.push(['u']); }
+  }
+  for (const b of world.bombs) {
+    b.t += dt;
+    if (b.t >= b.dur && !b.done) { b.done = true; if (play) paint(b.tx, b.tz, 3.6, b.slot); events.push(['s', +b.tx.toFixed(1), +b.tz.toFixed(1), b.color]); }
+  }
+  world.bombs = world.bombs.filter((b) => !b.done);
+}
+
+// Run engine > bots: head for nearest patch that isn't theirs, bomb enemy-heavy areas
+function botThink(p, dt) {
+  const ai = p.ai;
+  ai.t -= dt;
+  if (ai.t <= 0) {
+    ai.t = 0.6 + rng() * 0.6;
+    let best = null, bs = -1e9;
+    for (let i = 0; i < 26; i++) {
+      const x = (rng() - 0.5) * (G - 4), z = (rng() - 0.5) * (G - 4), k = tileIdx(x, z);
+      if (k < 0 || solid[k]) continue;
+      const v = grid[k] === p.slot ? -6 : grid[k] ? 4 : 3;
+      const s = v - Math.hypot(x - p.x, z - p.z) * 0.18;
+      if (s > bs) { bs = s; best = [x, z]; }
+    }
+    if (best) { ai.tx = best[0]; ai.tz = best[1]; }
+    // enemy paint ahead? throw a bomb
+    const fx = p.x + Math.sin(p.face) * 7, fz = p.z + Math.cos(p.face) * 7, k = tileIdx(fx, fz);
+    if (k >= 0 && grid[k] && grid[k] !== p.slot && rng() < 0.5) p.bombSeq++;
+  }
+  const dx = ai.tx - p.x, dz = ai.tz - p.z, l = Math.hypot(dx, dz) || 1;
+  // wiggle so trails cover area instead of thin lines
+  const w = Math.sin(performance.now() / 300 + p.id) * 0.5;
+  p.inX = dx / l + (-dz / l) * w; p.inZ = dz / l + (dx / l) * w;
+}
+
+// Game > Phases: countdown, 90 s paint, results (tile share)
+let lastBeep = 0;
+function countTiles() {
+  const counts = new Array(palette.length).fill(0);
+  let open = 0;
+  for (let i = 0; i < G * G; i++) { if (solid[i]) continue; open++; counts[grid[i]]++; }
+  for (const p of world.players.values()) p.tiles = (counts[p.slot] ?? 0) / open;
+  return counts;
+}
+function phases(dt) {
+  if (world.mode === 'attract') {
+    world.phase = 'play';
+    world.t += dt;
+    // attract: wipe the floor every 40 s so it never saturates
+    if (world.t > 40) { world.t = 0; grid.fill(0); texDirty = true; }
+    return;
+  }
+  if (world.phase === 'count') {
+    world.t -= dt;
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { world.phase = 'play'; world.t = MATCH_TIME; events.push(['c', 0]); }
+  } else if (world.phase === 'play') {
+    world.t -= dt;
+    if (world.t <= 0) {
+      countTiles();
+      const top = [...world.players.values()].sort((a, b) => b.tiles - a.tiles)[0];
+      world.phase = 'end'; world.t = 7; world.winner = top?.id ?? null;
+    }
+  } else if (world.phase === 'end') {
+    world.t -= dt;
+    if (world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startMatch() {
+  grid.fill(0); texDirty = true; deltas = []; keyT = 0;
+  assignSlots();
+  world.phase = 'count'; world.t = 3; lastBeep = 4; world.winner = null; world.bombs = [];
+  spawnAll();
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract'; world.t = 0;
+  world.seed = 7; buildArena(7);
+  for (let i = 0; i < 6; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  grid.fill(0); assignSlots(); spawnAll();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'splat-turf', title: 'Splat Turf', emoji: '🎨', accent: '#ff4fa3',
+  blurb: 'Roll your goo blob around and paint the floor your color. You zoom on your own paint and crawl on theirs. Paint bombs splat big circles. Most turf after 90 seconds wins.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 blobs per room (humans + bots).',
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ seed, bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match'; world.seed = seed;
+    buildArena(seed);
+    grid.fill(0); texDirty = true;
+    ['top', 'board'].forEach((id) => (document.getElementById(id).style.display = id === 'top' ? 'flex' : 'block'));
+    document.getElementById('share').style.display = 'block';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startMatch();
+  },
+  onLobby() {
+    ['top', 'board', 'share', 'bomb'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 14 seats: joiner takes over the newest bot's paint slot
+    let slot = 0;
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) { slot = bot.slot; removePlayer(bot.id); } }
+    const np = addPlayer(p.id, p.nick, p.color, false);
+    if (!slot) { slot = palette.length; palette.push(p.color); } else palette[slot] = p.color;
+    np.slot = slot; np.x = 0; np.z = 0; resolve(np);
+    texDirty = true; keyT = 0;
+  }
+}
+
+// Multiplayer > Net: grid deltas every snapshot, full keyframe each second (late joiners, new host)
+const remoteIn = new Map();
+let keyT = 0;
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+const KEY_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
+function snapshot(withKey) {
+  const s = {
+    g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events, D: deltas,
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), p.slot, p.bot ? 1 : 0, f2(p.bombCD)]),
+    B: world.bombs.map((b) => [f2(b.sx), f2(b.sz), f2(b.tx), f2(b.tz), f2(b.t), b.dur, b.color]),
+  };
+  if (withKey) { s.K = Array.from(grid, (v) => KEY_CHARS[v]).join(''); s.pal = palette; }
+  return names.stamp(s, world.players.values());
+}
+let snapAt = 0;
+function applySnap(s) {
+  names.read(s);
+  if (s.seed !== world.seed) { world.seed = s.seed; buildArena(s.seed); }
+  Object.assign(world, { phase: s.ph, t: s.t, winner: s.win });
+  if (s.pal) { palette = s.pal; texDirty = true; }
+  if (s.K) { for (let i = 0; i < G * G; i++) grid[i] = KEY_CHARS.indexOf(s.K[i]); texDirty = true; }
+  for (let i = 0; i < s.D.length; i += 2) grid[s.D[i]] = s.D[i + 1];
+  if (s.D.length) texDirty = true;
+  const seen = new Set();
+  for (const a of s.P) {
+    const [id, x, z, vx, vz, face, slot, bot, bombCD] = a;
+    seen.add(id);
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
+    Object.assign(p, { x, z, vx, vz, face, slot, bombCD });
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  world.bombs = s.B.map(([sx, sz, tx, tz, t, dur, color]) => ({ sx, sz, tx, tz, t, dur, color }));
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+function playEvents(evs) {
+  for (const e of evs) {
+    if (e[0] === 't') { const p = world.players.get(e[1]); if (p) { sfx.throw(p.x, p.z); const b = blobs.get(p.id); if (b) b.userData.squash = 1; } }
+    else if (e[0] === 's') { sfx.splat(e[1], e[2]); for (let i = 0; i < 22; i++) { const a = rng() * Math.PI * 2, s = 3 + rng() * 7; drop(e[1], 0.6, e[2], Math.cos(a) * s, 4 + rng() * 5, Math.sin(a) * s, e[3], 0.9, 1.4); } }
+    else if (e[0] === 'u') sfx.bump();
+    else if (e[0] === 'c') sfx.beep(e[1] === 0);
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > keyboard + touch stick + bomb button
+const keys = {};
+const local = { x: 0, z: 0, bombSeq: 0 };
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'Space' && !e.repeat) local.bombSeq++;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const stick = document.getElementById('stick'), knob = stick.firstElementChild;
+let stickId = null, sx = 0, sz = 0;
+stick.addEventListener('pointerdown', (e) => { stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });
+stick.addEventListener('pointermove', (e) => { if (e.pointerId === stickId) moveStick(e); });
+stick.addEventListener('pointerup', () => { stickId = null; sx = sz = 0; knob.style.transform = ''; });
+function moveStick(e) {
+  const r = stick.getBoundingClientRect();
+  let dx = (e.clientX - r.left - r.width / 2) / (r.width / 2), dz = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+  const l = Math.hypot(dx, dz); if (l > 1) { dx /= l; dz /= l; }
+  sx = dx; sz = dz; knob.style.transform = `translate(${dx * 40}px, ${dz * 40}px)`;
+}
+document.getElementById('bombBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); local.bombSeq++; });
+function readInput() {
+  local.x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + sx;
+  local.z = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) + sz;
+}
+
+// HUD > share bar, standings, clock, banner, bomb cooldown
+const bigEl = document.getElementById('big');
+let bigText = '';
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+let hudT = 0;
+function hud(dt) {
+  if (world.mode !== 'match') return;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.25;
+  countTiles();
+  const ps = [...world.players.values()].sort((a, b) => b.tiles - a.tiles);
+  document.getElementById('share').innerHTML = ps.map((p) => `<div style="width:${(p.tiles * 100).toFixed(2)}%;background:${p.color}"></div>`).join('');
+  document.getElementById('board').innerHTML = `<div class="hd">Turf</div>` + ps.map((p) => `<div class="row"><i style="background:${p.color}"></i><span class="n">${esc(p.nick)}${p.id === lobby.room?.me ? ' (you)' : ''}</span><span class="p">${(p.tiles * 100).toFixed(1)}%</span></div>`).join('');
+  const m = Math.max(0, world.phase === 'play' ? world.t : MATCH_TIME);
+  document.getElementById('clock').textContent = `${Math.floor(m / 60)}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
+  if (world.phase === 'count') big(`${Math.max(1, Math.ceil(world.t))}<small>paint everything</small>`);
+  else if (world.phase === 'play') big(world.t > MATCH_TIME - 1 ? 'SPLAT!' : world.t < 10 ? `${Math.ceil(world.t)}` : '');
+  else if (world.phase === 'end') { const w = world.players.get(world.winner); big(w ? `🏆 ${esc(w.nick)}<small>${(w.tiles * 100).toFixed(1)}% of the floor</small>` : 'Time!'); }
+  const me = world.players.get(lobby.room?.me);
+  const bombEl = document.getElementById('bomb');
+  bombEl.style.display = me && world.phase === 'play' ? 'block' : 'none';
+  if (me) bombEl.textContent = me.bombCD > 0 ? `💣 bomb in ${Math.ceil(me.bombCD)}s` : '💣 bomb ready (Space)';
+}
+
+// Run engine > sim tick (worker)
+let acc = 0, sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') Object.assign(me, { inX: local.x, inZ: local.z, bombSeq: local.bombSeq });
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { inX: inp.x, inZ: inp.z, bombSeq: inp.b }); }
+    acc += dt;
+    while (acc >= STEP) {
+      for (const p of world.players.values()) if (p.bot) botThink(p, STEP);
+      physics(STEP);
+      phases(STEP);
+      acc -= STEP;
+    }
+    if (world.mode === 'match' && room) {
+      sendT -= dt; keyT -= dt;
+      if (sendT <= 0) {
+        sendT = 0.05;
+        const key = keyT <= 0;
+        if (key) keyT = 1;
+        room.send(snapshot(key)); playEvents(events); events = []; deltas = [];
+      }
+    } else { playEvents(events); events = []; deltas = []; }
+  } else if (world.mode === 'match' && room) {
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: f2(local.x), z: f2(local.z), b: local.bombSeq }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop: blobs squash + roll, bombs arc, camera follows own blob
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 60, 40), camLook = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (texDirty) refreshTex();
+  floorMat.uniforms.uTime.value = time;
+  const hostSim = isHostSim();
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  for (const p of world.players.values()) {
+    let b = blobs.get(p.id);
+    if (!b) { b = makeBlob(p); blobs.set(p.id, b); b.position.set(p.x, 0, p.z); }
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, k = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    b.position.x += (tx - b.position.x) * k; b.position.z += (tz - b.position.z) * k;
+    const sp = Math.hypot(p.vx, p.vz);
+    let da = p.face - b.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    b.rotation.y += da * Math.min(1, dt * 12);
+    const u = b.userData;
+    u.squash = Math.max(0, u.squash - dt * 3);
+    const wob = Math.sin(time * 14 + p.id) * Math.min(sp / 12, 1) * 0.08;
+    u.body.scale.set(1 + wob + u.squash * 0.25, 1 - wob - u.squash * 0.3 - Math.min(sp / 12, 1) * 0.1, 1 + Math.min(sp / 12, 1) * 0.15);
+    u.body.position.y = 0.85 * u.body.scale.y + Math.abs(Math.sin(time * 9 + p.id)) * Math.min(sp / 12, 1) * 0.25;
+    if (sp > 3 && rng() < 0.25) drop(b.position.x - p.vx * 0.06, 0.4, b.position.z - p.vz * 0.06, (rng() - 0.5) * 2, 2, (rng() - 0.5) * 2, p.color, 0.5, 0.8);
+  }
+  world.bombs.forEach((bm, i) => {
+    const m = bombMesh(i, bm.color), t = Math.min((bm.t + age) / bm.dur, 1);
+    m.visible = true;
+    m.position.set(THREE.MathUtils.lerp(bm.sx, bm.tx, t), 1.2 + Math.sin(t * Math.PI) * 5, THREE.MathUtils.lerp(bm.sz, bm.tz, t));
+  });
+  for (let i = world.bombs.length; i < bombMeshes.length; i++) bombMeshes[i].visible = false;
+  bulbs.forEach((b, i) => b.material.color.setHSL((i / bulbs.length + time * 0.15) % 1, 0.9, 0.65));
+  updateFx(dt);
+  hud(dt);
+  // camera: follow own blob in a match, otherwise frame the whole floor
+  const me = world.players.get(lobby.room?.me);
+  const fit = Math.max(1, 1.45 / camera.aspect);
+  if (world.mode === 'match' && me && world.phase !== 'end') {
+    const bp = blobs.get(me.id)?.position ?? new THREE.Vector3(me.x, 0, me.z);
+    camLook.lerp(new THREE.Vector3(bp.x * 0.6, 0, bp.z * 0.6), 1 - Math.exp(-dt * 5));
+    camPos.lerp(new THREE.Vector3(bp.x * 0.6, 34 * fit, bp.z * 0.6 + 22 * fit), 1 - Math.exp(-dt * 4));
+  } else {
+    camLook.lerp(new THREE.Vector3(0, 0, 2), 1 - Math.exp(-dt * 2));
+    camPos.lerp(new THREE.Vector3(0, 52 * fit, 36 * fit), 1 - Math.exp(-dt * 2));
+  }
+  focus.copy(camLook);
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

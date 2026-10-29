@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Balloon Battle</title>
+<style>
+  :root { --ink: #fff; --card: rgba(16, 24, 40, 0.62); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #ffd6e7; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .a { font-size: 30px; font-weight: 900; line-height: 1; color: #ff7aa8; font-variant-numeric: tabular-nums; }
+  #info .a small { font-size: 15px; color: #fff; opacity: 0.75; }
+  #info .m { font-size: 13px; margin-top: 4px; opacity: 0.9; }
+  #info .b { font-size: 20px; margin-top: 4px; letter-spacing: 2px; min-height: 24px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 200px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row small { min-width: 34px; text-align: right; opacity: 0.8; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; opacity: 0.9; }
+  #board .row.me span { color: #ff7aa8; font-weight: 800; }
+  #board .row.out { opacity: 0.45; }
+  #feed { position: fixed; left: 14px; top: 132px; font-size: 12.5px; display: none; pointer-events: none; }
+  #feed div { background: var(--card); border-radius: 9px; padding: 4px 9px; margin-bottom: 4px; animation: fade 4s forwards; }
+  @keyframes fade { 80% { opacity: 1; } to { opacity: 0; } }
+  #big { position: fixed; top: 32%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(32px, 8vw, 80px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.3em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ff7aa8; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse) { #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="a" id="clock"></div><div class="m" id="mine"></div><div class="b" id="bals"></div></div>
+<div id="feed"></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>WASD / arrows</b> steer · <b>Space</b> dash · poke the 🎈 balloons <b>behind</b> other scooters with your lance · protect your own tail · grab floating bundles for spares</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/balloon-battle/index.html
+ * PURPOSE: online balloon battle for up to 14: lance scooters with balloons tied behind, pop rivals' balloons from the rear, lose them all and sit out as a ghost; host-authoritative sim
+ * UI: Balloon Battle page (lobby overlay, match clock, own balloons, pop feed, standings, banner, phone joystick + DASH)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createNameSync } from '../common/snapshot-names.js';
+import { createTouchPad } from '../common/touch-joystick.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, pastel sky, striped carnival plaza, rim wall with bunting, pillars, center carousel
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffd6e7);
+scene.fog = new THREE.Fog(0xffd6e7, 80, 200);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 400);
+scene.add(new THREE.HemisphereLight(0xfff4fa, 0x9a7aa0, 1.5));
+const sun = new THREE.DirectionalLight(0xfff1e0, 2.2);
+sun.position.set(-18, 44, 22);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 120 });
+scene.add(sun);
+const R_ARENA = 26, PILLARS = [[0, 0, 3.2]];
+for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2 + 0.6; PILLARS.push([Math.sin(a) * 14, Math.cos(a) * 14, 1.3]); }
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const floorTex = canvasTex(1024, 1024, (g, w, h) => {
+  // pinwheel stripes radiating from the center, like a big-top floor
+  const n = 24;
+  for (let k = 0; k < n; k++) {
+    g.fillStyle = k % 2 ? '#fff3e6' : '#ffc2d6';
+    g.beginPath(); g.moveTo(w / 2, h / 2); g.arc(w / 2, h / 2, w, (k / n) * Math.PI * 2, ((k + 1) / n) * Math.PI * 2); g.fill();
+  }
+  for (let i = 0; i < 4000; i++) { g.fillStyle = `rgba(120,60,90,${Math.random() * 0.06})`; g.fillRect(Math.random() * w, Math.random() * h, 3, 3); }
+  g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = 10;
+  for (const r of [0.2, 0.36]) { g.beginPath(); g.arc(w / 2, h / 2, w * r, 0, Math.PI * 2); g.stroke(); }
+});
+const floor = new THREE.Mesh(new THREE.CircleGeometry(R_ARENA, 96).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.75 }));
+floor.receiveShadow = true;
+scene.add(floor);
+const lawn = new THREE.Mesh(new THREE.PlaneGeometry(500, 500).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x9fd67a, roughness: 1 }));
+lawn.position.y = -0.04; lawn.receiveShadow = true;
+scene.add(lawn);
+const wall = new THREE.Mesh(new THREE.TorusGeometry(R_ARENA + 0.5, 0.6, 12, 96).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xff5d8f, roughness: 0.5 }));
+wall.position.y = 0.5; wall.castShadow = true;
+scene.add(wall);
+const BUNT = ['#ff5d8f', '#ffd23f', '#3ad1ff', '#8ac926', '#b07cff'];
+for (let k = 0; k < 16; k++) {
+  const a = (k / 16) * Math.PI * 2, pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 5, 6), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+  pole.position.set(Math.sin(a) * (R_ARENA + 1.4), 2.5, Math.cos(a) * (R_ARENA + 1.4)); pole.castShadow = true;
+  scene.add(pole);
+  const a2 = ((k + 1) / 16) * Math.PI * 2;
+  for (let j = 1; j < 8; j++) {
+    const t = j / 8, aa = a + (a2 - a) * t, r = R_ARENA + 1.4, flag = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 3), new THREE.MeshStandardMaterial({ color: BUNT[(k + j) % 5], side: THREE.DoubleSide }));
+    flag.position.set(Math.sin(aa) * r, 4.8 - Math.sin(t * Math.PI) * 0.9, Math.cos(aa) * r); flag.rotation.x = Math.PI;
+    scene.add(flag);
+  }
+}
+const pillarMats = BUNT.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.5 }));
+PILLARS.slice(1).forEach(([x, z, r], k) => {
+  const p = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.1, 1.8, 24), pillarMats[k % 5]); p.position.set(x, 0.9, z); p.castShadow = p.receiveShadow = true;
+  const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshStandardMaterial({ color: 0xffd23f, metalness: 0.6, roughness: 0.3 })); star.position.set(x, 2.4, z);
+  scene.add(p, star);
+});
+// Scene > carousel: spinning roof + horses on poles over the center pillar (visual only)
+const carousel = new THREE.Group();
+{
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.4, 0.6, 32), new THREE.MeshStandardMaterial({ color: 0xfff3e6 })); base.position.y = 0.3; base.receiveShadow = true;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(3.8, 1.8, 16), new THREE.MeshStandardMaterial({ color: 0xff5d8f, flatShading: true })); roof.position.y = 4.4; roof.castShadow = true;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3.8, 10), new THREE.MeshStandardMaterial({ color: 0xffd23f, metalness: 0.5, roughness: 0.3 })); mast.position.y = 2.2;
+  carousel.add(base, roof, mast);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2, pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.5, 6), mast.material);
+    pole.position.set(Math.sin(a) * 2.5, 2.2, Math.cos(a) * 2.5);
+    const horse = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.7, 4, 8), pillarMats[k % 5]); horse.rotation.x = Math.PI / 2; horse.position.set(Math.sin(a) * 2.5, 1.6, Math.cos(a) * 2.5); horse.rotation.z = a; horse.castShadow = true;
+    carousel.add(pole, horse);
+  }
+}
+scene.add(carousel);
+
+// Players > lance scooters: round tub in player color, rider, silver lance, balloon bundle on strings behind, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(16,24,40,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.4, 0.6, 1); s.position.y = 3.6; s.renderOrder = 5;
+  return s;
+}
+const balloonGeo = new THREE.SphereGeometry(0.42, 18, 14);
+balloonGeo.scale(1, 1.18, 1);
+const MAX_BAL = 5, LANCE = 1.35, TAIL = 1.25, HIT_R = 1.25, SR = 0.8;
+const players3d = new Map();
+function makeScooter(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mats = [];
+  const mat = (o) => { const m = new THREE.MeshStandardMaterial({ transparent: true, ...o }); mats.push(m); return m; };
+  const tubMat = mat({ color: p.color, roughness: 0.4 }), skin = mat({ color: 0xffd9b3, roughness: 0.7 }), silver = mat({ color: 0xdfe6ee, metalness: 0.9, roughness: 0.2 }), dark = mat({ color: 0x2b2d42 });
+  const tub = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.7, 0.55, 24), tubMat); tub.position.y = 0.42; tub.castShadow = true;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.09, 8, 28), dark); rim.rotation.x = Math.PI / 2; rim.position.y = 0.7;
+  const skirt = new THREE.Mesh(new THREE.TorusGeometry(0.74, 0.12, 8, 28), dark); skirt.rotation.x = Math.PI / 2; skirt.position.y = 0.16;
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.35, 4, 10), tubMat); torso.position.y = 1.15; torso.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 16, 12), skin); head.position.y = 1.72; head.castShadow = true;
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), silver); helm.position.y = 1.76;
+  for (const s of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), dark); eye.position.set(s * 0.1, 1.74, 0.24); body.add(eye); }
+  const lance = new THREE.Mesh(new THREE.ConeGeometry(0.1, 1.5, 10), silver); lance.rotation.x = Math.PI / 2; lance.position.set(0.3, 1.0, 0.95); lance.castShadow = true;
+  const guard = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.3, 12, 1, true), silver); guard.rotation.x = -Math.PI / 2; guard.position.set(0.3, 1.0, 0.3);
+  body.add(tub, rim, skirt, torso, head, helm, lance, guard);
+  const balloons = [], strings = [];
+  const bMat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.25, metalness: 0.1, emissive: p.color, emissiveIntensity: 0.15 });
+  const sGeo = new THREE.BufferGeometry(); sGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAX_BAL * 6), 3));
+  const stringLines = new THREE.LineSegments(sGeo, new THREE.LineBasicMaterial({ color: 0x444444 }));
+  for (let i = 0; i < MAX_BAL; i++) { const b = new THREE.Mesh(balloonGeo, bMat); b.castShadow = true; balloons.push(b); body.add(b); }
+  body.add(stringLines);
+  const tag = nameTag(p.nick, p.color);
+  g.add(body, tag);
+  g.userData = { body, balloons, stringLines, mats, bMat, tag };
+  scene.add(g);
+  return g;
+}
+
+// Pickups > floating balloon bundles (+1 spare)
+const PICK_N = 4;
+const pick3d = Array.from({ length: PICK_N }, (_, k) => {
+  const g = new THREE.Group();
+  for (let j = 0; j < 3; j++) { const b = new THREE.Mesh(balloonGeo, new THREE.MeshStandardMaterial({ color: BUNT[(k + j) % 5], roughness: 0.25 })); b.position.set((j - 1) * 0.35, 1.4 + (j % 2) * 0.3, 0); b.scale.setScalar(0.8); b.castShadow = true; g.add(b); }
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, side: THREE.DoubleSide }));
+  ring.position.y = 0.03; g.add(ring);
+  g.visible = false; scene.add(g);
+  return g;
+});
+
+// FX > confetti on pops, dust on dashes + bumps
+const PUFF = 700;
+const puffGeo = new THREE.BufferGeometry();
+const puffPos = new Float32Array(PUFF * 3), puffVel = new Float32Array(PUFF * 3), puffLife = new Float32Array(PUFF), puffCol = new Float32Array(PUFF * 3);
+puffGeo.setAttribute('position', new THREE.BufferAttribute(puffPos, 3));
+puffGeo.setAttribute('color', new THREE.BufferAttribute(puffCol, 3));
+const puffs = new THREE.Points(puffGeo, new THREE.PointsMaterial({ size: 0.3, vertexColors: true, transparent: true, opacity: 0.95 }));
+puffs.frustumCulled = false;
+scene.add(puffs);
+for (let i = 0; i < PUFF; i++) puffPos[i * 3 + 1] = -99;
+let puffNext = 0;
+const _c = new THREE.Color();
+function burst(x, y, z, n, spd, colors) {
+  for (let k = 0; k < n; k++) {
+    const i = puffNext++ % PUFF, a = Math.random() * Math.PI * 2, s = spd * (0.4 + Math.random());
+    puffPos.set([x, y, z], i * 3); puffVel.set([Math.cos(a) * s, 2 + Math.random() * 4, Math.sin(a) * s], i * 3); puffLife[i] = 0.7 + Math.random() * 0.5;
+    _c.set(colors[k % colors.length]); puffCol.set([_c.r, _c.g, _c.b], i * 3);
+  }
+}
+
+// Audio > pop, dash zip, bump, pickup, out, countdown, fanfare
+const gameAudio = createGameAudio({ noiseFilter: 'highpass' });
+const { tone, noise } = gameAudio;
+const sfx = {
+  pop(me) { const v = me ? 0.35 : 0.12; noise(0.09, v, 1200, 400); tone(900, 200, 0.06, v * 0.6, 'square'); },
+  dash(me) { if (me) { noise(0.25, 0.08, 3000, 800); tone(300, 700, 0.2, 0.05, 'sawtooth'); } },
+  bump() { tone(180, 90, 0.12, 0.08, 'triangle'); },
+  grab() { tone(660, 1320, 0.18, 0.08, 'triangle'); },
+  out() { tone(500, 120, 0.8, 0.1, 'sawtooth'); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
+};
+
+// Game > World
+const BOT_NAMES = ['Poppy', 'Bingo', 'Squeak', 'Twirl', 'Pinky', 'Zippo', 'Bubbles', 'Dizzy', 'Fizz', 'Noodle', 'Sprocket', 'Jinx', 'Tango', 'Sparky'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+const MATCH_T = 150, WIN_POPS = 20, SPEED = 9, TURN = 3.4, DASH_V = 19, OUT_T = 4, START_BAL = 3;
+const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, players: new Map(), picks: [], winner: null };
+let events = [];
+const rng = Math.random;
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, h: 0, mx: 0, mz: 0, dashSeq: 0, lastDash: 0, dashT: 0, dashCD: 0, bal: START_BAL, pops: 0, outs: 0, out: 0, inv: 0, lastHit: 0, skill: 0.5 + rng() * 0.45, tgt: null, tgtT: 0, wiggle: rng() * 6 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function rimSpawn(p, a) { Object.assign(p, { x: Math.sin(a) * (R_ARENA - 3), z: Math.cos(a) * (R_ARENA - 3), vx: 0, vz: 0, h: a + Math.PI, dashT: 0, bal: START_BAL, out: 0, inv: 2 }); }
+function placePick(k) {
+  // random open spot: off the pillars, inside the rim
+  for (let tries = 0; tries < 20; tries++) {
+    const a = rng() * Math.PI * 2, r = 5 + rng() * (R_ARENA - 8), x = Math.sin(a) * r, z = Math.cos(a) * r;
+    if (PILLARS.every(([px, pz, pr]) => Math.hypot(x - px, z - pz) > pr + 1.5)) { world.picks[k] = { x, z, t: 0 }; return; }
+  }
+}
+function startMatch() {
+  const ps = [...world.players.values()];
+  ps.forEach((p, k) => { rimSpawn(p, (k / ps.length) * Math.PI * 2); p.pops = 0; p.outs = 0; p.inv = 0; });
+  world.picks = [];
+  for (let k = 0; k < PICK_N; k++) placePick(k);
+  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, winner: null });
+}
+
+// Run engine > scooter steering (stick sets heading + throttle, limited turn rate), dash, rim + pillar bounces, ghosts
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function stepPlayer(p, dt) {
+  p.inv -= dt; p.dashT -= dt; p.dashCD -= dt;
+  if (p.out > 0) {
+    p.out -= dt;
+    if (p.out <= 0) { rimSpawn(p, rng() * Math.PI * 2); events.push(['r', p.id]); }
+  }
+  const frozen = world.phase !== 'play';
+  let mx = frozen ? 0 : p.mx, mz = frozen ? 0 : p.mz;
+  const ml = Math.min(1, Math.hypot(mx, mz));
+  // turn rate cap is the whole game: you can't spin instantly to guard your balloons
+  if (ml > 0.15) { let dh = Math.atan2(mx, mz) - p.h; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); p.h += clamp(dh, -TURN * dt, TURN * dt); }
+  const fx = Math.sin(p.h), fz = Math.cos(p.h);
+  if (p.dashSeq !== p.lastDash) {
+    p.lastDash = p.dashSeq;
+    if (p.dashCD <= 0 && !frozen && !p.out) { p.vx = fx * DASH_V; p.vz = fz * DASH_V; p.dashT = 0.35; p.dashCD = 2.2; events.push(['d', p.id]); }
+  }
+  if (p.dashT <= 0) {
+    const k = Math.min(1, dt * 3.2), sp = SPEED * (ml > 0.15 ? ml : 0) * (p.out ? 1.1 : 1);
+    p.vx += (fx * sp - p.vx) * k; p.vz += (fz * sp - p.vz) * k;
+  }
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  const r = Math.hypot(p.x, p.z);
+  if (r > R_ARENA - SR) {
+    const nx = p.x / r, nz = p.z / r, vn = p.vx * nx + p.vz * nz;
+    p.x = nx * (R_ARENA - SR); p.z = nz * (R_ARENA - SR);
+    if (vn > 0) { p.vx -= 1.6 * vn * nx; p.vz -= 1.6 * vn * nz; }
+  }
+  if (p.out) return;
+  for (const [px, pz, pr] of PILLARS) {
+    const dx = p.x - px, dz = p.z - pz, d = Math.hypot(dx, dz);
+    if (d < pr + SR && d > 1e-4) {
+      const nx = dx / d, nz = dz / d, vn = p.vx * nx + p.vz * nz;
+      p.x = px + nx * (pr + SR); p.z = pz + nz * (pr + SR);
+      if (vn < 0) { p.vx -= 1.6 * vn * nx; p.vz -= 1.6 * vn * nz; }
+    }
+  }
+  world.picks.forEach((k, i) => {
+    if (!k || k.t > 0 || p.bal >= MAX_BAL) return;
+    if (Math.hypot(p.x - k.x, p.z - k.z) < 1.4) { p.bal++; k.t = 8; events.push(['g', p.id, i]); }
+  });
+}
+// Run engine > lance vs tail hit test + body bumps (ghosts pass through everything)
+function contacts(ps) {
+  for (const a of ps) {
+    if (a.out || world.phase !== 'play') continue;
+    const tx = a.x + Math.sin(a.h) * LANCE, tz = a.z + Math.cos(a.h) * LANCE;
+    for (const b of ps) {
+      if (b === a || b.out || b.inv > 0) continue;
+      const bx = b.x - Math.sin(b.h) * TAIL, bz = b.z - Math.cos(b.h) * TAIL;
+      if (Math.hypot(tx - bx, tz - bz) > HIT_R) continue;
+      b.bal--; b.inv = 1; b.lastHit = a.id; a.pops++;
+      b.vx += Math.sin(b.h) * 6; b.vz += Math.cos(b.h) * 6;
+      if (b.bal <= 0) { b.out = OUT_T; b.outs++; }
+      events.push(['p', a.id, b.id, +bx.toFixed(1), +bz.toFixed(1), b.bal <= 0 ? 1 : 0]);
+    }
+  }
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j];
+    if (a.out || b.out) continue;
+    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d > SR * 2 || d < 1e-4) continue;
+    const nx = dx / d, nz = dz / d, pen = (SR * 2 - d) / 2;
+    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
+    const vr = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
+    if (vr < 0) {
+      a.vx += nx * vr * 0.9; a.vz += nz * vr * 0.9; b.vx -= nx * vr * 0.9; b.vz -= nz * vr * 0.9;
+      if (-vr > 5) events.push(['b', a.id, b.id]);
+    }
+  }
+}
+
+// Run engine > bots: grab spares when low, else stalk a rival's tail (swing wide of its lance), dash in for the poke, swerve when tailed
+function botThink(p, dt) {
+  if (p.out) { p.mx = Math.sin(p.wiggle) * 0.4; p.mz = Math.cos(p.wiggle) * 0.4; p.wiggle += dt; return; }
+  const ps = [...world.players.values()].filter((q) => q !== p && !q.out);
+  let tx = 0, tz = 0, attack = null;
+  const spare = p.bal < 3 && world.picks.filter((k) => k && k.t <= 0).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0];
+  p.tgtT -= dt;
+  const cur = world.players.get(p.tgt);
+  if (!cur || cur.out || p.tgtT <= 0) {
+    const pick = ps.sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[Math.floor(rng() * Math.min(2, ps.length))];
+    p.tgt = pick?.id ?? null; p.tgtT = 2.5 + rng() * 2.5;
+  }
+  const t = world.players.get(p.tgt);
+  if (spare && Math.hypot(spare.x - p.x, spare.z - p.z) < 14) { tx = spare.x; tz = spare.z; }
+  else if (t && !t.out) {
+    const fx = Math.sin(t.h), fz = Math.cos(t.h), rx = p.x - t.x, rz = p.z - t.z;
+    const behind = rx * fx + rz * fz < -0.5;
+    if (behind) { tx = t.x - fx * TAIL; tz = t.z - fz * TAIL; attack = t; }
+    else {
+      // in front of the target: arc around its side to reach the tail without eating its lance
+      const side = rx * fz - rz * fx >= 0 ? 1 : -1;
+      tx = t.x + fz * side * 4 - fx * 3; tz = t.z - fx * side * 4 - fz * 3;
+    }
+  } else { tx = Math.sin(p.wiggle) * 10; tz = Math.cos(p.wiggle) * 10; p.wiggle += dt * 0.3; }
+  // swerve when someone's lance is closing on our own tail
+  const myTx = p.x - Math.sin(p.h) * TAIL, myTz = p.z - Math.cos(p.h) * TAIL;
+  const threat = ps.find((q) => Math.hypot(q.x + Math.sin(q.h) * LANCE - myTx, q.z + Math.cos(q.h) * LANCE - myTz) < 3.2);
+  if (threat && rng() < p.skill) { const s = Math.sin(p.wiggle * 3) > 0 ? 1 : -1; tx = p.x + Math.cos(p.h) * s * 6; tz = p.z - Math.sin(p.h) * s * 6; }
+  let lx = tx - p.x, lz = tz - p.z;
+  // steer around pillars
+  for (const [px, pz, pr] of PILLARS) { const dx = p.x - px, dz = p.z - pz, d = Math.hypot(dx, dz); if (d < pr + 3) { lx += (dx / d) * (pr + 3 - d) * 2; lz += (dz / d) * (pr + 3 - d) * 2; } }
+  const l = Math.hypot(lx, lz) || 1;
+  p.mx = lx / l; p.mz = lz / l;
+  if (attack && p.dashCD <= 0) {
+    const dist = Math.hypot(attack.x - Math.sin(attack.h) * TAIL - (p.x + Math.sin(p.h) * LANCE), attack.z - Math.cos(attack.h) * TAIL - (p.z + Math.cos(p.h) * LANCE));
+    const facing = (Math.sin(p.h) * lx + Math.cos(p.h) * lz) / l;
+    if (dist < 5 && facing > 0.85 && rng() < 0.08 * p.skill) p.dashSeq++;
+  }
+}
+
+// Game > Phases: countdown, play, final standings
+let lastBeep = 0;
+function phases(dt) {
+  const ps = [...world.players.values()];
+  world.t -= dt;
+  for (const k of world.picks) if (k && k.t > 0) { k.t -= dt; if (k.t <= 0) placePick(world.picks.indexOf(k)); }
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'play'; }
+  } else if (world.phase === 'play') {
+    world.left -= dt;
+    const top = ps.reduce((a, b) => (b.pops > (a?.pops ?? -1) ? b : a), null);
+    if (world.left <= 0 || (top && top.pops >= WIN_POPS)) {
+      world.winner = top?.id ?? null;
+      if (top) events.push(['w', top.id]);
+      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
+    }
+  } else if (world.phase === 'final' && world.t <= 0) {
+    if (world.mode === 'attract') startMatch();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract';
+  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  startMatch();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'balloon-battle', title: 'Balloon Battle', emoji: '🎈', accent: '#ff7aa8',
+  blurb: 'Lance scooters with balloons tied behind. Swing around rivals and poke their tails, keep your own balloons out of reach, dash in for the pop. Lose them all and you ghost for a few seconds.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: `Up to 14 riders per room (humans + bots). First to ${WIN_POPS} pops or most after 2½ minutes.`,
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match';
+    ['info', 'board', 'feed'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    document.getElementById('top').style.display = 'flex';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startMatch();
+  },
+  onLobby() {
+    ['info', 'board', 'top', 'feed'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 14 seats: a late human takes the lowest-scoring bot's place
+    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.pops - b.pops)[0]; if (bot) removePlayer(bot.id); }
+    rimSpawn(addPlayer(p.id, p.nick, p.color, false), rng() * Math.PI * 2);
+  }
+}
+
+// Multiplayer > Net: guest input 20 Hz, host snapshots with events
+const remoteIn = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
+function snapshot() {
+  return names.stamp({
+    g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
+    K: world.picks.map((k) => (k ? [f2(k.x), f2(k.z), k.t > 0 ? 0 : 1] : [0, 0, 0])),
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.h), (p.bot ? 1 : 0) | (p.dashT > 0 ? 2 : 0) | (p.out > 0 ? 4 : 0) | (p.inv > 0 ? 8 : 0), p.bal, p.pops, p.outs]),
+  }, world.players.values());
+}
+let snapAt = 0;
+function applySnap(s) {
+  names.read(s);
+  Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, winner: s.win });
+  world.picks = s.K.map(([x, z, on]) => ({ x, z, t: on ? 0 : 1 }));
+  const seen = new Set();
+  for (const [id, x, z, vx, vz, h, fl, bal, pops, outs] of s.P) {
+    seen.add(id);
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
+    Object.assign(p, { x, z, vx, vz, h, dashT: fl & 2 ? 0.1 : 0, out: fl & 4 ? 1 : 0, inv: fl & 8 ? 0.1 : 0, bal, pops, outs });
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+let shake = 0;
+const feedEl = document.getElementById('feed');
+function feed(html) {
+  const d = document.createElement('div'); d.innerHTML = html; feedEl.prepend(d);
+  while (feedEl.children.length > 5) feedEl.lastChild.remove();
+  setTimeout(() => d.remove(), 4000);
+}
+const tagOf = (p) => `<b style="color:${p.color}">${esc(p.nick)}</b>`;
+function playEvents(evs) {
+  const me = lobby.room?.me, match = world.mode === 'match';
+  for (const e of evs) {
+    const p = world.players.get(e[1]);
+    if (e[0] === 'p') {
+      const v = world.players.get(e[2]);
+      burst(e[3], 2.2, e[4], 26, 4, [v?.color ?? '#fff', '#ffffff', '#ffd23f']);
+      if (match) {
+        sfx.pop(e[1] === me || e[2] === me);
+        if (e[2] === me) { shake = 0.4; if (e[5]) { sfx.out(); flash('<small>all popped!</small>👻 ghosting…', 1.6); } }
+        else if (e[1] === me) flash(e[5] ? '<small>knocked out</small>💥 POP!' : '<small>pop!</small>🎈 +1', 0.9);
+        if (p && v) feed(`${tagOf(p)} 📌 ${tagOf(v)}${e[5] ? ' 👻' : ''}`);
+      }
+    } else if (e[0] === 'd' && p) { burst(p.x, 0.3, p.z, 8, 2, ['#ffffff', '#f0e0ea']); if (match) sfx.dash(e[1] === me); }
+    else if (e[0] === 'b' && match && (e[1] === me || e[2] === me)) sfx.bump();
+    else if (e[0] === 'g' && p) { if (match && e[1] === me) { sfx.grab(); flash('<small>spare balloon</small>🎈 +1', 0.8); } }
+    else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you popped the most!' : 'pop champion'}</small>🏆 ${esc(p.nick)}`, 4); }
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > keyboard + phone joystick + DASH button
+const keys = {}, local = { x: 0, z: 0, dashSeq: 0 };
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if ((e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.dashSeq++;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const pad = createTouchPad({ buttons: [{ id: 'dash', label: 'DASH', color: 'rgba(255, 122, 168, 0.75)' }], onStart: gameAudio.unlock });
+pad.onPress('dash', () => local.dashSeq++);
+function readInput() {
+  local.x = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x;
+  local.z = (keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) - pad.y;
+}
+
+// HUD > match clock, own balloons, standings (pops + balloons left), banner
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.8) { big(t); flashT = len; }
+let hudT = 0;
+const mmss = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+function hud(dt) {
+  flashT -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  const me = world.players.get(lobby.room?.me);
+  if (world.phase === 'count') big(`<small>poke balloons from behind</small>${Math.max(1, Math.ceil(world.t))}`);
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pops - a.pops)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big(me?.out ? '<small>ghost · respawning soon</small>👻' : '');
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  document.getElementById('clock').innerHTML = `${mmss(world.left)}<small> left</small>`;
+  document.getElementById('mine').textContent = `${me ? `you: ${me.pops} pops · ` : ''}first to ${WIN_POPS}`;
+  document.getElementById('bals').textContent = me ? (me.out ? '👻' : '🎈'.repeat(me.bal)) : '';
+  const r = [...world.players.values()].sort((a, b) => b.pops - a.pops || b.bal - a.bal);
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p.out ? 'out' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><small>${p.out ? '👻' : `🎈${p.bal}`}</small><em>📌${p.pops}</em></div>`).join('');
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && world.players.get(room.me);
+    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, dashSeq: local.dashSeq });
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, dashSeq: inp.d }); }
+    const ps = [...world.players.values()];
+    if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, dt);
+    for (const p of ps) stepPlayer(p, dt);
+    contacts(ps);
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    if (world.phase === 'play') world.left -= dt;
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), d: local.dashSeq }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 36, 26), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim();
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  for (const p of world.players.values()) {
+    let g = players3d.get(p.id);
+    if (!g) { g = makeScooter(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
+    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
+    let dh = p.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    g.rotation.y += dh * Math.min(1, dt * (hostSim ? 30 : 14));
+    const u = g.userData;
+    u.body.position.y = 0.06 + Math.sin(time * 5 + p.id) * 0.04;
+    u.body.rotation.x = p.dashT > 0 ? 0.15 : 0;
+    // ghosts fade out; fresh respawns blink while invulnerable
+    const ghost = p.out > 0, blink = !ghost && p.inv > 0 && Math.sin(time * 30) > 0;
+    for (const m of u.mats) m.opacity = ghost ? 0.25 : blink ? 0.5 : 1;
+    u.bMat.opacity = blink ? 0.5 : 1; u.bMat.transparent = blink;
+    const pos = u.stringLines.geometry.attributes.position;
+    u.balloons.forEach((b, i) => {
+      b.visible = !ghost && i < p.bal;
+      if (!b.visible) { pos.setXYZ(i * 2, 0, 0, 0); pos.setXYZ(i * 2 + 1, 0, 0, 0); return; }
+      const off = i - (p.bal - 1) / 2, sway = Math.sin(time * 2.2 + i * 1.7 + p.id) * 0.12;
+      b.position.set(off * 0.5 + sway, 2.5 + Math.abs(off) * -0.15 + Math.sin(time * 3 + i) * 0.06, -TAIL - 0.1);
+      pos.setXYZ(i * 2, 0, 0.75, -0.6); pos.setXYZ(i * 2 + 1, b.position.x, b.position.y - 0.48, b.position.z);
+    });
+    pos.needsUpdate = true;
+    u.tag.position.y = 3.6;
+  }
+  world.picks.forEach((k, i) => {
+    const g = pick3d[i];
+    g.visible = !!k && k.t <= 0;
+    if (g.visible) { g.position.set(k.x, Math.sin(time * 2 + i) * 0.15, k.z); g.rotation.y = time * 0.8; }
+  });
+  carousel.rotation.y = time * 0.5;
+  carousel.children.forEach((c, i) => { if (i >= 3 && i % 2 === 0) c.position.y = 1.6 + Math.sin(time * 2 + i) * 0.3; });
+  for (let i = 0; i < PUFF; i++) {
+    if (puffLife[i] <= 0) continue;
+    puffLife[i] -= dt; puffVel[i * 3 + 1] -= 7 * dt;
+    for (let k = 0; k < 3; k++) puffPos[i * 3 + k] += puffVel[i * 3 + k] * dt;
+    if (puffPos[i * 3 + 1] < 0.05) { puffPos[i * 3 + 1] = 0.05; puffVel[i * 3] *= 0.8; puffVel[i * 3 + 2] *= 0.8; puffVel[i * 3 + 1] = 0; }
+    if (puffLife[i] <= 0) puffPos[i * 3 + 1] = -99;
+  }
+  puffGeo.attributes.position.needsUpdate = true;
+  puffGeo.attributes.color.needsUpdate = true;
+  hud(dt);
+  // camera: whole plaza in view, nudged toward own scooter
+  const me = world.players.get(lobby.room?.me), mg = me && players3d.get(me.id);
+  const fx = mg ? mg.position.x * 0.35 : 0, fz = mg ? mg.position.z * 0.35 : 0;
+  const fit = Math.max(1, 1.25 / camera.aspect);
+  camPos.lerp(_v.set(fx, 33 * fit, fz + 23 * fit), 1 - Math.exp(-dt * 3));
+  camLook.lerp(_v.set(fx, 0, fz + 1.5), 1 - Math.exp(-dt * 3));
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Cannon Cove</title>
+<style>
+  :root { --ink: #fff; --card: rgba(10, 22, 34, 0.62); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #6cc4e8; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; min-width: 190px; }
+  #info .a { font-size: 30px; font-weight: 900; line-height: 1; color: #ffd23f; font-variant-numeric: tabular-nums; }
+  #info .a small { font-size: 15px; color: #fff; opacity: 0.75; }
+  #info .m { font-size: 13px; margin-top: 4px; opacity: 0.9; }
+  #hp { display: flex; gap: 3px; margin-top: 6px; }
+  #hp i { width: 18px; height: 8px; border-radius: 3px; background: #ff5a5f; }
+  #hp i.off { background: rgba(255, 255, 255, 0.18); }
+  #guns { display: flex; gap: 6px; margin-top: 6px; font-size: 11.5px; }
+  #guns span { flex: 1; text-align: center; padding: 3px 0; border-radius: 6px; background: rgba(255, 255, 255, 0.12); }
+  #guns span.ready { background: #2ec27e; color: #06240f; font-weight: 800; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 46px; text-align: right; opacity: 0.85; }
+  #board .row.out span { opacity: 0.45; }
+  #board .row.me span { color: #ffd23f; font-weight: 800; }
+  #feed { position: fixed; left: 14px; top: 150px; font-size: 12.5px; display: none; flex-direction: column; gap: 4px; pointer-events: none; }
+  #feed div { background: var(--card); padding: 4px 9px; border-radius: 8px; }
+  #map { position: fixed; right: 14px; bottom: 14px; width: 150px; height: 150px; border-radius: 50%; display: none; background: rgba(10, 40, 60, 0.55); border: 2px solid rgba(255, 255, 255, 0.35); }
+  #big { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(32px, 8vw, 80px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.3); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.3em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffd23f; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse) { #hint { display: none; } #map { top: 62px; bottom: auto; left: 14px; right: auto; width: 110px; height: 110px; } #feed { top: 180px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="a" id="clock"></div><div class="m" id="mine"></div><div id="hp"></div><div id="guns"><span id="gunL">◀ port</span><span id="gunR">starboard ▶</span></div></div>
+<div id="board" class="card"></div>
+<div id="feed"></div>
+<canvas id="map" width="300" height="300"></canvas>
+<div id="big"></div>
+<div id="hint" class="card"><b>W/S</b> sails · <b>A/D</b> helm · <b>Q</b> fire port (left) · <b>E</b> fire starboard (right) · grab 🛢 barrels to patch the hull</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/pirate-cannon-clash/index.html
+ * PURPOSE: online pirate ship free-for-all for up to 14: arcade sailing, port/starboard broadsides with arcing cannonballs, island cover, repair barrels, sink to score; host-authoritative sim
+ * UI: Cannon Cove page (lobby overlay, clock, hull + cannon reload HUD, standings, sink feed, round minimap, phone joystick + fire buttons)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createNameSync } from '../common/snapshot-names.js';
+import { createTouchPad } from '../common/touch-joystick.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, sky, rolling sea (CPU waves), sandy islands with palms, rock stacks
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x8fd0f0);
+scene.fog = new THREE.Fog(0x8fd0f0, 70, 210);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x2a6a8a, 1.4));
+const sun = new THREE.DirectionalLight(0xfff0d0, 2.4);
+sun.position.set(30, 60, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 160 });
+scene.add(sun, sun.target);
+const R_SEA = 62;
+const wave = (x, z, t) => Math.sin(x * 0.18 + t * 1.3) * 0.32 + Math.sin(z * 0.23 - t * 1.1) * 0.26 + Math.sin((x + z) * 0.4 + t * 2.1) * 0.08;
+const seaGeo = new THREE.PlaneGeometry(220, 220, 90, 90).rotateX(-Math.PI / 2);
+const sea = new THREE.Mesh(seaGeo, new THREE.MeshStandardMaterial({ color: 0x1f8fc4, roughness: 0.25, metalness: 0.15, flatShading: true }));
+sea.receiveShadow = true;
+scene.add(sea);
+const seaBase = seaGeo.attributes.position.array.slice();
+// arena limit: a ring of buoys
+const buoyMat = new THREE.MeshStandardMaterial({ color: 0xff5a3c, roughness: 0.5 });
+const buoys = [];
+for (let k = 0; k < 40; k++) {
+  const a = (k / 40) * Math.PI * 2, b = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.5, 1.4, 10), buoyMat);
+  b.position.set(Math.cos(a) * (R_SEA + 1), 0.4, Math.sin(a) * (R_SEA + 1)); b.castShadow = true;
+  scene.add(b); buoys.push(b);
+}
+const ISLANDS = [[0, 0, 7], [-30, -22, 5], [28, -26, 4.5], [-26, 28, 4.5], [31, 24, 5.5], [0, -44, 3.5], [0, 44, 3.5], [-46, 2, 3.5], [46, -2, 3.5]];
+const sandMat = new THREE.MeshStandardMaterial({ color: 0xf2d59a, roughness: 0.95 }), grassMat = new THREE.MeshStandardMaterial({ color: 0x5fb04a, roughness: 0.9 });
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8a6440 }), leafMat = new THREE.MeshStandardMaterial({ color: 0x3f9a3a, side: THREE.DoubleSide, flatShading: true });
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x8c8f96, flatShading: true });
+for (const [x, z, r] of ISLANDS) {
+  const g = new THREE.Group();
+  const sand = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.85, r * 1.1, 1.6, 28), sandMat); sand.position.y = 0.2; sand.receiveShadow = true;
+  const top = new THREE.Mesh(new THREE.SphereGeometry(r * 0.6, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), grassMat); top.position.y = 0.95; top.scale.y = 0.45; top.receiveShadow = true;
+  g.add(sand, top);
+  for (let k = 0; k < Math.round(r / 2); k++) {
+    const palm = new THREE.Group(), a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.45, h = 3 + Math.random() * 2;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, h, 7), trunkMat); trunk.position.y = h / 2; trunk.rotation.z = 0.15; trunk.castShadow = true;
+    palm.add(trunk);
+    for (let j = 0; j < 6; j++) { const leaf = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 2.6), leafMat); leaf.position.set(0.25, h, 0); leaf.rotation.set(-1.1, (j / 6) * Math.PI * 2, 0); leaf.translateY(1.1); leaf.castShadow = true; palm.add(leaf); }
+    palm.position.set(Math.cos(a) * d, 1, Math.sin(a) * d);
+    g.add(palm);
+  }
+  for (let k = 0; k < 3; k++) { const rk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6 + Math.random() * 0.8, 0), rockMat); const a = Math.random() * Math.PI * 2; rk.position.set(Math.cos(a) * r, 0.2, Math.sin(a) * r); rk.castShadow = true; g.add(rk); }
+  g.position.set(x, 0, z);
+  scene.add(g);
+}
+
+// Ships > hull, deck, mast, sail in player color, flag, side cannons, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(10,22,34,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(4, 1, 1); s.position.y = 7.2; s.renderOrder = 5;
+  return s;
+}
+const hullShape = new THREE.Shape();
+hullShape.moveTo(-1.1, -2.4); hullShape.lineTo(1.1, -2.4); hullShape.lineTo(1.25, 0.8); hullShape.quadraticCurveTo(1.0, 2.2, 0, 3.1); hullShape.quadraticCurveTo(-1.0, 2.2, -1.25, 0.8); hullShape.closePath();
+const hullGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 1.3, bevelEnabled: true, bevelSize: 0.12, bevelThickness: 0.12, bevelSegments: 2 }).rotateX(Math.PI / 2).translate(0, 1.0, 0);
+const deckGeo = new THREE.ShapeGeometry(hullShape).rotateX(-Math.PI / 2).translate(0, 1.02, 0);
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x7a4a2a, roughness: 0.8 }), deckMat = new THREE.MeshStandardMaterial({ color: 0xc89a62, roughness: 0.85 });
+const ironMat = new THREE.MeshStandardMaterial({ color: 0x22252b, metalness: 0.6, roughness: 0.4 });
+const ships3d = new Map();
+function makeShip(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  const hull = new THREE.Mesh(hullGeo, woodMat); hull.castShadow = true;
+  const deck = new THREE.Mesh(deckGeo, deckMat); deck.receiveShadow = true;
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.62, 0.18, 4.2), new THREE.MeshStandardMaterial({ color: p.color })); stripe.position.set(0, 0.62, -0.1);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 5.6, 8), woodMat); mast.position.set(0, 3.8, 0.2); mast.castShadow = true;
+  const sailMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color).lerp(new THREE.Color(0xffffff), 0.35), side: THREE.DoubleSide, roughness: 0.9 });
+  const sailGeo = new THREE.PlaneGeometry(2.8, 2.6, 6, 4);
+  // billow the sail forward
+  const sp = sailGeo.attributes.position;
+  for (let i = 0; i < sp.count; i++) { const x = sp.getX(i), y = sp.getY(i); sp.setZ(i, 0.45 * (1 - (x / 1.4) ** 2) * (1 - ((y) / 1.3) ** 2 * 0.5)); }
+  sailGeo.computeVertexNormals();
+  const sail = new THREE.Mesh(sailGeo, sailMat); sail.position.set(0, 4.1, 0.35); sail.castShadow = true;
+  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.2, 6).rotateZ(Math.PI / 2), woodMat); yard.position.set(0, 5.4, 0.3);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.55), new THREE.MeshStandardMaterial({ color: 0x111111, side: THREE.DoubleSide })); flag.position.set(0.45, 6.4, 0.2);
+  const skull = new THREE.Mesh(new THREE.CircleGeometry(0.13, 12), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })); skull.position.set(0.45, 6.42, 0.21);
+  body.add(hull, deck, stripe, mast, sail, yard, flag, skull);
+  for (const s of [-1, 1]) for (const z of [-1.1, 0, 1.1]) { const c = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.16, 0.7, 8).rotateZ(Math.PI / 2), ironMat); c.position.set(s * 1.35, 1.25, z); body.add(c); }
+  const smoke = new THREE.Group(); body.add(smoke);
+  const tag = nameTag(p.nick, p.color);
+  g.add(body, tag);
+  g.userData = { body, sail, flag, tag };
+  scene.add(g);
+  return g;
+}
+
+// FX > cannonballs, splashes, muzzle smoke, wood splinters (one shared particle pool)
+const ballGeo = new THREE.SphereGeometry(0.28, 12, 8);
+const balls3d = [];
+const P_N = 1500;
+const pGeo = new THREE.BufferGeometry();
+const pPos = new Float32Array(P_N * 3), pCol = new Float32Array(P_N * 3), pVel = new Float32Array(P_N * 3), pLife = new Float32Array(P_N), pGrav = new Float32Array(P_N);
+pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+const parts = new THREE.Points(pGeo, new THREE.PointsMaterial({ size: 0.4, vertexColors: true, transparent: true, opacity: 0.9 }));
+parts.frustumCulled = false;
+scene.add(parts);
+for (let i = 0; i < P_N; i++) pPos[i * 3 + 1] = -99;
+let pNext = 0;
+const C_WATER = new THREE.Color(0xe8f8ff), C_SMOKE = new THREE.Color(0xbfbfbf), C_WOOD = new THREE.Color(0x8a5a32), C_FIRE = new THREE.Color(0xffa030);
+function spray(x, y, z, n, col, spd, up, grav = 14, life = 0.9) {
+  for (let k = 0; k < n; k++) {
+    const i = pNext++ % P_N, a = Math.random() * Math.PI * 2, s = spd * Math.random();
+    pPos.set([x, y, z], i * 3); pVel.set([Math.cos(a) * s, up * (0.5 + Math.random()), Math.sin(a) * s], i * 3);
+    pCol.set([col.r, col.g, col.b], i * 3); pLife[i] = life * (0.6 + Math.random() * 0.6); pGrav[i] = grav;
+  }
+}
+
+// Audio > cannon boom, splash, crunch, sink groan, countdown, fanfare
+const gameAudio = createGameAudio({ noiseSeconds: 2 });
+const { tone } = gameAudio;
+const noise = (len, vol, f0, f1, delay = 0) => gameAudio.noise(len, vol, f0, f1, 'lowpass', delay);
+const near = (x, z) => { const m = ships.get(lobby.room?.me); return m ? Math.max(0.12, 1 - Math.hypot(m.x - x, m.z - z) / 60) : 0.5; };
+const sfx = {
+  boom(x, z) { const v = near(x, z); for (let k = 0; k < 3; k++) noise(0.7, 0.32 * v, 1600, 60, k * 0.07); tone(90, 40, 0.5, 0.2 * v, 'sine'); },
+  splash(x, z) { noise(0.35, 0.12 * near(x, z), 3500, 400); },
+  crunch(x, z) { const v = near(x, z); noise(0.3, 0.35 * v, 2200, 200); tone(180, 60, 0.25, 0.15 * v, 'square'); },
+  sink() { tone(220, 50, 1.6, 0.12, 'sawtooth'); noise(1.6, 0.15, 1200, 100); },
+  repair() { [660, 880].forEach((f, i) => tone(f, f, 0.12, 0.08, 'triangle', i * 0.09)); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  win() { [392, 523, 659, 784, 1046].forEach((f, i) => tone(f, f, 0.24, 0.1, 'square', i * 0.12)); },
+};
+
+// Game > World: ships, cannonballs, barrels
+const BOT_NAMES = ['Redbeard', 'Saltjaw', 'Bilge Rat', 'Peg Leg', 'Calico', 'Barnacle', 'Squall', 'One-Eye', 'Mad Molly', 'Sea Dog', 'Cutlass', 'Plank', 'Flint', 'Kraken'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+const MATCH_T = 180, WIN_SINKS = 8, MAX_HP = 5, MAXS = 9.5, RELOAD = 2.6, SHIP_R = 2.2, G = 12;
+const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, winner: null };
+const ships = new Map();
+let balls = [], barrels = [], events = [];
+const rng = Math.random;
+function addShip(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, h: 0, speed: 0, hp: MAX_HP, sunk: 0, thr: 0, turn: 0, cdL: 0, cdR: 0, seqL: 0, seqR: 0, lastL: 0, lastR: 0, kills: 0, deaths: 0, lastHit: null, inv: 0, skill: 0.55 + rng() * 0.4, think: 0, target: null };
+  ships.set(id, p);
+  return p;
+}
+function removeShip(id) { ships.delete(id); const g = ships3d.get(id); if (g) { scene.remove(g); ships3d.delete(id); } }
+function clearShips() { for (const id of [...ships.keys()]) removeShip(id); }
+function blocked(x, z, pad) { return ISLANDS.some(([ix, iz, r]) => Math.hypot(x - ix, z - iz) < r + pad); }
+function spawn(p, a) {
+  let x, z, tries = 0;
+  do { const r = R_SEA - 8 - rng() * 6; x = Math.cos(a) * r; z = Math.sin(a) * r; a += 0.4; tries++; } while ((blocked(x, z, 4) || [...ships.values()].some((q) => q !== p && !q.sunk && Math.hypot(q.x - x, q.z - z) < 7)) && tries < 20);
+  Object.assign(p, { x, z, h: Math.atan2(-x, -z), speed: 0, hp: MAX_HP, sunk: 0, cdL: 1, cdR: 1, inv: 2.5, lastHit: null });
+}
+function startMatch() {
+  const ps = [...ships.values()];
+  ps.forEach((p, k) => { spawn(p, (k / ps.length) * Math.PI * 2); p.kills = 0; p.deaths = 0; });
+  balls = [];
+  barrels = [];
+  for (let k = 0; k < 5; k++) barrels.push(newBarrel());
+  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1 : 3.5, left: world.mode === 'attract' ? 90 : MATCH_T, winner: null });
+}
+function newBarrel() {
+  let x, z;
+  do { const a = rng() * Math.PI * 2, r = 8 + rng() * (R_SEA - 14); x = Math.cos(a) * r; z = Math.sin(a) * r; } while (blocked(x, z, 2.5));
+  return { x: +x.toFixed(1), z: +z.toFixed(1), t: 0 };
+}
+
+// Run engine > sailing: throttle eases speed, helm turns faster under way, islands + ships + buoy ring push back
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+function stepShip(p, dt) {
+  p.cdL -= dt; p.cdR -= dt; p.inv -= dt;
+  if (p.sunk) { p.sunk += dt; if (p.sunk > 4 && world.phase === 'play') { spawn(p, rng() * Math.PI * 2); events.push(['r', p.id]); } return; }
+  const live = world.phase === 'play';
+  const thr = live ? clamp(p.thr, -1, 1) : 0, turn = live ? clamp(p.turn, -1, 1) : 0;
+  const want = thr >= 0 ? thr * MAXS : thr * MAXS * 0.35;
+  p.speed += clamp(want - p.speed, -6 * dt, 3.2 * dt);
+  // positive helm = starboard (right) = heading decreases
+  p.h = wrap(p.h - turn * (0.35 + 0.75 * Math.min(Math.abs(p.speed) / MAXS, 1)) * dt * Math.sign(p.speed || 1));
+  p.x += Math.sin(p.h) * p.speed * dt; p.z += Math.cos(p.h) * p.speed * dt;
+  for (const [ix, iz, r] of ISLANDS) {
+    const dx = p.x - ix, dz = p.z - iz, d = Math.hypot(dx, dz), rr = r + SHIP_R * 0.8;
+    if (d < rr && d > 1e-3) { p.x = ix + (dx / d) * rr; p.z = iz + (dz / d) * rr; p.speed *= 0.6; }
+  }
+  const d = Math.hypot(p.x, p.z), lim = R_SEA - SHIP_R;
+  if (d > lim) { p.x *= lim / d; p.z *= lim / d; p.speed *= 0.7; }
+  if (!live) return;
+  const fire = (side) => {
+    // side: -1 port (left), +1 starboard (right)
+    const fx = Math.sin(p.h), fz = Math.cos(p.h), rx = -fz, rz = fx;
+    const sx = rx * side, sz = rz * side;
+    for (let k = -1; k <= 1; k++) {
+      const v = 15 + rng() * 2;
+      balls.push({ owner: p.id, x: p.x + sx * 1.5 + fx * k * 1.1, y: 1.3, z: p.z + sz * 1.5 + fz * k * 1.1, vx: sx * v + fx * p.speed + (rng() - 0.5), vy: 6.5 + rng(), vz: sz * v + fz * p.speed + (rng() - 0.5), t: 0 });
+    }
+    events.push(['f', p.id, side]);
+  };
+  if (p.seqL !== p.lastL) { p.lastL = p.seqL; if (p.cdL <= 0) { p.cdL = RELOAD; fire(-1); } }
+  if (p.seqR !== p.lastR) { p.lastR = p.seqR; if (p.cdR <= 0) { p.cdR = RELOAD; fire(1); } }
+}
+function shipCollide(ps) {
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j];
+    if (a.sunk || b.sunk) continue;
+    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d > SHIP_R * 2 || d < 1e-3) continue;
+    const pen = (SHIP_R * 2 - d) / 2, nx = dx / d, nz = dz / d;
+    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
+    a.speed *= 0.85; b.speed *= 0.85;
+  }
+}
+// Run engine > cannonballs: ballistic arc, hull hit test in ship-local box, splash on water or island
+function stepBalls(dt) {
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i];
+    b.t += dt; b.vy -= G * dt;
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    let gone = false;
+    for (const p of ships.values()) {
+      if (p.id === b.owner && b.t < 0.4 || p.sunk || b.y > 2.4) continue;
+      const dx = b.x - p.x, dz = b.z - p.z, fx = Math.sin(p.h), fz = Math.cos(p.h);
+      const lz = dx * fx + dz * fz, lx = dx * -fz + dz * fx;
+      if (Math.abs(lx) < 1.4 && lz > -2.6 && lz < 3.1) {
+        gone = true;
+        events.push(['h', p.id, +b.x.toFixed(1), +b.z.toFixed(1)]);
+        if (p.inv <= 0 && p.id !== b.owner) {
+          p.hp--; p.lastHit = b.owner;
+          if (p.hp <= 0) {
+            p.sunk = 0.001; p.deaths++; p.speed = 0;
+            const k = ships.get(p.lastHit); if (k) k.kills++;
+            events.push(['k', p.id, p.lastHit]);
+          }
+        }
+        break;
+      }
+    }
+    if (!gone && (b.y < 0 || blocked(b.x, b.z, 0) && b.y < 1.5)) { gone = true; events.push(['s', +b.x.toFixed(1), +b.z.toFixed(1), blocked(b.x, b.z, 0) ? 1 : 0]); }
+    if (gone || b.t > 4) balls.splice(i, 1);
+  }
+  for (const br of barrels) {
+    if (br.t > 0) { br.t -= dt; if (br.t <= 0) Object.assign(br, newBarrel()); continue; }
+    for (const p of ships.values()) if (!p.sunk && Math.hypot(p.x - br.x, p.z - br.z) < SHIP_R + 0.8 && p.hp < MAX_HP) { p.hp = Math.min(MAX_HP, p.hp + 2); br.t = 12; events.push(['b', p.id]); break; }
+  }
+}
+
+// Run engine > bots: hunt nearest ship, swing broadside-on at mid range, fire the facing battery, dodge islands and the buoy ring
+function botThink(p, dt) {
+  if (p.sunk) return;
+  p.think -= dt;
+  if (p.think <= 0 || !ships.get(p.target?.id)?.hp) {
+    p.think = 1.5 + rng();
+    let best = null, bd = Infinity;
+    for (const q of ships.values()) if (q !== p && !q.sunk) { const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; } }
+    // hurt bots go for a barrel first
+    const br = p.hp <= 2 ? barrels.filter((b) => b.t <= 0).sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z))[0] : null;
+    p.target = br && (!best || Math.hypot(br.x - p.x, br.z - p.z) < 30) ? { barrel: br } : best;
+  }
+  const tg = p.target?.barrel ?? p.target;
+  let want = p.h, thr = 0.8;
+  if (tg) {
+    const dx = tg.x - p.x, dz = tg.z - p.z, d = Math.hypot(dx, dz), bear = Math.atan2(dx, dz), rel = wrap(bear - p.h);
+    if (p.target.barrel || d > 22) want = bear;
+    else if (d < 9) want = bear + Math.PI;
+    else want = bear - Math.sign(rel || 1) * Math.PI / 2;
+    thr = p.target.barrel ? 1 : d > 22 ? 1 : 0.6;
+    if (!p.target.barrel && d < 21) {
+      // rel > 0 = target on the port (left) side
+      const off = Math.abs(Math.abs(rel) - Math.PI / 2);
+      if (off < 0.18 + p.skill * 0.15 && rng() < 0.08 + p.skill * 0.1) { if (rel > 0) p.seqL++; else p.seqR++; }
+    }
+  }
+  // look ahead for islands and the arena edge
+  const ax = p.x + Math.sin(p.h) * 9, az = p.z + Math.cos(p.h) * 9;
+  for (const [ix, iz, r] of ISLANDS) if (Math.hypot(ax - ix, az - iz) < r + 4) { const side = Math.sign(wrap(Math.atan2(ix - p.x, iz - p.z) - p.h)) || 1; want = p.h - side * 1.2; }
+  if (Math.hypot(ax, az) > R_SEA - 6) want = Math.atan2(-p.x, -p.z);
+  p.turn = clamp(-wrap(want - p.h) * 2.2, -1, 1);
+  p.thr = thr;
+}
+
+// Game > Phases: countdown, play, final standings
+let lastBeep = 0;
+function phases(dt) {
+  world.t -= dt;
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { events.push(['c', 0]); world.phase = 'play'; }
+  } else if (world.phase === 'play') {
+    world.left -= dt;
+    const top = [...ships.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0];
+    if (world.left <= 0 || top?.kills >= WIN_SINKS) {
+      world.winner = top?.id ?? null;
+      if (top) events.push(['w', top.id]);
+      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
+    }
+  } else if (world.phase === 'final' && world.t <= 0) {
+    if (world.mode === 'attract') startMatch();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+}
+function startAttract() {
+  clearShips();
+  world.mode = 'attract';
+  for (let i = 0; i < 8; i++) addShip(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  startMatch();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'cannon-cove', title: 'Cannon Cove', emoji: '🏴‍☠️', accent: '#ff7a3c',
+  blurb: 'Pirate ship free-for-all. Swing broadside-on, fire the port or starboard battery, dodge the arcing cannonballs behind islands. Sink ships to score.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: `Up to 14 captains per room (humans + bots). First to ${WIN_SINKS} sinks or most after 3 minutes.`,
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearShips();
+    world.mode = 'match';
+    ['info', 'board', 'map'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    document.getElementById('top').style.display = 'flex';
+    document.getElementById('feed').style.display = 'flex';
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
+    for (const p of lobby.room.players) addShip(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addShip(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    startMatch();
+  },
+  onLobby() {
+    ['info', 'board', 'top', 'map', 'feed'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...ships.values()]) if (!p.bot && !ids.has(p.id)) removeShip(p.id);
+  for (const p of players) if (!ships.has(p.id)) {
+    // keep 14 seats: a late captain takes the worst bot's place
+    if (ships.size >= 14) { const bot = [...ships.values()].filter((q) => q.bot).sort((a, b) => a.kills - b.kills)[0]; if (bot) removeShip(bot.id); }
+    spawn(addShip(p.id, p.nick, p.color, false), rng() * Math.PI * 2);
+  }
+}
+
+// Multiplayer > Net: guest input 20 Hz, host snapshots 20 Hz; cannonballs replayed from fire events
+const remoteIn = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
+function snapshot() {
+  return names.stamp({
+    g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
+    B: barrels.map((b) => [b.x, b.z, b.t > 0 ? 1 : 0]),
+    P: [...ships.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.speed), p.hp, (p.bot ? 1 : 0) | (p.sunk ? 2 : 0) | (p.inv > 0 ? 4 : 0), f2(p.sunk), p.kills, p.deaths, f2(Math.max(0, p.cdL)), f2(Math.max(0, p.cdR))]),
+  }, ships.values());
+}
+let snapAt = 0;
+function applySnap(s) {
+  names.read(s);
+  Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, winner: s.win });
+  barrels = s.B.map(([x, z, gone]) => ({ x, z, t: gone }));
+  const seen = new Set();
+  for (const [id, x, z, h, speed, hp, fl, sunk, kills, deaths, cdL, cdR] of s.P) {
+    seen.add(id);
+    if (!ships.has(id) && !names.name(id)) continue;
+    const p = ships.get(id) ?? addShip(id, ...names.name(id), !!(fl & 1));
+    Object.assign(p, { x, z, h, speed, hp, sunk, inv: fl & 4 ? 1 : 0, kills, deaths, cdL, cdR });
+  }
+  for (const id of [...ships.keys()]) if (!seen.has(id)) removeShip(id);
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+let shake = 0;
+const feed = [];
+function pushFeed(html) { feed.unshift({ html, t: 5 }); feed.length = Math.min(feed.length, 5); }
+function playEvents(evs) {
+  const me = lobby.room?.me, match = world.mode === 'match', host = isHostSim();
+  for (const e of evs) {
+    const p = ships.get(e[1]);
+    if (e[0] === 'f' && p) {
+      const fx = Math.sin(p.h), fz = Math.cos(p.h), sx = -fz * e[2], sz = fx * e[2];
+      for (let k = -1; k <= 1; k++) spray(p.x + sx * 1.6 + fx * k * 1.1, 1.4, p.z + sz * 1.6 + fz * k * 1.1, 10, k ? C_SMOKE : C_FIRE, 1.5, 1.2, -1, 1.2);
+      // guests fly visual-only copies of the host's balls
+      if (!host) for (let k = -1; k <= 1; k++) balls.push({ owner: p.id, x: p.x + sx * 1.5 + fx * k * 1.1, y: 1.3, z: p.z + sz * 1.5 + fz * k * 1.1, vx: sx * 16 + fx * p.speed, vy: 7, vz: sz * 16 + fz * p.speed, t: 0, ghost: true });
+      if (match) sfx.boom(p.x, p.z);
+      if (e[1] === me) shake = 0.25;
+    } else if (e[0] === 'h' && p) { spray(e[2], 1.5, e[3], 24, C_WOOD, 5, 6); if (match) sfx.crunch(e[2], e[3]); if (e[1] === me) shake = 0.45; }
+    else if (e[0] === 's') { spray(e[1], 0.2, e[2], 18, e[3] ? C_SMOKE : C_WATER, 1.6, 7, 16, 0.8); if (match) sfx.splash(e[1], e[2]); }
+    else if (e[0] === 'k' && p) {
+      const k = ships.get(e[2]);
+      spray(p.x, 1, p.z, 60, C_WOOD, 7, 8); spray(p.x, 1, p.z, 30, C_FIRE, 4, 6);
+      if (match) { sfx.sink(); pushFeed(`<b style="color:${k?.color ?? '#fff'}">${esc(k?.nick ?? '?')}</b> 💥 sank <b style="color:${p.color}">${esc(p.nick)}</b>`); }
+      if (e[1] === me && match) flash('<small>to the depths…</small>☠️ Sunk!', 2.5);
+      else if (e[2] === me && match) flash('<small>direct hit</small>💥 Sunk one!', 1.4);
+    } else if (e[0] === 'b' && e[1] === me && match) { sfx.repair(); flash('<small>hull patched</small>🛢 +2', 1); }
+    else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you rule the seas!' : 'captain of the cove'}</small>🏴‍☠️ ${esc(p.nick)}`, 4); }
+  }
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > keyboard + phone joystick (sails + helm) + port / starboard fire buttons
+const keys = {}, local = { thr: 0, turn: 0, seqL: 0, seqR: 0 };
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (!e.repeat) {
+    if (e.code === 'KeyQ' || e.code === 'KeyJ') local.seqL++;
+    if (e.code === 'KeyE' || e.code === 'KeyK') local.seqR++;
+  }
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const pad = createTouchPad({ buttons: [{ id: 'right', label: 'FIRE ▶', color: 'rgba(255, 122, 60, 0.65)' }, { id: 'left', label: '◀ FIRE', color: 'rgba(255, 122, 60, 0.65)' }], onStart: gameAudio.unlock });
+pad.onPress('left', () => local.seqL++);
+pad.onPress('right', () => local.seqR++);
+function readInput() {
+  local.thr = clamp((keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) + pad.y, -1, 1);
+  local.turn = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x, -1, 1);
+}
+
+// HUD > clock, hull pips, battery reload, standings, sink feed, minimap, banner
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.8) { big(t); flashT = len; }
+let hudT = 0;
+const mmss = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`;
+const mapCv = document.getElementById('map'), mg = mapCv.getContext('2d');
+function hud(dt) {
+  flashT -= dt;
+  for (const f of feed) f.t -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  const me = ships.get(lobby.room?.me);
+  if (world.phase === 'count') big(`<small>raise the sails</small>${Math.max(1, Math.ceil(world.t))}`);
+  else if (world.phase === 'final') { const top = [...ships.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏴‍☠️ ${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big(me?.sunk ? `<small>new ship in ${Math.max(0, Math.ceil(4 - me.sunk))}s</small>` : '');
+  if (me) {
+    document.getElementById('gunL').className = me.cdL <= 0 && !me.sunk ? 'ready' : '';
+    document.getElementById('gunR').className = me.cdR <= 0 && !me.sunk ? 'ready' : '';
+  }
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('clock').innerHTML = `${mmss(world.left)}<small> left</small>`;
+  document.getElementById('mine').textContent = me ? `you: ${me.kills} sunk · ${me.deaths} lost · first to ${WIN_SINKS}` : '';
+  document.getElementById('hp').innerHTML = me ? Array.from({ length: MAX_HP }, (_, i) => `<i class="${i < me.hp ? '' : 'off'}"></i>`).join('') : '';
+  const r = [...ships.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.sunk ? 'out' : ''} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>💥${p.kills} ☠️${p.deaths}</em></div>`).join('');
+  document.getElementById('feed').innerHTML = feed.filter((f) => f.t > 0).map((f) => `<div>${f.html}</div>`).join('');
+  // minimap: islands, barrels, ships as heading arrows
+  const W = mapCv.width, s = W / 2 / (R_SEA + 4);
+  mg.clearRect(0, 0, W, W);
+  mg.fillStyle = '#f2d59a';
+  for (const [x, z, r2] of ISLANDS) { mg.beginPath(); mg.arc(W / 2 + x * s, W / 2 + z * s, r2 * s, 0, 7); mg.fill(); }
+  mg.fillStyle = '#c8873a';
+  for (const b of barrels) if (b.t <= 0) mg.fillRect(W / 2 + b.x * s - 4, W / 2 + b.z * s - 4, 8, 8);
+  for (const p of ships.values()) {
+    if (p.sunk) continue;
+    mg.save(); mg.translate(W / 2 + p.x * s, W / 2 + p.z * s); mg.rotate(-p.h);
+    mg.fillStyle = p.color; mg.strokeStyle = p.id === lobby.room?.me ? '#fff' : 'rgba(0,0,0,0.5)'; mg.lineWidth = p.id === lobby.room?.me ? 3 : 1.5;
+    mg.beginPath(); mg.moveTo(0, 10); mg.lineTo(6, -7); mg.lineTo(-6, -7); mg.closePath(); mg.fill(); mg.stroke();
+    mg.restore();
+  }
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room;
+  if (isHostSim()) {
+    const me = room && ships.get(room.me);
+    if (me && world.mode === 'match') Object.assign(me, { thr: local.thr, turn: local.turn, seqL: local.seqL, seqR: local.seqR });
+    for (const [id, inp] of remoteIn) { const p = ships.get(id); if (p) Object.assign(p, { thr: inp.a, turn: inp.b, seqL: inp.l, seqR: inp.r }); }
+    const ps = [...ships.values()];
+    for (const p of ps) if (p.bot) botThink(p, dt);
+    for (const p of ps) stepShip(p, dt);
+    shipCollide(ps);
+    stepBalls(dt);
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    if (world.phase === 'play') world.left -= dt;
+    for (let i = balls.length - 1; i >= 0; i--) { const b = balls[i]; b.t += dt; b.vy -= G * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; if (b.y < 0 || b.t > 3) balls.splice(i, 1); }
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', a: +local.thr.toFixed(2), b: +local.turn.toFixed(2), l: local.seqL, r: local.seqR }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 60, 70), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+const barrelGeo = new THREE.CylinderGeometry(0.55, 0.55, 1.1, 14), barrelMat = new THREE.MeshStandardMaterial({ color: 0xa8682e, roughness: 0.7 });
+const barrels3d = [];
+let camMode = 0;
+addEventListener('keydown', (e) => { if (e.code === 'KeyC' && !e.repeat) camMode = (camMode + 1) % 2; });
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim();
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  // sea waves
+  const pa = seaGeo.attributes.position.array;
+  for (let i = 0; i < pa.length; i += 3) pa[i + 1] = wave(seaBase[i], seaBase[i + 2], time);
+  seaGeo.attributes.position.needsUpdate = true;
+  seaGeo.computeVertexNormals();
+  for (const b of buoys) b.position.y = 0.3 + wave(b.position.x, b.position.z, time);
+  for (const p of ships.values()) {
+    let g = ships3d.get(p.id);
+    if (!g) { g = makeShip(p); ships3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
+    const tx = p.x + Math.sin(p.h) * p.speed * age, tz = p.z + Math.cos(p.h) * p.speed * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 12);
+    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, g.position.y, tz);
+    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
+    g.rotation.y += wrap(p.h - g.rotation.y) * (hostSim ? 1 : a);
+    const u = g.userData, w0 = wave(g.position.x, g.position.z, time);
+    // bob + pitch/roll from the local wave slope; sinking ships list and slide under
+    const sx = wave(g.position.x + 1, g.position.z, time) - w0, sz = wave(g.position.x, g.position.z + 1, time) - w0;
+    const fx = Math.sin(p.h), fz = Math.cos(p.h);
+    u.body.rotation.x = -(sx * fx + sz * fz) * 0.7;
+    u.body.rotation.z = (sx * fz - sz * fx) * 0.7 + (p.sunk ? Math.min(p.sunk, 2) * 0.6 : (MAX_HP - p.hp) * 0.03);
+    g.position.y = w0 - 0.35 - (p.sunk ? Math.min(p.sunk, 3) * 2.6 : 0);
+    u.sail.scale.y = 0.6 + Math.min(Math.abs(p.speed) / MAXS, 1) * 0.4;
+    u.flag.rotation.y = Math.sin(time * 6 + p.id) * 0.3;
+    u.tag.visible = !p.sunk;
+    g.visible = !(p.sunk > 3.5);
+    // invulnerable after respawn: blink
+    u.body.visible = !(p.inv > 0 && Math.sin(time * 20) > 0.3) || p.sunk;
+    if (!p.sunk && p.hp <= 2 && Math.random() < dt * 8) spray(g.position.x, 2.2, g.position.z, 1, C_SMOKE, 0.4, 2.5, -1, 1.6);
+  }
+  // cannonballs
+  while (balls3d.length < balls.length) { const m = new THREE.Mesh(ballGeo, ironMat); m.castShadow = true; scene.add(m); balls3d.push(m); }
+  balls3d.forEach((m, i) => { const b = balls[i]; m.visible = !!b; if (b) m.position.set(b.x, b.y, b.z); });
+  while (barrels3d.length < barrels.length) { const m = new THREE.Mesh(barrelGeo, barrelMat); m.castShadow = true; scene.add(m); barrels3d.push(m); }
+  barrels3d.forEach((m, i) => { const b = barrels[i]; m.visible = !!b && b.t <= 0; if (b) { m.position.set(b.x, wave(b.x, b.z, time) + 0.1, b.z); m.rotation.set(Math.PI / 2, time * 0.4 + i, Math.sin(time * 2 + i) * 0.2); } });
+  for (let i = 0; i < P_N; i++) {
+    if (pLife[i] <= 0) continue;
+    pLife[i] -= dt; pVel[i * 3 + 1] -= pGrav[i] * dt;
+    for (let k = 0; k < 3; k++) pPos[i * 3 + k] += pVel[i * 3 + k] * dt;
+    if (pLife[i] <= 0 || pPos[i * 3 + 1] < -1) { pLife[i] = 0; pPos[i * 3 + 1] = -99; }
+  }
+  pGeo.attributes.position.needsUpdate = true; pGeo.attributes.color.needsUpdate = true;
+  hud(dt);
+  // camera: chase own ship from behind (C toggles high view); spectators and attract orbit the cove
+  const me = ships.get(lobby.room?.me), mgp = me && ships3d.get(me.id);
+  if (mgp && world.mode === 'match') {
+    const fx = Math.sin(mgp.rotation.y), fz = Math.cos(mgp.rotation.y), far = camMode ? 34 : 15, up = camMode ? 34 : 9;
+    camPos.lerp(_v.set(mgp.position.x - fx * far, up, mgp.position.z - fz * far), 1 - Math.exp(-dt * 3));
+    camLook.lerp(_v.set(mgp.position.x + fx * 8, 0, mgp.position.z + fz * 8), 1 - Math.exp(-dt * 4));
+  } else {
+    const a = time * 0.05, fit = Math.max(1, 1.3 / camera.aspect);
+    camPos.lerp(_v.set(Math.sin(a) * 70 * fit, 58 * fit, Math.cos(a) * 70 * fit), 1 - Math.exp(-dt * 2));
+    camLook.lerp(_v.set(0, 0, 0), 1 - Math.exp(-dt * 2));
+  }
+  sun.position.copy(camLook).add(_v.set(30, 60, 20)); sun.target.position.copy(camLook);
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

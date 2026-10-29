@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Snowball Brawl</title>
+<style>
+  :root { --ink: #fff; --card: rgba(18, 34, 58, 0.62); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bcd6ec; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; cursor: crosshair; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 14px; user-select: none; }
+  #clock { top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 16px; font-weight: 900; font-size: 22px; font-variant-numeric: tabular-nums; display: none; margin-top: 46px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 170px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row b { font-variant-numeric: tabular-nums; }
+  #board .row.me span { color: #ffd23f; font-weight: 800; }
+  #board .row.out { opacity: 0.55; }
+  #feed { top: 14px; left: 14px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; position: fixed; font-size: 12.5px; }
+  #feed div { background: var(--card); padding: 4px 10px; border-radius: 9px; backdrop-filter: blur(6px); }
+  #me { bottom: 14px; left: 50%; transform: translateX(-50%); padding: 8px 14px; display: none; gap: 14px; align-items: center; font-weight: 800; font-size: 13px; }
+  #me .pips { display: flex; gap: 4px; }
+  #me .pips i { width: 15px; height: 15px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); }
+  #me .pips.ammo i.on { background: #fff; box-shadow: inset -3px -3px 0 rgba(120, 160, 200, 0.6); }
+  #me .pips.hits i.on { background: #6cc6ff; }
+  #big { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(30px, 7vw, 76px); font-weight: 900; text-shadow: 0 4px 0 rgba(20, 40, 70, 0.35); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.9; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffd23f; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.16); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 120px rgba(90, 180, 255, 0.9); opacity: 0; transition: opacity 0.25s; }
+  #stick { position: fixed; left: 24px; bottom: 24px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); border: 2px solid rgba(255, 255, 255, 0.5); display: none; }
+  #stick div { position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255, 255, 255, 0.8); }
+  @media (pointer: coarse) { #stick { display: block; } #hint { display: none; } }
+</style>
+</head>
+<body>
+<div id="hurt"></div>
+<div id="clock" class="card">2:00</div>
+<div id="board" class="card"></div>
+<div id="feed"></div>
+<div id="me" class="card"><span>❄ ammo</span><div class="pips ammo" id="ammo"></div><span>hits</span><div class="pips hits" id="hits"></div></div>
+<div id="big"></div>
+<div id="hint" class="card"><b>WASD</b> move · <b>mouse</b> aim · <b>click / hold</b> throw · lob over the forts · 3 hits freezes a player</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+<div id="stick"><div></div></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: 3d-toys/snowball-fight-arena/index.html
+ * PURPOSE: online free-for-all snowball fight for up to 14: aim with the mouse, lob arcing snowballs over crumbling snow forts, 3 hits freezes a player; 2-minute match; host-authoritative sim
+ * UI: Snowball Brawl page (lobby overlay, clock, scoreboard, freeze feed, ammo + hits pips, touch stick)
+ * USED BY: 3d-toys/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createNameSync } from '../common/snapshot-names.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, winter sky, low sun
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbcd6ec);
+scene.fog = new THREE.Fog(0xbcd6ec, 55, 120);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 300);
+scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x8fa6c4, 1.6));
+const sun = new THREE.DirectionalLight(0xfff1dc, 2.4);
+sun.position.set(-18, 34, 14);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, near: 1, far: 100 });
+scene.add(sun);
+
+// Field > snow ground, snowbank rim, pine ring
+const R_ARENA = 25;
+const snowTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#e8f0f8'; g.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(${150 + Math.random() * 60},${180 + Math.random() * 50},230,${0.05 + Math.random() * 0.08})`; g.beginPath(); g.arc(Math.random() * 512, Math.random() * 512, 3 + Math.random() * 18, 0, Math.PI * 2); g.fill(); }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(8, 8); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const ground = new THREE.Mesh(new THREE.CircleGeometry(80, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: snowTex, roughness: 0.95 }));
+ground.receiveShadow = true;
+scene.add(ground);
+const snowMat = new THREE.MeshStandardMaterial({ color: 0xf2f7fd, roughness: 0.9 });
+const rim = new THREE.Mesh(new THREE.TorusGeometry(R_ARENA + 1, 1.1, 10, 80).rotateX(Math.PI / 2), snowMat);
+rim.scale.y = 0.5; rim.receiveShadow = true;
+scene.add(rim);
+{
+  const trunkGeo = new THREE.CylinderGeometry(0.25, 0.35, 1.4, 6), trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a32 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2f6b4f, roughness: 0.8, flatShading: true }), capMat = snowMat;
+  for (let i = 0; i < 46; i++) {
+    const a = (i / 46) * Math.PI * 2 + Math.random() * 0.08, r = R_ARENA + 5 + Math.random() * 10, s = 0.8 + Math.random() * 0.8;
+    const t = new THREE.Group();
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat); trunk.position.y = 0.7; t.add(trunk);
+    for (let k = 0; k < 3; k++) {
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(2 - k * 0.5, 2.2, 7), leafMat); cone.position.y = 2 + k * 1.3; cone.castShadow = true; t.add(cone);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(1.2 - k * 0.3, 0.9, 7), capMat); cap.position.y = 2.75 + k * 1.3; t.add(cap);
+    }
+    t.position.set(Math.cos(a) * r, 0, Math.sin(a) * r); t.scale.setScalar(s);
+    scene.add(t);
+  }
+}
+// falling snow around the view
+const FLAKES = 1400, flakeGeo = new THREE.BufferGeometry(), fPos = new Float32Array(FLAKES * 3);
+for (let i = 0; i < FLAKES; i++) fPos.set([(Math.random() - 0.5) * 80, Math.random() * 30, (Math.random() - 0.5) * 80], i * 3);
+flakeGeo.setAttribute('position', new THREE.BufferAttribute(fPos, 3));
+const flakes = new THREE.Points(flakeGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18, transparent: true, opacity: 0.85, depthWrite: false }));
+flakes.frustumCulled = false;
+scene.add(flakes);
+
+// Field > snow forts: axis-aligned boxes that shrink per hit and regrow
+const WALL_HP = 5, WALL_H = 1.5;
+const WALLS = [];
+for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+  const cx = sx * 10, cz = sz * 10;
+  WALLS.push({ x: cx, z: cz - sz * 1.7, w: 4, d: 0.9 }, { x: cx - sx * 1.7, z: cz, w: 0.9, d: 4 });
+}
+WALLS.push({ x: 4.5, z: 0, w: 0.9, d: 3.4 }, { x: -4.5, z: 0, w: 0.9, d: 3.4 }, { x: 0, z: 4.5, w: 3.4, d: 0.9 }, { x: 0, z: -4.5, w: 3.4, d: 0.9 });
+WALLS.push({ x: 0, z: 18.5, w: 5, d: 0.9 }, { x: 0, z: -18.5, w: 5, d: 0.9 }, { x: 18.5, z: 0, w: 0.9, d: 5 }, { x: -18.5, z: 0, w: 0.9, d: 5 });
+const wallMat = new THREE.MeshStandardMaterial({ color: 0xe6f0fb, roughness: 0.85 });
+const walls3d = WALLS.map((w) => {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w.w, WALL_H, w.d, 3, 0.3), wallMat);
+  m.position.set(w.x, WALL_H / 2, w.z); m.castShadow = m.receiveShadow = true;
+  scene.add(m);
+  return m;
+});
+
+// Players > round snowsuit kid in player color, beanie, scarf, mittens, ice cube when frozen, name tag
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(18,34,58,0.72)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.8, 0.7, 1); s.position.y = 2.75; s.renderOrder = 5;
+  return s;
+}
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xffd9bd, roughness: 0.7 }), eyeMat = new THREE.MeshBasicMaterial({ color: 0x1b2230 });
+const iceMat = new THREE.MeshStandardMaterial({ color: 0x9fdcff, transparent: true, opacity: 0.55, roughness: 0.05, metalness: 0.1, emissive: 0x3b8fd0, emissiveIntensity: 0.25 });
+const iceGeo = new RoundedBoxGeometry(1.7, 2.4, 1.7, 3, 0.25);
+const players3d = new Map();
+function makeKid(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  const suit = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.6, emissive: 0x58b8ff, emissiveIntensity: 0 });
+  const dark = new THREE.MeshStandardMaterial({ color: new THREE.Color(p.color).multiplyScalar(0.55), roughness: 0.7 });
+  const torso = new THREE.Mesh(new THREE.SphereGeometry(0.62, 18, 14), suit); torso.scale.set(1, 1.1, 0.95); torso.position.y = 0.85;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), skinMat); head.position.y = 1.72;
+  const hat = new THREE.Mesh(new THREE.SphereGeometry(0.45, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), dark); hat.position.y = 1.8;
+  const pom = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), snowMat); pom.position.y = 2.28;
+  const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.11, 8, 18).rotateX(Math.PI / 2), dark); scarf.position.y = 1.36;
+  const eyes = [-0.14, 0.14].map((x) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), eyeMat); e.position.set(x, 1.76, 0.38); return e; });
+  const mitL = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), dark); mitL.position.set(-0.68, 0.9, 0.1);
+  const mitR = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), dark); mitR.position.set(0.68, 0.9, 0.1);
+  const boots = [-0.25, 0.25].map((x) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), dark); b.scale.set(1, 0.7, 1.3); b.position.set(x, 0.15, 0.05); return b; });
+  body.add(torso, head, hat, pom, scarf, ...eyes, mitL, mitR, ...boots);
+  body.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  const ice = new THREE.Mesh(iceGeo, iceMat); ice.position.y = 1.15; ice.visible = false;
+  const tag = nameTag(p.nick, p.color);
+  g.add(body, ice, tag);
+  g.userData = { body, suit, mitR, ice, tag, anim: 0 };
+  scene.add(g);
+  return g;
+}
+
+// FX > snowballs, ground splats, puff particles, aim reticle + arc preview
+const ballGeo = new THREE.SphereGeometry(0.2, 12, 10), ballMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
+const balls3d = new Map();
+const SPLATS = 160, splats = new THREE.InstancedMesh(new THREE.CircleGeometry(0.5, 12).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xd9e8f6, roughness: 1 }), SPLATS);
+{ const m = new THREE.Matrix4().makeTranslation(0, -5, 0); for (let i = 0; i < SPLATS; i++) splats.setMatrixAt(i, m); }
+scene.add(splats);
+let splatNext = 0;
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
+function splat(x, z) {
+  _p.set(x, 0.02 + (splatNext % 7) * 0.002, z); _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.random() * 6); _s.set(0.7 + Math.random() * 0.6, 1, 0.7 + Math.random() * 0.6);
+  splats.setMatrixAt(splatNext++ % SPLATS, _m.compose(_p, _q, _s)); splats.instanceMatrix.needsUpdate = true;
+}
+const PUFF = 700, puffGeo = new THREE.BufferGeometry(), puPos = new Float32Array(PUFF * 3), puVel = new Float32Array(PUFF * 3), puLife = new Float32Array(PUFF), puCol = new Float32Array(PUFF * 3);
+for (let i = 0; i < PUFF; i++) puPos[i * 3 + 1] = -99;
+puffGeo.setAttribute('position', new THREE.BufferAttribute(puPos, 3));
+puffGeo.setAttribute('color', new THREE.BufferAttribute(puCol, 3));
+const puffs = new THREE.Points(puffGeo, new THREE.PointsMaterial({ size: 0.24, vertexColors: true }));
+puffs.frustumCulled = false;
+scene.add(puffs);
+let puNext = 0;
+function puff(x, y, z, n, hex = 0xffffff, speed = 4) {
+  const c = new THREE.Color(hex);
+  for (let k = 0; k < n; k++) {
+    const i = puNext++ % PUFF, a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random());
+    puPos.set([x, y, z], i * 3); puVel.set([Math.cos(a) * s, 2 + Math.random() * speed, Math.sin(a) * s], i * 3);
+    puCol.set([c.r, c.g, c.b], i * 3); puLife[i] = 0.5 + Math.random() * 0.5;
+  }
+}
+const reticle = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.6, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff5d73, transparent: true, opacity: 0.85, depthWrite: false }));
+reticle.position.y = 0.04; reticle.visible = false;
+scene.add(reticle);
+const ARC_N = 18, arcGeo = new THREE.BufferGeometry(), arcPos = new Float32Array(ARC_N * 3);
+arcGeo.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+const arcPts = new THREE.Points(arcGeo, new THREE.PointsMaterial({ color: 0xff5d73, size: 0.2, transparent: true, opacity: 0.75, depthWrite: false }));
+arcPts.frustumCulled = false; arcPts.visible = false;
+scene.add(arcPts);
+
+// Audio > throw whoosh, splat, hit thud, freeze chime, unfreeze crack, beeps
+const gameAudio = createGameAudio({ minNoiseVol: 0.003 });
+const { tone, noise } = gameAudio;
+const sfx = {
+  throw(v) { noise(0.18, 0.09 * v, 600, 2400, 'bandpass'); },
+  splat(v) { noise(0.14, 0.14 * v, 1800, 300); },
+  hit() { tone(160, 70, 0.14, 0.16, 'sine'); noise(0.12, 0.16, 2200, 400); },
+  ding() { tone(1320, 1320, 0.08, 0.06, 'triangle'); },
+  freeze() { [1047, 1319, 1568, 2093].forEach((f, i) => tone(f, f, 0.35, 0.06, 'triangle', i * 0.06)); },
+  crack() { noise(0.2, 0.12, 4000, 900, 'highpass'); },
+  beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
+  whistle() { tone(2800, 2600, 0.3, 0.08); tone(2800, 2900, 0.5, 0.08, 'sine', 0.35); },
+};
+
+// Game > World
+const BOT_NAMES = ['Frosty', 'Blizzard', 'Flurry', 'Sleet', 'Icicle', 'Yeti', 'Slushy', 'Avalanche', 'Mitten', 'Powder', 'Tundra', 'Snowcone', 'Glacier', 'Frostbite'];
+const BOT_COLORS = ['#ff5d73', '#3fa7ff', '#ffb000', '#2ec27e', '#a970ff', '#ff7b2f', '#00c2c7', '#ff5fbf', '#8bc34a', '#5c6bc0', '#e0b04a', '#26a69a', '#7ae7ff', '#c0ca33'];
+const PR = 0.7, SPEED = 7.5, G = 20, MAX_AMMO = 5, CD = 0.38, REGEN = 0.75, RANGE = 22, MATCH = 120, HITS = 3, FREEZE_T = 3, INV_T = 1.6;
+const world = { mode: 'attract', phase: 'count', t: 2, clock: MATCH, players: new Map(), balls: new Map(), walls: WALLS.map(() => ({ hp: WALL_HP, down: 0 })), nextBall: 1 };
+let events = [];
+const rng = Math.random, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function addPlayer(id, nick, color, bot) {
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, face: 0, hits: 0, frozen: 0, inv: 0, score: 0, dealt: 0, ammo: MAX_AMMO, cd: 0, regen: 0, mx: 0, mz: 0, ax: 0, az: 0, fire: 0, pending: [], skill: 0.6 + rng() * 0.3, think: 0, strafe: rng() < 0.5 ? 1 : -1, target: null, ex: 0, ez: 0 };
+  world.players.set(id, p);
+  return p;
+}
+function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
+function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+function spawnAll() {
+  const ps = [...world.players.values()], off = rng() * Math.PI * 2;
+  ps.forEach((p, i) => {
+    const a = off + (i / ps.length) * Math.PI * 2;
+    Object.assign(p, { x: Math.cos(a) * 21, z: Math.sin(a) * 21, vx: 0, vz: 0, face: Math.atan2(-Math.cos(a), -Math.sin(a)), hits: 0, frozen: 0, inv: 0, ammo: MAX_AMMO, ax: 0, az: 0, pending: [] });
+  });
+  world.balls.clear();
+  world.walls.forEach((w) => { w.hp = WALL_HP; w.down = 0; });
+  world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3;
+}
+
+// Run engine > throws: ballistic arc that reaches the aim point at chest height
+function throwBall(p, tx, tz) {
+  if (world.phase !== 'play' || p.frozen > 0 || p.ammo < 1 || p.cd > 0) return false;
+  let dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz) || 1;
+  const dc = clamp(d, 1.5, RANGE); dx *= dc / d; dz *= dc / d;
+  const nx = dx / dc, nz = dz / dc, sx = p.x + nx * 0.6, sz = p.z + nz * 0.6;
+  const T = 0.3 + dc / 32, y0 = 1.4, y1 = 0.9;
+  const b = { id: world.nextBall++, x: sx, y: y0, z: sz, vx: (p.x + dx - sx) / T, vy: (y1 - y0 + 0.5 * G * T * T) / T, vz: (p.z + dz - sz) / T, owner: p.id };
+  world.balls.set(b.id, b);
+  p.ammo--; p.cd = CD + (p.bot ? 0.25 + rng() * 0.5 : 0); p.face = Math.atan2(nx, nz);
+  events.push(['t', p.id]);
+  return true;
+}
+function hitPlayer(p, b) {
+  const by = world.players.get(b.owner);
+  if (p.frozen > 0 || p.inv > 0) { events.push(['h', p.id, b.owner, 0, f1(b.x), f1(b.y), f1(b.z)]); return; }
+  p.hits++; p.vx += b.vx * 0.18; p.vz += b.vz * 0.18;
+  if (by) by.dealt++;
+  events.push(['h', p.id, b.owner, 1, f1(b.x), f1(b.y), f1(b.z)]);
+  if (p.hits >= HITS) {
+    p.hits = 0; p.frozen = FREEZE_T;
+    if (by) by.score++;
+    events.push(['f', p.id, b.owner]);
+  }
+}
+const f1 = (v) => Math.round(v * 10) / 10;
+function stepBalls(dt, ps) {
+  for (const b of world.balls.values()) {
+    b.vy -= G * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    let gone = false;
+    for (let i = 0; i < WALLS.length && !gone; i++) {
+      const W = WALLS[i], s = world.walls[i];
+      if (s.hp <= 0 || b.y > wallH(s) + 0.15 || Math.abs(b.x - W.x) > W.w / 2 + 0.15 || Math.abs(b.z - W.z) > W.d / 2 + 0.15) continue;
+      s.hp--; if (s.hp <= 0) s.down = 12;
+      events.push(['w', i, f1(b.x), f1(b.y), f1(b.z)]);
+      gone = true;
+    }
+    if (!gone) for (const p of ps) {
+      if (p.id === b.owner || b.y > 2.1) continue;
+      if (Math.hypot(b.x - p.x, b.z - p.z) < PR + 0.22) { hitPlayer(p, b); gone = true; break; }
+    }
+    if (!gone && b.y < 0.15) { events.push(['s', f1(b.x), f1(b.z)]); gone = true; }
+    if (!gone && Math.hypot(b.x, b.z) > R_ARENA + 10) gone = true;
+    if (gone) world.balls.delete(b.id);
+  }
+}
+const wallH = (s) => (s.hp <= 0 ? 0 : WALL_H * (0.25 + 0.75 * (s.hp / WALL_HP)));
+
+// Run engine > players: smoothed walk, fort + arena collision, ammo regen, freeze/thaw
+function pushOutBox(p, W) {
+  const hx = W.w / 2, hz = W.d / 2, cx = clamp(p.x, W.x - hx, W.x + hx), cz = clamp(p.z, W.z - hz, W.z + hz);
+  const dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
+  if (d >= PR) return;
+  if (d < 1e-4) {
+    const ox = hx - Math.abs(p.x - W.x), oz = hz - Math.abs(p.z - W.z);
+    if (ox < oz) p.x = W.x + Math.sign(p.x - W.x || 1) * (hx + PR); else p.z = W.z + Math.sign(p.z - W.z || 1) * (hz + PR);
+  } else { p.x = cx + (dx / d) * PR; p.z = cz + (dz / d) * PR; }
+}
+function stepPlayer(p, dt) {
+  p.cd = Math.max(0, p.cd - dt); p.inv = Math.max(0, p.inv - dt);
+  if (p.ammo < MAX_AMMO) { p.regen += dt; if (p.regen >= REGEN) { p.regen = 0; p.ammo++; } } else p.regen = 0;
+  if (p.frozen > 0) { p.frozen -= dt; if (p.frozen <= 0) { p.frozen = 0; p.inv = INV_T; events.push(['u', p.id]); } }
+  const live = world.phase === 'play' && p.frozen <= 0;
+  let mx = live ? p.mx : 0, mz = live ? p.mz : 0;
+  const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
+  const k = 1 - Math.exp(-dt * (p.frozen > 0 ? 4 : 10));
+  p.vx += (mx * SPEED - p.vx) * k; p.vz += (mz * SPEED - p.vz) * k;
+  p.x += p.vx * dt; p.z += p.vz * dt;
+  for (let i = 0; i < WALLS.length; i++) if (world.walls[i].hp > 0) pushOutBox(p, WALLS[i]);
+  const r = Math.hypot(p.x, p.z); if (r > R_ARENA - PR) { p.x *= (R_ARENA - PR) / r; p.z *= (R_ARENA - PR) / r; }
+  if (!live) return;
+  const dx = p.ax - p.x, dz = p.az - p.z;
+  if (dx * dx + dz * dz > 0.25) p.face = Math.atan2(dx, dz);
+  if (p.pending.length > 3) p.pending.splice(0, p.pending.length - 3);
+  if (p.pending.length && p.cd <= 0) { const [tx, tz] = p.pending.shift(); throwBall(p, tx, tz); }
+  else if (p.fire) throwBall(p, p.ax, p.az);
+}
+function playerBumps(ps) {
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+    const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
+    if (d > PR * 2 || d < 1e-4) continue;
+    const pen = (PR * 2 - d) / 2, nx = dx / d, nz = dz / d;
+    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
+  }
+}
+function stepWalls(dt, ps) {
+  world.walls.forEach((s, i) => {
+    if (s.hp > 0 || (s.down -= dt) > 0) return;
+    const W = WALLS[i];
+    // only regrow when nobody stands inside the footprint
+    if (ps.some((p) => Math.abs(p.x - W.x) < W.w / 2 + PR && Math.abs(p.z - W.z) < W.d / 2 + PR)) { s.down = 0.5; return; }
+    s.hp = WALL_HP;
+    events.push(['r', i]);
+  });
+}
+
+// Run engine > bots: chase nearest thawed rival at throwing range, strafe, lead the aim, dodge incoming, back off when empty
+function botThink(p, dt, ps) {
+  p.think -= dt;
+  if (p.think <= 0) {
+    p.think = 0.3 + rng() * 0.25;
+    let best = null, bd = 1e9;
+    for (const q of ps) {
+      if (q === p || q.frozen > 0) continue;
+      const d = Math.hypot(q.x - p.x, q.z - p.z) + (q.inv > 0 ? 8 : 0) + (q.id === p.target ? -3 : 0) + (q.hits ? -2 * q.hits : 0);
+      if (d < bd) { bd = d; best = q; }
+    }
+    p.target = best?.id ?? null;
+    if (rng() < 0.18) p.strafe *= -1;
+    p.ex = (rng() - 0.5) * 2; p.ez = (rng() - 0.5) * 2;
+  }
+  const t = world.players.get(p.target);
+  let mx = 0, mz = 0;
+  p.fire = 0;
+  if (t && t.frozen <= 0) {
+    const dx = t.x - p.x, dz = t.z - p.z, d = Math.hypot(dx, dz) || 1, nx = dx / d, nz = dz / d;
+    const want = p.ammo >= 1 ? 10 : 19, radial = clamp((d - want) / 4, -1, 1);
+    mx = nx * radial - nz * p.strafe * 0.75; mz = nz * radial + nx * p.strafe * 0.75;
+    const T = 0.3 + Math.min(d, RANGE) / 32, err = (1 - p.skill) * d * 0.3;
+    p.ax = t.x + t.vx * T * p.skill + p.ex * err; p.az = t.z + t.vz * T * p.skill + p.ez * err;
+    p.fire = d < RANGE + 1 && t.inv <= 0 && p.ammo >= 1 ? 1 : 0;
+  } else { mx = -p.x * 0.05; mz = -p.z * 0.05; p.ax = p.x + Math.sin(p.face); p.az = p.z + Math.cos(p.face); }
+  for (const b of world.balls.values()) {
+    if (b.owner === p.id) continue;
+    const rx = p.x - b.x, rz = p.z - b.z, vv = b.vx * b.vx + b.vz * b.vz || 1, tc = (rx * b.vx + rz * b.vz) / vv;
+    if (tc < 0 || tc > 0.6) continue;
+    const cx = b.x + b.vx * tc - p.x, cz = b.z + b.vz * tc - p.z, cl = Math.hypot(cx, cz);
+    if (cl < 1.4 && rng() < p.skill * 0.5) {
+      // step away from the ball's closest pass, sideways if it is dead on
+      const sx = cl > 0.05 ? -cx / cl : -b.vz / Math.sqrt(vv), sz = cl > 0.05 ? -cz / cl : b.vx / Math.sqrt(vv);
+      mx = sx; mz = sz;
+      break;
+    }
+  }
+  p.mx = mx; p.mz = mz;
+}
+
+// Game > Phases: countdown, 2-minute brawl (attract loops forever), results
+let lastBeep = 0;
+function phases(dt) {
+  world.t -= dt;
+  if (world.phase === 'count') {
+    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
+    if (world.t <= 0) { world.phase = 'play'; events.push(['c', 0]); }
+  } else if (world.phase === 'play' && world.mode === 'match') {
+    world.clock -= dt;
+    if (world.clock <= 0) { world.clock = 0; world.phase = 'final'; world.t = 10; events.push(['e']); }
+  } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
+}
+function startAttract() {
+  clearPlayers();
+  world.mode = 'attract'; world.clock = MATCH;
+  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
+  spawnAll();
+}
+
+// Multiplayer > Lobby
+const lobby = createLobby({
+  game: 'snowball-brawl', title: 'Snowball Brawl', emoji: '☃️', accent: '#6cc6ff',
+  blurb: 'Free-for-all snowball fight. Aim with the mouse, lob over the snow forts, and freeze rivals with three hits. Most freezes in two minutes wins.',
+  maxBots: 13, defaultBots: 5, minPlayers: 2,
+  note: 'Up to 14 players per room (humans + bots). Forts crumble when hit and regrow.',
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    room.on('data', onData);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost }) {
+    clearPlayers();
+    world.mode = 'match'; world.clock = MATCH;
+    feedEl.innerHTML = '';
+    ['clock', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
+    ['me', 'top'].forEach((id) => (document.getElementById(id).style.display = 'flex'));
+    syncTop();
+    if (!isHost) { world.phase = 'count'; world.t = 3; return; }
+    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    spawnAll();
+  },
+  onLobby() {
+    ['clock', 'board', 'me', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    big('');
+    startAttract();
+  },
+});
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (world.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
+  for (const p of players) if (!world.players.has(p.id)) {
+    // keep 14 seats: a joining human takes a bot's place
+    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot); if (bot) removePlayer(bot.id); }
+    const a = rng() * Math.PI * 2, kid = addPlayer(p.id, p.nick, p.color, false);
+    Object.assign(kid, { x: Math.cos(a) * 21, z: Math.sin(a) * 21, inv: INV_T });
+  }
+}
+
+// Multiplayer > Net: guests send move + aim + throw queue (seq numbered), host sends snapshots
+const remoteSeq = new Map();
+function onData(d, from) {
+  if (!d || d._lobby) return;
+  if (d.g === 'i' && lobby.room.isHost) {
+    const p = world.players.get(from);
+    if (!p) return;
+    Object.assign(p, { mx: d.mx, mz: d.mz, ax: d.ax, az: d.az });
+    const q = d.q || [];
+    let last = remoteSeq.get(from);
+    // first packet from this guest (or after host migration): adopt its counter without replaying old throws
+    if (last === undefined) { remoteSeq.set(from, q.length ? q[q.length - 1][0] : 0); return; }
+    for (const [s, tx, tz] of q) if (s > last) { p.pending.push([tx, tz]); last = s; }
+    remoteSeq.set(from, last);
+  }
+  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+}
+const f2 = (v) => Math.round(v * 100) / 100;
+// Cloud Sync > nick + color ride in a name table, not every row
+const names = createNameSync();
+function snapshot() {
+  return names.stamp({
+    g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), ev: events,
+    W: world.walls.map((s) => s.hp),
+    B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)]),
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.face), f2(p.vx), f2(p.vz), p.hits, f2(p.frozen), f2(p.inv), p.score, p.dealt, p.ammo, p.bot ? 1 : 0]),
+  }, world.players.values());
+}
+let snapAt = 0;
+function applySnap(s) {
+  names.read(s);
+  Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck });
+  s.W.forEach((hp, i) => (world.walls[i].hp = hp));
+  const seenB = new Set();
+  for (const [id, x, y, z, vx, vy, vz] of s.B) { seenB.add(id); const b = world.balls.get(id) ?? { id }; Object.assign(b, { x, y, z, vx, vy, vz }); world.balls.set(id, b); }
+  for (const id of [...world.balls.keys()]) if (!seenB.has(id)) world.balls.delete(id);
+  const seen = new Set();
+  for (const [id, x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo, bot] of s.P) {
+    seen.add(id);
+    if (!world.players.has(id) && !names.name(id)) continue;
+    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
+    Object.assign(p, { x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo });
+  }
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  playEvents(s.ev);
+  snapAt = performance.now();
+}
+let shake = 0;
+const hurtEl = document.getElementById('hurt'), feedEl = document.getElementById('feed');
+function camDist(x, z) { return Math.hypot(x - camLook.x, z - camLook.z); }
+function playEvents(evs) {
+  const me = lobby.room?.me, match = world.mode === 'match', vol = (x, z) => (match ? 1 : 0.35) * clamp(1.2 - camDist(x, z) / 30, 0.1, 1);
+  for (const e of evs) {
+    if (e[0] === 't') { const p = world.players.get(e[1]), g = players3d.get(e[1]); if (g) g.userData.anim = 0.3; if (p) sfx.throw(vol(p.x, p.z)); }
+    else if (e[0] === 'h') {
+      puff(e[4], e[5], e[6], e[3] ? 26 : 12, e[3] ? 0xffffff : 0xbfe6ff, 4);
+      if (match || rng() < 0.3) sfx.splat(vol(e[4], e[6]));
+      if (e[3] && match) {
+        if (e[1] === me) { sfx.hit(); shake = 0.3; hurtEl.style.opacity = 1; setTimeout(() => (hurtEl.style.opacity = 0), 220); }
+        if (e[2] === me) sfx.ding();
+      }
+    } else if (e[0] === 'f') {
+      const v = world.players.get(e[1]), by = world.players.get(e[2]);
+      if (v) puff(v.x, 1.2, v.z, 40, 0x9fdcff, 6);
+      if (match) {
+        sfx.freeze();
+        if (v && by) addFeed(`<b style="color:${by.color}">${esc(by.nick)}</b> ❄ froze <b style="color:${v.color}">${esc(v.nick)}</b>`);
+        if (e[1] === me) flash(`<small>frozen by ${esc(by?.nick ?? '?')}</small>🧊 BRRR`, 1.6);
+        else if (e[2] === me) flash(`<small>you froze ${esc(v?.nick ?? '?')}</small>❄ +1`, 1.2);
+      }
+    } else if (e[0] === 'u') { const v = world.players.get(e[1]); if (v) puff(v.x, 1.2, v.z, 24, 0x9fdcff, 5); if (match && v) sfx.crack(); }
+    else if (e[0] === 's') { splat(e[1], e[2]); puff(e[1], 0.15, e[2], 8, 0xffffff, 2); if (match) sfx.splat(vol(e[1], e[2]) * 0.6); }
+    else if (e[0] === 'w') { puff(e[2], e[3], e[4], 16, 0xe6f0fb, 3); if (match) sfx.splat(vol(e[2], e[4]) * 0.8); }
+    else if (e[0] === 'r') { const W = WALLS[e[1]]; puff(W.x, 0.6, W.z, 30, 0xffffff, 3); }
+    else if (e[0] === 'c' && match) { sfx.beep(e[1] === 0); if (e[1] === 0) flash('THROW!', 0.8); }
+    else if (e[0] === 'e' && match) sfx.whistle();
+  }
+}
+function addFeed(html) {
+  const d = document.createElement('div'); d.innerHTML = html;
+  feedEl.prepend(d);
+  while (feedEl.children.length > 5) feedEl.lastChild.remove();
+  setTimeout(() => d.remove(), 6000);
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Input > WASD + mouse aim on the ground, click/hold throws; touch stick + tap to throw
+const keys = {};
+addEventListener('keydown', (e) => { keys[e.code] = true; if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); });
+addEventListener('keyup', (e) => (keys[e.code] = false));
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), aimHit = new THREE.Vector3();
+const local = { mx: 0, mz: 0, ax: 0, az: 0, fire: 0, seq: 0, q: [], nextFire: 0, hasAim: false };
+let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
+const cv = renderer.domElement;
+cv.addEventListener('pointermove', (e) => { mouseX = e.clientX; mouseY = e.clientY; local.hasAim = true; });
+cv.addEventListener('pointerdown', (e) => { mouseX = e.clientX; mouseY = e.clientY; local.hasAim = true; local.fire = 1; });
+addEventListener('pointerup', () => (local.fire = 0));
+addEventListener('blur', () => { local.fire = 0; for (const k in keys) keys[k] = false; });
+const stick = document.getElementById('stick'), knob = stick.firstElementChild;
+let stickId = null, sx = 0, sz = 0;
+stick.addEventListener('pointerdown', (e) => { e.stopPropagation(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });
+stick.addEventListener('pointermove', (e) => { if (e.pointerId === stickId) moveStick(e); });
+stick.addEventListener('pointerup', (e) => { e.stopPropagation(); stickId = null; sx = sz = 0; knob.style.transform = ''; });
+function moveStick(e) {
+  const r = stick.getBoundingClientRect();
+  let dx = (e.clientX - r.left - r.width / 2) / (r.width / 2), dz = (e.clientY - r.top - r.height / 2) / (r.height / 2);
+  const l = Math.hypot(dx, dz); if (l > 1) { dx /= l; dz /= l; }
+  sx = dx; sz = dz; knob.style.transform = `translate(${dx * 40}px, ${dz * 40}px)`;
+}
+function readInput() {
+  local.mx = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + sx, -1, 1);
+  local.mz = clamp((keys.KeyS || keys.ArrowDown ? 1 : 0) - (keys.KeyW || keys.ArrowUp ? 1 : 0) + sz, -1, 1);
+}
+function updateAim() {
+  ndc.set((mouseX / innerWidth) * 2 - 1, -(mouseY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (ray.ray.intersectPlane(floor, aimHit)) { local.ax = aimHit.x; local.az = aimHit.z; }
+}
+
+// HUD > clock, scoreboard, ammo + hits pips, banner
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0, hudT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t, len = 1.6) { big(t); flashT = len; }
+const pips = (n, on) => Array.from({ length: n }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('');
+const ranked = () => [...world.players.values()].sort((a, b) => b.score - a.score || b.dealt - a.dealt);
+function hud(dt) {
+  flashT -= dt;
+  if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
+  if (world.phase === 'count') big(`<small>get ready</small>${Math.max(1, Math.ceil(world.t))}`);
+  else if (world.phase === 'final') {
+    const top = ranked()[0];
+    big(`<small>back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 <span style="color:${top?.color}">${esc(top?.nick ?? '')}</span>`);
+  } else if (flashT <= 0) big('');
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  const c = Math.max(0, world.clock), meId = lobby.room?.me, me = world.players.get(meId);
+  document.getElementById('clock').textContent = `${Math.floor(c / 60)}:${String(Math.floor(c % 60)).padStart(2, '0')}`;
+  document.getElementById('ammo').innerHTML = pips(MAX_AMMO, me?.ammo ?? 0);
+  document.getElementById('hits').innerHTML = pips(HITS, me?.frozen > 0 ? HITS : me?.hits ?? 0);
+  document.getElementById('board').innerHTML = ranked().map((p, i) => `<div class="row ${p.id === meId ? 'me' : ''} ${p.frozen > 0 ? 'out' : ''}">${i + 1}. <i style="background:${p.color}"></i><span>${p.frozen > 0 ? '🧊 ' : ''}${esc(p.nick)}</span><b>❄ ${p.score}</b></div>`).join('');
+}
+
+// Run engine > sim tick (worker)
+let sendT = 0;
+const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+function simTick(dt) {
+  readInput();
+  const room = lobby.room, now = performance.now() / 1000;
+  if (isHostSim()) {
+    const me = room && world.mode === 'match' && world.players.get(room.me);
+    if (me) Object.assign(me, { mx: local.mx, mz: local.mz, fire: local.fire, ...(local.hasAim ? { ax: local.ax, az: local.az } : {}) });
+    const ps = [...world.players.values()];
+    for (const p of ps) if (p.bot) botThink(p, dt, ps);
+    for (const p of ps) stepPlayer(p, dt);
+    playerBumps(ps);
+    for (let k = 0; k < 2; k++) stepBalls(dt / 2, ps);
+    stepWalls(dt, ps);
+    phases(dt);
+    if (world.mode === 'match' && room) {
+      sendT -= dt;
+      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
+    } else { playEvents(events); events = []; }
+  } else if (world.mode === 'match' && room) {
+    const me = world.players.get(room.me);
+    // guest throttles its own throws; host still checks ammo + cooldown
+    if (local.fire && now >= local.nextFire && me && me.ammo >= 1 && me.frozen <= 0 && world.phase === 'play') {
+      local.seq++; local.q.push([local.seq, f2(local.ax), f2(local.az)]); if (local.q.length > 4) local.q.shift();
+      local.nextFire = now + CD + 0.03;
+    }
+    sendT -= dt;
+    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', mx: +local.mx.toFixed(2), mz: +local.mz.toFixed(2), ax: f2(local.ax), az: f2(local.az), q: local.q }); }
+  }
+}
+startTicker(60, simTick);
+
+// Run engine > render loop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 40, 40), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const hostSim = isHostSim(), age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const meId = lobby.room?.me;
+  for (const p of world.players.values()) {
+    let g = players3d.get(p.id);
+    if (!g) { g = makeKid(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
+    const moving = p.frozen <= 0 && world.phase === 'play', tx = p.x + (moving ? p.vx * age : 0), tz = p.z + (moving ? p.vz * age : 0), a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) g.position.set(tx, 0, tz);
+    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
+    let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    g.rotation.y += dh * Math.min(1, dt * 18);
+    const u = g.userData, sp = Math.hypot(p.vx, p.vz);
+    u.body.position.y = p.frozen > 0 ? 0 : Math.abs(Math.sin(time * 13 + p.id)) * 0.12 * Math.min(sp / SPEED, 1);
+    u.body.rotation.z = p.frozen > 0 ? 0 : Math.sin(time * 13 + p.id) * 0.06 * Math.min(sp / SPEED, 1);
+    u.anim = Math.max(0, u.anim - dt);
+    const sw = u.anim > 0 ? Math.sin((1 - u.anim / 0.3) * Math.PI) : 0;
+    u.mitR.position.set(0.68 - sw * 0.3, 0.9 + sw * 0.7, 0.1 + sw * 0.5);
+    u.suit.emissiveIntensity = p.hits * 0.22;
+    u.ice.visible = p.frozen > 0;
+    // ice pops in slightly oversized then settles
+    if (u.ice.visible) u.ice.scale.setScalar(1 + Math.max(0, p.frozen - FREEZE_T + 0.2) * 1.5);
+    g.visible = !(p.inv > 0 && Math.floor(time * 12) % 2);
+    u.tag.visible = p.id !== meId;
+  }
+  for (const id of [...balls3d.keys()]) if (!world.balls.has(id)) { scene.remove(balls3d.get(id)); balls3d.delete(id); }
+  for (const b of world.balls.values()) {
+    let m = balls3d.get(b.id);
+    if (!m) { m = new THREE.Mesh(ballGeo, ballMat); m.castShadow = true; scene.add(m); balls3d.set(b.id, m); }
+    m.position.set(b.x + b.vx * age, b.y + b.vy * age - 0.5 * G * age * age, b.z + b.vz * age);
+  }
+  world.walls.forEach((s, i) => {
+    const m = walls3d[i], h = wallH(s) / WALL_H, cur = m.visible ? m.scale.y : 0, nh = cur + (h - cur) * Math.min(1, dt * 10);
+    m.visible = nh > 0.02; m.scale.y = Math.max(nh, 0.001); m.position.y = (WALL_H * nh) / 2;
+  });
+  for (let i = 0; i < PUFF; i++) {
+    if (puLife[i] <= 0) continue;
+    puLife[i] -= dt; puVel[i * 3 + 1] -= 12 * dt;
+    for (let k = 0; k < 3; k++) puPos[i * 3 + k] += puVel[i * 3 + k] * dt;
+    if (puPos[i * 3 + 1] < 0.05) { puPos[i * 3 + 1] = 0.05; puVel[i * 3] *= 0.6; puVel[i * 3 + 2] *= 0.6; puVel[i * 3 + 1] = 0; }
+    if (puLife[i] <= 0) puPos[i * 3 + 1] = -99;
+  }
+  puffGeo.attributes.position.needsUpdate = true; puffGeo.attributes.color.needsUpdate = true;
+  for (let i = 0; i < FLAKES; i++) {
+    fPos[i * 3 + 1] -= dt * (1.2 + (i % 5) * 0.25); fPos[i * 3] += Math.sin(time + i) * dt * 0.4;
+    if (fPos[i * 3 + 1] < 0) { fPos[i * 3 + 1] = 28; fPos[i * 3] = camLook.x + (Math.random() - 0.5) * 80; fPos[i * 3 + 2] = camLook.z + (Math.random() - 0.5) * 80; }
+  }
+  flakeGeo.attributes.position.needsUpdate = true;
+  hud(dt);
+  // camera: angled follow on own kid, aim preview; attract = slow orbit
+  const me = world.players.get(meId), mg = me && players3d.get(me.id);
+  if (mg && world.mode === 'match') {
+    camPos.lerp(_v.set(mg.position.x, 21, mg.position.z + 15), 1 - Math.exp(-dt * 5));
+    camLook.lerp(_v.set(mg.position.x, 0, mg.position.z + 1), 1 - Math.exp(-dt * 6));
+    updateAim();
+    const show = world.phase === 'play' && me.frozen <= 0 && local.hasAim;
+    reticle.visible = arcPts.visible = show;
+    if (show) {
+      let dx = local.ax - mg.position.x, dz = local.az - mg.position.z, d = Math.hypot(dx, dz) || 1;
+      const dc = clamp(d, 1.5, RANGE); dx *= dc / d; dz *= dc / d;
+      reticle.position.set(mg.position.x + dx, 0.04, mg.position.z + dz);
+      reticle.material.color.set(me.ammo >= 1 ? 0xff5d73 : 0x8899aa);
+      const T = 0.3 + dc / 32, vy = (0.9 - 1.4 + 0.5 * G * T * T) / T;
+      for (let i = 0; i < ARC_N; i++) { const t = ((i + 1) / ARC_N) * T; arcPos.set([mg.position.x + (dx * t) / T, 1.4 + vy * t - 0.5 * G * t * t, mg.position.z + (dz * t) / T], i * 3); }
+      arcGeo.attributes.position.needsUpdate = true;
+    }
+  } else {
+    reticle.visible = arcPts.visible = false;
+    const a = time * 0.06;
+    camPos.lerp(_v.set(Math.sin(a) * 34, 30, Math.cos(a) * 34), 1 - Math.exp(-dt * 2));
+    camLook.lerp(_v.set(0, 0, 0), 1 - Math.exp(-dt * 3));
+  }
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(_v.set((rng() - 0.5) * shake, (rng() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

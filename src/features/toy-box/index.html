@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D Toy Box</title>
+<style>
+  :root { --bg: #0f1117; --card: #181b24; --ink: #eef1f7; --muted: #8b93a7; --line: #262a36; --accent: #ffbf2f; --pill: rgba(14, 16, 22, 0.78); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; }
+
+  /* Home > gallery grid */
+  #home header { padding: 56px 24px 24px; max-width: 1200px; margin: 0 auto; position: relative; }
+  #home h1 { font-size: clamp(32px, 6vw, 56px); margin: 0; letter-spacing: -0.03em; }
+  #home header p { color: var(--muted); max-width: 600px; line-height: 1.6; }
+  .count { color: var(--accent); }
+  /* Home > header > top-right link to sibling page */
+  .xlink { position: absolute; top: 18px; right: 24px; padding: 7px 14px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none; }
+  .xlink:hover { background: var(--accent); color: #1a1408; }
+  /* Home > filter tabs */
+  #filters { max-width: 1200px; margin: 0 auto; padding: 0 24px 22px; display: flex; gap: 8px; flex-wrap: wrap; }
+  #filters button { border: 1px solid var(--line); background: var(--card); padding: 8px 14px; border-radius: 999px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  #filters button:hover { border-color: #3a4052; }
+  #filters button.on { background: var(--accent); border-color: var(--accent); color: #1a1408; }
+  #filters button .n { opacity: 0.6; font-weight: 500; margin-left: 4px; }
+  a.card[hidden], #menu button[hidden] { display: none; }
+  .preview .mp { position: absolute; right: 12px; top: 10px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #ffbf2f; color: #1a1408; }
+  #grid { max-width: 1200px; margin: 0 auto; padding: 0 24px 64px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 18px; }
+  a.card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; color: inherit; text-decoration: none; transition: transform 0.2s, border-color 0.2s; }
+  a.card:hover, a.card:focus-visible { transform: translateY(-3px); border-color: var(--accent); outline: none; }
+  .preview { aspect-ratio: 16 / 10; position: relative; display: grid; place-items: center; font-size: 64px; overflow: hidden; }
+  .preview iframe { position: absolute; inset: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; border: 0; pointer-events: none; }
+  .preview .num { position: absolute; left: 12px; top: 10px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); color: #fff; }
+  .body { padding: 14px 16px 18px; }
+  .body h2 { margin: 0 0 4px; font-size: 18px; }
+  .body p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  .tags { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .tags span { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #232736; color: #b9c0d3; }
+
+  /* Viewer > full-screen toy + nav pill */
+  #viewer { position: fixed; inset: 0; display: none; background: #000; }
+  body.playing { overflow: hidden; }
+  body.playing #home { display: none; }
+  body.playing #viewer { display: block; }
+  #frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  #nav { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); transition: opacity 0.4s, transform 0.3s; z-index: 5; max-width: calc(100% - 32px); }
+  #nav.dim { opacity: 0.28; }
+  #nav.dim:hover { opacity: 1; }
+  #nav button { border: 0; background: transparent; padding: 7px 10px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  #nav button:hover { background: rgba(255, 255, 255, 0.1); }
+  #nav .sep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(255, 255, 255, 0.12); }
+  #cur { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  #cur .t { overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  #cur .i { color: var(--muted); font-weight: 500; font-size: 12px; }
+  #nav.hidden { transform: translate(-50%, -140%); opacity: 0; pointer-events: none; }
+  #tab { position: absolute; top: 0; left: 50%; transform: translate(-50%, -100%); padding: 2px 14px 5px; border: 0; border-radius: 0 0 10px 10px; background: var(--pill); cursor: pointer; font-size: 12px; transition: transform 0.3s; z-index: 5; }
+  #tab.show { transform: translate(-50%, 0); }
+  #menu { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: min(340px, calc(100% - 32px)); max-height: min(70vh, 560px); overflow: auto; padding: 6px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); display: none; z-index: 6; }
+  #menu.open { display: block; }
+  #menu button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 9px; cursor: pointer; font-size: 14px; }
+  #menu button:hover { background: rgba(255, 255, 255, 0.08); }
+  #menu button.on { background: var(--accent); color: #1a1408; font-weight: 700; }
+  #menu .e { width: 24px; text-align: center; }
+  @media (max-width: 560px) { #cur .t, #cur .i, .wide { display: none; } }
+</style>
+</head>
+<body>
+<section id="home">
+  <header>
+    <h1>3D Toy Box</h1>
+    <p>Tiny games: Three.js toys plus classic 2D arcade games, all procedural, no assets. <span class="count" id="count"></span> so far. Hover a card for a live preview, click to play. Inside a toy: <b>[</b> / <b>]</b> flip between toys. Multiplayer toys use 4-letter room codes: open a second tab or send the invite link to a friend on your network.</p>
+    <a class="xlink" href="/">Render Studio ↗</a>
+  </header>
+  <nav id="filters"></nav>
+  <main id="grid"></main>
+</section>
+<section id="viewer">
+  <iframe id="frame" title="toy" allow="autoplay; fullscreen; pointer-lock; gamepad"></iframe>
+  <div id="nav">
+    <button id="home-btn" title="All toys (Esc)">⌂ <span class="wide">Toys</span></button>
+    <div class="sep"></div>
+    <button id="prev" title="Previous toy ([)">‹</button>
+    <button id="cur" title="Pick a toy"><span class="e"></span><span class="t"></span><span class="i"></span> ▾</button>
+    <button id="next" title="Next toy (])">›</button>
+    <div class="sep"></div>
+    <button id="hide" title="Hide bar">✕</button>
+  </div>
+  <button id="tab" title="Show toy bar">☰ toys</button>
+  <div id="menu"></div>
+</section>
+
+<script type="module">
+/**
+ * FILE: 3d-toys/index.html
+ * PURPOSE: single-page toy box: gallery home + full-screen iframe viewer with prev/next/dropdown nav, hash routing
+ * UI: 3D Toy Box home grid, toy viewer nav pill
+ * USED BY: entry point, http://localhost:5055/3d-toys/
+ * KEY EXPORTS: none (standalone page)
+ */
+import { TOYS } from './common/toy-list.js';
+
+const $ = (id) => document.getElementById(id);
+const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
+
+// Home > Filter tabs: All / Single player / Multiplayer; state lives in home hash (#f=multi) so Back restores it
+const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
+const isMulti = (t) => t.players === 'multi';
+const match = (t, f) => f === 'all' || (f === 'multi') === isMulti(t);
+let filter = 'all';
+let list = TOYS;
+FILTERS.forEach(([f, label]) => {
+  const b = document.createElement('button');
+  b.dataset.f = f;
+  b.innerHTML = `${label}<span class="n">${TOYS.filter((t) => match(t, f)).length}</span>`;
+  b.onclick = () => go(f === 'all' ? '' : `f=${f}`);
+  $('filters').append(b);
+});
+function setFilter(f) {
+  filter = FILTERS.some(([k]) => k === f) ? f : 'all';
+  list = TOYS.filter((t) => match(t, filter));
+  $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
+  let n = 0;
+  $('grid').querySelectorAll('a.card').forEach((a) => {
+    const show = match(TOYS.find((t) => t.dir === a.dataset.dir), filter);
+    a.hidden = !show;
+    if (show) a.querySelector('.num').textContent = ++n;
+  });
+  menu.querySelectorAll('button').forEach((b) => (b.hidden = !list.some((t) => t.dir === b.dataset.dir)));
+}
+
+// Home > Grid: cards; iframe preview only on hover to keep GPU idle
+$('count').textContent = `${TOYS.length} toys`;
+TOYS.forEach((t, i) => {
+  const a = document.createElement('a');
+  a.className = 'card';
+  a.href = `#${t.dir}`;
+  a.dataset.dir = t.dir;
+  a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 14</span>' : ''}${t.emoji}</div>
+    <div class="body"><h2>${t.title}</h2><p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
+  const prev = a.querySelector('.preview');
+  let timer;
+  a.addEventListener('mouseenter', () => {
+    if (t.preview === false) return;
+    timer = setTimeout(() => { if (!prev.querySelector('iframe')) prev.insertAdjacentHTML('beforeend', `<iframe src="${t.dir}/" tabindex="-1"></iframe>`); }, 250);
+  });
+  a.addEventListener('mouseleave', () => { clearTimeout(timer); prev.querySelector('iframe')?.remove(); });
+  $('grid').append(a);
+});
+
+// Viewer > Dropdown: every toy, current one highlighted
+TOYS.forEach((t) => {
+  const b = document.createElement('button');
+  b.dataset.dir = t.dir;
+  b.innerHTML = `<span class="e">${t.emoji}</span>${t.title}`;
+  b.onclick = () => go(t.dir);
+  menu.append(b);
+});
+
+// Viewer > Routing: hash = toy folder, empty = home
+let current = null;
+// location.replace (not src=) so frame swaps add no history entries; Back stays on shell hashes
+function setFrame(url) {
+  const abs = new URL(url, location.href).href;
+  try { frame.contentWindow.location.replace(abs); } catch { frame.src = abs; }
+}
+function go(dir) { location.hash = dir ? dir : ''; }
+// prev/next cycle inside the active filter
+function step(d) {
+  const i = list.findIndex((t) => t.dir === current);
+  go(list[(i + d + list.length) % list.length].dir);
+}
+const homeHash = () => (filter === 'all' ? '' : `f=${filter}`);
+function route() {
+  // #toy-dir?room=ABCD: query is handed to the toy (multiplayer invite links)
+  const [dir, query] = decodeURIComponent(location.hash.slice(1)).split('?');
+  menu.classList.remove('open');
+  if (dir.startsWith('f=') || !dir) setFilter(dir.slice(2));
+  // deep link to a toy outside the active filter: widen to All so nav still contains it
+  else if (!list.some((t) => t.dir === dir) && TOYS.some((t) => t.dir === dir)) setFilter('all');
+  const i = list.findIndex((t) => t.dir === dir);
+  if (i < 0) {
+    current = null;
+    document.body.classList.remove('playing');
+    // blank the frame so the last toy's WebGL + audio shut down
+    setFrame('about:blank');
+    document.title = '3D Toy Box';
+    return;
+  }
+  const t = list[i];
+  current = t.dir;
+  document.body.classList.add('playing');
+  setFrame(`${t.dir}/${query ? `?${query}` : ''}`);
+  document.title = `${t.title} · 3D Toy Box`;
+  $('cur').querySelector('.e').textContent = t.emoji;
+  $('cur').querySelector('.t').textContent = t.title;
+  $('cur').querySelector('.i').textContent = `${i + 1}/${list.length}`;
+  menu.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.dir === t.dir));
+  wake();
+}
+addEventListener('hashchange', route);
+
+// Viewer > Nav pill: buttons, hide/show tab
+$('home-btn').onclick = () => go(homeHash());
+$('prev').onclick = () => step(-1);
+$('next').onclick = () => step(1);
+$('cur').onclick = (e) => {
+  e.stopPropagation();
+  menu.classList.toggle('open');
+  menu.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+};
+$('hide').onclick = () => { nav.classList.add('hidden'); tab.classList.add('show'); menu.classList.remove('open'); frame.focus(); };
+tab.onclick = () => { nav.classList.remove('hidden'); tab.classList.remove('show'); wake(); };
+addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.classList.remove('open'); });
+
+// Viewer > Nav pill > idle dim: fade after 3 s, wake when pointer nears top edge
+let idle;
+function wake() {
+  nav.classList.remove('dim');
+  clearTimeout(idle);
+  idle = setTimeout(() => { if (!menu.classList.contains('open')) nav.classList.add('dim'); }, 3000);
+}
+nav.addEventListener('pointerenter', wake);
+
+// Viewer > Keys: [ / ] flip toys, Esc home; also hooked inside the same-origin iframe
+function onKey(e) {
+  if (!current || e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (e.key === '[') step(-1);
+  else if (e.key === ']') step(1);
+}
+addEventListener('keydown', (e) => { onKey(e); if (e.key === 'Escape' && current) go(homeHash()); });
+frame.addEventListener('load', () => {
+  if (!current) return;
+  try {
+    const w = frame.contentWindow;
+    w.addEventListener('keydown', onKey);
+    w.addEventListener('pointermove', (e) => { if (e.clientY < 70) wake(); });
+    w.addEventListener('pointerdown', () => menu.classList.remove('open'));
+  } catch { /* cross-origin frame: shell keys still work */ }
+  // focus the toy so WASD toys drive without an extra click
+  frame.focus();
+});
+
+route();
+</script>
+</body>
+</html>
