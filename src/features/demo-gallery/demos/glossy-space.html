@@ -12,13 +12,6 @@
 <meta name="description" content="Space Aero wallpaper come to life: a glossy blue-green planet with a sun glint on its oceans, drifting clouds, city lights on the night side, a glowing cyan atmosphere, a banded ring system the planet shadows, green-to-violet aurora curtains over the pole, three pearly iridescent moons on inclined orbits, a nebula sky and a lens-flared sun. Drag to orbit, tap for a shooting star. Hard because the planet, clouds, nebula and aurora are all procedural noise shaders, the atmosphere is a per-pixel closest-approach glow, the rings ray-test against the planet for their shadow, and everything runs through bloom with a sun flare that the planet can occlude."/>
 <meta name="prompt" content="Build a Frutiger Space Aero scene in three.js, one HTML file: a glossy procedural planet shader (simplex fbm continents, ocean specular glint, ice caps, night-side city lights, fresnel rim), a cloud shell, an additive atmosphere glow from ray closest-approach, banded transparent rings shadowed by the planet, aurora ribbon curtains over the north pole animated in the vertex shader, three iridescent clearcoat moons on tilted orbits with faint orbit lines, an fbm nebula skybox with twinkling stars, a sun with Lensflare, and UnrealBloom. OrbitControls with slow auto-rotate; tapping launches a shooting star with a synth chime." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/glossy-space.html
- * PURPOSE: Space Aero planet scene: glossy shader planet, rings, aurora, iridescent moons, nebula, lens flare
- * UI: Render Studio > Frutiger Aero > Space Aero > Glossy Space
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__space (comet, comets, moons)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #02040e; }
 canvas { display: block; touch-action: none; }
 #badge { position: fixed; right: 18px; top: 18px; padding: 10px 16px 11px; border-radius: 14px; color: #e6f7ff; font: 12px "Segoe UI", system-ui, sans-serif; background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05)); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 30px rgba(0, 20, 60, 0.4); backdrop-filter: blur(10px); pointer-events: none; }

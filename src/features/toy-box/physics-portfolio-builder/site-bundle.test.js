@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-bundle.test.js
- * PURPOSE: site schema sanitizing and static bundle assembly
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests site schema sanitization and static bundle assembly.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

@@ -47,13 +47,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/hex-drop-survival/index.html
- * PURPOSE: online last-one-standing for up to 14: three stacked hex floors, every tile drops shortly after it is stepped on; host-authoritative sim, 3 rounds
- * UI: Hex Drop page (lobby overlay, alive counter, round standings, banner, touch stick + jump)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

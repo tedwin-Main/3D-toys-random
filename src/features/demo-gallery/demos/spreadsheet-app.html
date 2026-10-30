@@ -57,13 +57,6 @@
 <div id="scroller"><table id="grid"></table></div>
 <footer><span>Sum <b id="s-sum">0</b></span><span>Avg <b id="s-avg">–</b></span><span>Count <b id="s-cnt">0</b></span><span class="hide-m">Arrows · Enter · Tab · type to edit · Ctrl+C / Ctrl+V</span></footer>
 <script>
-/**
- * FILE: render-studio/frontend/demos/spreadsheet-app.html
- * PURPOSE: Spreadsheet: tokenizer + precedence parser, refs/ranges/functions, dependency recalculation with cycle errors, copy-paste ref shifting, CSV
- * UI: Render Studio > Apps & UI > Spreadsheet
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__sheet (test hook: set, get, display)
- */
 const COLS = 12, ROWS = 40;
 const $ = (id) => document.getElementById(id);
 const colName = (c) => String.fromCharCode(65 + c);

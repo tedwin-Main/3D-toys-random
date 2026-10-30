@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/break-stage.js
- * PURPOSE: React shell for scene renderer: canvas, projected project labels (also keyboard targets), WebGL fallback
- * UI: Viewer > Hero > stage, Builder > Preview > stage
- * USED BY: viewer-page.js, preview-panel.js
- * KEY EXPORTS: BreakStage, declutterLabels
- */
+// Renders interactive break stage connecting three.js scene with physics simulation.
 
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import { html } from './html.js'

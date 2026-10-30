@@ -42,13 +42,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/musical-chairs-party/index.html
- * PURPOSE: online musical chairs for up to 14: dance on a disco floor while the music plays, chairs pop up at random spots when it stops, shove rivals to grab one; one fewer chair each round; host-authoritative sim
- * UI: Chair Scramble page (lobby overlay, round status, alive board, shove button, touch stick)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

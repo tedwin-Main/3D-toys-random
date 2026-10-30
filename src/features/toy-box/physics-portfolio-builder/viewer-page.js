@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/viewer-page.js
- * PURPOSE: published portfolio: scroll-scrubbed break hero, settled scene as nav, work list, contact, project drawer
- * UI: Viewer (whole page)
- * USED BY: viewer-main.js
- * KEY EXPORTS: ViewerPage
- */
+// Renders published portfolio page with scrubbed break hero and work list.
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import gsap from 'gsap'

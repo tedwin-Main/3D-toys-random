@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/builder-page.js
- * PURPOSE: builder shell: draft state, autosave, bake on scene change, image URLs, three-panel layout
- * UI: Builder (whole page)
- * USED BY: builder-main.js
- * KEY EXPORTS: BuilderPage
- */
+// Renders portfolio builder main page: editor panels, preview, and top bar.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { html } from './html.js'

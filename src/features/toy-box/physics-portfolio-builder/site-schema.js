@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-schema.js
- * PURPOSE: site.json shape: palettes, font pairs, default draft, normalize untrusted input
- * UI: Builder > Projects + Style panels, Viewer (theme tokens)
- * USED BY: builder-page.js, viewer-page.js, site-bundle.js, tests
- * KEY EXPORTS: PALETTES, FONT_PAIRS, PROJECT_COLORS, createDefaultSite, createProject, normalizeSite, slugify
- */
+// Defines site schema, palette tokens, typography pairs, and input sanitization.
 
 import { PRESET_INFO } from './preset-info.js'
 

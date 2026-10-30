@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-table-physics.js
- * PURPOSE: pool table engine core copied from 8Ball_Studio pool-break-physics.js: 6 pockets + jaws, swept ball/cushion contacts, cloth friction, spin
- * UI: Play > table (via pool-game-physics.js)
- * USED BY: pool-game-physics.js
- * KEY EXPORTS: DEFAULT_TABLE_CONFIG, mergeConfig, createTableGeometry, simulateStep
- */
+// Defines geometric dimensions, cushions, and pocket boundaries for pool table.
 
 // No DOM or renderer import: runs in node tests and in the shot worker.
 const clamp = ( value, min = 0, max = 1 ) => Math.min( max, Math.max( min, value ) )

@@ -12,13 +12,6 @@
 <meta name="description" content="A 2005-era pocket music player, with no brand: a glossy white body, a small colour screen with a sliding menu stack (Music, Playlists, Songs, Extras, Settings, Now Playing), and a working click wheel. Dragging round the wheel scrolls lists with a tiny tick each step, the four wheel buttons do Menu, Back, Forward and Play/Pause, and the centre button selects. Songs are original synth tunes from a lookahead sequencer, and on Now Playing the wheel turns the volume. Hard because the wheel turns pointer angle into steps (handling the wrap past 180 degrees), and every screen slides in or out as a stack." />
 <meta name="prompt" content="Build a 2005-style pocket music player in one HTML file with no brand: glossy white CSS body, a 320x240 colour screen with a sliding menu stack (Music, Playlists, Songs, Extras, Settings, Now Playing with art, progress and time), and a real click wheel where circular dragging scrolls lists with a tick per step; Menu, Back, Forward, Play/Pause and a centre select. Songs are original tunes from a WebAudio lookahead sequencer; on Now Playing the wheel sets volume. Add keyboard support and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/click-wheel-player.html
- * PURPOSE: 2005 pocket player: circular-drag click wheel, sliding menu stack, Now Playing with synth sequencer and volume
- * UI: Render Studio > Frutiger Aero > Click Wheel Player
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__wheel (turn, press, screen)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Helvetica Neue", "Myriad Pro", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 body { display: grid; place-items: center; background: radial-gradient(ellipse at 50% 30%, #ffffff, #e3eef7 50%, #b7d3ea); }

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/snap-pacing.js
- * PURPOSE: guest-side snapshot pacing: measures how unevenly host snapshots arrive, softens remote-entity smoothing and stretches the coast window when they bunch up
- * UI: multiplayer action toys (other players on a guest screen)
- * USED BY: toy-box multiplayer pages (applySnap arrived, render loop rate / cap)
- * KEY EXPORTS: createSnapPacing
- */
+// Paces snapshot arrival to smooth remote entity interpolation.
 
 const CALM_MS = 8; // ticker quantization at 60 Hz: below this counts as steady
 const PAUSE_MS = 500; // longer gap = tab hidden / host migration, not jitter

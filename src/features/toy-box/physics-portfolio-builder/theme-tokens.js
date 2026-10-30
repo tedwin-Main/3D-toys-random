@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/theme-tokens.js
- * PURPOSE: site palette + font pair to CSS custom properties on an element
- * UI: Viewer (whole page), Builder > Preview frame
- * USED BY: viewer-page.js, preview-panel.js
- * KEY EXPORTS: themeTokens, applyTheme
- */
+// Maps site palette and font selections to CSS custom properties.
 
 import { FONT_PAIRS, PALETTES } from './site-schema.js'
 

@@ -12,13 +12,6 @@
 <meta name="description" content="A 2005-era console dashboard, with no logos. Five coloured 'blades' (Store, Online, Games, Media, Settings) stack like pages in CSS 3D, and switching tabs flips the stack open to the next blade with a synthesized whoosh. Each blade has glossy list rows, a profile card or a big feature tile, an 'award unlocked' toast pops in, and a four-quadrant ring of light pulses at the bottom. Hard because the blades are real 3D-transformed panels whose rotation and depth are recomputed per state, so the pages fold and stay readable at phone width." />
 <meta name="prompt" content="Recreate a 2005-era console 'blades' dashboard in one HTML file with no logos: five full-height coloured panels (Store, Online, Games, Media, Settings) stacked in CSS 3D, with labelled tabs on their edges; left/right or click flips between them with a synthesized whoosh. Fill each blade with glossy rows, a profile card or a feature tile, add an 'award unlocked' toast and a glowing four-quadrant ring of light, a soft green-white backdrop and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/blade-dashboard.html
- * PURPOSE: 2005 console blades: CSS 3D stacked panels, tab flip with whoosh, glossy rows, profile card, award toast, ring of light
- * UI: Render Studio > Frutiger Aero > Blade Dashboard
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__blades (go, toast)
- */
 :root { --font: "Segoe UI", "Convection", "Helvetica Neue", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: #fff; user-select: none; -webkit-user-select: none; }

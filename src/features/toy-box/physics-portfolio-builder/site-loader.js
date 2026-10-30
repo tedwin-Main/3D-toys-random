@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-loader.js
- * PURPOSE: viewer data source: published site.json + one random baked break, or builder draft (?draft=1)
- * UI: Viewer > page load
- * USED BY: viewer-main.js
- * KEY EXPORTS: loadViewerData
- */
+// Loads published site JSON and baked break recording into viewer.
 
 import { decodeRecording } from './scene-recording.js'
 import { normalizeSite } from './site-schema.js'

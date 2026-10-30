@@ -24,13 +24,6 @@
 <canvas id="c"></canvas>
 <div id="pad"><div><button data-k="ArrowLeft">◀</button><button data-k="ArrowRight">▶</button></div><div><button data-k="ArrowUp">▲</button><button data-k="Space">●</button></div></div>
 <script>
-/**
- * FILE: src/features/toy-box/asteroids/index.html
- * PURPOSE: Vector Asteroids: phosphor glow, inertia, wrap-aware drawing, splitting rocks, saucer, hyperspace, heartbeat, AI pilot
- * UI: Render Studio > Games > Asteroids
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let W, H, dpr;
 function resize() { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }

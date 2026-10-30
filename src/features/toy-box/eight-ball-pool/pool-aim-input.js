@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-aim-input.js
- * PURPOSE: table pointer + keyboard controls: hover/tap/drag aim, press-and-pull-back shot, ball-in-hand drag, arrow/space keys
- * UI: Play > table (aim, shoot, place cue ball)
- * USED BY: play-page.js
- * KEY EXPORTS: attachAimInput
- */
+// Handles drag and touch aim input, cue elevation, and fine adjustment.
 
 import { GAME_CONFIG } from './pool-game-physics.js'
 

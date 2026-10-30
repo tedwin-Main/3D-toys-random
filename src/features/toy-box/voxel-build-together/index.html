@@ -46,13 +46,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/voxel-build-together/index.html
- * PURPOSE: shared voxel sandbox for up to 14 builders: place, erase, paint and pick blocks together, live colored cursors, host-ordered edits, save/load in browser
- * UI: Block Party page (lobby overlay, tool + palette bar, builders list, room bar with save/load/clear)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { createGameAudio } from '../common/game-audio.js';

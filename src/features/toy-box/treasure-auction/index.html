@@ -60,13 +60,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/treasure-auction/index.html
- * PURPOSE: online sealed-bid auction for 2-14: every lot everyone bids in secret at once; treasure goes to the highest unmatched bid, a cursed lot makes everyone pay and sticks the lowest bidder with it; score = coins + loot. Host-run, bids stay on the host until the reveal, state sent only on change
- * UI: Treasure Auction page (lobby overlay, lot banner, bid box, scoreboard, 3D auction stage with bidder pawns + paddles)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

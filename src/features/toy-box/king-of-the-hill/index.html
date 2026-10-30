@@ -46,13 +46,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/king-of-the-hill/index.html
- * PURPOSE: online king of the hill for up to 14: a crown ring hops between hilltops, stand in it alone to score, shove-dash rivals off the floating island; host-authoritative sim
- * UI: Crown Keep page (lobby overlay, match clock, zone status, standings, banner, phone joystick + SHOVE)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

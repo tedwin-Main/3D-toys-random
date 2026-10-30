@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/image-upload.js
- * PURPOSE: shrink uploaded project image to max 1600 px WebP, store in IndexedDB, return file name
- * UI: Builder > Projects > card > Image dropzone
- * USED BY: project-editor.js
- * KEY EXPORTS: importProjectImage
- */
+// Optimizes uploaded project images to WebP and stores them in IndexedDB.
 
 import { saveImage } from './draft-store.js'
 

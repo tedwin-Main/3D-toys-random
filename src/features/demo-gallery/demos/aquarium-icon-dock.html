@@ -12,13 +12,6 @@
 <meta name="description" content="Glossy 3D app icons standing on a glass shelf in front of a living aquarium: fish school around swaying seaweed, bubbles rise through god-ray light, and the sand glows with caustics. Moving along the shelf magnifies the icons like a dock in real 3D; clicking one bounces it, and clicking the water drops food that the fish chase. Hard because the dock magnification is a smooth cosine falloff applied to 3D meshes from a raycast on the shelf plane, the fish are a small boids flock with a food attractor, and the seaweed sways in a vertex shader." />
 <meta name="prompt" content="Build a three.js scene in one HTML file: seven glossy 3D app icons (rounded boxes with clearcoat and canvas-drawn glyph faces, no real logos) on a glass shelf in front of an aquarium with a boids school of fish, swaying seaweed via a vertex shader, rising bubbles, light shafts and caustic sand. Pointer position along the shelf magnifies icons with a cosine falloff like a dock, clicking an icon bounces it, clicking the water drops food the fish chase; add an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/aquarium-icon-dock.html
- * PURPOSE: 3D glossy icon dock on glass shelf over aquarium: magnify falloff, bounce, fish boids with food, seaweed shader, bubbles, caustics
- * UI: Render Studio > Frutiger Aero > Aquarium Icon Dock
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__aquarium (hover, bounce, feed)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #062a4a; font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif; }
 canvas { display: block; }
 #label { position: fixed; left: 0; top: 0; transform: translate(-50%, -100%); padding: 5px 12px; border-radius: 12px; font-size: 13px; color: #fff; background: rgba(10, 30, 50, 0.7); backdrop-filter: blur(6px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25); pointer-events: none; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }

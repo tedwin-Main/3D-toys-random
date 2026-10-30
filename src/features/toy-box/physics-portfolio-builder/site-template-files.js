@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-template-files.js
- * PURPOSE: every file the published viewer needs, paths relative to builder root (no build, so hand list)
- * UI: Builder > Top bar > Export zip
- * USED BY: export-site.js, site-template-files.test.js
- * KEY EXPORTS: TEMPLATE_FILES
- */
+// Declares static template file manifest for exported portfolio bundles.
 
 // viewer.html becomes index.html in the zip; rest sit flat beside it so relative imports still resolve
 export const TEMPLATE_FILES = Object.freeze( [

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/rigid-body-physics.js
- * PURPOSE: deterministic 3D rigid-body bake (dominoes) on Rapier WASM, same output shape as rolling sim
- * UI: none (baked in builder worker, sampled by viewer)
- * USED BY: scene-presets.js
- * KEY EXPORTS: simulateRigidBodies
- */
+// Simulates deterministic 3D rigid body dominoes physics via Rapier WASM.
 
 // browser worker ignores import maps: full CDN url; node tests use npm package (3d-toys devDependency)
 const RAPIER_URL = 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.21.0/+esm'

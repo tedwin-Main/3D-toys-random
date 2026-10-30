@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/own-prediction.js
- * PURPOSE: guest-side prediction for own player: runs game step on local input at once, host snapshots pull it back (blend small drift, snap big error)
- * UI: multiplayer action toys (guest's own car / player / ship)
- * USED BY: toy-box multiplayer pages (simTick guest branch, applySnap, render loop)
- * KEY EXPORTS: createPrediction, blendAngle
- */
+// Handles guest-side input prediction and snapshot reconciliation.
 
 // Multiplayer > Guest prediction
 // step(p, dt): game's per-entity step; live(me): when to predict; seed(pred, me): fix-ups on start (copy arrays, sync seq counters); merge(pred, host): extra fields to take from host

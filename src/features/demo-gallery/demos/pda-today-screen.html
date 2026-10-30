@@ -12,13 +12,6 @@
 <meta name="description" content="A glossy 2003 pocket PC you drive with a stylus: the Today screen over a painted lake wallpaper shows the date, owner, next appointment, tasks and unread mail; the Start menu opens Calendar (month grid with appointment days), Inbox, Tasks (tick them off) and Notes, where a letter recognizer panel turns your single-stroke letters into text, Graffiti style. A reminder balloon pops up with Snooze and Dismiss, the hardware buttons jump between apps, and the stylus clicks on glass. Hard because the handwriting is recognised for real: every stroke is resampled, scaled with its aspect kept and matched against unistroke templates for letters, space and backspace, and attract mode writes a note by drawing actual strokes through the same recognizer."/>
 <meta name="prompt" content="Build a 2003-era Pocket PC style PDA in one HTML file: a silver device with hardware app buttons and a 5-way pad, a 240x320 screen scaled to fit, a stylus cursor, and apps: Today screen (date, owner, appointment, tasks, unread mail over a painted wallpaper), Start menu, Calendar month view with agenda, Inbox, Tasks with checkboxes, and Notes with a letter recognizer input panel that recognises single-stroke letters (resample, scale, template match like the $1 recognizer) plus space and backspace strokes. Add a reminder balloon with snooze, stylus tap sounds and a chime. Attract mode writes a note by drawing real strokes through the recognizer; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/pda-today-screen.html
- * PURPOSE: 2003 pocket PC: Today screen, Start menu, calendar, inbox, tasks, notes with unistroke handwriting recognizer
- * UI: Render Studio > Retro Aesthetics > Frutiger Aero > Core Aero > PDA Today Screen
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__pda (app, write, recognize, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { font: 11px Tahoma, Verdana, sans-serif; user-select: none; background: radial-gradient(ellipse at 50% 20%, #e8f6ff, #9fc9ec 55%, #4f88c4); }

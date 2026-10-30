@@ -56,13 +56,6 @@
   <div id="info">left: reveal · right / long-press: flag · click a number: chord</div>
 </main>
 <script>
-/**
- * FILE: src/features/toy-box/minesweeper/index.html
- * PURPOSE: Minesweeper with safe first click, flood fill, chording, flags/long-press, timer, and a constraint-solver AI attract mode
- * UI: Render Studio > Games > Minesweeper Solver
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page); window.__mines test hooks
- */
 const DIFFS = [[9, 9, 10], [16, 16, 40], [30, 16, 99]];
 const gridEl = document.getElementById('grid'), face = document.getElementById('face'), infoEl = document.getElementById('info');
 let W, H, M, cells, els, started, over, flags, opened, t0, timer, diff = 1, ai = true, idle = 0, aiTimer = null;

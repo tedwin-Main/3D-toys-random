@@ -12,13 +12,6 @@
 <meta name="description" content="The tropical Frutiger Aero stock image come to life: a turquoise lagoon with a palm island, glossy dolphins leaping in arcs, white splashes and foam rings, gulls circling and a sun-glitter path on the water. Click the water and a dolphin leaps right there; drag to orbit. Hard because the ocean is a multi-wave vertex shader with analytic normals, Fresnel sky reflection, shallow-water tint around the island and foam rings fed live from splash events, while each dolphin is built from a lathe profile with extruded fins and flies a ballistic arc that it faces along."/>
 <meta name="prompt" content="Build a Frutiger Aero tropical lagoon in three.js, one HTML file: a gradient sky dome with a sun, an ocean plane with summed sine waves and analytic normals, Fresnel reflection, sun glitter, turquoise shallows and a foam shoreline around a palm island (stacked-cylinder trunks, bent frond strips, coconuts), and glossy procedural dolphins (lathe body, extruded fins and flapping flukes) that leap in ballistic arcs facing their velocity, with splash particles and foam rings drawn into the water shader. Click the water to make a dolphin jump there, orbit with drag, add circling gulls, cloud sprites, synthesized waves, splashes and chirps, and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/dolphin-lagoon.html
- * PURPOSE: tropical lagoon: wave shader with splash foam, palm island, procedural dolphins leaping on click
- * UI: Render Studio > Frutiger Aero > Dolphin Lagoon
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__lagoon (jump, airborne, count)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd6f5; }
 canvas { display: block; touch-action: none; }
 #hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: #fff; font: 13px "Segoe UI", system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0, 40, 80, 0.7); white-space: nowrap; pointer-events: none; }

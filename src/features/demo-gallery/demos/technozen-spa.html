@@ -12,13 +12,6 @@
 <meta name="description" content="Technozen, the calm spa-tech corner of Frutiger Aero: a still pool in pale morning mist with a cairn of wet balancing pebbles, swaying bamboo, lily pads and a bamboo spout that drips into the water, every drop (and every click) spreading rings across the surface, with the odd leaf drifting down. Over it floats a frosted-glass breathing app whose ring swells and settles through inhale, hold and exhale, with soft bells, drop sounds and an ambient pad. Hard because the water is a single shader summing decaying ripple rings with analytic normals, Fresnel sky reflection and a sun glint, the pebbles are noise-displaced clearcoat ellipsoids, and the breath timer drives both the overlay and the scene light."/>
 <meta name="prompt" content="Build a Technozen spa scene in three.js, one HTML file: a misty still pool whose shader sums up to 12 decaying ripple rings with analytic normals, Fresnel sky reflection and a sun glint; a cairn of noise-displaced wet clearcoat pebbles on a flat rock, swaying segmented bamboo, lily pads, a bamboo spout that drips droplets into the pool and drifting falling leaves, all in soft mint-and-white light. Overlay a frosted-glass breathing app with an SVG ring for inhale, hold and exhale, session length chips, bells, drop sounds and an ambient pad; clicks on the water make ripples." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/technozen-spa.html
- * PURPOSE: Technozen zen pool: ripple shader, pebble cairn, bamboo spout drips, frosted breathing app
- * UI: Render Studio > Frutiger Aero > Technozen > Technozen Spa
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__zen (drop, breathe, phase, ripples)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #e6f2ee; font-family: "Segoe UI", "Helvetica Neue", Helvetica, sans-serif; color: #24433f; }
 canvas { display: block; touch-action: none; }
 #panel { position: fixed; left: 28px; bottom: 28px; width: 270px; padding: 18px 20px 16px; border-radius: 22px; background: linear-gradient(160deg, rgba(255, 255, 255, 0.62), rgba(225, 245, 238, 0.38)); border: 1px solid rgba(255, 255, 255, 0.85); box-shadow: 0 18px 40px rgba(40, 90, 80, 0.18), inset 0 1px 0 #fff; backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2); user-select: none; }

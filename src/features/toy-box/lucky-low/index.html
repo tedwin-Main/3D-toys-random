@@ -47,13 +47,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/lucky-low/index.html
- * PURPOSE: online bluffing number game for 2-14: everyone picks a number in secret, the lowest number nobody else picked wins and scores its own value; host-run, picks stay on the host until the reveal, state sent only on change
- * UI: Lucky Low page (lobby overlay, number pad, scoreboard, banner, 3D row of numbered pillars where tokens drop on the reveal)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

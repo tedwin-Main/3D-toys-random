@@ -12,13 +12,6 @@
 <meta name="description" content="The late-2000s 'ribbons' screensaver: translucent glassy ribbons fly in long looping paths through dark blue space, each a strip rebuilt every frame from its own trail, twisting as it turns, glowing brighter at its edges and fading out at the tail. Click to change the colour set, drag to tilt the view, and the ribbons swerve toward the pointer. Hard because each ribbon is a dynamic triangle strip whose side vector is parallel-transported along the trail, so it twists smoothly and never flips, with every vertex rewritten on every frame." />
 <meta name="prompt" content="Recreate the late-2000s ribbons screensaver in three.js, one HTML file: 8 translucent ribbons following smooth 3D noise flight paths, each a dynamic triangle strip rebuilt every frame from a 220-point trail with a parallel-transported side vector so it twists without flipping, tapering, fading at the tail and glowing brighter at its edges with additive blending over a dark blue gradient. Click to cycle colour sets, drag to tilt the view, steer ribbons toward the pointer, and auto-drift in attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/glass-ribbons-screensaver.html
- * PURPOSE: ribbons screensaver: dynamic strip geometry from noise-driven trails, parallel-transport twist, additive edge glow
- * UI: Render Studio > Frutiger Aero > Glass Ribbons Screensaver
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__ribbons (palette, count)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #01030c; }
 canvas { display: block; }
 #hint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); color: rgba(190, 220, 255, 0.45); font: 13px "Segoe UI", system-ui, sans-serif; white-space: nowrap; }

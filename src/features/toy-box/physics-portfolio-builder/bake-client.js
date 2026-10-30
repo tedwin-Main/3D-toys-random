@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/bake-client.js
- * PURPOSE: promise wrapper over bake worker, one shared worker per tab
- * UI: Builder > Preview
- * USED BY: builder-page.js
- * KEY EXPORTS: bakeVariants, VARIANT_COUNT
- */
+// Dispatches physics bake tasks to background web worker.
 
 export const VARIANT_COUNT = 3
 

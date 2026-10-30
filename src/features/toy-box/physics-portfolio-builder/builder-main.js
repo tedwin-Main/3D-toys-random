@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/builder-main.js
- * PURPOSE: builder entry: mount builder page (fonts + styles linked in index.html)
- * UI: Builder
- * USED BY: index.html
- * KEY EXPORTS: none
- */
+// Mounts portfolio builder web application into root container.
 
 import { createRoot } from 'react-dom/client'
 import { html } from './html.js'

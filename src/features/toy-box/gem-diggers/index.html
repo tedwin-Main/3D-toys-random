@@ -44,13 +44,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/gem-diggers/index.html
- * PURPOSE: online turn-based dig game for 2-14 on a shared field: dig one tile per turn, gem = +3 and dig again, bomb = -2, empty tiles hint how many bombs and gems touch them; seeded field, host-run, state sent only on change
- * UI: Gem Diggers page (lobby overlay, turn banner, scoreboard, 3D meadow of grass tiles with hint numbers, gems and craters)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

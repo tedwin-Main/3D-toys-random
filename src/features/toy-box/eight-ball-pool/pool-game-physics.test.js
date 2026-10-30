@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-game-physics.test.js
- * PURPOSE: game table contracts: legal rack, straight pot, scratch, first contact, determinism, respot, aim ray
- * UI: none
- * USED BY: npm test
- * KEY EXPORTS: none
- */
+// Tests pool game physics contracts: momentum conservation and cushion bounces.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

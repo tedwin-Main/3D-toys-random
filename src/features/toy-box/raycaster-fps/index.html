@@ -19,13 +19,6 @@
 <body>
 <canvas id="c"></canvas>
 <script>
-/**
- * FILE: src/features/toy-box/raycaster-fps/index.html
- * PURPOSE: Wolfenstein-style DDA raycaster: textured walls/floor/ceiling, sliding doors, z-buffered sprites, drones, pickups, minimap, bot attract mode
- * UI: Render Studio > Games > Raycaster FPS
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const view = document.createElement('canvas'), vctx = view.getContext('2d');
 let RW = 480, RH = 270, img, buf, zbuf, dpr = 1;

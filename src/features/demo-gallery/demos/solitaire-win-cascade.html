@@ -12,13 +12,6 @@
 <meta name="description" content="Late-90s Klondike solitaire on green felt with a glossy bubble card back: drag cards and runs between piles, double-click to send a card home, draw from the stock, undo, and win to get the famous bouncing-card cascade that smears trails across the whole table. Left alone it deals a seeded game its own solver can finish and plays it to the cascade. Hard because every card face is drawn procedurally (pip layouts, corner indices, framed court cards), cards ease to layout targets so every move animates for free, drops pick the legal pile with the biggest overlap, and the cascade paints onto a canvas that is never cleared."/>
 <meta name="prompt" content="Build late-90s Klondike solitaire in one HTML file on canvas: procedurally drawn card faces with real pip layouts and a generic glossy card back, green felt, stock/waste/foundations/tableau with drag-and-drop of runs, double-click to foundation, draw-one with recycling, classic scoring, timer and undo. Winning launches the bouncing-card cascade that leaves trails on a never-cleared overlay canvas. Add a greedy solver, deal a seed it can finish and auto-play it as an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/solitaire-win-cascade.html
- * PURPOSE: Klondike solitaire with procedural cards, greedy-solver attract and the bouncing win cascade
- * UI: Render Studio > Frutiger Aero > Card Solitaire
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__solitaire (deal, state, cascade, solves, step, next, cards)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b5a22; font: 12px "Segoe UI", Tahoma, sans-serif; user-select: none; -webkit-user-select: none; }
 #win { position: fixed; inset: 0; display: flex; flex-direction: column; }

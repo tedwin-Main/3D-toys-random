@@ -1,10 +1,5 @@
-"""
-FILE: src/features/blender-scenes/eight-ball-product-shot.py
-PURPOSE: headless Blender scene: procedural 8-ball on pool felt; Cycles hero still, EEVEE turntable mp4 (frames + ffmpeg), GLB export; writes notes.json entries
-UI: Render Studio > Blender Renders + 3D Models tabs
-USED BY: run by hand: /Applications/Blender.app/Contents/MacOS/Blender -b -P blender-scenes/eight-ball-product-shot.py
-KEY EXPORTS: none (script)
-"""
+# Renders procedural 8-ball scene and exports still, turntable, and GLB assets.
+
 import json
 import math
 import shutil

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/builder-icons.js
- * PURPOSE: inline Phosphor icons (one fixed weight each) so pages need no icon package
- * UI: Builder > Top bar, Preview controls, Projects, Style; Viewer > Work list, Project drawer
- * USED BY: top-bar.js, preview-panel.js, project-editor.js, style-editor.js, project-grid.js, project-drawer.js
- * KEY EXPORTS: ArrowSquareOut, DownloadSimple, ArrowsClockwise, Pause, Play, Tag, ArrowDown, ArrowUp, DotsSixVertical, ImageSquare, Plus, Trash, X, ArrowRight, ArrowUpRight
- */
+// Defines inline icons for portfolio builder interface.
 
 import { html } from './html.js'
 

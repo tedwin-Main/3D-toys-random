@@ -12,13 +12,6 @@
 <meta name="description" content="A 2007-era welcome screen, with no logos. Aurora ribbons and light streaks drift across a deep teal sky behind glossy user tiles. Pick a user, type a password, hit the round blue arrow, and a ring of dots spins over 'Welcome' while a synthesized startup chord swells. Then the desktop fades in, and Log off brings you back. Hard because the aurora is many stroked bezier ribbons drawn in additive light every frame, and the tile, password and welcome states have to morph smoothly into one another." />
 <meta name="prompt" content="Recreate a 2007-era login / welcome screen in one HTML file with no logos: animated canvas aurora ribbons and light streaks on deep teal, glossy rounded user tiles with procedural pictures, a password box with a round glossy arrow button, an incorrect-password message, then a spinning dot ring and 'Welcome' with a synthesized startup chord swell before fading to a desktop. Add ease-of-access and power buttons and an attract mode that logs itself in." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/aurora-login-screen.html
- * PURPOSE: 2007 welcome screen: canvas aurora, user tiles, password + arrow, welcome spinner, synth startup chord, desktop fade
- * UI: Render Studio > Frutiger Aero > Aurora Login Screen
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__login (pick, submit, logoff)
- */
 :root { --font: "Segoe UI", "Frutiger", "Helvetica Neue", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: #fff; user-select: none; -webkit-user-select: none; background: #03314f; }

@@ -12,13 +12,6 @@
 <meta name="description" content="The 2007-era bubbles screensaver, rebuilt. Glassy soap bubbles drift across a desktop and bounce off the screen edges and each other, refracting the windows and icons behind them like little lenses, with swirling thin-film colour and a sharp window highlight. Switch between clear and tinted metallic bubbles, click one to pop it, or move the mouse to 'wake' the desktop. Hard because each bubble samples the same desktop texture by screen position with a normal-based lens offset, so the background has to line up pixel-for-pixel behind the 3D spheres." />
 <meta name="prompt" content="Recreate the classic 2007 bubbles screensaver in three.js in one HTML file: draw a fake glass desktop (wallpaper, icons, a window, a taskbar) to a canvas texture as the backdrop, then float 3D soap bubbles over it that refract the desktop through a screen-space lens offset, with thin-film iridescence, Fresnel rim and a window-shaped specular highlight. Bubbles bounce off the edges and each other elastically; click pops them; add a clear / tinted toggle." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/soap-bubbles-screensaver.html
- * PURPOSE: 2007 bubbles screensaver: desktop canvas backdrop, refracting thin-film bubbles, elastic bounces, pop, tint toggle
- * UI: Render Studio > Frutiger Aero > Bubbles Screensaver
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__bubblesaver (tint, pop, count)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b3a5a; }
 canvas { display: block; }
 #ui { position: fixed; right: 14px; top: 14px; display: flex; gap: 6px; font: 12px "Segoe UI", system-ui, sans-serif; }

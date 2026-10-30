@@ -53,13 +53,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/mini-golf-party/index.html
- * PURPOSE: online turn-based mini golf for up to 14: tee off in order, then farthest from the cup putts next, shot clock, resting balls can be knocked; 6 floating-island holes (bumpers, windmills, slopes, water, sand); host-authoritative physics
- * UI: Putt Party page (lobby overlay, hole HUD, live leaderboard, scorecard, drag-to-putt aim)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

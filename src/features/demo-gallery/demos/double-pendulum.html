@@ -32,13 +32,6 @@
   <div id="read"></div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/double-pendulum.html
- * PURPOSE: RK4 double pendulums from near-identical starts diverging chaotically; log-separation plot, energy drift readout, drag to set angles
- * UI: Render Studio > Physics > Double Pendulum Chaos
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const trail = document.getElementById('trail'), tctx = trail.getContext('2d');
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 let dpr, W, H, ox, oy, L;

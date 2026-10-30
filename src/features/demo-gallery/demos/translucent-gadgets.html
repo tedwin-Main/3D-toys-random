@@ -12,13 +12,6 @@
 <meta name="description" content="Late-90s candy-coloured see-through plastic as a 3D product shot. A generic all-in-one CRT computer, a puck mouse with a coiled cable and a pocket handheld all turn on a white studio turntable. The shells are physical transmission materials, so you see the tube, the circuit board and the chips glowing through tinted plastic, and the computer and handheld screens run live canvas animations. Pick from five fruity colours and the tint fades across every shell. Hard because transmission renders the scene twice, and it still has to stay smooth on a phone." />
 <meta name="prompt" content="Make a late-1990s translucent candy-plastic product showcase in three.js in one HTML file, with no logos. Model a generic all-in-one CRT computer, a round puck mouse with a cable and a handheld game device out of MeshPhysicalMaterial transmission shells, so the internals (CRT neck, circuit boards, chips) show through. Put them on a white studio turntable with soft shadows and a room environment map, give the screens live canvas textures, and add five fruit-colour swatches that tween the tint." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/translucent-gadgets.html
- * PURPOSE: three.js candy translucent plastic: CRT all-in-one, puck mouse, handheld, transmission shells, colour swatches, turntable
- * UI: Render Studio > Frutiger Aero > Translucent Gadgets
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__gadgets (color, spin)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f6f8; font-family: "Lucida Grande", "Helvetica Neue", system-ui, sans-serif; }
 canvas { display: block; }
 #sw { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; gap: 14px; padding: 10px 16px; border-radius: 30px; background: rgba(255, 255, 255, 0.7); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.9); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }

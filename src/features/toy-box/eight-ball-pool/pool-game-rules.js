@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-game-rules.js
- * PURPOSE: pure 8-ball rules: break, open table, groups, fouls, ball in hand, 8-ball win/loss, practice mode
- * UI: Play > HUD (turn, groups, toasts), Play > ball in hand
- * USED BY: play-page.jsx, pool-bot.js, pool-game-rules.test.js
- * KEY EXPORTS: SOLIDS, STRIPES, groupOf, createGame, legalTargets, onTableIds, applyShot
- */
+// Enforces standard 8-ball rules: fouls, ball assignment, turns, and win states.
 
 export const SOLIDS = Object.freeze( [ 1, 2, 3, 4, 5, 6, 7 ] )
 export const STRIPES = Object.freeze( [ 9, 10, 11, 12, 13, 14, 15 ] )

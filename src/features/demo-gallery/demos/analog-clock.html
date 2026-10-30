@@ -41,13 +41,6 @@
   <div id="laps"></div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/analog-clock.html
- * PURPOSE: Chronograph watch on canvas: live time, sweep/tick seconds with spring, date window, moon phase, GMT subdial, working stopwatch, time warp
- * UI: Render Studio > Apps & UI > Chronograph Watch
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__clock (test hook: stopwatch, toggle, lap, reset, setWarp)
- */
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 let W = 0, H = 0;
 function resize() { const dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); }

@@ -60,13 +60,6 @@
   </div>
 </main>
 <script>
-/**
- * FILE: render-studio/frontend/demos/neural-net-xor.html
- * PURPOSE: From-scratch MLP: forward/backprop, Adam, BCE loss; live decision boundary, per-neuron activation maps, weight-coloured diagram, loss curve
- * UI: Render Studio > Algorithms > Neural Net Playground
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__nn (test hook: train, loss, reset, accuracy)
- */
 const $ = (id) => document.getElementById(id);
 
 // Data: 2D points in [-1,1]^2 with labels 0/1

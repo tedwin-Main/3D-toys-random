@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/room-client.js
- * PURPOSE: browser side of room relay: join/create room by code on same-origin relay (Render SG / local server), roster + host tracking, send to all, one peer, or host
- * UI: every multiplayer toy (through room-lobby.js)
- * USED BY: components/room-lobby.js, multiplayer toy pages
- * KEY EXPORTS: connectRoom, startTicker
- */
+// Manages browser client connection to room relay.
 
 const CONNECT_TIMEOUT_MS = 4000;
 

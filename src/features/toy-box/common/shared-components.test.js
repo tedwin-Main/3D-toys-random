@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/shared-components.test.js
- * PURPOSE: lobby invite link contracts and game audio unlock / burst gating with stubbed Web Audio
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests lobby invite link contracts and Web Audio unlock behavior.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

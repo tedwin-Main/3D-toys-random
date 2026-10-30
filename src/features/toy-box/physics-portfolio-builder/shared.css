@@ -1,10 +1,4 @@
-/*
- * FILE: src/features/toy-box/physics-portfolio-builder/shared.css
- * PURPOSE: reset, base tokens, 3D stage + projected label styles shared by viewer and builder
- * UI: Viewer > Hero stage, Builder > Preview stage
- * USED BY: index.html, viewer.html
- * KEY EXPORTS: none
- */
+/* Defines base reset, design tokens, and shared 3D stage layout styles. */
 
 :root {
   --bg: #07110d;

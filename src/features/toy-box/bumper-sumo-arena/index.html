@@ -41,13 +41,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/bumper-sumo-arena/index.html
- * PURPOSE: online party sumo: bumper cars on a shrinking floating ring, dash to shove, last car standing wins the round, first to 3; host-authoritative sim, bots fill seats
- * UI: Bumper Sumo page (lobby overlay, scoreboard, countdown, touch stick)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

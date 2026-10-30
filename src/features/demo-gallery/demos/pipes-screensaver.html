@@ -12,13 +12,6 @@
 <meta name="description" content="The late-90s 3D pipes screensaver: shiny Phong-shaded pipes grow cell by cell through an invisible 3D grid, turning at ball joints, never crossing each other, each new pipe in a fresh colour, with the rare teapot hiding at a joint. When the space fills up the screen fades to black and it starts again. Click to restart, drag to orbit. Hard because hundreds of growing segments must stay a few draw calls, so cylinders and joints live in instanced meshes whose matrices and colours are written as each pipe animates, while a self-avoiding walk picks turns through an occupancy grid."/>
 <meta name="prompt" content="Recreate the late-90s 3D pipes screensaver in three.js, one HTML file: pipes do self-avoiding random walks through a 14³ occupancy grid, growing smoothly segment by segment, turning at ball joints, ending when boxed in and restarting in a new bright colour, four at a time. Render all cylinders and spheres as InstancedMesh with per-instance colour and shiny Phong material, add a rare teapot joint, fade to black and reset when the grid fills, click to restart and drag to orbit with a slow auto-rotate." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/pipes-screensaver.html
- * PURPOSE: 3D pipes screensaver: self-avoiding grid walks drawn with instanced cylinders and ball joints
- * UI: Render Studio > Frutiger Aero > 3D Pipes Screensaver
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__pipes (reset, segments, pipes)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 canvas { display: block; touch-action: none; }
 #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity 0.6s; }

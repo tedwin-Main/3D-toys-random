@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/toy-list.js
- * PURPOSE: single source of toy metadata: TOYS = games (Toy Box), SIMS = simulations (Render Studio tabs); multiplayer toys carry a genre for the Multiplayer tab filter
- * UI: 3D Toy Box home grid, viewer nav pill + dropdown; Render Studio sim cards
- * USED BY: src/features/toy-box/index.html, src/features/studio-server/list-assets.js, src/features/demo-capture/capture-demos.js
- * KEY EXPORTS: TOYS, SIMS
- */
+// Defines metadata registry for games and simulations.
 // Toy Box > Data: one entry per toy folder (newest last); dir = folder name = hash route
 export const TOYS = [
   { "dir": "pelican-on-bicycle", "emoji": "🚲", "title": "Pelican on a Bicycle", "desc": "Ride a pouch-wobbling pelican over rolling hills. IK legs on real pedals, bell, squawk, fish to catch.", "tags": ["drive", "IK", "physics-lite"], "bg": "#bfe3ff" },

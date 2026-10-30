@@ -12,13 +12,6 @@
 <meta name="description" content="A late-90s skinnable MP3 player with its main window, ten-band equalizer and playlist docked together: a seven-segment time display, scrolling song marquee, spectrum analyser with falling peaks (click it for the oscilloscope), seek, volume and balance sliders, shuffle and repeat, and six original synth tracks generated live by a lookahead sequencer with kick, snare, hats, bass, arps and pads. The equalizer is real: preamp and ten peaking filters with presets and a drawn response curve, so dragging a band changes the sound. Swap between Chrome, Aqua Gel and Dark skins, drag windows to snap them to each other and drag the main window to carry its docked windows along, double-click a title bar to shade it."/>
 <meta name="prompt" content="Build a Y2K-era skinnable MP3 player in one HTML file with three docked windows (main, 10-band equalizer, playlist): seven-segment time, scrolling title marquee, spectrum analyser with peaks and oscilloscope mode, transport buttons, seek, volume and balance sliders, shuffle and repeat. Generate six original tracks live with a WebAudio lookahead sequencer (drums, bass, arps, pads). Make the EQ real with a preamp and ten BiquadFilter peaking bands, presets and a response curve. Three skins via CSS variables (chrome, aqua gel, dark), windows that snap to each other and move together when docked, title double-click shades a window. Attract mode plays and cycles skins; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/skinnable-mp3-player.html
- * PURPOSE: Y2K skinnable MP3 player: docked main, EQ and playlist windows, live synth tracks, real EQ, three skins
- * UI: Render Studio > Retro Aesthetics > 2000s > Skinnable MP3 Player
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__mp3 (play, pause, stop, next, prev, skin, preset, seek, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { font: 8px Tahoma, Verdana, sans-serif; user-select: none; background: radial-gradient(ellipse at 30% 20%, #3d6fd8, transparent 55%), radial-gradient(ellipse at 80% 90%, #7b3fd8, transparent 50%), linear-gradient(160deg, #0b1d4a, #06102a); }

@@ -12,13 +12,6 @@
 <meta name="description" content="A glossy black-glass media player from the mid-2000s, with no logos. It has a glowing round play orb, a gel seek bar, a playlist pane with procedural album art, and three classic visualizers: Ambience (a canvas feedback swirl), Bars with mirror reflections and falling peak caps, and a polar Scope. The music is an original synthesized chill-out loop (pad chords, arpeggio, sub bass, kick and hats) scheduled in WebAudio and read back through an AnalyserNode. Hard because the swirl re-draws its own last frame zoomed and rotated every tick, so the colours have to stay bright without washing out to white." />
 <meta name="prompt" content="Build a 2006-style glossy media player in one HTML file with no images and no real logos: black glass frame with blue glow, a big round play orb, gel seek and volume bars, a playlist with procedural album art. Synthesize an original chill electronic loop in WebAudio (pads, arpeggio, bass, kick, hats), feed it through an AnalyserNode and draw three visualizers on canvas: a feedback 'ambience' swirl, mirrored bars with peak caps, and a polar oscilloscope. Add an attract mode that animates without audio." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/media-player-visualizer.html
- * PURPOSE: 2006 glossy media player: play orb, seek/volume gel bars, playlist art, 3 canvas visualizers fed by a synthesized WebAudio loop
- * UI: Render Studio > Frutiger Aero > Glass Media Player
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__player (play, mode, next)
- */
 :root { --glow: #3fb6ff; --font: "Segoe UI", Tahoma, "Helvetica Neue", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font: 12px var(--font); color: #d8e6f2; user-select: none; -webkit-user-select: none; }

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/draft-store.js
- * PURPOSE: builder draft persistence: site JSON in localStorage, baked breaks + images in IndexedDB
- * UI: Builder (autosave), Viewer ?draft=1 (live preview of unsaved draft)
- * USED BY: builder-page.js, site-loader.js, export-site.js
- * KEY EXPORTS: loadDraftSite, saveDraftSite, saveDraftRecordings, loadDraftRecordings, saveImage, loadImage, deleteImage
- */
+// Manages builder draft persistence in localStorage and IndexedDB.
 
 import { del, get, set } from 'idb-keyval'
 

@@ -1,10 +1,4 @@
-/*
- * FILE: src/features/toy-box/physics-portfolio-builder/builder.css
- * PURPOSE: builder chrome: top bar, side panels, project cards, scene/palette/type pickers, preview frame + controls
- * UI: Builder (whole page)
- * USED BY: index.html
- * KEY EXPORTS: none
- */
+/* Styles portfolio builder chrome, side panels, card lists, and controls. */
 
 /* builder chrome keeps own neutral tokens; site palette only paints preview frame */
 .builder {

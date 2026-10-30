@@ -12,13 +12,6 @@
 <meta name="description" content="The late-90s fancy text gallery every school newsletter used: a grey dialog with a grid of twelve styles (rainbow arch, chrome 3D, waving blue, gold slant, perspective floor shadow, neon glow, pyramid, bulge and more) and a page preview that renders whatever you type in the chosen style, ready to save as a PNG. Hard because canvas can't bend text, so each style draws the text flat with its gradient and outline, then rebuilds it one pixel column at a time through a warp function (arch, wave, slant, bulge, triangle, vanishing), and fakes 3D by stacking a tinted copy behind the face, plus skewed floor shadows and glows."/>
 <meta name="prompt" content="Build a late-90s fancy text gallery in one HTML file with canvas 2D: a grey dialog with a 4x3 grid of style thumbnails and a page preview of the user's text. Render each style by drawing the text flat with gradient fills (rainbow, chrome, gold, fire) and outlines, warping it column by column through arch, wave, slant, bulge, triangle and vanishing-point functions, and faking depth with stacked tinted extrusions, drop and skewed floor shadows and neon glow. Add font choice, animated wave styles, PNG export, click sounds and an attract mode that cycles styles and sample phrases." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/wordart-studio.html
- * PURPOSE: late-90s fancy text gallery: gradient text warped per pixel column, stacked extrusions, shadows, PNG export
- * UI: Render Studio > Frutiger Aero > Fancy Text Studio
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__wordart (style, text, font, png)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body { background: #008080; font: 12px Tahoma, "MS Sans Serif", Arial, sans-serif; display: grid; place-items: center; padding: 10px; overflow: auto; }

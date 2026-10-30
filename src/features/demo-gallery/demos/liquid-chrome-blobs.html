@@ -41,13 +41,6 @@
   <div class="hint">Move the pointer: the lead blob follows it. Click to splash.</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/liquid-chrome-blobs.html
- * PURPOSE: WebGL2 raymarched chrome metaballs: smooth-min field, 2-bounce reflections, glossy floor, procedural softbox env
- * UI: Render Studio > Shaders > Liquid Chrome
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

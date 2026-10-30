@@ -24,13 +24,6 @@
 <canvas id="c"></canvas>
 <div id="pad"><div><button data-k="ArrowLeft">◀</button><button data-k="ArrowRight">▶</button></div><div><button data-k="Space">⤒</button></div></div>
 <script>
-/**
- * FILE: src/features/toy-box/platformer/index.html
- * PURPOSE: Game-feel platformer: coyote time, jump buffer, variable jump, wall jump, moving platforms, slimes, spikes, checkpoints, lookahead camera, bot attract mode
- * UI: Render Studio > Games > Platformer Feel
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const TS = 32, LW = 150, LH = 15;
 let VW, VH, zoom, dpr;

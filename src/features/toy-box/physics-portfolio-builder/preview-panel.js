@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/preview-panel.js
- * PURPOSE: live scene preview: scrub slider, play, variant pills, reroll, label toggle, bake status
- * UI: Builder > Preview
- * USED BY: builder-page.js
- * KEY EXPORTS: PreviewPanel
- */
+// Renders live preview panel with scrub slider, playback controls, and variant pills.
 
 import { useEffect, useRef, useState } from 'react'
 import { html } from './html.js'

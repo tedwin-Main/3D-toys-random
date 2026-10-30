@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/scene-renderer.js
- * PURPOSE: three.js stage for any baked break: surface, bodies, lights, camera swing, hover/pick, label projection
- * UI: Viewer > Hero, Builder > Preview
- * USED BY: break-stage.js
- * KEY EXPORTS: createSceneRenderer
- */
+// Renders three.js stage for baked break simulations with projected labels.
 
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'

@@ -40,13 +40,6 @@
   <div class="hint">Drag to pan · scroll / pinch to zoom · naive float breaks near 10⁵×</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/mandelbrot-zoom.html
- * PURPOSE: Deep Mandelbrot zoom: CPU double reference orbit, GPU float perturbation with rebasing, naive-float comparison
- * UI: Render Studio > Shaders > Mandelbrot Deep Zoom
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__mandel (test hook: view, zoom, iters, stop, setNaive)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

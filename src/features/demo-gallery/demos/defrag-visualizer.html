@@ -12,13 +12,6 @@
 <meta name="description" content="A late-90s disk defragmenter you can actually watch: pick a drive, it reads the drive information while the cluster map fills in, then a real compaction algorithm walks the disk moving every file into one contiguous run, evicting blocks out of the way, flashing each cluster it reads and writes while red fragmented files turn blue. Click any cluster to see which file and fragment lives there, open the legend, pause, stop or hide the details, and listen to synthesized seek clicks over the spindle hum until the defragmentation complete dialog. Hard because the disk is a simulated aged file system (files written, deleted and rewritten into holes) and the defragmenter is a step-by-step generator that keeps file maps, fragmentation state and progress consistent on every move."/>
 <meta name="prompt" content="Build a Windows 98 style disk defragmenter visualizer in one HTML file: a Select Drive dialog, then a Defragmenting Drive C window with a cluster grid canvas sized to fit, a simulated aged disk (files written sequentially, a third deleted, new files first-fit into the holes so they fragment, unmovable system clusters), and a real compaction defragmenter that moves blocks one at a time with eviction to free space, flashing read and write clusters, recolouring files from fragmented red to contiguous blue, a blocky progress bar with percent complete, Stop, Pause, Legend and Hide Details buttons, click a cluster for a tooltip with file and fragment, WebAudio seek clicks and hum, a completion dialog, and attract mode that loops. Works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/defrag-visualizer.html
- * PURPOSE: 90s disk defragmenter: aged simulated disk, compaction algorithm, cluster map, seek sounds
- * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Defrag Visualizer
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__defrag (start, pause, stop, step, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; background: #008080; color: #000; user-select: none; }

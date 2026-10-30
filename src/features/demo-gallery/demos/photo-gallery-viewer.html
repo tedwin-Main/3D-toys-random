@@ -12,13 +12,6 @@
 <meta name="description" content="A 2007-style Aero photo gallery: a glass window with a dark glossy toolbar, a navigation tree of tags and dates, a thumbnail grid grouped by month with hover previews, and a viewer with a filmstrip, zoom, pan, rotate, star ratings, an info pane and a Fix pane with auto adjust and exposure, contrast and colour sliders. The big blue orb starts a full-screen Ken Burns slideshow with crossfades and Pan and zoom, Fade, Sepia and Black and white themes over a soft synthesized pad. Hard because every photo (sunset palm beach, mountain lake with reflection, tulip fields, aurora, city at night, rolling hills, dunes, reef, autumn path, cherry blossom) is painted procedurally on canvas at load, and the slideshow computes cover-fit pan and zoom rectangles per slide."/>
 <meta name="prompt" content="Build a Frutiger Aero photo gallery app in one HTML file: an Aero glass window with dark glossy toolbar, nav tree (All pictures, tags, dates, ratings), thumbnail grid grouped by month with a hover preview popup, and a viewer mode with filmstrip, zoom slider, wheel zoom, drag pan, rotate, delete with undo toast, star ratings, Info and Fix panes (auto adjust, exposure, contrast, colour). Paint ten landscape photos procedurally on canvas at load. A big blue orb play button opens a full-screen Ken Burns slideshow with crossfades and theme picker (Pan and zoom, Fade, Sepia, Black and white) over a soft synth pad. Attract mode browses, fixes and runs a slideshow; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/photo-gallery-viewer.html
- * PURPOSE: Core Aero photo gallery: thumbnail grid, viewer with fix and info panes, Ken Burns slideshow, procedural photos
- * UI: Render Studio > Frutiger Aero > Core Aero > Photo Gallery Viewer
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__gallery (open, next, prev, slideshow, exit, rate, fix, del, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { font: 12px "Segoe UI", Tahoma, sans-serif; color: #1c2a3a; background: radial-gradient(ellipse at 20% 110%, #7fe0ff 0, transparent 50%), radial-gradient(ellipse at 90% -10%, #9b7bff 0, transparent 45%), linear-gradient(160deg, #0d4f9e, #1d8fd8 50%, #0a3d7a); user-select: none; }

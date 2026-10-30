@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/camera-path.js
- * PURPOSE: orbit camera math: fit table in view, smooth pose blend, pose to world position
- * UI: 8-Ball > table camera (overhead + cue cam)
- * USED BY: pool-table-scene.js
- * KEY EXPORTS: fitDistance, blendPose, poseToCamera
- */
+// Computes orbit camera poses, framing transitions, and world positions.
 
 // fraction of screen half-extent the table may fill
 const FIT = 0.9

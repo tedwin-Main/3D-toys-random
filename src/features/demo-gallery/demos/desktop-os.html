@@ -90,13 +90,6 @@
 </div>
 <div id="menu" class="hidden"></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/desktop-os.html
- * PURPOSE: One-file desktop: window manager (drag/resize/focus/min/max/close), taskbar, start menu, Notepad/Calc/Paint/Mines/Terminal
- * UI: Render Studio > Apps & UI > Desktop OS
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__desk (test hook: open, windows)
- */
 const $ = (s, el = document) => el.querySelector(s);
 const desk = $('#desk'), tasks = $('#tasks'), menu = $('#menu');
 const APPS = {

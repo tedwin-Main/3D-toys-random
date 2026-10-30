@@ -51,13 +51,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/bomb-tag-arena/index.html
- * PURPOSE: online hot-potato tag for up to 14: bombs pass on contact, holders blow up when the fuse ends, waves until one survives; host-authoritative sim, 3 rounds
- * UI: Hot Potato page (lobby overlay, fuse timer, alive counter, standings, banner, touch stick + dash)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

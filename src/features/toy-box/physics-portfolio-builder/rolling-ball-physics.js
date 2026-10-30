@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/rolling-ball-physics.js
- * PURPOSE: deterministic rolling-ball sim (pool, marbles): swept contacts, cloth friction, spin, first-hit log
- * UI: none (baked in builder worker, sampled by viewer)
- * USED BY: scene-presets.js
- * KEY EXPORTS: simulateRollingBalls, DEFAULT_ROLLING_PHYSICS
- */
+// Simulates deterministic rolling-ball physics for pool and marble breaks.
 
 // Ported from 8Ball_Studio pool-break-physics.js: per-ball radius and mass, closed walls, no pockets
 // (pocketed ball = lost project), settles on its own instead of fixed milestone.

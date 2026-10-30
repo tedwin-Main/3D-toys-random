@@ -12,13 +12,6 @@
 <meta name="description" content="A mid-2000s console home screen in the Wii-era style, with no logos: a grid of rounded white channel tiles, each running its own live canvas preview, on a soft pinstripe backdrop. A curved bottom bar holds a big grey clock and the date, a pointing-hand cursor glows tiles on hover, and clicking a tile zooms it to fill the screen. A synthesized electric-piano lounge loop and hover chimes play throughout. The hard part is twelve tiny animations repainting every frame alongside DOM zoom transitions, all kept smooth." />
 <meta name="prompt" content="Recreate a 2006-era console channel menu (Wii style, no real logos) in one HTML file. A grid of 12 rounded white tiles, each with a different live canvas animation, on a light pinstripe background. Add a curved bottom bar with a large grey clock and date and round side buttons, a pointing-hand cursor, hover glow plus chime, and a click that zooms the tile full-screen with Menu / Start buttons. Synthesize a soft lounge menu tune with WebAudio and add an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/channel-menu.html
- * PURPOSE: 2006-era console channel grid: live canvas tiles, hand cursor, zoom-in channel view, clock bar, synth lounge loop
- * UI: Render Studio > Frutiger Aero > Channel Menu
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__channels (open, close, hover, music)
- */
 :root { --blue: #34bdef; --grey: #8d8d8d; --font: "Rodin", "Hiragino Maru Gothic ProN", "Arial Rounded MT Bold", "Nunito", "Helvetica Neue", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: #555; user-select: none; -webkit-user-select: none; cursor: none; }

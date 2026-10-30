@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/export-site.js
- * PURPOSE: gather viewer template + draft into static site files; download as zip
- * UI: Builder > Top bar > Export zip
- * USED BY: top-bar.js
- * KEY EXPORTS: collectSiteFiles, downloadSiteZip
- */
+// Assembles viewer template and draft data into downloadable static site zip.
 
 import JSZip from 'jszip'
 import { buildSiteFiles } from './site-bundle.js'

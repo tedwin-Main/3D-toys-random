@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/body-textures.js
- * PURPOSE: canvas textures for bodies (pool balls, marbles, domino faces) and surfaces (felt, wood, marble ring)
- * UI: Viewer > Hero scene, Builder > Preview scene
- * USED BY: scene-renderer.js
- * KEY EXPORTS: poolBallTexture, cueBallTexture, marbleTexture, dominoTexture, surfaceTexture
- */
+// Generates canvas textures and materials for 3D physics bodies.
 
 import * as THREE from 'three'
 import { createRandom } from './seeded-random.js'

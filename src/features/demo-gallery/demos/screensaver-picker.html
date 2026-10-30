@@ -12,13 +12,6 @@
 <meta name="description" content="The Display Properties dialog from a late-90s desktop, live: a beige CRT in the dialog previews Mystify, Bezier, Marquee, Starfield and Flying Shapes, each with its own speed and settings, and Preview runs the chosen saver fullscreen until you move the mouse. The Background tab repaints the desktop in classic tile patterns, Appearance swaps window colour schemes and Settings slides the resolution. Hard because five independent screensaver engines run from one interface at any canvas size, Flying Shapes is a small painter's-sorted flat-shaded 3D renderer, and every tab, bevel and control is rebuilt by hand."/>
 <meta name="prompt" content="Build a late-90s Display Properties dialog in one HTML file with a beveled 98-style UI and tabs: Screen Saver tab with a beige CRT monitor preview, a saver dropdown (None, Bezier, Flying Shapes, Marquee, Mystify, Starfield), speed slider, marquee text, wait spinner and a Preview button that runs the saver fullscreen and exits on mouse movement or a key. Implement all five savers on canvas at any size (Flying Shapes as a tiny flat-shaded 3D renderer with painter's sort). Background tab changes the desktop tile pattern, Appearance swaps title bar colour schemes, Settings has a resolution slider. Attract mode cycles savers and briefly runs a fullscreen preview." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/screensaver-picker.html
- * PURPOSE: 98-style Display Properties: live CRT previews of Mystify, Bezier, Marquee, Starfield, Flying Shapes, fullscreen preview
- * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Screensaver Picker
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__savers (pick, preview, tab, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { --t1: #000080; --t2: #1084d0; --face: #c0c0c0; background: #008080; font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; color: #000; display: grid; place-items: center; user-select: none; transition: background 0.2s; }

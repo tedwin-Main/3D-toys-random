@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-table-scene.js
- * PURPOSE: three.js 8-ball table: felt, cushions + pockets built from physics geometry, balls, cue stick, aim guide, shot playback, camera
- * UI: Play > table (menu backdrop, aiming, shot playback, ball in hand)
- * USED BY: play-page.js
- * KEY EXPORTS: createPoolTableScene, BALL_COLORS
- */
+// Renders three.js 3D scene for pool table, balls, shadows, and cue stick.
 
 import * as THREE from 'three'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'

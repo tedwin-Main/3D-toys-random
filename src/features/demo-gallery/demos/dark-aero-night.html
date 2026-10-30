@@ -12,13 +12,6 @@
 <meta name="description" content="The night-time side of the Frutiger look ('Dark Aero'): an aurora shader sky full of stars over a still lake that really reflects everything, glowing glass orbs hovering above the water with bloom, fireflies, dark hill silhouettes, and a frosted glass clock widget. Click an orb and it rings a soft pentatonic bell and pulses its light across the lake. Hard because the water is a Reflector with a custom ripple shader inside a bloom post-process chain, and the aurora is layered fbm curtains in a sky-dome shader." />
 <meta name="prompt" content="Build a 'Dark Aero' night scene in three.js, one HTML file: an aurora sky-dome shader (layered fbm curtains in green, cyan and violet, plus twinkling stars), a mirror lake using Reflector with a custom ripple shader, hill silhouettes, floating glass orbs with glowing cores and bloom, firefly points, and a frosted-glass clock widget. Clicking an orb rings a pentatonic bell and pulses its glow; add gentle orbit controls and an attract mode that plays the orbs as a slow melody." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/dark-aero-night.html
- * PURPOSE: dark aero night: aurora dome shader, Reflector lake with ripples, glass orbs with bloom, fireflies, glass clock widget, bell orbs
- * UI: Render Studio > Frutiger Aero > Dark Aero Night
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__night (ring, aurora)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #020814; font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif; }
 canvas { display: block; }
 #widget { position: fixed; right: 24px; top: 24px; width: 210px; padding: 16px 18px; border-radius: 16px; color: #e6fbff; background: linear-gradient(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)); backdrop-filter: blur(14px) saturate(1.4); -webkit-backdrop-filter: blur(14px) saturate(1.4); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 0 0 1px rgba(160, 230, 255, 0.18), 0 10px 30px rgba(0, 0, 0, 0.5); }

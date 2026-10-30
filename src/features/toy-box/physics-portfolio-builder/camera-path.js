@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/camera-path.js
- * PURPOSE: camera choreography: low POV behind striker, swing up to framed overview of settled scene
- * UI: Viewer > Hero, Builder > Preview
- * USED BY: scene-renderer.js, camera-path.test.js
- * KEY EXPORTS: startPose, endPose, blendPose, poseToCamera
- */
+// Computes camera choreography from striker perspective to settled scene.
 
 // per-scene opening shot: elevation (rad), extra distance behind striker (m), fov (deg)
 const OPENING = Object.freeze( {

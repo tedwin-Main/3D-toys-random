@@ -46,13 +46,6 @@
 </header>
 <div id="board"></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/sorting-visualizer.html
- * PURPOSE: Sorting race: 8 algorithms as op-yielding generators on shared data, compare/write counters, finish order, solo mode with sonification
- * UI: Render Studio > Algorithms > Sorting Race
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__sort (test hook: run, names)
- */
 const $ = (id) => document.getElementById(id);
 
 // Algorithms: generators over an Arr wrapper; every get/compare/set yields so lanes animate real work

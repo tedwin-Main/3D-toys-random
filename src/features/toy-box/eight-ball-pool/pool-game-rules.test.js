@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-game-rules.test.js
- * PURPOSE: 8-ball rule contracts: fouls, groups, turn keep/pass, 8-ball win/loss, break respot, practice clear
- * UI: none
- * USED BY: npm test
- * KEY EXPORTS: none
- */
+// Tests 8-ball game rule contracts: fouls, scratches, ball assignment, and win/loss.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

@@ -12,13 +12,6 @@
 <meta name="description" content="A 2006-style Web 2.0 'glossy button generator', the kind every design blog linked to. Pick a hue, shape, gloss, size, icon and reflection, or a preset (Aqua, Lime, Cherry, Grape, Graphite, Sunset), and a live gel button updates on a pinstripe stage while the exact CSS is written out for copying. Hard because the preview is styled by the same generated stylesheet it exports, so what you copy is guaranteed to match what you see, including the split-gradient gel, the gloss highlight pseudo-element, hover and pressed states." />
 <meta name="prompt" content="Make a 2006-style glossy 'gel button generator' in one HTML file: controls for label, hue, shape (pill, rounded, square), gloss strength, size, icon and reflection, plus presets (Aqua, Lime, Cherry, Grape, Graphite, Sunset). Generate real CSS (split gradient gel, ::before gloss highlight, hover and pressed states), inject it to style the live preview on a pinstripe stage, and show it in a code box with a Copy button. Add a beta badge, a click blip and an attract mode that cycles presets." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/gel-button-maker.html
- * PURPOSE: Web 2.0 gel button generator: controls and presets write CSS that styles the live preview and exports via Copy
- * UI: Render Studio > Frutiger Aero > Gel Button Maker
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__gelmaker (set, preset, css)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; font-family: "Lucida Grande", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; color: #2b3a4a; }
 body { background: repeating-linear-gradient(90deg, #eef4f9 0 2px, #f8fbfd 2px 4px); overflow: hidden; }

@@ -52,13 +52,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/snowball-fight-arena/index.html
- * PURPOSE: online free-for-all snowball fight for up to 14: aim with the mouse, lob arcing snowballs over crumbling snow forts, 3 hits freezes a player; 2-minute match; host-authoritative sim
- * UI: Snowball Brawl page (lobby overlay, clock, scoreboard, freeze feed, ammo + hits pips, touch stick)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/studio-server/list-assets.js
- * PURPOSE: build gallery list: live html demos, rendered media files, 3d-toys simulations (games stay on /3d-toys/)
- * UI: Render Studio home grid, category tabs, viewer
- * USED BY: backend/start-server.js (GET /api/assets), backend/capture-demos.js
- * KEY EXPORTS: CATEGORIES, TABS, STACKS, listAssets, listDemos
- */
+// Builds gallery list for live HTML demos, rendered media, and 3D simulations.
+
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { extname, join, basename } from 'node:path';
 import { SIMS } from '../toy-box/common/toy-list.js';

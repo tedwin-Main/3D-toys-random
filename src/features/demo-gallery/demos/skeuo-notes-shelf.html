@@ -12,13 +12,6 @@
 <meta name="description" content="Peak skeuomorphism, circa 2010: a stitched leather notepad of yellow ruled paper in a handwriting face sits beside a wooden bookshelf on grey linen. Pick a notebook off the shelf and the binding changes to its leather, flip pages over the top like a legal pad, type straight onto the paper, and delete a note by tearing the sheet off along its perforation so it drops away, leaving a ragged stub. Hard because every material, from wood grain and leather pores to linen weave, paper fibre and cloth book spines, is generated on canvas at load, and the flip, tear and fall are layered CSS 3D and clip-path animations with synthesized paper and wood foley."/>
 <meta name="prompt" content="Build an early-2010s skeuomorphic notes app in one HTML file with no images: canvas-generated linen background, wood-grain bookshelf with cloth and leather book spines in gold foil, and a leather-bound legal notepad with stitching, yellow ruled paper, red margin and a handwriting font. Clicking a notebook on the shelf pulls it out and rebinds the pad in its leather; pages flip over the top edge in CSS 3D with shading; notes are editable; the trash button tears the sheet off along a jagged perforation and drops it away. WebAudio synthesizes page swish, tear crackle, book thud and pencil ticks. Attract mode flips, switches books, handwrites a new note and tears one off." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/skeuo-notes-shelf.html
- * PURPOSE: Skeuomorphic notes app: leather legal pad, page flip, torn-page delete, wooden bookshelf of notebooks
- * UI: Render Studio > Frutiger Aero > Skeuomorphism > Skeuo Notes Shelf
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__skeuo (flip, tear, book, add, note, count)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: #d6d1c4 var(--linen); font: 14px "Helvetica Neue", Helvetica, Arial, sans-serif; color: #3a2a1a; display: flex; align-items: center; justify-content: center; gap: 40px; padding: 20px; }

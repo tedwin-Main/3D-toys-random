@@ -44,13 +44,6 @@
 <div id="tip"></div>
 <div class="note">synthetic network · not real people</div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/force-graph.html
- * PURPOSE: d3-force network on canvas: synthetic community graph, label-propagation communities, PageRank sizing, BFS shortest path, drag/zoom/hover
- * UI: Render Studio > Algorithms > Force Graph
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__graph (test hook: path, communities, pagerank)
- */
 const $ = (id) => document.getElementById(id);
 const cv = $('c'), g = cv.getContext('2d');
 let W = 0, H = 0, dpr = 1;

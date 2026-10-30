@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/multiplayer-rooms/room-load-test.js
- * PURPOSE: load-tests room relay: N fake players in one room, host snapshots 20 Hz, guest inputs 20 Hz to host, reports server echo RTT + guest-host-guest RTT
- * UI: none (cli)
- * USED BY: npm run load-test (3d-toys/package.json)
- * KEY EXPORTS: none (run: node backend/room-load-test.js [ws-url] [players=14] [seconds=30])
- */
+// Load-tests room relay with simulated players and reports round-trip latency.
+
 import WebSocket from 'ws';
 
 const URL_ARG = process.argv[2] ?? 'ws://localhost:5055/3d-toys/rooms';

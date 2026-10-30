@@ -51,13 +51,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/bank-or-bust/index.html
- * PURPOSE: online push-your-luck dice for 2-14: one shared roll for everyone, each roll grows the pot of players still in, bank to keep it; a single 1 busts the round, snake eyes wipe the total. Host-run, state sent only on change
- * UI: Bank or Bust page (lobby overlay, pot counter, BANK button, scoreboard, 3D dice table with pawns)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

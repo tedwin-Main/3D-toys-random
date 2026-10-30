@@ -12,13 +12,6 @@
 <meta name="description" content="A 2005-era 10-foot TV media-centre menu, with no logos: deep blue gradient waves, a generic green orb, and a vertical menu that rolls like a drum (items scale and fade with distance from the focus row). The focused row opens a horizontal strip of glowing thumbnail tiles, each drawn live on canvas. Arrow keys, wheel, swipe or click move focus with synthesized tick and select sounds. Hard because the drum is a continuous spring offset (not discrete jumps), so rows ease through scale, opacity and blur while the strip cross-fades per category." />
 <meta name="prompt" content="Build a 2005-style TV media-centre menu in one HTML file with no logos: deep blue animated gradient with soft light waves, a glossy green orb top-left, and a vertical rolling menu (TV, Music, Pictures, Videos, Radio, Tasks) where rows scale and fade by distance from focus on a spring. The focused row shows a horizontal strip of glowing canvas thumbnails. Arrows, wheel, swipe and click navigate with synthesized ticks; add a clock and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/media-center-menu.html
- * PURPOSE: 2005 TV media centre: blue wave backdrop, spring rolling vertical menu, glowing thumbnail strip, synth ticks
- * UI: Render Studio > Frutiger Aero > Media Center Menu
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__mediacenter (move, pick, strip)
- */
 :root { --font: "Segoe UI", "Segoe Media Center", "Helvetica Neue", system-ui, sans-serif; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: var(--font); color: #fff; user-select: none; -webkit-user-select: none; background: #031a4a; }

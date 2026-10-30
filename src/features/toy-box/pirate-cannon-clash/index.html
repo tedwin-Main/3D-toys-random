@@ -53,13 +53,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/pirate-cannon-clash/index.html
- * PURPOSE: online pirate ship free-for-all for up to 14: arcade sailing, port/starboard broadsides with arcing cannonballs, island cover, repair barrels, sink to score; host-authoritative sim
- * UI: Cannon Cove page (lobby overlay, clock, hull + cannon reload HUD, standings, sink feed, round minimap, phone joystick + fire buttons)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';

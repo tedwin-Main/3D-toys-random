@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/scene-presets.test.js
- * PURPOSE: every preset bakes deterministic, contained, fully hit, non-overlapping breaks
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests scene preset bake determinism, containment, and non-overlapping layouts.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

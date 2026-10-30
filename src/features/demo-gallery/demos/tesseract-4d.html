@@ -40,13 +40,6 @@
   <div class="hint">Drag rotates XW / YW · toggle planes above</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/tesseract-4d.html
- * PURPOSE: 4D polytope viewer: 6-plane rotation, 4D-3D-2D perspective, w-coloured glowing edges, 5/8/16/24-cell
- * UI: Render Studio > 2D & Generative > Tesseract 4D
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 const $ = (id) => document.getElementById(id);
 let W = 0, H = 0, dpr = 1;

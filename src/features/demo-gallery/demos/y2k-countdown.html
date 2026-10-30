@@ -12,13 +12,6 @@
 <meta name="description" content="New Year's Eve 1999 at a Y2K readiness centre: glowing seven-segment digits count down the last ten seconds of the millennium over a spinning wireframe globe, a checklist reports every system compliant and world clocks show who has already crossed into 2000. At midnight the millennium bug bites: the date rolls over to 1900, digits scramble, the screen tears and shakes, checks flip to FAIL and an error box demands a patch. Hit PATCH NOW (or wait) and the fix installs, everything turns green and fireworks fill the sky for the new millennium, then the clock resets for another go. Hard because the LCD digits, globe, glitch tearing and fireworks are all canvas-drawn on one seekable timeline with synthesized ticks, glitch buzz and fanfare."/>
 <meta name="prompt" content="Build a Y2K New Year's Eve countdown in one HTML file: a millennium-watch control room with large canvas-drawn seven-segment digits counting 23:59:50 to midnight on 12.31.1999 over a rotating wireframe globe, a system-compliance checklist, analog world clocks marking which cities are already in 2000, and a news ticker. At midnight the millennium bug glitch hits: date shows 1900, digits scramble, slice tearing, RGB split and shake, checks flip to FAIL and an error dialog offers PATCH NOW. Patching shows a progress bar, restores everything and launches a firework show with HAPPY NEW MILLENNIUM, then loops. WebAudio second ticks, glitch buzz, patch arpeggio, fanfare and firework pops." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/y2k-countdown.html
- * PURPOSE: NYE 1999 Y2K countdown: 7-seg clock, globe, compliance checks, millennium bug glitch, patch, fireworks
- * UI: Render Studio > Frutiger Aero > Y2K Futurism > Y2K Countdown
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__y2kclock (patch, restart, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: radial-gradient(ellipse at 50% 40%, #12306a, #050b1f 70%); color: #bfe4ff; font: 12px Verdana, Geneva, sans-serif; }

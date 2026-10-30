@@ -43,13 +43,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/fence-fields/index.html
- * PURPOSE: online turn-based dots-and-boxes for 2-14 on a 3D meadow: build one fence per turn, closing a pen claims it (sheep in your color) and gives another turn; board grows with player count, shot clock, chain-aware bots. Host-run, state sent only on change
- * UI: Fence Fields page (lobby overlay, turn card, scoreboard, hover ghost fence, posts / fences / pens / sheep)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createLobby } from '../common/room-lobby.js';

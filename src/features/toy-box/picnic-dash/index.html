@@ -51,13 +51,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/picnic-dash/index.html
- * PURPOSE: online simultaneous-turn grid game for 2-14: each turn everyone picks a step in secret, all moves resolve at once (same-square or swap = both bounce), critters grab picnic fruit; host-run, moves stay on the host until the reveal, state sent only on change
- * UI: Picnic Dash page (lobby overlay, D-pad, scoreboard, banner, 3D picnic meadow grid with trees, fruit and hopping critters)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

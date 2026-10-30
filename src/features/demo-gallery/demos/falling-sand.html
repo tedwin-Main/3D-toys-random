@@ -29,13 +29,6 @@
 <div id="hud"><b>Falling Sand</b><span id="info"></span></div>
 <div id="bar"></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/falling-sand.html
- * PURPOSE: Falling-sand cellular automaton: 11 materials with density, flow, burning, steam, lava-water rock and plant growth; scripted idle scene
- * UI: Render Studio > Physics > Falling Sand
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const E = 0, WALL = 1, SAND = 2, WATER = 3, WOOD = 4, FIRE = 5, SMOKE = 6, STEAM = 7, OIL = 8, LAVA = 9, PLANT = 10, ROCK = 11;
 const MATS = [
   [SAND, 'Sand', [218, 178, 102]], [WATER, 'Water', [40, 110, 230]], [OIL, 'Oil', [70, 52, 30]], [LAVA, 'Lava', [255, 100, 20]],

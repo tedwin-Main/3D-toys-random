@@ -12,13 +12,6 @@
 <meta name="description" content="A 1998 word processor with an eager little helper: Orbit, a satellite robot with solar panel arms, floats over the page, follows your pointer with its eyes and fills idle moments by waving, spinning, scanning, thinking and dozing off. Start a document with Dear and it pops up with a balloon asking if you are writing a letter, and the letter wizard really drops in the date and a formal or friendly closing; start a numbered list or type three exclamation marks and it has opinions about that too. Ask it a question in the search box and it ranks its local help topics by keyword, drag it anywhere and the balloon flips to stay on screen, or hide it and watch it jet away. Hard because the character is an SVG rig driven by layered CSS state animations, and the tips come from live pattern matching on what you type."/>
 <meta name="prompt" content="Build a late-90s word processor window in one HTML file with an original animated helper character (a small satellite robot, not a paperclip): it floats over the document, its eyes follow the pointer, it has idle animations (wave, spin, scan, think, doze), and a speech balloon with tips, clickable options and a search box. Detect what the user types: a letter starting with Dear (offer a letter wizard that inserts the date and a formal or friendly closing), a numbered list, lots of exclamation marks. The search box ranks local help topics by keyword match. The helper is draggable, the balloon flips to stay on screen, it can be hidden and summoned from the Help menu, and it chirps with synthesized sounds. Attract mode types a letter, uses the wizard and searches help; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/desk-helper-assistant.html
- * PURPOSE: 1998 word processor with original robot helper: typed-text tips, letter wizard, help search, idle animations
- * UI: Render Studio > Retro Aesthetics > 90s > Retro Desktop > Desk Helper Assistant
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__helper (type, search, anim, show, hide, pick, state)
- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; }

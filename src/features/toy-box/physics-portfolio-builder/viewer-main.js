@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/viewer-main.js
- * PURPOSE: viewer entry: fetch site data, mount page or error card (fonts + styles linked in viewer.html)
- * UI: Viewer
- * USED BY: viewer.html
- * KEY EXPORTS: none
- */
+// Mounts published portfolio viewer and loads site configuration.
 
 import { createRoot } from 'react-dom/client'
 import { html } from './html.js'

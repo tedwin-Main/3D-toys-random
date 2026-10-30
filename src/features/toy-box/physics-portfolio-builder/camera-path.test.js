@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/camera-path.test.js
- * PURPOSE: camera choreography contracts for every preset and screen shape
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests camera choreography contracts across presets and viewport aspect ratios.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

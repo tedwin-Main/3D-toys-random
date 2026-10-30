@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-controls.js
- * PURPOSE: game HUD pieces: pull-down power bar, cue-ball spin pad, player cards with ball chips
- * UI: Play > HUD (power bar, spin pad, players)
- * USED BY: play-page.js
- * KEY EXPORTS: PowerBar, SpinPad, PlayerCards, BallChip
- */
+// Renders HUD controls, cue stick power meter, spin selector, and menu buttons.
 
 import { useRef } from 'react'
 import { html } from './html.js'

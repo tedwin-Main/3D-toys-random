@@ -51,13 +51,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/tank-battle-maze/index.html
- * PURPOSE: online 14-player tank deathmatch in a seeded maze: tank controls + mouse turret, ricochet shells, power-up crates, bots with BFS pathing; host-authoritative sim
- * UI: Tank Brawl page (lobby overlay, scoreboard, kill feed, minimap, twin touch sticks)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

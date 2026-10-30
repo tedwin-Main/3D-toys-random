@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-shot-worker.js
- * PURPOSE: off-main-thread shot sim + bot thinking, so long shots never freeze table
- * UI: Play > shot, Play > vs Bot (bot turn)
- * USED BY: pool-shot-client.js
- * KEY EXPORTS: none (worker message protocol)
- */
+// Runs pool shot physics simulation in a web worker.
 
 import { simulateShot } from './pool-game-physics.js'
 import { chooseShot } from './pool-bot.js'

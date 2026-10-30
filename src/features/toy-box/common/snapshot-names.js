@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/snapshot-names.js
- * PURPOSE: keeps nick + color out of every snapshot: host stamps a name table on roster change + once per second, guests cache it
- * UI: every multiplayer toy that sends host snapshots
- * USED BY: multiplayer toy pages (snapshot() + applySnap())
- * KEY EXPORTS: createNameSync
- */
+// Syncs and caches player name table across host and guests.
 
 const REFRESH_EVERY = 20; // snapshots; 1 s at 20 Hz, heals late joiners
 

@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/multiplayer-rooms/room-relay.js
- * PURPOSE: Node websocket transport for room relay (Render): upgrades sockets, ping/pong dead-socket check, hands messages to relay core
- * UI: every multiplayer toy (via toy-box/common/room-client.js)
- * USED BY: start-server.js, studio-server/start-server.js
- * KEY EXPORTS: createRoomRelay
- */
+// Provides Node WebSocket transport for room relay with heartbeat checks.
+
 import { WebSocketServer } from 'ws';
 import { createRelayCore } from './room-relay-core.js';
 

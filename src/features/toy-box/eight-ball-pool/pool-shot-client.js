@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-shot-client.js
- * PURPOSE: promise wrapper over pool shot worker, one shared worker per tab
- * UI: Play > shot, Play > vs Bot
- * USED BY: play-page.js
- * KEY EXPORTS: simulateShotAsync, chooseBotShot
- */
+// Bridges pool game UI to background physics simulation worker.
 
 let worker = null
 let nextId = 0

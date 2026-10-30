@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-game-physics.js
- * PURPOSE: playable 8-ball table on top of pool-table-physics: rack, cue strike, shot recording, aim ray, ball-in-hand checks
- * UI: Play > table, Play > aim overlay
- * USED BY: pool-bot.js, pool-shot-worker.js, pool-table-scene.js, play-page.jsx, pool-game-physics.test.js
- * KEY EXPORTS: GAME_CONFIG, TABLE, BALL_IDS, createRack, simulateShot, shotSpeed, aimRay, isPlacementValid, placeCueBall, respotBall, findFreeSpot, cloneBalls
- */
+// Simulates 2D pool ball physics, collisions, cushion bounces, and pocket falls.
 
 import { createTableGeometry, mergeConfig, simulateStep } from './pool-table-physics.js'
 import { createRandom } from './seeded-random.js'

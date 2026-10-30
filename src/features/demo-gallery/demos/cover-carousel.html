@@ -12,13 +12,6 @@
 <meta name="description" content="The 2006-era album 'cover flow' browser, with no brand: 24 procedurally painted album covers in CSS 3D, the centre one facing you and the rest angled into two stacks, all standing on a black glossy floor that reflects them. Drag with inertia, scroll, use the arrow keys or the glossy scrollbar; clicking the centre cover flips it over to show its tracklist, and the tracks play short synth previews. Hard because the position is one continuous float, so every cover's angle, offset and depth are interpolated mid-swipe instead of snapping between states." />
 <meta name="prompt" content="Build a 2006-style album cover-flow browser in one HTML file with no brand: 24 procedural canvas album covers in CSS 3D (centre faces forward, others rotate about 70 degrees into stacks), a black glossy floor with reflections, and a glossy scrollbar. Drive everything from one continuous float with inertial drag, wheel and arrow keys; clicking the centre cover flips it to a tracklist whose rows play short synth previews. Add an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/cover-carousel.html
- * PURPOSE: album cover flow: CSS 3D covers from a continuous float, inertial drag, reflections, flip to tracklist, synth previews
- * UI: Render Studio > Frutiger Aero > Cover Carousel
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__covers (go, flip)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: "Lucida Grande", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 body { background: linear-gradient(#000 0%, #0b0d10 55%, #000 56%, #000); }

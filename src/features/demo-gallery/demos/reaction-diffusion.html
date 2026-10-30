@@ -37,13 +37,6 @@
   <div class="hint">Draw to add chemical · patterns grow from your strokes</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/reaction-diffusion.html
- * PURPOSE: WebGL2 Gray-Scott RD: half-float ping-pong, 9-point Laplacian, presets, pointer painting, embossed colour render
- * UI: Render Studio > 2D & Generative > Reaction Diffusion
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false });
 const $ = (id) => document.getElementById(id);

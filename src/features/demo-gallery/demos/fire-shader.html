@@ -40,13 +40,6 @@
   <div class="hint">Drag left / right to blow wind</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/fire-shader.html
- * PURPOSE: WebGL2 procedural campfire: warped FBM flames, blackbody colour, logs, ground glow, sparks, smoke, wind drag
- * UI: Render Studio > Shaders > Fire Shader
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

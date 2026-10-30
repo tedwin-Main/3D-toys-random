@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/studio-server/start-server.js
- * PURPOSE: one-port server for whole repo: studio gallery, media with Range streaming, asset list api, 3d-toys static under /3d-toys/, multiplayer room relay
- * UI: every Render Studio screen, every 3D Toy Box page, multiplayer toys (websocket)
- * USED BY: npm start (root package.json), render.yaml
- * KEY EXPORTS: none (boots http server on PORT, default 5066)
- */
+// Runs studio server for gallery, media streaming, asset API, and room relay.
+
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';

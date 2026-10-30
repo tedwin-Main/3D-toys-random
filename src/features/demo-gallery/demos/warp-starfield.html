@@ -30,13 +30,6 @@
 <div class="title"><h1>Warp Starfield</h1><p>hold to jump · move to steer</p></div>
 <div id="hud"><span>WARP</span><div id="bar"><i></i></div><span id="speed"></span></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/warp-starfield.html
- * PURPOSE: Hyperspace starfield: 3D stars, perspective streaks from previous screen pos, blue shift, tunnel glow, jump flash
- * UI: Render Studio > 2D & Generative > Warp Starfield
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), g = cv.getContext('2d');
 let W = 0, H = 0, dpr = 1;
 function resize() { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0); }

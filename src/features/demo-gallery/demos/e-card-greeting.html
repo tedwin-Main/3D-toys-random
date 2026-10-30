@@ -12,13 +12,6 @@
 <meta name="description" content="A free e-card site from 2000: someone sent you a card, so click the sealed envelope and the flap lifts, the card slides out, unfolds like a real bi-fold to a poem and a personal note, confetti bursts across the page and a tinny MIDI-style tune plays from the little embedded player. Switch between Birthday, Thank You and Just Because, then fill in the send form and watch the card fold back into its envelope, get stamped and fly off with a pickup code. Hard because the envelope, flap, pocket and two-sided cover are layered CSS 3D faces driven by awaited Web Animations, every card front and scene is painted procedurally, and the music is a small sequenced piano synth with chords."/>
 <meta name="prompt" content="Build a 2000-era free e-card website in one HTML file: tiled pastel background, gradient logo header, category sidebar, a CSS 3D envelope with opening flap and pocket that releases a bi-fold card which then opens in 3D to a poem and a message, canvas confetti, a procedurally drawn card front per category (birthday balloons, thank-you flowers, just-because heart) and an animated inside scene (cake with flickering candles or floating hearts), an embedded MIDI-style player synthesizing piano melodies with chords in WebAudio, and a send form that folds the card back, closes the envelope, stamps it and flies it away with a pickup code. Attract mode opens, plays and sends cards." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/e-card-greeting.html
- * PURPOSE: 2000 e-card site: 3D envelope, unfolding card, confetti, MIDI-style tune, send form that mails the card away
- * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > E-Card Greeting
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__ecard (open, send, pick, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
 body { font: 13px Verdana, Geneva, sans-serif; color: #333; background: #fde8f4 radial-gradient(circle, #fff 0 2px, transparent 3px) 0 0 / 28px 28px, #fde8f4; background-color: #fde8f4; overflow-x: hidden; }

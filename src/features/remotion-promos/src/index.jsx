@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/remotion-promos/src/index.jsx
- * PURPOSE: Remotion entry: registers the StudioPromo composition (1920x1080, 30 fps, 15 s)
- * UI: Render Studio > Remotion Videos tab (rendered output)
- * USED BY: remotion-promos/package.json scripts (studio, render)
- * KEY EXPORTS: none (registerRoot side effect)
- */
+// Registers StudioPromo composition for Remotion.
+
 import React from "react";
 import { Composition, registerRoot } from "remotion";
 import { StudioPromo } from "./studio-promo.jsx";

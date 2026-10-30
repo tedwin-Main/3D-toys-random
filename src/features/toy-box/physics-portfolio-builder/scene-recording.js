@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/scene-recording.js
- * PURPOSE: baked break format: pack/unpack Int16 frames, sample any time, map scroll progress to sim time
- * UI: Viewer > Hero (scroll scrub), Builder > Preview (scrub slider)
- * USED BY: scene-presets.js, frontend scene-renderer.js, viewer-page.js, builder-page.js
- * KEY EXPORTS: createRecording, encodeRecording, decodeRecording, sampleRecording, createSample, timelineState, TIMELINE
- */
+// Encodes, decodes, and interpolates compressed physics animation recordings.
 
 export const RECORDING_VERSION = 1
 

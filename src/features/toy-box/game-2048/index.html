@@ -54,13 +54,6 @@
   <div class="hint">arrows / WASD / swipe · AI plays when idle</div>
 </main>
 <script>
-/**
- * FILE: src/features/toy-box/game-2048/index.html
- * PURPOSE: 2048 with animated slides/merges/spawns, once-per-move merging, undo, best score, swipe, expectimax AI attract mode
- * UI: Render Studio > Games > 2048 + Expectimax
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page); window.__g2048 test hooks
- */
 const boardEl = document.getElementById('board'), scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
 const COLORS = { 2: ['#eae4da', '#4b4237'], 4: ['#ede0c8', '#4b4237'], 8: ['#f6a96b', '#fff'], 16: ['#f68a58', '#fff'], 32: ['#f6684f', '#fff'], 64: ['#f24a2f', '#fff'], 128: ['#edd073', '#fff'], 256: ['#edcc62', '#fff'], 512: ['#edc850', '#fff'], 1024: ['#7ad7ff', '#0d2236'], 2048: ['#ffd23f', '#3a2600'], 4096: ['#c77dff', '#fff'], 8192: ['#7dffb0', '#08301a'] };
 let grid, score = 0, best = 0, tiles = new Map(), nextId = 1, undoStack = [], ai = true, idle = 0, won = false, overShown = false;

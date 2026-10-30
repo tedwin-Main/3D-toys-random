@@ -12,13 +12,6 @@
 <meta name="description" content="A mid-2000s glossy feature phone, with no brand: a 240x320 screen with signal bars, battery and a bubbly wallpaper, a 3x3 menu of glossy icons, inbox and ringtone lists, and a camera viewfinder. It is driven by a real d-pad, soft keys, call/end keys and a 12-key pad (or the arrow keys and digits on a keyboard). Number keys play true dual-tone DTMF, and the Ringtones list plays original polyphonic tunes. Hard because every key routes through one screen state machine (idle, dialer, menu, list, view, camera), so the soft-key labels always match what the keys do." />
 <meta name="prompt" content="Recreate a mid-2000s glossy feature phone UI in one HTML file with no brand: a CSS candybar phone with a 240x320 screen (status bar, bubbly wallpaper, clock), a 3x3 menu of glossy icons, inbox and ringtone lists, a camera viewfinder, soft keys, a d-pad, call/end keys and a 12-key pad. Route every key through one screen state machine with matching soft-key labels, play dual-tone DTMF on digits and original polyphonic ringtones with WebAudio, and add an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/flip-phone-ui.html
- * PURPOSE: 2006 feature phone: CSS handset, QVGA screen state machine (idle, dialer, menu, list, view, camera), DTMF keys, polyphonic ringtones
- * UI: Render Studio > Frutiger Aero > Glossy Phone UI
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__phone (press, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Tahoma", "Segoe UI", "Helvetica Neue", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 body { background: radial-gradient(ellipse at 50% 30%, #ffffff, #d7ecfa 45%, #9fd0f2); display: grid; place-items: center; }

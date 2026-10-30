@@ -12,13 +12,6 @@
 <meta name="description" content="The sound of 1999 getting online: a beveled Connect To dialog dials a 555 number with a dial tone and real DTMF pairs, rings, then plays a synthesized modem handshake of answer tone with phase reversals, FSK negotiation, line probing and scrambled training hiss while a modem-lights panel blinks and an oscilloscope traces the line. Once connected at 49,333 bps the tray icon flickers, mail trickles into the inbox and an attached lake photo arrives in progressive passes from blocky to sharp, top to bottom, at dial-up speed. Hard because every sound is built from oscillators, filtered noise and scheduled frequency hops, the whole sequence runs on one virtual timeline that the UI, LEDs, scope and audio all follow, and the photo is painted procedurally and revealed pass by pass."/>
 <meta name="prompt" content="Build a late-90s dial-up connection simulator in one HTML file with a 98-style beveled UI: a Connect To dialog (user, masked password, 555 number) that dials with dial tone, DTMF and ringback, then synthesizes a modem handshake in WebAudio (2100 Hz answer tone with phase reversals, FSK negotiation, multi-tone line probing, scrambled training noise), status text steps, a modem lights panel (MR TR OH CD HS RD SD) and an oscilloscope. On connect: tray icon blinking, a Connected at 49,333 bps balloon, an inbox that receives messages one by one and a procedurally painted photo that loads as progressive pixelated passes top to bottom. Disconnect, draggable windows, attract-mode auto dial, mobile stacked layout." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/dial-up-connect.html
- * PURPOSE: 90s dial-up simulator: DTMF + modem handshake synth, modem lights, tray icon, inbox with progressive photo
- * UI: Render Studio > Frutiger Aero > 90s Desktop & Web > Dial-Up Connect
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__dialup (dial, hangup, state, image)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { background: #008080; font: 11px Tahoma, "MS Sans Serif", Geneva, sans-serif; color: #000; user-select: none; }

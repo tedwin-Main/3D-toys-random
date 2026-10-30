@@ -46,13 +46,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/light-cycle-arena/index.html
- * PURPOSE: online light-cycle battle for up to 14: 90° turns, boost energy, glowing trail walls on a 100x100 grid, flood-fill bots, 5 rounds; host-authoritative grid sim
- * UI: Light Cycles page (lobby overlay, alive counter, energy bar, standings, minimap, phone joystick flick-turns + BOOST button)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';

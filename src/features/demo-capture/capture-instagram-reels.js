@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/demo-capture/capture-instagram-reels.js
- * PURPOSE: record every Frutiger Aero demo in 9:16 portrait with scripted mouse motion, build Instagram reels: one per demo, one per style, one master
- * UI: none (output to src/features/instagram-posts; raw clips kept in demo-capture/.instagram-capture)
- * USED BY: npm run instagram [-- names... --build-only]
- * KEY EXPORTS: none (cli script)
- */
+// Records Frutiger Aero demos in 9:16 portrait and builds Instagram reels.
+
 import { chromium } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readdir, rm, writeFile, access } from 'node:fs/promises';

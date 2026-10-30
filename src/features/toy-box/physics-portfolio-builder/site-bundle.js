@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-bundle.js
- * PURPOSE: assemble static site file list: viewer template + site.json + baked breaks + project images
- * UI: Builder > Top bar > Export zip
- * USED BY: frontend export-site.js, tests
- * KEY EXPORTS: buildSiteFiles, TEMPLATE_ENTRY
- */
+// Bundles viewer templates, site schema JSON, baked breaks, and images.
 
 import { normalizeSite } from './site-schema.js'
 

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/game-icons.js
- * PURPOSE: 5 inline Phosphor icons (one fixed weight each) so page needs no icon package
- * UI: 8-Ball > HUD top bar (menu, camera, replay, new rack), Skip button
- * USED BY: play-page.js
- * KEY EXPORTS: X, CameraRotate, ArrowCounterClockwise, ArrowsClockwise, FastForward
- */
+// Defines inline Phosphor icons for pool interface without extra dependencies.
 
 import { html } from './html.js'
 

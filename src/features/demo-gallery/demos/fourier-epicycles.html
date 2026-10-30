@@ -67,13 +67,6 @@
   <div class="hint">Square shows Gibbs ringing at the corners. Sweep adds circles one by one so you can watch the series converge.</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/fourier-epicycles.html
- * PURPOSE: complex DFT of a closed curve, redrawn by sorted rotating epicycles; presets, freehand drawing, term sweep, spectrum
- * UI: Render Studio > 2D & Generative > Fourier Epicycles
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 const $ = (id) => document.getElementById(id);

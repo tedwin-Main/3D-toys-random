@@ -22,13 +22,6 @@
 <canvas id="c"></canvas>
 <div id="hud"><b>Stable Fluids</b><span>drag to stir · tap for a splat · space to clear</span></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/fluid-sim.html
- * PURPOSE: GPU stable-fluids solver (advect, divergence, Jacobi pressure, gradient subtract, vorticity) with dye splats and pointer stirring
- * UI: Render Studio > Physics > Stable Fluids
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: false });
 gl.getExtension('EXT_color_buffer_float');

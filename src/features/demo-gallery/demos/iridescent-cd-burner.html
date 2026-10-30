@@ -12,13 +12,6 @@
 <meta name="description" content="An early-2000s disc burning app around a real-looking CD: the blank spins on a glossy blue backdrop, its data side throwing rainbow diffraction bands that slide as the disc wobbles, while a laser spot creeps outward and darkens the dye ring track by track. The glass app panel shows the track list, a 80-minute capacity bar, write speed, buffer and a striped progress bar; when it finishes it chimes and ejects. Hard because the rainbow is computed, not textured: each pixel takes the groove direction and the light-view half vector, solves the grating equation for the first three diffraction orders and turns those wavelengths into colour."/>
 <meta name="prompt" content="Build an early-2000s CD burning app in one HTML file with three.js: a spinning, gently wobbling CD whose data side uses a diffraction-grating shader (groove tangent dotted with the half vector, 1.6 µm spacing, first three orders mapped from wavelength to RGB) over a silver mirror base, a burned dye region that grows outward under a glowing laser spot, a clear hub and rim. Overlay a glossy glass app panel with track list, 80-minute capacity bar, speed menu, buffer readout, striped progress bar, Burn and Eject gel buttons, a finished chime and an eject animation, synthesized drive whir and clunks, and an attract mode that keeps burning discs." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/iridescent-cd-burner.html
- * PURPOSE: CD burner app: diffraction-grating disc shader, laser burn ring, glossy burn panel, eject animation
- * UI: Render Studio > Frutiger Aero > Iridescent CD Burner
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__burner (burn, eject, progress, speed)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b4fa0; font: 12px "Segoe UI", Tahoma, system-ui, sans-serif; }
 canvas { display: block; }
 #app { position: fixed; left: 24px; top: 50%; transform: translateY(-50%); width: 320px; border-radius: 12px; color: #fff; background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.12) 40%, rgba(20, 70, 140, 0.35)); border: 1px solid rgba(255, 255, 255, 0.65); box-shadow: 0 12px 40px rgba(0, 20, 60, 0.5), inset 0 1px #fff; backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4); text-shadow: 0 1px 2px rgba(0, 20, 60, 0.7); }

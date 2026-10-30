@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/main.js
- * PURPOSE: 8-Ball entry: mount game (fonts + styles linked from index.html)
- * UI: 8-Ball
- * USED BY: eight-ball-pool/index.html
- * KEY EXPORTS: none
- */
+// Mounts 8-Ball pool game into root container.
 
 import { createRoot } from 'react-dom/client'
 import { html } from './html.js'

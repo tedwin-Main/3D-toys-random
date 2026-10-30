@@ -12,13 +12,6 @@
 <meta name="description" content="The late-90s first-person maze screensaver: a freshly carved maze of brick walls, stone floor and tiled ceiling that you glide through on autopilot, hugging the left wall around every corner. Spinning chrome polyhedra float in the corridors and flip the whole world upside down when you pass through them, and a smiling face waits at the exit to start a new maze in a new wall style. Take over with the arrow keys or taps, and toggle the minimap. Hard because the maze is generated, instanced and textured procedurally, and the walker is a wall-following state machine with eased turns, moves and barrel-roll flips."/>
 <meta name="prompt" content="Recreate the late-90s 3D maze screensaver in three.js, one HTML file: carve a maze with a recursive backtracker, build it as instanced wall blocks with procedural canvas brick, stone floor and ceiling textures, and walk it first-person on autopilot with the left-hand rule, easing every move and 90° turn. Add spinning chrome polyhedra that flip the camera upside down when touched, a smiley at the exit that fades into a new maze with another wall style, a camera-carried light with fog, a toggleable minimap with the visited trail, manual arrow/tap control and synthesized blips." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/maze-screensaver.html
- * PURPOSE: first-person maze screensaver: backtracker maze, wall-follower autopilot, flip polyhedra, minimap
- * UI: Render Studio > Frutiger Aero > 3D Maze Screensaver
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__maze (regen, flip, map, pos)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 canvas { display: block; }
 #map { position: fixed; left: 12px; top: 12px; width: 150px; height: 150px; border: 1px solid rgba(255, 255, 255, 0.4); background: rgba(0, 0, 0, 0.55); image-rendering: pixelated; }

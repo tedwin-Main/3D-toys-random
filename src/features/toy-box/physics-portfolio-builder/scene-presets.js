@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/scene-presets.js
- * PURPOSE: three break scenes (pool, marbles, dominoes): layout per project count, seeded jitter, bake to recording
- * UI: Builder > Style > Scene picker, Builder > Preview
- * USED BY: frontend bake-worker.js, tests
- * KEY EXPORTS: PRESETS, bakePreset, bodyCountFor
- */
+// Configures break scene layouts, seeded jitter, and bake parameters.
 
 import { simulateRollingBalls } from './rolling-ball-physics.js'
 import { simulateRigidBodies } from './rigid-body-physics.js'

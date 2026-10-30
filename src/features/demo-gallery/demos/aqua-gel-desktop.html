@@ -12,13 +12,6 @@
 <meta name="description" content="An early-2000s 'lickable' gel desktop in the Aqua style, with no images and no logos. Windows have pinstripes and red/amber/green gel buttons, there is a brushed-metal jukebox with an LCD, and a sheet dialog slides down with a pulsing blue default button. A translucent dock magnifies under the cursor, bounces apps as they launch, and minimizes windows with a genie-style warp. Hard because every gel bead (gradient body, caustic glow at the bottom, specular cap at the top) is pure CSS, and the genie warp is a clip-path morph synced with a transform." />
 <meta name="prompt" content="Recreate an early-2000s Aqua-style desktop in one HTML file with no images and no real logos. Pinstriped windows with glossy red/yellow/green gel buttons, a brushed-metal music player with an LCD, gel scrollbars and a sheet dialog with a pulsing blue default button. Add a translucent dock that magnifies icons under the cursor, bounces an app on launch and minimizes windows with a genie effect, plus an aqua wave wallpaper. Synthesize UI sounds and add an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/aqua-gel-desktop.html
- * PURPOSE: early-2000s gel desktop: pinstripe windows, gel buttons, brushed-metal jukebox, sheet dialog, magnifying dock, genie minimize
- * UI: Render Studio > Frutiger Aero > Gel Desktop
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__aqua (open, minimize, sheet, magnify)
- */
 :root { --font: "Lucida Grande", "Lucida Sans Unicode", "Helvetica Neue", system-ui, sans-serif; --gel: #2b7fe0; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font: 12px var(--font); color: #111; user-select: none; -webkit-user-select: none; background: #1d6fd6; }

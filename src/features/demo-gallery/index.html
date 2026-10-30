@@ -131,13 +131,6 @@
 </section>
 
 <script type="module">
-/**
- * FILE: render-studio/frontend/index.html
- * PURPOSE: showcase gallery: grouped category tabs, cards with explanation + prompt, full-screen viewer for demos / models / video / images, hash routing
- * UI: Render Studio home grid, category tabs, viewer nav pill, info panel
- * USED BY: entry point, http://localhost:5066/
- * KEY EXPORTS: none (standalone page)
- */
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), nav = $('nav'), menu = $('menu'), tab = $('tab'), info = $('info');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/preset-info.js
- * PURPOSE: scene labels and project limits, no physics imports (keeps Rapier out of viewer bundle)
- * UI: Builder > Style > Scene picker
- * USED BY: scene-presets.js, site-schema.js, style-editor.js
- * KEY EXPORTS: PRESET_INFO, PRESET_IDS
- */
+// Defines scene presets, project limits, and metadata without physics dependencies.
 
 export const PRESET_INFO = Object.freeze( {
   pool: Object.freeze( { id: 'pool', label: 'Pool break', blurb: 'Cue ball breaks a racked triangle on felt.', maxProjects: 15 } ),

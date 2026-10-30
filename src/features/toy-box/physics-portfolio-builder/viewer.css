@@ -1,10 +1,4 @@
-/*
- * FILE: src/features/toy-box/physics-portfolio-builder/viewer.css
- * PURPOSE: published portfolio layout: top bar, tall sticky hero, work rows, footer, project drawer
- * UI: Viewer (whole page)
- * USED BY: viewer.html
- * KEY EXPORTS: none
- */
+/* Styles published portfolio layout, sticky hero, work rows, and drawer. */
 
 .site-bar {
   position: fixed;

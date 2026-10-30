@@ -12,13 +12,6 @@
 <meta name="description" content="An early-2000s console memory card screen: two 15-block cards float over slow blue light ribbons, each save a spinning flat-shaded 3D icon (crystal, cube, pyramid, gem, ring) that takes one to three blocks. Pick a save to see it turn large in the info panel, copy it to the other card and watch its blocks fly across while the progress bar warns you not to remove the card, or delete it and see the blocks crumble and the rest slide back. Full cards and duplicate saves get the proper refusal. Hard because the icons are real little meshes rotated, sorted and lit every frame in 2D canvas, and block allocation, copy and delete keep both cards consistent while the animation plays."/>
 <meta name="prompt" content="Build an early-2000s game console memory card manager in one HTML file with original styling and fictional game names: two 15-block memory cards side by side over an animated ambient background, saves that use 1 to 3 blocks each with spinning flat-shaded 3D icons drawn on canvas (polyhedra rotated, depth-sorted and lit), an info panel with a large spinning icon, copy (blocks fly to the other card, progress bar dialog) and delete (confirm, blocks crumble, later saves slide back), not-enough-space and already-exists errors, keyboard control, cursor blips and a quiet synth drone. Attract mode copies and deletes saves; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/memory-card-manager.html
- * PURPOSE: console memory card manager: two 15-block cards, spinning 3D save icons, copy and delete with block animation
- * UI: Render Studio > Retro Aesthetics > 2000s > Console Aero > Memory Card Manager
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__memcard (select, copy, del, answer, state)
- */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #020818; }

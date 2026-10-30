@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/scene-recording.test.js
- * PURPOSE: recording pack/unpack precision, sampler interpolation, scroll timeline shape
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests recording frame compression precision, sampling, and scroll interpolation.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

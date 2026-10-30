@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/project-editor.js
- * PURPOSE: project list editor: add, remove, reorder (drag or arrows), edit fields, colour, image upload
- * UI: Builder > Projects panel
- * USED BY: builder-page.js
- * KEY EXPORTS: ProjectEditor
- */
+// Renders project list editor for adding, reordering, and editing portfolio items.
 
 import { useEffect, useRef, useState } from 'react'
 import { html } from './html.js'

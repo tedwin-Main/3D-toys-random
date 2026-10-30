@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/pool-bot.test.js
- * PURPOSE: bot contracts: finds straight-in pot, chosen shot pots legal ball, places cue on ball in hand, breaks at rack
- * UI: none
- * USED BY: npm test
- * KEY EXPORTS: none
- */
+// Tests pool bot decision contracts for shot selection and ball placement.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

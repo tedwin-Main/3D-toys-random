@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/bake-worker.js
- * PURPOSE: off-main-thread physics bake: preset + project count + seeds in, encoded recordings out
- * UI: Builder > Preview (Baking… status)
- * USED BY: bake-client.js
- * KEY EXPORTS: none (worker message protocol)
- */
+// Bakes physics simulation recording in background worker thread.
 
 import { bakePreset } from './scene-presets.js'
 import { encodeRecording } from './scene-recording.js'

@@ -12,13 +12,6 @@
 <meta name="description" content="Tech-optimism landing page from the eve of the year 2000: a liquid chrome blob logo that ripples and mirrors a studio of light strips, orbited by chrome rings and beads above an endless glowing cyan grid, with translucent glass panels, cyber type and a LAUNCH 2000 countdown. When it hits zero the page flashes, the grid hyperdrives, a shockwave rings out and the new millennium is welcomed, while an optional synthesized techno loop pumps underneath. Drag the blob to spin it. Hard because the chrome blob displaces in the vertex shader with normals rebuilt from neighbour samples, its reflections come from a procedural light-strip environment baked through PMREM, and the grid is an anti-aliased derivative shader."/>
 <meta name="prompt" content="Build a Y2K futurism landing page in one HTML file: a three.js liquid chrome blob (MeshPhysicalMaterial, noise displacement via onBeforeCompile with normals recomputed from neighbour samples, reflections from a PMREM-baked procedural light-strip environment) orbited by chrome torus rings and beads, over a scrolling anti-aliased cyan perspective grid and a gradient sky with bloom. DOM on top: glass nav bar, chrome cyber headline, translucent feature cards and a LAUNCH 2000 T-minus countdown that triggers a flash, hyperdrive grid, shockwave and a welcome message. Optional WebAudio techno loop (kick, hats, saw bass, square arp) with a riser on launch. Drag spins the blob; attract mode loops the countdown." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/y2k-chrome-landing.html
- * PURPOSE: Y2K futurism landing page: liquid chrome blob logo, cyan grid floor, glass panels, Launch 2000 countdown, techno synth
- * UI: Render Studio > Frutiger Aero > Y2K Futurism > Y2K Chrome Landing
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__y2k (launch, countdown, sound, state)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #050a1e; color: #dff3ff; font: 13px "Futura", "Trebuchet MS", Verdana, sans-serif; }
 canvas { display: block; position: fixed; inset: 0; touch-action: none; }

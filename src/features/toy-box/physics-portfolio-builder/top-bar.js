@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/top-bar.js
- * PURPOSE: builder header: brand, open full preview, export zip, result toast
- * UI: Builder > Top bar
- * USED BY: builder-page.js
- * KEY EXPORTS: TopBar
- */
+// Renders builder top navigation bar with preview, export, and status toast.
 
 import { useState } from 'react'
 import { html } from './html.js'

@@ -91,13 +91,6 @@
 <div class="final" id="final"><div class="final-card"><h1>Final</h1><ol class="standings" id="standings"></ol><div class="final-btns" id="finalBtns"><button id="toLobby">Lobby</button><button class="primary" id="again">Play again</button></div><p class="hint" id="finalWait">Waiting for the host…</p></div></div>
 
 <script type="module">
-/**
- * FILE: src/features/toy-box/wheres-waldo-game/index.html
- * PURPOSE: online Where's Waldo for up to 14: race to spot him in a seeded crowd (best of 5) or take turns hiding him; Malaysian maps, decoys ramp each round; host-authoritative rounds, clicks, scores; bots
- * UI: Waldo Hunt page (lobby overlay + host settings, HUD pills + round clock, pannable crowd canvas + minimap, target card, round end, final standings)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 

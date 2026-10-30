@@ -12,13 +12,6 @@
 <meta name="description" content="A late-2000s desktop sidebar weather gadget: a frosted glass card over a matching wallpaper, with a live sky panel (sun showers, glossy clouds, rain, thunderstorms with lightning, snow and frost), a big glossy icon, temperature and a 5-day forecast strip. Raindrops bead on the glass, merge and slide down, each one refracting an upside-down copy of the sky behind it. Click the sky to change the weather, pick a day, flip to options for city and units, drag the gadget. Hard because the droplets sample the live sky canvas as tiny inverted lenses every frame, and two full weather scenes cross-fade on two canvases at once." />
 <meta name="prompt" content="Build a late-2000s glass desktop weather gadget in one HTML file with canvas 2D: a frosted glass card over a matching wallpaper, a live sky panel with five weather states (sun shower, sunny, partly cloudy, thunderstorm with lightning, snow) cross-fading, glossy clouds and hills, and raindrops on the glass that merge, slide and refract an inverted copy of the sky. Add a big glossy icon, temperature, 5-day forecast strip, °C/°F and city options on a flipped back face, synthesized rain, wind and thunder, a draggable card, and an attract mode that tours the forecast." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/weather-gadget.html
- * PURPOSE: glass sidebar weather gadget: cross-faded canvas weather scenes, refracting raindrops on glass, forecast strip
- * UI: Render Studio > Frutiger Aero > Glass Weather Gadget
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__weather (set, day, city, state, unit, drops)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #2a7fd0; font-family: "Segoe UI", "Frutiger", "Myriad Pro", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
 #bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 #gad { --k: 1; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(var(--k)); width: min(300px, calc(100vw - 64px)); }

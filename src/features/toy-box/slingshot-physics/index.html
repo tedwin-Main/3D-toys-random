@@ -20,13 +20,6 @@
 <canvas id="c"></canvas>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 <script>
-/**
- * FILE: src/features/toy-box/slingshot-physics/index.html
- * PURPOSE: Angry-Birds-style slingshot on Matter.js: impact-based block/pig damage, exact trajectory preview, boost, levels, AI aim attract mode
- * UI: Render Studio > Games > Slingshot Physics
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const { Engine, Bodies, Body, Composite, Events } = Matter;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const WORLD_W = 2200, GROUND = 900, SLING = { x: 300, y: GROUND - 170 }, MAXPULL = 120, POWER = 0.21;

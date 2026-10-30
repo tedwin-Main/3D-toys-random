@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/ball-textures.js
- * PURPOSE: canvas textures for pool balls, cue ball, felt and wood
- * UI: 8-Ball > table (balls, cloth, rails)
- * USED BY: pool-table-scene.js
- * KEY EXPORTS: poolBallTexture, cueBallTexture, surfaceTexture
- */
+// Generates canvas textures for pool balls, cue ball, felt, and wood.
 
 import * as THREE from 'three'
 import { createRandom } from './seeded-random.js'

@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/seeded-random.js
- * PURPOSE: deterministic random numbers for rack jitter, bot aim noise, texture grain
- * UI: none
- * USED BY: pool-game-physics.js, pool-shot-worker.js, pool-table-scene.js, ball-textures.js
- * KEY EXPORTS: createRandom
- */
+// Provides deterministic pseudorandom number generator for game seeds.
 
 // Run engine: mulberry32, same seed same sequence on every machine
 export function createRandom( seed = 1 ) {

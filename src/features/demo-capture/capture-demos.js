@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/demo-capture/capture-demos.js
- * PURPOSE: headless QA + poster capture for live demos: console errors, fps, poster png, optional mobile shot + video clips + ffmpeg demo reel
- * UI: Render Studio home grid posters, Videos tab (demo reel), Images tab (reel gif)
- * USED BY: npm run capture [-- names... --mobile --clips --reel --toys]
- * KEY EXPORTS: none (cli script)
- */
+// Runs headless QA and poster capture for live demos.
+
 import { chromium } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';

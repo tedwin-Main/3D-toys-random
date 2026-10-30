@@ -57,13 +57,6 @@
 </div>
 <div id="status"></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/paint-app.html
- * PURPOSE: Paint program: brush/pencil/eraser/spray/line/rect/ellipse/fill/eyedropper, undo-redo stack, PNG export, idle self-painting demo
- * UI: Render Studio > Apps & UI > Paint App
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__paint (test hook: fill, pixel, exportURL, undo, stroke)
- */
 const $ = (id) => document.getElementById(id);
 const art = $('art'), pre = $('preview'), g = art.getContext('2d', { willReadFrequently: true }), pg = pre.getContext('2d');
 const TOOLS = [['brush', '🖌️'], ['pencil', '✏️'], ['eraser', '🧽'], ['spray', '💨'], ['line', '╱'], ['rect', '▭'], ['ellipse', '◯'], ['fill', '🪣'], ['picker', '💧']];

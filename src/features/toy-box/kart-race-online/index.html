@@ -50,13 +50,6 @@
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
 <script type="module">
-/**
- * FILE: src/features/toy-box/kart-race-online/index.html
- * PURPOSE: online 14-kart 3-lap race on a seeded circuit: drift physics for every kart, item boxes (boost, banana, homing shell), live positions; host-authoritative sim
- * UI: Kart Party GP page (lobby overlay, position + lap HUD, item slot, minimap, results, phone joystick + ITEM / DRIFT buttons)
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';

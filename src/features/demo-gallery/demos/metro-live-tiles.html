@@ -12,13 +12,6 @@
 <meta name="description" content="The early-2010s flat 'Frutiger Metro' start screen: a sideways-scrolling wall of coloured live tiles in thin light type that peek, flip and cycle their content on their own (mail, calendar, weather, photos, people, music, news, clock). Pressing a tile tilts it toward your finger; opening one turnstiles the other tiles away and zooms into a panorama app whose big title parallaxes behind the pivots. A charm panel swaps the accent background and pattern; at phone width it reflows into the two-column phone start. Hard because the tile wall is a dense column-flow grid of four tile sizes, every tile animates on its own timer, and the open and close transitions are choreographed per column."/>
 <meta name="prompt" content="Build an early-2010s flat live-tile start screen in one HTML file: a horizontally scrolling wall of grouped coloured tiles in four sizes packed with CSS grid column-dense, thin light type and line icons, tiles that peek, flip and cycle live content on independent timers, a press-to-tilt effect, a turnstile animation that opens a full-screen panorama app with parallax title and pivots, and a charm panel to change the accent background. Reflow to a two-column phone start under 600 px and add an attract mode that scrolls and opens apps." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/metro-live-tiles.html
- * PURPOSE: flat live-tile start screen: peeking/flipping tiles, turnstile open into panorama apps, accent charm
- * UI: Render Studio > Frutiger Aero > Frutiger Metro > Live Tiles Start
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__metro (open, back, accent, state)
- */
 :root { --bg: #1d1d6b; --pat: none; --u: 74px; --g: 8px; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; color: #fff; font-family: "Segoe UI Light", "Segoe UI", "Selawik", "Open Sans", "Helvetica Neue", sans-serif; font-weight: 300; user-select: none; -webkit-user-select: none; }

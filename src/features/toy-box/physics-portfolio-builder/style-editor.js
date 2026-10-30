@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/style-editor.js
- * PURPOSE: site identity, scene picker, palette, type pair, contact links
- * UI: Builder > Style panel
- * USED BY: builder-page.js
- * KEY EXPORTS: StyleEditor
- */
+// Renders styling editor panel for identity, scene picker, palette, and fonts.
 
 import { Fragment } from 'react'
 import { html } from './html.js'

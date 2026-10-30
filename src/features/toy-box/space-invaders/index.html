@@ -24,13 +24,6 @@
 <canvas id="glow"></canvas>
 <div id="scan"></div><div id="vig"></div>
 <script>
-/**
- * FILE: src/features/toy-box/space-invaders/index.html
- * PURPOSE: Space Invaders clone: pixel sprites, speeding swarm + march, per-pixel bunker erosion, UFO, waves, CRT glow, AI attract mode
- * UI: Render Studio > Games > Space Invaders
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 // Native arcade resolution; CSS scales it up with nearest-neighbour
 const W = 224, H = 256;
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');

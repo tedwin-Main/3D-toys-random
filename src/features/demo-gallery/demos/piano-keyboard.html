@@ -45,13 +45,6 @@
 <div id="status"></div>
 <div id="keys"><div class="bed" id="bed"></div></div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/piano-keyboard.html
- * PURPOSE: WebAudio piano: 4 synthesized voices, sustain, mouse/multi-touch/keyboard input, piano-roll waterfall, record + timed playback, idle melody
- * UI: Render Studio > Apps & UI > Piano
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__piano (test hook: down, up, recorded, playback)
- */
 const $ = (id) => document.getElementById(id);
 const NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 let LO = 48, HI = 84; // C3..C6

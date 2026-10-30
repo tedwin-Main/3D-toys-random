@@ -12,13 +12,6 @@
 <meta name="description" content="A mid-2000s console 'cross media bar', with no brand: a horizontal row of white line-art category icons crossed by a vertical column of items, over the famous glowing wave ribbon whose background colour shifts with the month. Arrows, wheel, swipe or click move along both axes with springy easing and soft synth ticks. Hard because the ribbon is dozens of phase-offset sine strands drawn additively each frame, and the two-axis menu keeps a remembered item per category so moving back restores where you were." />
 <meta name="prompt" content="Recreate a 2006-style console cross media bar in one HTML file with no brand: a canvas backdrop with a smooth gradient whose hue follows the current month and a glowing additive wave ribbon of many sine strands; a horizontal row of white line-art category icons (Users, Settings, Photo, Music, Video, Game, Network, Friends) crossed by a vertical item column that remembers its position per category. Navigate with arrows, wheel, swipe and click, spring-ease every move, add a clock, synth ticks and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/media-bar-xmb.html
- * PURPOSE: cross media bar: month-hue gradient, additive sine wave ribbon, two-axis icon menu with remembered rows, spring easing, synth ticks
- * UI: Render Studio > Frutiger Aero > Cross Media Bar
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__xmb (move, month)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Helvetica Neue", "Segoe UI", system-ui, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; background: #000; }
 #bg { position: fixed; inset: 0; width: 100%; height: 100%; }

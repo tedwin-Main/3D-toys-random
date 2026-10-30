@@ -12,13 +12,6 @@
 <meta name="description" content="The late-90s 3D text screensaver: your words, extruded and bevelled, see-sawing, spinning, wobbling and tumbling on black. Click to swap the surface between solid gloss, chrome reflecting a sky-and-horizon environment, a marble texture and a rainbow; open the retro setup dialog to type your own text, show the time instead, change the motion and speed. Hard because the text is real extruded font geometry rebuilt on every change (and every second in clock mode), centred and fitted to any screen, with a generated environment map for the chrome and world-space UVs for the texture."/>
 <meta name="prompt" content="Recreate the late-90s 3D text screensaver in three.js, one HTML file: load the bundled helvetiker bold font with FontLoader, extrude the text with TextGeometry and a bevel, centre it and fit it to the viewport. Offer surfaces (solid gloss, chrome with a PMREM sky-gradient environment, canvas marble texture, rainbow vertex colours) cycled by clicking, motions (see-saw, spin, wobble, tumble, drift) and a retro setup dialog with text input, a show-time option and a speed slider. Attract mode cycles motions, surfaces and phrases." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/spinning-text-screensaver.html
- * PURPOSE: 3D text screensaver: extruded font geometry with chrome/solid/texture/rainbow surfaces and classic motions
- * UI: Render Studio > Frutiger Aero > 3D Text Screensaver
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__text (set, style, motion, time, state)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font: 11px Tahoma, Verdana, sans-serif; }
 canvas { display: block; touch-action: none; cursor: pointer; }
 #gear { position: fixed; right: 12px; bottom: 12px; padding: 4px 10px; color: #000; background: #d4d0c8; border: 2px outset #fff; font: inherit; cursor: pointer; opacity: 0.55; }

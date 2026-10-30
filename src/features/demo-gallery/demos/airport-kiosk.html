@@ -12,13 +12,6 @@
 <meta name="description" content="A bright Humanity Aero airport kiosk from around 2008: through tall sunlit windows planes taxi past while a glossy white touch kiosk greets you in five languages. Its split-flap departures board clatters every character through the alphabet as flights move from On Time to Boarding to Final Call and roll off, the clock ticks forward, and tapping any flight draws an animated walking route on the terminal map from You Are Here to the gate, with a little traveller walking it and the walk time. Hard because the board is a per-character flap engine that steps each cell through the drum independently with synthesized clatter, the map routes along a waypoint path, and the whole concourse view is painted on canvas."/>
 <meta name="prompt" content="Build a Humanity Aero airport wayfinding kiosk in one HTML file: canvas background of a sunlit terminal with tall window mullions, sky, clouds and a plane taxiing, a glossy white kiosk with blue glass header cycling Welcome in five languages, a split-flap departures board where every character steps through the flap drum independently (time, destination, flight, gate, remarks) and statuses advance with a simulated clock as flights depart and new ones roll in, wayfinding signs with pictograms, and an SVG terminal map where tapping a flight animates a walking route from You Are Here to its gate with a walking dot and walk time. WebAudio flap clatter and boarding chimes; attract mode cycles flights; works at phone width." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/airport-kiosk.html
- * PURPOSE: Humanity Aero airport kiosk: split-flap departures board, terminal map routing, wayfinding signs, sunlit concourse
- * UI: Render Studio > Frutiger Aero > Humanity Aero > Airport Kiosk
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__kiosk (select, minute, board, route)
- */
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body { font: 13px "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: #12324f; background: #cfe6f7; }

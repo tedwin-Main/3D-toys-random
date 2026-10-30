@@ -1,10 +1,5 @@
-"""
-FILE: src/features/blender-scenes/low-poly-island.py
-PURPOSE: headless Blender scene: procedural low-poly island (noise terrain, height colours, trees, rocks, lighthouse, clouds, faceted water); Cycles still, EEVEE turntable mp4, GLB export; writes notes.json entries
-UI: Render Studio > Blender Renders + 3D Models tabs
-USED BY: run by hand: /Applications/Blender.app/Contents/MacOS/Blender -b -P blender-scenes/low-poly-island.py [-- --quick | --glb-only]
-KEY EXPORTS: none (script)
-"""
+# Renders procedural low-poly island scene and exports still, turntable, and GLB assets.
+
 import json
 import math
 import random

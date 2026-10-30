@@ -43,13 +43,6 @@
   <div class="hint">Drag to orbit · scroll / pinch to zoom · power morphs the bulb</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/mandelbulb-fractal.html
- * PURPOSE: WebGL2 raymarched Mandelbulb with DE, orbit-trap color, soft shadow, AO, adaptive resolution
- * UI: Render Studio > Shaders > Mandelbulb
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

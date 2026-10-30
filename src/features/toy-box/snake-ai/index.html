@@ -38,13 +38,6 @@
   <button id="restart">Restart</button>
 </div>
 <script>
-/**
- * FILE: src/features/toy-box/snake-ai/index.html
- * PURPOSE: neon Snake with Hamiltonian-cycle autopilot taking provably safe shortcuts; manual takeover via keys/swipe
- * UI: Render Studio > Games > Snake AI
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const COLS = 24, ROWS = 16, N = COLS * ROWS; // ROWS even so the zigzag cycle closes
 const $ = (id) => document.getElementById(id);

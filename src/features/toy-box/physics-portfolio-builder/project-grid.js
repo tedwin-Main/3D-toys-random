@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/project-grid.js
- * PURPOSE: plain list of all projects under the break (also the no-WebGL / reduced-motion path)
- * UI: Viewer > Work section
- * USED BY: viewer-page.js
- * KEY EXPORTS: ProjectGrid
- */
+// Renders accessible static project grid fallback for non-WebGL devices.
 
 import { html } from './html.js'
 import { ArrowRight } from './builder-icons.js'

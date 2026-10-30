@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/common/touch-joystick.js
- * PURPOSE: phone controls: virtual joystick bottom-left, round action buttons bottom-right; hidden on mouse/trackpad screens
- * UI: touch controls on driving / walking toys (drift kart, kart party, light cycles, lawn stripes, pelican, tiny planet, Crown Keep, Cannon Cove, Penguin Curling, Sheepdog Rush, Balloon Battle)
- * USED BY: drift-kart-racing, kart-race-online, light-cycle-arena, lawn-mower-stripes, pelican-on-bicycle, tiny-planet-world, king-of-the-hill, pirate-cannon-clash, penguin-curling, sheepdog-rush, balloon-battle
- * KEY EXPORTS: createTouchPad
- */
+// Renders on-screen touch joystick and action buttons for mobile devices.
 
 const CSS = `
 .tp-wrap { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 20; }

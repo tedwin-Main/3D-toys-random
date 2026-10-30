@@ -37,13 +37,6 @@
   <div class="hint">Drag to wipe the glass · it fogs back slowly</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/rain-on-glass.html
- * PURPOSE: WebGL2 rainy window: sliding + static drops, trail clearing, refraction of procedural bokeh city, wipe-to-clear
- * UI: Render Studio > Shaders > Rain on Glass
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

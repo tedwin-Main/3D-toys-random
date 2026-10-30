@@ -1,10 +1,5 @@
-"""
-FILE: src/features/texture-generator/make-textures.py
-PURPOSE: procedural texture pack with numpy + Pillow (seamless marble, stained-glass voronoi, terrain heightmap + shaded relief, pixel spaceship sprite sheet); writes PNGs + notes.json
-UI: Render Studio > Images tab
-USED BY: run by hand: python-textures/.venv/bin/python python-textures/make-textures.py
-KEY EXPORTS: none (script)
-"""
+# Generates procedural texture pack using NumPy and Pillow.
+
 import colorsys
 import json
 from pathlib import Path

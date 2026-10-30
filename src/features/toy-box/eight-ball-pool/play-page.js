@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/play-page.js
- * PURPOSE: 8-ball game screen: menu, turn flow (you / bot), shots via worker, ball in hand, replay, game over
- * UI: Play (whole page: menu, table, HUD, game over)
- * USED BY: main.js
- * KEY EXPORTS: PlayPage
- */
+// Renders 8-Ball pool play page with HUD, table view, and controls.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { html } from './html.js'

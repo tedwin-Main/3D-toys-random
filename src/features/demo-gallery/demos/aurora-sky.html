@@ -42,13 +42,6 @@
   <div class="hint">Drag to look around</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/aurora-sky.html
- * PURPOSE: WebGL2 aurora: stacked noise curtains, stars + Milky Way, mountain silhouette, rippled lake reflection
- * UI: Render Studio > Shaders > Aurora Sky
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

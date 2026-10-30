@@ -12,13 +12,6 @@
 <meta name="description" content="The classic late-2000s stock wallpaper as a live 3D scene: rolling green hills under a deep blue sky, a mirror lake, 40,000 wind-swept grass blades and iridescent soap bubbles drifting past a lens-flared sun. Bubbles use a thin-film interference plus Fresnel shader, so their colour bands swirl as the film thins. Click a bubble to pop it, or click anywhere else to blow a new cluster. Hard because every surface is a custom shader (sky, water, grass sway, bubble film) and it still has to hit 60 fps on a phone." />
 <meta name="prompt" content="Build the classic Frutiger Aero wallpaper as a three.js scene in one HTML file: rolling grass hills, a deep-blue-to-white sky with soft clouds, a reflective lake, wind-swept instanced grass and floating iridescent soap bubbles with a thin-film interference + Fresnel shader. Add a lens flare from the sun, a few butterflies, a slow drifting camera, click-to-pop bubbles with a synthesized pop, and click-to-blow new bubbles." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/bubble-meadow.html
- * PURPOSE: three.js Frutiger wallpaper: hills, lake, instanced grass, thin-film soap bubbles, butterflies, lens flare
- * UI: Render Studio > Frutiger Aero > Bubble Meadow
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__meadow (spawn, popAll, bubbles)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #8fd3ff; touch-action: none; }
 canvas { display: block; }
 #flare { position: fixed; inset: 0; pointer-events: none; mix-blend-mode: screen; }

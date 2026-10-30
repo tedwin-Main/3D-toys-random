@@ -12,13 +12,6 @@
 <meta name="description" content="A late-90s keychain virtual pet in translucent candy plastic: an egg-shaped shell you can see the circuit board through, a 32x16 dot-matrix LCD with the slow ghosting of a cheap screen, eight menu icons and three buttons. The egg hatches into a little blob that walks around, gets hungry, poops, falls asleep, gets sick and grows up; feed it meals or snacks, flush, give medicine, scold it, check its hearts and play the left-or-right guessing game. Hard because the LCD is a real frame buffer with per-pixel persistence, drawn from hand-made bitmaps and a 3x5 font, driven by a stats-and-modes state machine with timed needs, all in era-correct square-wave beeps."/>
 <meta name="prompt" content="Build a late-90s keychain virtual pet in one HTML file: a translucent candy-plastic egg shell in CSS with a visible circuit board and a keyring, five colour options, a 32x16 dot-matrix LCD canvas with per-pixel ghosting, eight icons and A/B/C buttons. Drive it with a state machine: egg, hatch, baby, child; hunger, happiness, weight, age, poop, sickness and sleep on timers; feed meal or snack, lights, a left/right guessing game, medicine, toilet flush, status hearts, discipline and an attention icon. Draw everything from bitmaps and a 3x5 font, beep in square waves, and add an attract mode that takes care of the pet." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/virtual-pet-egg.html
- * PURPOSE: keychain virtual pet: candy plastic egg, ghosting dot LCD, needs-and-modes state machine
- * UI: Render Studio > Frutiger Aero > Virtual Pet Egg
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__pet (press, state, stats, colour)
- */
 :root { --c1: rgba(120, 225, 255, 0.92); --c2: rgba(0, 140, 215, 0.88); --btn: #ff5fa2; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; -webkit-user-select: none; }

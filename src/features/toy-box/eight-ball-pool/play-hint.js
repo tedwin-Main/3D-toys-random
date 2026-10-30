@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/eight-ball-pool/play-hint.js
- * PURPOSE: picks HUD hint line for current play phase, ball in hand, pointer type, camera
- * UI: Play > HUD hint
- * USED BY: play-page.js
- * KEY EXPORTS: hintFor
- */
+// Computes HUD hint text based on turn phase, ball in hand, and input mode.
 
 // Play > HUD hint: empty string when nothing to say
 export function hintFor( { phase, ballInHand, finePointer, cameraMode } ) {

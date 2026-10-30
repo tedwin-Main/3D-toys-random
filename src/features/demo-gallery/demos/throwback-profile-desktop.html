@@ -12,13 +12,6 @@
 <meta name="description" content="A 2007 afternoon on one screen, with no logos. A pinstriped browser holds a social profile page (glitter name, Mood, a blinking Online Now!, a Top 8, a comment wall and a profile song). A buddy list shows '♫ now playing', and a glossy Aqua mini player streams real era songs (Fireflies, 1234, New Soul, Bubbly, Electric Feel...) from their official YouTube uploads via a hidden IFrame API player. Hard because the one player drives three UIs (the LCD, the profile song box and the messenger status), and the YouTube script loads only on the first hover or tap, so the page stays offline-clean until you press play." />
 <meta name="prompt" content="Build a 2007 throwback desktop in one HTML file with no real logos. A blue-sky Aqua wallpaper; a glossy mini music player (prev / play / next, LCD with title and artist) that streams era songs from official YouTube uploads through a hidden YouTube IFrame API player; a pinstripe browser window showing a MySpace-style profile with glitter name, mood, blinking Online Now, Top 8 friends, comments and a profile-song box; an MSN-style buddy list whose personal message shows the current song; sign-in toasts, nudge and a glossy dock. Load the YouTube API lazily on first hover or tap." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/throwback-profile-desktop.html
- * PURPOSE: 2007 throwback desktop: Aqua mini player (real songs via YouTube IFrame API), social profile page, buddy list now-playing, dock
- * UI: Render Studio > Frutiger Aero > Throwback Profile Desktop
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__throwback (play, next, prev, track, nudge)
- */
 :root { --font: "Lucida Grande", "Segoe UI", Tahoma, "Helvetica Neue", system-ui, sans-serif; --sp: #003399; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; font: 12px var(--font); color: #222; user-select: none; -webkit-user-select: none; }

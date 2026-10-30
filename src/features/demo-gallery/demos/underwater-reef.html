@@ -12,13 +12,6 @@
 <meta name="description" content="Aquatic Aero at its most saturated: a sunlit coral reef seen through clear turquoise water, with dancing caustics on rippled sand, shafts of god rays, swaying kelp and anemones, branching, brain and tube corals, a sea turtle gliding laps, rising glossy bubbles, drifting marine snow and three schools of tropical fish flocking as boids. Tap to startle the nearest school into a scatter and a burst of bubbles. Hard because 140 fish run separation, alignment, cohesion and flee forces every frame, their tails wiggle in the vertex shader per instance, the caustics are an iterative shader on displaced sand, and every coral is generated and merged into single meshes."/>
 <meta name="prompt" content="Build a Frutiger Aquatic coral reef in three.js, one HTML file: a gradient underwater dome with exp fog, displaced sand with an iterative caustics shader, additive god-ray planes, procedural merged branching coral, brain coral, tube sponges, swaying kelp and anemones, a sea turtle with flapping flippers gliding a loop, rising bubbles, marine snow and three species of fish as instanced boids with per-instance tail wiggle in the vertex shader. Clicking scatters the nearest school with a flee force and a bubble burst; slow auto-orbit camera." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/underwater-reef.html
- * PURPOSE: Aquatic Aero reef: boid fish schools, caustic sand, god rays, procedural coral, turtle, bubbles
- * UI: Render Studio > Frutiger Aero > Aquatic Aero > Underwater Reef
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__reef (scatter, fish, turtle)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0e6a9a; }
 canvas { display: block; touch-action: none; }
 #hint { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; color: #e8fbff; font: 13px "Segoe UI", system-ui, sans-serif; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.35); backdrop-filter: blur(8px); white-space: nowrap; pointer-events: none; }

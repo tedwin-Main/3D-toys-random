@@ -80,13 +80,6 @@
 <div id="sheet"><div class="sheet"><canvas id="shc"></canvas><div class="body"><div class="tag" id="stag"></div><h4 id="sht"></h4><div class="meta" id="shm"></div><p id="shd" style="color:#cfc9c6;line-height:1.55;margin:0"></p></div></div></div>
 <div class="note">fictional brand + titles · all art generated</div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/streaming-landing.html
- * PURPOSE: Streaming home page for invented brand: seeded generative posters, rotating hero, snap carousels, Top 10, detail sheet, idle tour
- * UI: Render Studio > Apps & UI > Streaming Landing
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const $ = (id) => document.getElementById(id);
 function rng(seed) { return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; }
 

@@ -1,10 +1,4 @@
-/*
- * FILE: src/features/toy-box/eight-ball-pool/play.css
- * PURPOSE: 8-ball page: reset + tokens, full-bleed table, glass HUD, power bar, spin pad, menu + game-over panels
- * UI: Play (whole page)
- * USED BY: eight-ball-pool/index.html
- * KEY EXPORTS: none
- */
+/* Styles 8-ball page layout, table view, glass HUD, power bar, and panels. */
 
 :root {
   --fg: #f2f1e9;

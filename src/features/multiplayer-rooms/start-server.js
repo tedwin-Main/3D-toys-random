@@ -1,10 +1,5 @@
-/**
- * FILE: src/features/multiplayer-rooms/start-server.js
- * PURPOSE: one-port server for whole toy box: static toys under /3d-toys/, room relay socket for multiplayer toys
- * UI: every 3D Toy Box page (static), multiplayer toys (websocket)
- * USED BY: npm start (3d-toys/package.json)
- * KEY EXPORTS: none (boots http server on PORT, default 5055)
- */
+// Runs one-port server for static toys and multiplayer room relay socket.
+
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';

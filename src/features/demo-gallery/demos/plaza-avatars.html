@@ -12,13 +12,6 @@
 <meta name="description" content="A late-2000s console 'avatar plaza', with no brand: a crowd of chibi characters built from primitives (big round heads, capsule bodies, hair caps), each with a randomly generated face drawn on a canvas texture, wandering a bright white plaza with soft blob shadows and a gentle steering-and-separation walk. Click one and it hops, waves and shows its name and a speech bubble, and the camera eases over to it. Hard because every face is generated (eyes, brows, mouth, blush) and repainted when it blinks, and the crowd avoids each other without any physics engine." />
 <meta name="prompt" content="Build a late-2000s console-style 'avatar plaza' in three.js, one HTML file with no brand: 14 chibi avatars from primitives (big sphere head, capsule body, hair cap, stubby arms) with procedurally drawn canvas faces that blink, wandering a bright white plaza with blob shadows using simple steering plus separation. Clicking one makes it hop and wave, shows a name and speech bubble, and eases the camera to it; add a New Avatar button, a soft synth chime and an attract mode." />
 <style>
-/**
- * FILE: render-studio/frontend/demos/plaza-avatars.html
- * PURPOSE: avatar plaza: primitive chibi avatars with canvas faces, steering crowd, click to hop and wave, camera ease
- * UI: Render Studio > Frutiger Aero > Plaza Avatars
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__plaza (pick, add, count)
- */
 html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f7fa; font-family: "Segoe UI", "Helvetica Neue", system-ui, sans-serif; }
 canvas { display: block; }
 #bubble { position: fixed; left: 0; top: 0; transform: translate(-50%, -100%); padding: 8px 14px; border-radius: 16px; background: #fff; color: #334; font-size: 14px; box-shadow: 0 4px 14px rgba(0, 40, 80, 0.2); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.2s; }

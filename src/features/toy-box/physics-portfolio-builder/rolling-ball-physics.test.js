@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/rolling-ball-physics.test.js
- * PURPOSE: rolling sim contracts: momentum transfer, energy never grows, walls hold, first hit logged
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests rolling-ball physics contracts: momentum conservation and boundary walls.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

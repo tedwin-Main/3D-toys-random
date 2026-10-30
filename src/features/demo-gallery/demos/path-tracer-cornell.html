@@ -43,13 +43,6 @@
   <div class="hint">Drag to move the camera · noise clears as samples add up</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/path-tracer-cornell.html
- * PURPOSE: WebGL2 progressive path tracer: Cornell box, NEE area light, glass/mirror/rough metal, float accumulation, ACES
- * UI: Render Studio > Shaders > Cornell Box
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: window.__pt (test hook: spp, scene)
- */
 const cv = document.getElementById('c');
 const gl = cv.getContext('webgl2', { antialias: false, powerPreference: 'high-performance' });
 const $ = (id) => document.getElementById(id);

@@ -55,13 +55,6 @@
   <p class="hint"><kbd>WASD</kbd>/<kbd>←↑→↓</kbd> walk · click to path · <kbd>Space</kbd> auto · <kbd>R</kbd> new · <kbd>F</kbd> reveal · <kbd>Z</kbd> zoom</p>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/dungeon-generator.html
- * PURPOSE: seeded roguelike dungeon generator (BSP rooms, CA caves, corridors, props) with shadowcasting FOV, fog of war, torch lighting, auto-explore hero, PNG export
- * UI: Render Studio > Generators > Dungeon Generator
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 const $ = (id) => document.getElementById(id);

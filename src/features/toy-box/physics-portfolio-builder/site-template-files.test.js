@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/site-template-files.test.js
- * PURPOSE: export template list matches every local file reachable from viewer.html
- * UI: none
- * USED BY: npm test (3d-toys root)
- * KEY EXPORTS: none
- */
+// Tests export template manifest against viewer HTML dependency paths.
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

@@ -27,13 +27,6 @@
   <button data-a="left">◀</button><button data-a="right">▶</button><button data-a="ccw">⟲</button><button data-a="cw">⟳</button><button data-a="soft">▼</button><button data-a="hard">⤓</button>
 </div>
 <script>
-/**
- * FILE: src/features/toy-box/neon-tetris/index.html
- * PURPOSE: guideline Tetris (SRS kicks, 7-bag, hold, ghost, lock delay, DAS, T-spins, B2B, combos) with neon canvas render, WebAudio SFX, AI attract mode
- * UI: Render Studio > Games > Neon Tetris
- * USED BY: src/features/toy-box/index.html (iframe viewer)
- * KEY EXPORTS: none (standalone page)
- */
 const cv = document.getElementById('c');
 const ctx = cv.getContext('2d');
 const COLS = 10, ROWS = 20, HID = 2, H_ALL = ROWS + HID;

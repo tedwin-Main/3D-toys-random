@@ -1,10 +1,4 @@
-/**
- * FILE: src/features/toy-box/physics-portfolio-builder/project-drawer.js
- * PURPOSE: side panel with one project's image, details and outbound link
- * UI: Viewer > Project drawer (opened from ball click, label, or work grid)
- * USED BY: viewer-page.js
- * KEY EXPORTS: ProjectDrawer
- */
+// Renders project details slide-over drawer with image, description, and link.
 
 import { Fragment, useEffect, useRef } from 'react'
 import { html } from './html.js'

@@ -46,13 +46,6 @@
   <div class="hint">Move the pointer for parallax. Drag Time to scrub the whole day; every layer stays in sync.</div>
 </div>
 <script>
-/**
- * FILE: render-studio/frontend/demos/animated-svg-landscape.html
- * PURPOSE: generates layered SVG landscape once, then animates day cycle, sun/moon, clouds, birds, ripples purely with SMIL
- * UI: Render Studio > 2D & Generative > Animated SVG Landscape
- * USED BY: frontend/index.html viewer iframe, backend/capture-demos.js
- * KEY EXPORTS: none (standalone page)
- */
 const DUR = 40; // seconds per full day
 const START = 0.36; // open on late afternoon so first frame is warm
 const svg = document.getElementById('scene');
