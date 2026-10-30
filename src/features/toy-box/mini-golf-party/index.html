@@ -542,12 +542,13 @@ function turns(dt) {
   }
   world.tt -= dt;
   if (b.bot) { b.botT -= dt; if (b.botT <= 0) { const s = planShot(b, b.skill); shoot(b, s.a, s.p); } return; }
-  // shot clock ran out: penalty stroke, turn passes
+  // shot clock ran out: penalty stroke, then a weak putt is played for them so the ball still moves
+  // (left resting it would stay farthest from the cup and take every turn until the stroke cap)
   if (world.tt <= 0) {
     b.strokes++; b.teed = true;
     events.push(['o', b.id]);
-    if (b.strokes >= MAX_STROKES) pickUp(b);
-    world.turn = null; world.tt = TURN_GAP;
+    if (b.strokes >= MAX_STROKES) { pickUp(b); world.turn = null; world.tt = TURN_GAP; }
+    else { const s = planShot(b, 0); shoot(b, s.a, s.p); }
   }
 }
 const score = (b) => b.scores.reduce((s, v) => s + (v ?? 0), 0);
@@ -725,7 +726,7 @@ function playEvents(evs) {
       else if (e[2] === 1) flash(`<small>${esc(b.nick)}</small>HOLE IN ONE!`);
     } else if (e[0] === 'm' && e[1] === me) flash('<small>stroke limit</small>Picked up');
     else if (e[0] === 't' && e[1] === me) { sfx.turn(); flash('Your turn!'); }
-    else if (e[0] === 'o' && e[1] === me) flash('<small>shot clock</small>+1 stroke');
+    else if (e[0] === 'o' && e[1] === me) flash('<small>shot clock · putt played for you</small>+1 stroke');
   }
 }
 const label = (d) => ({ '-3': 'Albatross!', '-2': 'Eagle!', '-1': 'Birdie!', 0: 'Par' }[d] ?? (d === 1 ? 'Bogey' : d === 2 ? 'Double bogey' : `+${d}`));

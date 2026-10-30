@@ -244,8 +244,12 @@ function botMove(p) {
   for (const e of free) { const n = chainIfGiven(e) + rng() * 0.1; if (n < bestN) { bestN = n; best = e; } }
   return best;
 }
-// timeout: build a random safe-ish fence for the idle player
-function autoMove() { const p = S.P[S.turn]; build(p.id, botMove({ slop: 0 })); }
+// timeout: a random fence for the idle player; no planning, so waiting out the clock never beats playing
+function autoMove() {
+  const p = S.P[S.turn], free = [];
+  for (let e = 0; e < G.ne; e++) if (!placed(e)) free.push(e);
+  build(p.id, free[Math.floor(rng() * free.length)]);
+}
 
 // Run engine > host tick: intro, bot turns, shot clock; publish on change
 let dirty = true;
