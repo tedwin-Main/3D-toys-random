@@ -32,7 +32,7 @@
 <div id="status" class="card"></div>
 <div id="meter" class="card"><div class="lava"></div><div class="crown">👑</div></div>
 <div id="big"></div>
-<div id="hint" class="card"><b>WASD</b> move · <b>Space</b> jump (twice for double jump) · climb the tower, stomp heads, outrun the lava · first to the crown wins</div>
+<div id="hint" class="card"><b>WASD</b> move · <b>Space</b> jump (twice for double jump) · climb the tower, stomp heads to daze rivals, outrun the lava · first to the crown wins</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <div id="jump" class="card">JUMP</div>
 <div id="stick"><div></div></div>
@@ -234,9 +234,11 @@ const PR = 0.45, PH = 1.2, G = 32, RUN = 7.5, JUMP = 14.5, DJUMP = 11.5;
 const world = { mode: 'attract', phase: 'count', t: 2, time: 0, lavaT: 0, lava: -4, winner: null, seed: 1, deaths: 0, players: new Map() };
 let events = [];
 const rng = Math.random, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const LAVA_DELAY = 9, lavaRate = (t) => 0.75 + t * 0.012;
+const LAVA_DELAY = 9, lavaRate = (t) => 0.75 + t * 0.012, STUN_T = 0.7;
+// head stomp victim: knocked down and dazed for a moment (applied by whoever simulates that jumper)
+function squash(v) { v.stun = STUN_T; v.vy = Math.min(v.vy, -6); }
 function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, face: 0, ground: null, jumps: 0, coyote: 0, out: false, place: 0, best: 0, mx: 0, mz: 0, jump: 0, jseq: 0, skill: 0.5 + rng() * 0.45, target: null, think: 0, stuck: 0 };
+  const p = { id, nick, color, bot, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, face: 0, ground: null, jumps: 0, coyote: 0, out: false, place: 0, best: 0, mx: 0, mz: 0, jump: 0, jseq: 0, stun: 0, skill: 0.5 + rng() * 0.45, target: null, think: 0, stuck: 0 };
   world.players.set(id, p);
   return p;
 }
@@ -244,6 +246,9 @@ function removePlayer(id) { world.players.delete(id); const g = players3d.get(id
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
 function physics(p, dt, t, others) {
   const onGround = !!p.ground;
+  // dazed after a head stomp: no running or jumping
+  p.stun = Math.max(0, p.stun - dt);
+  if (p.stun > 0) { p.mx = p.mz = 0; p.jump = 0; }
   let mx = p.mx, mz = p.mz;
   const ml = Math.hypot(mx, mz); if (ml > 1) { mx /= ml; mz /= ml; }
   const k = 1 - Math.exp(-dt * (onGround ? 14 : 4));
@@ -464,7 +469,7 @@ function onData(d, from) {
     const last = remoteJ.get(from);
     if (last !== undefined && d.j > last) events.push(['j', from, d.j - last > 1 || d.dj ? 2 : 1]);
     remoteJ.set(from, d.j);
-    if (d.st) { const v = world.players.get(d.st); if (v) events.push(['s', from, d.st]); }
+    if (d.st) { const v = world.players.get(d.st); if (v) { events.push(['s', from, d.st]); if (v.bot) squash(v); } }
   }
   if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
 }
@@ -512,7 +517,7 @@ function playEvents(evs) {
       if (g) g.userData.squash = 1;
       if (v) burst(v.x, v.y + PH, v.z, 14, v.color, 3);
       if (e[1] !== me) sfx.stomp(vol(v));
-      if (e[2] === me) { shake = 0.25; const m = world.players.get(me); if (m) m.vy = Math.min(m.vy, -6); }
+      if (e[2] === me) { shake = 0.25; const m = world.players.get(me); if (m) squash(m); }
     } else if (e[0] === 'b') {
       const p = world.players.get(e[1]);
       burst(e[2], e[3] + 0.3, e[4], 50, 0xff7a2e, 7);
@@ -610,13 +615,13 @@ function simTick(dt) {
   if (isHostSim()) {
     const ps = [...world.players.values()];
     const me = room && world.mode === 'match' ? world.players.get(room.me) : null;
-    if (me && !me.out) { const r = stepOwn(me, dt, ps); if (r.jumped) events.push(['j', me.id, r.jumped]); if (r.stomped) { events.push(['s', me.id, r.stomped.id]); stompOut = 0; } }
+    if (me && !me.out) { const r = stepOwn(me, dt, ps); if (r.jumped) events.push(['j', me.id, r.jumped]); if (r.stomped) { events.push(['s', me.id, r.stomped.id]); if (r.stomped.bot) squash(r.stomped); stompOut = 0; } }
     for (const p of ps) {
       if (!p.bot || p.out) continue;
       botThink(p, dt, world.time);
       const r = physics(p, dt, world.time, ps);
       if (r.jumped) events.push(['j', p.id, r.jumped]);
-      if (r.stomped) events.push(['s', p.id, r.stomped.id]);
+      if (r.stomped) { events.push(['s', p.id, r.stomped.id]); if (r.stomped.bot) squash(r.stomped); }
     }
     phases(dt);
     if (world.mode === 'match' && room) {
