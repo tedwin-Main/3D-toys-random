@@ -14,7 +14,7 @@ npm test        # pool + Break Builder engine tests (node --test)
 
 Toys alone: `npm run toys` from the root serves only the toy box on http://localhost:5055/3d-toys/.
 
-Both servers serve every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:<port>/3d-toys/`. Needs Node >= 20.
+Both servers serve every toy under `/3d-toys/`, the room relay socket at `/3d-toys/rooms`, and `/health` for uptime checks. Friends on the same network can join via `http://<your-ip>:<port>/3d-toys/`. Needs Node >= 22.
 
 ## Deploy on Render
 

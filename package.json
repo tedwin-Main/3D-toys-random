@@ -8,7 +8,7 @@
     "start": "node src/features/studio-server/start-server.js",
     "dev": "node --watch src/features/studio-server/start-server.js",
     "toys": "node src/features/multiplayer-rooms/start-server.js",
-    "test": "node --test src/features/toy-box/common/ src/features/toy-box/eight-ball-pool/ src/features/toy-box/physics-portfolio-builder/",
+    "test": "node --test \"src/features/toy-box/common/*.test.js\" \"src/features/toy-box/eight-ball-pool/*.test.js\" \"src/features/toy-box/physics-portfolio-builder/*.test.js\"",
     "load-test": "node src/features/multiplayer-rooms/room-load-test.js",
     "capture": "node src/features/demo-capture/capture-demos.js",
     "instagram": "node src/features/demo-capture/capture-instagram-reels.js"
@@ -21,6 +21,6 @@
     "playwright": "^1.49.1"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
