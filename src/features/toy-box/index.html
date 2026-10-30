@@ -24,6 +24,13 @@
   #filters button:hover { border-color: #3a4052; }
   #filters button.on { background: var(--accent); border-color: var(--accent); color: #1a1408; }
   #filters button .n { opacity: 0.6; font-weight: 500; margin-left: 4px; }
+  /* Home > genre chips, only under the Multiplayer tab */
+  #genres { max-width: 1200px; margin: -10px auto 0; padding: 0 24px 22px; display: flex; gap: 6px; flex-wrap: wrap; }
+  #genres[hidden] { display: none; }
+  #genres button { border: 1px solid var(--line); background: transparent; color: inherit; padding: 5px 11px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  #genres button:hover { border-color: #3a4052; }
+  #genres button.on { background: var(--card); border-color: var(--accent); color: var(--accent); }
+  #genres button .n { opacity: 0.6; font-weight: 500; margin-left: 4px; }
   a.card[hidden], #menu button[hidden] { display: none; }
   .preview .mp { position: absolute; right: 12px; top: 10px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #ffbf2f; color: #1a1408; }
   #grid { max-width: 1200px; margin: 0 auto; padding: 0 24px 64px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 18px; }
@@ -73,6 +80,7 @@
     <a class="xlink" href="/">Render Studio ↗</a>
   </header>
   <nav id="filters"></nav>
+  <nav id="genres" hidden></nav>
   <main id="grid"></main>
 </section>
 <section id="viewer">
@@ -103,26 +111,40 @@ import { TOYS } from './common/toy-list.js';
 const $ = (id) => document.getElementById(id);
 const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
 
-// Home > Filter tabs: All / Single player / Multiplayer; state lives in home hash (#f=multi) so Back restores it
+// Home > Filter tabs: All / Single player / Multiplayer, plus genre chips under Multiplayer; state lives in home hash (#f=multi&g=battle) so Back restores it
 const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
+const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['creative', '🧱 Creative']];
 const isMulti = (t) => t.players === 'multi';
-const match = (t, f) => f === 'all' || (f === 'multi') === isMulti(t);
-let filter = 'all';
+const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || t.genre === g);
+let filter = 'all', genre = 'all';
 let list = TOYS;
+const filterHash = (f, g) => (f === 'all' ? '' : `f=${f}${f === 'multi' && g !== 'all' ? `&g=${g}` : ''}`);
 FILTERS.forEach(([f, label]) => {
   const b = document.createElement('button');
   b.dataset.f = f;
   b.innerHTML = `${label}<span class="n">${TOYS.filter((t) => match(t, f)).length}</span>`;
-  b.onclick = () => go(f === 'all' ? '' : `f=${f}`);
+  b.onclick = () => go(filterHash(f, 'all'));
   $('filters').append(b);
 });
-function setFilter(f) {
+GENRES.forEach(([g, label]) => {
+  const b = document.createElement('button');
+  b.dataset.g = g;
+  b.innerHTML = `${label}<span class="n">${TOYS.filter((t) => match(t, 'multi', g)).length}</span>`;
+  b.onclick = () => go(filterHash('multi', g));
+  $('genres').append(b);
+});
+// arg = hash after "f=", e.g. "multi&g=battle"
+function setFilter(arg = '') {
+  const [f, ...rest] = arg.split('&'), g = new URLSearchParams(rest.join('&')).get('g');
   filter = FILTERS.some(([k]) => k === f) ? f : 'all';
-  list = TOYS.filter((t) => match(t, filter));
+  genre = filter === 'multi' && GENRES.some(([k]) => k === g) ? g : 'all';
+  list = TOYS.filter((t) => match(t, filter, genre));
   $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
+  $('genres').hidden = filter !== 'multi';
+  $('genres').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.g === genre));
   let n = 0;
   $('grid').querySelectorAll('a.card').forEach((a) => {
-    const show = match(TOYS.find((t) => t.dir === a.dataset.dir), filter);
+    const show = match(TOYS.find((t) => t.dir === a.dataset.dir), filter, genre);
     a.hidden = !show;
     if (show) a.querySelector('.num').textContent = ++n;
   });
@@ -170,7 +192,7 @@ function step(d) {
   const i = list.findIndex((t) => t.dir === current);
   go(list[(i + d + list.length) % list.length].dir);
 }
-const homeHash = () => (filter === 'all' ? '' : `f=${filter}`);
+const homeHash = () => filterHash(filter, genre);
 function route() {
   // #toy-dir?room=ABCD: query is handed to the toy (multiplayer invite links)
   const [dir, query] = decodeURIComponent(location.hash.slice(1)).split('?');
