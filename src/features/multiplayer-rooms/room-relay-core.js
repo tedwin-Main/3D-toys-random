@@ -2,7 +2,7 @@
  * FILE: src/features/multiplayer-rooms/room-relay-core.js
  * PURPOSE: transport-free room relay logic: join by game + 4-letter code, roster, host election + migration, message fan-out, silent-socket sweep
  * UI: every multiplayer toy (via toy-box/common/room-client.js)
- * USED BY: room-relay.js (Node ws, Render), cloudflare-relay/worker.js (Durable Object)
+ * USED BY: room-relay.js (Node ws, Render)
  * KEY EXPORTS: createRelayCore
  */
 

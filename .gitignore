@@ -7,4 +7,3 @@ src/features/remotion-promos/out/
 .install-*.log
 src/features/demo-capture/.instagram-capture/
 src/features/instagram-posts/
-.wrangler/

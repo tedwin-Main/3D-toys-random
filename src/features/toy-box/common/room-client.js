@@ -1,12 +1,11 @@
 /**
  * FILE: src/features/toy-box/common/room-client.js
- * PURPOSE: browser side of room relay: join/create room by code (Cloudflare relay first, same-origin Render relay fallback), roster + host tracking, send to all, one peer, or host
+ * PURPOSE: browser side of room relay: join/create room by code on same-origin relay (Render SG / local server), roster + host tracking, send to all, one peer, or host
  * UI: every multiplayer toy (through room-lobby.js)
  * USED BY: components/room-lobby.js, multiplayer toy pages
  * KEY EXPORTS: connectRoom, startTicker
  */
 
-const CLOUD_RELAY = 'wss://toy-rooms.tedwin1996.workers.dev/3d-toys/rooms';
 const CONNECT_TIMEOUT_MS = 4000;
 
 // absolute path so toys work both standalone and inside shell iframe
@@ -15,23 +14,11 @@ function sameOriginRelay() {
   url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.href;
 }
-// Cloud Sync > relay order: ?relay=cloud|local forces one; localhost/LAN stay on own server (offline dev, LAN parties)
-function relayUrls() {
-  const force = new URLSearchParams(location.search).get('relay');
-  if (force === 'cloud') return [CLOUD_RELAY];
-  if (force === 'local') return [sameOriginRelay()];
-  const lan = /^(localhost|127\.|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
-  return lan ? [sameOriginRelay()] : [CLOUD_RELAY, sameOriginRelay()];
-}
 const unreachable = () => Object.assign(new Error('Room server unreachable. Start it: cd 3d-toys && npm start'), { unreachable: true });
 
-// Cloud Sync > join: tries each relay in order; moves on only when one is unreachable (not on "Room is full")
-export async function connectRoom(opts) {
-  let err;
-  for (const url of relayUrls()) {
-    try { return await openRoom(url, opts); } catch (e) { err = e; if (!e.unreachable) break; }
-  }
-  throw err;
+// Cloud Sync > join: page's own server hosts the relay (Render SG in production, localhost / LAN in dev)
+export function connectRoom(opts) {
+  return openRoom(sameOriginRelay(), opts);
 }
 
 // Cloud Sync > one relay: resolves with live room handle once server confirms seat
