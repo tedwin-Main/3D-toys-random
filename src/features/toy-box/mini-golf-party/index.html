@@ -45,7 +45,7 @@
 <div id="info" class="card"><div class="h" id="holeName"></div><div class="m" id="holeMeta"></div></div>
 <div id="board" class="card"></div>
 <div id="big"></div>
-<div id="hint" class="card"><b>Drag back</b> from anywhere and release to putt · <b>wheel</b> zoom to your ball · <b>F</b> follow ball</div>
+<div id="hint" class="card">On <b>your turn</b>: drag back from anywhere and release to putt · <b>wheel</b> zoom to your ball · <b>F</b> follow ball</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <div id="card" class="card"></div>
 
@@ -55,7 +55,7 @@
 <script type="module">
 /**
  * FILE: src/features/toy-box/mini-golf-party/index.html
- * PURPOSE: online mini golf for up to 14: everyone putts the same hole at once, balls collide, 6 floating-island holes (bumpers, windmills, slopes, water, sand); host-authoritative physics
+ * PURPOSE: online turn-based mini golf for up to 14: tee off in order, then farthest from the cup putts next, shot clock, resting balls can be knocked; 6 floating-island holes (bumpers, windmills, slopes, water, sand); host-authoritative physics
  * UI: Putt Party page (lobby overlay, hole HUD, live leaderboard, scorecard, drag-to-putt aim)
  * USED BY: src/features/toy-box/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -173,7 +173,7 @@ const HOLES = [
     '################',
   ] },
 ];
-const T = 2, R = 0.2, SUB = 1 / 120, MAX_STROKES = 8, HOLE_TIME = 75;
+const T = 2, R = 0.2, SUB = 1 / 120, MAX_STROKES = 8, MAX_ROLL = 15, TURN_GAP = 0.6;
 const SLOPE = { '^': [0, -1], v: [0, 1], '>': [1, 0], '<': [-1, 0] };
 const solid = (ch) => ch === '#' || ch === ' ';
 let H = null;
@@ -420,6 +420,10 @@ function makeBall(b) {
 const myRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.04, 8, 32).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff }));
 myRing.visible = false;
 scene.add(myRing);
+// whose turn: colored ring under the active ball
+const turnRing = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.62, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false }));
+turnRing.visible = false;
+scene.add(turnRing);
 const aimArrow = new THREE.Group();
 const aimMat = new THREE.MeshBasicMaterial({ color: 0x5ee07a, transparent: true, opacity: 0.9, depthWrite: false });
 const shaft = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 1).translate(0, 0.5, 0).rotateX(-Math.PI / 2), aimMat);
@@ -461,38 +465,90 @@ const sfx = {
   bump() { tone(180, 520, 0.18, 0.12, 'sine'); },
   splash() { noise(0.6, 0.3, 1500, 200); },
   cup(me) { [784, 988, 1175, 1568].forEach((f, i) => setTimeout(() => tone(f, f, 0.14, me ? 0.1 : 0.04, 'square'), i * 70)); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
 };
 
 // Game > World
 const BOT_NAMES = ['Birdie', 'Bogey Bob', 'Chip', 'Eagle Eye', 'Fore!', 'Gimme', 'Hacker', 'Lumpy', 'Mulligan', 'Putty', 'Sandy', 'Tee-Rex', 'Albatross', 'Shank'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const world = { mode: 'attract', phase: 'intro', t: 2.5, hole: 0, ht: 0, balls: new Map() };
+// turn: whose putt it is; rolling: that putt is still moving; tt: shot clock (or gap before next turn); order: tee-off order
+const world = { mode: 'attract', phase: 'intro', t: 2.5, hole: 0, ht: 0, balls: new Map(), turn: null, rolling: false, roll: 0, tt: 0, clock: 20, order: [] };
 let events = [];
 const rng = Math.random;
 function addBall(id, nick, color, bot) {
-  const b = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, lastX: 0, lastZ: 0, strokes: 0, holed: false, done: false, scores: [], botT: 1 + rng() * 2, skill: 0.72 + rng() * 0.22, wallCD: 0 };
+  const b = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, lastX: 0, lastZ: 0, strokes: 0, teed: false, holed: false, done: false, scores: [], botT: 1, skill: 0.72 + rng() * 0.22, wallCD: 0 };
+  world.order.push(id);
   world.balls.set(id, b);
   return b;
 }
-function removeBall(id) { world.balls.delete(id); const g = balls3d.get(id); if (g) { scene.remove(g); balls3d.delete(id); } }
-function clearBalls() { for (const id of [...world.balls.keys()]) removeBall(id); }
+function removeBall(id) { world.balls.delete(id); world.order = world.order.filter((o) => o !== id); const g = balls3d.get(id); if (g) { scene.remove(g); balls3d.delete(id); } }
+function clearBalls() { for (const id of [...world.balls.keys()]) removeBall(id); world.order = []; }
 function teeSpot(k) {
   // spread across tee tiles, up to 4 balls per tile
   const n = H.starts.length, s = H.starts[k % n], o = [[-0.45, -0.45], [0.45, 0.45], [0.45, -0.45], [-0.45, 0.45]][Math.floor(k / n) % 4];
   return { x: s.x + o[0], z: s.z + o[1] };
 }
 function loadHole(i) {
+  // honor: best score on the last hole tees off first, ties keep previous order
+  if (i > 0) { const prev = new Map(world.order.map((id, k) => [id, k])); world.order.sort((a, c) => (world.balls.get(a)?.scores[i - 1] ?? 99) - (world.balls.get(c)?.scores[i - 1] ?? 99) || prev.get(a) - prev.get(c)); }
   setHole(i);
   world.hole = i; world.ht = 0; world.phase = 'intro'; world.t = world.mode === 'attract' ? 1 : 2.8;
-  [...world.balls.values()].forEach((b, k) => { const p = teeSpot(k); Object.assign(b, { x: p.x, z: p.z, vx: 0, vz: 0, lastX: p.x, lastZ: p.z, strokes: 0, holed: false, done: false, botT: 0.8 + rng() * 2.5 }); });
+  world.turn = null; world.rolling = false; world.tt = 0;
+  world.order.forEach((id, k) => { const b = world.balls.get(id), p = teeSpot(k); Object.assign(b, { x: p.x, z: p.z, vx: 0, vz: 0, lastX: p.x, lastZ: p.z, strokes: 0, teed: false, holed: false, done: false }); });
 }
 function shoot(b, a, p) {
-  if (b.done || b.vx || b.vz || world.phase !== 'play' || !Number.isFinite(a) || !Number.isFinite(p)) return;
+  if (!b || b.done || b.id !== world.turn || world.rolling || world.phase !== 'play' || !Number.isFinite(a) || !Number.isFinite(p)) return;
   const s = 1.5 + clamp(p, 0.03, 1) * 13.5;
   b.lastX = b.x; b.lastZ = b.z;
   b.vx = Math.sin(a) * s; b.vz = Math.cos(a) * s;
-  b.strokes++;
+  b.strokes++; b.teed = true;
+  world.rolling = true; world.roll = 0;
   events.push(['k', b.id, +p.toFixed(2)]);
+}
+// Game > Turn order: everyone tees off in honor order, then the ball farthest from the cup (by path) putts next
+function awayFrom(b) {
+  const f = H.field[Math.floor(b.z / T) * H.cols + Math.floor(b.x / T)];
+  return (f < 0 ? 99 : f) * T + 0.3 * Math.hypot(H.cup.x - b.x, H.cup.z - b.z);
+}
+function nextUp() {
+  const live = world.order.map((id) => world.balls.get(id)).filter((b) => b && !b.done);
+  return live.find((b) => !b.teed) ?? live.sort((a, c) => awayFrom(c) - awayFrom(a))[0] ?? null;
+}
+function pickUp(b) { b.done = true; b.scores[world.hole] = MAX_STROKES; events.push(['m', b.id]); }
+function turns(dt) {
+  if (world.phase !== 'play') return;
+  const list = [...world.balls.values()];
+  if (world.rolling) {
+    // putt in flight: wait for every ball to stop (cap so a ball stuck on a slope can't stall the room)
+    world.roll += dt;
+    const moving = list.some((b) => !b.done && (b.vx || b.vz));
+    if (moving && world.roll < MAX_ROLL) return;
+    world.rolling = false;
+    for (const b of list) if (!b.done) { b.vx = 0; b.vz = 0; b.lastX = b.x; b.lastZ = b.z; if (b.strokes >= MAX_STROKES) pickUp(b); }
+    world.turn = null; world.tt = TURN_GAP;
+    return;
+  }
+  const b = world.balls.get(world.turn);
+  if (!b || b.done) {
+    world.turn = null;
+    world.tt -= dt;
+    if (world.tt > 0) return;
+    const n = nextUp();
+    if (!n) return;
+    world.turn = n.id; world.tt = world.clock;
+    n.botT = world.mode === 'attract' ? 0.5 + rng() * 0.6 : 0.9 + rng() * 1.4;
+    events.push(['t', n.id]);
+    return;
+  }
+  world.tt -= dt;
+  if (b.bot) { b.botT -= dt; if (b.botT <= 0) { const s = planShot(b, b.skill); shoot(b, s.a, s.p); } return; }
+  // shot clock ran out: penalty stroke, turn passes
+  if (world.tt <= 0) {
+    b.strokes++; b.teed = true;
+    events.push(['o', b.id]);
+    if (b.strokes >= MAX_STROKES) pickUp(b);
+    world.turn = null; world.tt = TURN_GAP;
+  }
 }
 const score = (b) => b.scores.reduce((s, v) => s + (v ?? 0), 0);
 const parSoFar = (b) => b.scores.reduce((s, v, i) => s + (v != null ? HOLES[i].par : 0), 0);
@@ -510,13 +566,15 @@ function simBalls(dt) {
       if (b._wall > 1.2 && b.wallCD <= 0) { b.wallCD = 0.08; events.push(['w', b.id, +Math.min(b._wall / 8, 1).toFixed(2)]); }
       if (b._bump >= 0) events.push(['b', b.id, b._bump]);
       if (r === 's') {
+        // only the putter pays the penalty; a knocked ball just goes back where it rested
         events.push(['s', b.id, +b.x.toFixed(1), +b.z.toFixed(1)]);
         Object.assign(b, { x: b.lastX, z: b.lastZ, vx: 0, vz: 0 });
-        b.strokes++;
+        if (b.id === world.turn) b.strokes++;
       } else if (r === 'c') {
-        Object.assign(b, { holed: true, done: true, vx: 0, vz: 0, x: H.cup.x, z: H.cup.z });
-        b.scores[world.hole] = b.strokes;
-        events.push(['c', b.id, b.strokes]);
+        // knocked in counts too, at least 1 stroke
+        Object.assign(b, { holed: true, done: true, vx: 0, vz: 0, x: H.cup.x, z: H.cup.z, teed: true });
+        b.scores[world.hole] = Math.max(1, b.strokes);
+        events.push(['c', b.id, Math.max(1, b.strokes)]);
       }
     }
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
@@ -534,28 +592,15 @@ function simBalls(dt) {
       }
     }
   }
-  for (const b of list) if (!b.done && !b.vx && !b.vz && b.strokes >= MAX_STROKES) { b.done = true; b.scores[world.hole] = MAX_STROKES; events.push(['m', b.id]); }
-}
-function botTurns(dt) {
-  if (world.phase !== 'play') return;
-  for (const b of world.balls.values()) {
-    if (!b.bot || b.done || b.vx || b.vz) continue;
-    b.botT -= dt;
-    if (b.botT > 0) continue;
-    b.botT = 1 + rng() * 2.2;
-    const s = planShot(b, b.skill);
-    shoot(b, s.a, s.p);
-  }
 }
 
 // Game > Phases: intro banner, play, scorecard, final
 function phases(dt) {
   world.t -= dt;
   const list = [...world.balls.values()];
-  if (world.phase === 'intro') { if (world.t <= 0) { world.phase = 'play'; world.t = HOLE_TIME; } }
+  if (world.phase === 'intro') { if (world.t <= 0) { world.phase = 'play'; world.turn = null; world.tt = 0; } }
   else if (world.phase === 'play') {
-    if (world.t <= 0) for (const b of list) if (!b.done) { b.done = true; b.scores[world.hole] = Math.min(MAX_STROKES, Math.max(H.par + 2, b.strokes + 2)); }
-    if (list.every((b) => b.done)) { world.phase = 'score'; world.t = world.mode === 'attract' ? 1.5 : 5; }
+    if (!world.rolling && list.every((b) => b.done)) { world.phase = 'score'; world.t = world.mode === 'attract' ? 1.5 : 5; world.turn = null; }
   } else if (world.phase === 'score' && world.t <= 0) {
     if (world.hole < HOLES.length - 1) loadHole(world.hole + 1);
     else if (world.mode === 'attract') { for (const b of list) b.scores = []; loadHole(0); }
@@ -572,18 +617,20 @@ function startAttract() {
 // Multiplayer > Lobby
 const lobby = createLobby({
   game: 'mini-golf', title: 'Putt Party', emoji: '⛳', accent: '#5ee07a',
-  blurb: 'Everyone putts the same hole at the same time. Balls bump, bumpers boing, windmills swat. 6 holes, lowest total wins.',
+  blurb: 'Take turns: everyone tees off, then whoever is farthest from the cup putts next. Knock rivals around, dodge water and windmills. 6 holes, lowest total wins.',
   maxBots: 13, defaultBots: 3, minPlayers: 2,
-  note: 'Up to 14 golfers per room (humans + bots). Drag back to aim on phone or mouse.',
+  note: 'Up to 14 golfers per room (humans + bots). Drag back to aim on phone or mouse. Fewer golfers = quicker rounds.',
+  settings: [{ key: 'clock', label: 'Shot clock', options: [[15, '15 s'], [20, '20 s'], [30, '30 s']], value: 20 }],
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
     room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
+  onStart({ bots, isHost, settings }) {
     clearBalls();
     world.mode = 'match';
+    world.clock = settings.clock ?? 20;
     ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
     document.getElementById('top').style.display = 'flex';
     syncTop();
@@ -607,6 +654,7 @@ function onRoster(players) {
   for (const p of players) if (!world.balls.has(p.id)) {
     // keep 14 seats: a joining human replaces the worst bot
     if (world.balls.size >= 14) { const bot = [...world.balls.values()].filter((b) => b.bot).sort((a, c) => score(c) - score(a))[0]; if (bot) removeBall(bot.id); }
+    // late joiner tees off next (untee'd balls go first)
     const b = addBall(p.id, p.nick, p.color, false);
     for (let h = 0; h < world.hole; h++) b.scores[h] = HOLES[h].par + 2;
     const t = teeSpot(world.balls.size - 1);
@@ -632,10 +680,10 @@ let cardT = 0;
 const names = createNameSync();
 function snapshot(withCard) {
   const s = {
-    g: 's', ph: world.phase, t: f2(world.t), hole: world.hole, ht: f2(world.ht), ev: events,
-    B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.z), f2(b.vx), f2(b.vz), (b.bot ? 1 : 0) | (b.holed ? 2 : 0) | (b.done ? 4 : 0), b.strokes]),
+    g: 's', ph: world.phase, t: f2(world.t), hole: world.hole, ht: f2(world.ht), ev: events, tn: world.turn, tt: f2(world.tt), rl: world.rolling ? 1 : 0,
+    B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.z), f2(b.vx), f2(b.vz), (b.bot ? 1 : 0) | (b.holed ? 2 : 0) | (b.done ? 4 : 0) | (b.teed ? 8 : 0), b.strokes]),
   };
-  if (withCard) s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null)]);
+  if (withCard) { s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null)]); s.od = world.order; s.ck = world.clock; }
   return names.stamp(s, world.balls.values());
 }
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
@@ -644,18 +692,20 @@ let snapAt = 0;
 function applySnap(s) {
   names.read(s);
   if (!H || s.hole !== H.i) setHole(s.hole);
-  Object.assign(world, { phase: s.ph, t: s.t, hole: s.hole, ht: s.ht });
+  Object.assign(world, { phase: s.ph, t: s.t, hole: s.hole, ht: s.ht, turn: s.tn ?? null, tt: s.tt ?? 0, rolling: !!s.rl });
   const seen = new Set();
   for (const [id, x, z, vx, vz, fl, strokes] of s.B) {
     seen.add(id);
     if (!world.balls.has(id) && !names.name(id)) continue;
     const b = world.balls.get(id) ?? addBall(id, ...names.name(id), !!(fl & 1));
-    Object.assign(b, { x, z, vx, vz, strokes, holed: !!(fl & 2), done: !!(fl & 4) });
+    Object.assign(b, { x, z, vx, vz, strokes, holed: !!(fl & 2), done: !!(fl & 4), teed: !!(fl & 8) });
     // resting spot doubles as water-reset point if this tab inherits host
     if (!vx && !vz) { b.lastX = x; b.lastZ = z; }
   }
   for (const id of [...world.balls.keys()]) if (!seen.has(id)) removeBall(id);
   if (s.sc) for (const [id, sc] of s.sc) { const b = world.balls.get(id); if (b) b.scores = sc.map((v) => (v == null ? undefined : v)); }
+  if (s.od) world.order = s.od.filter((id) => world.balls.has(id));
+  if (s.ck) world.clock = s.ck;
   playEvents(s.ev);
   snapAt = pacing.arrived();
 }
@@ -674,6 +724,8 @@ function playEvents(evs) {
       if (e[1] === me) flash(e[2] === 1 ? 'HOLE IN ONE!' : label(e[2] - H.par));
       else if (e[2] === 1) flash(`<small>${esc(b.nick)}</small>HOLE IN ONE!`);
     } else if (e[0] === 'm' && e[1] === me) flash('<small>stroke limit</small>Picked up');
+    else if (e[0] === 't' && e[1] === me) { sfx.turn(); flash('Your turn!'); }
+    else if (e[0] === 'o' && e[1] === me) flash('<small>shot clock</small>+1 stroke');
   }
 }
 const label = (d) => ({ '-3': 'Albatross!', '-2': 'Eagle!', '-1': 'Birdie!', 0: 'Par' }[d] ?? (d === 1 ? 'Bogey' : d === 2 ? 'Double bogey' : `+${d}`));
@@ -684,7 +736,7 @@ const rel = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 function groundAt(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? p : null; }
 const myBall = () => world.balls.get(lobby.room?.me);
-function canAim() { const b = myBall(); return world.mode === 'match' && world.phase === 'play' && b && !b.done && !b.vx && !b.vz; }
+function canAim() { const b = myBall(); return world.mode === 'match' && world.phase === 'play' && b && !b.done && world.turn === b.id && !world.rolling; }
 let aim = null, shotSeq = 0, zoom = 1, follow = false;
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (e.button !== 0 || !canAim()) return;
@@ -722,16 +774,18 @@ function hud(dt) {
   if (world.mode !== 'match' || !H) return;
   flashT -= dt;
   if (world.phase === 'intro') big(`<small>Hole ${world.hole + 1} of ${HOLES.length} · Par ${H.par}</small>${esc(H.name)}`);
-  else if (flashT <= 0) big(world.phase === 'play' && myBall()?.done ? '<small>waiting for the others</small>' : '');
+  else if (flashT <= 0) big('');
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.2;
-  const me = myBall();
+  const me = myBall(), up = world.balls.get(world.turn);
   document.getElementById('holeName').innerHTML = `Hole ${world.hole + 1}/${HOLES.length}<small>${esc(H.name)} · Par ${H.par}</small>`;
-  const tl = world.phase === 'play' ? Math.max(0, Math.ceil(world.t)) : HOLE_TIME;
-  document.getElementById('holeMeta').innerHTML = me ? `Strokes <b>${me.strokes}</b> · total ${score(me)} (${rel(score(me) - parSoFar(me))}) · ${tl}s left` : `${tl}s left`;
+  // turn line: who is putting + shot clock
+  const clock = Math.max(0, Math.ceil(world.tt));
+  const turnLine = world.phase !== 'play' ? '' : !up ? 'next up…' : world.rolling ? `${esc(up.nick)} putted` : up.id === me?.id ? `<b>Your turn</b> · ${clock}s` : `${esc(up.nick)} to putt${up.bot ? '' : ` · ${clock}s`}`;
+  document.getElementById('holeMeta').innerHTML = (me ? `Strokes <b>${me.strokes}</b> · total ${score(me)} (${rel(score(me) - parSoFar(me))})<br>` : '') + turnLine;
   const r = [...world.balls.values()].sort((a, c) => score(a) - parSoFar(a) - (score(c) - parSoFar(c)) || a.strokes - c.strokes);
-  document.getElementById('board').innerHTML = r.map((b, i) => `<div class="row ${b.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${b.color}"></i><span>${esc(b.nick)}</span><em>${rel(score(b) - parSoFar(b))} · ${b.holed ? '✓' : b.done ? '✗' : b.strokes}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((b, i) => `<div class="row ${b.id === lobby.room?.me ? 'me' : ''}"><b>${b.id === world.turn ? '▶' : i + 1}</b><i style="background:${b.color}"></i><span>${esc(b.nick)}</span><em>${rel(score(b) - parSoFar(b))} · ${b.holed ? '✓' : b.done ? '✗' : b.strokes}</em></div>`).join('');
   const card = document.getElementById('card');
   if (world.phase === 'score' || world.phase === 'final') {
     const rows = [...world.balls.values()].sort((a, c) => score(a) - score(c));
@@ -750,7 +804,7 @@ const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
 function simTick(dt) {
   const room = lobby.room;
   if (!isHostSim() || !H) return;
-  if (world.phase === 'play') { botTurns(dt); simBalls(dt); }
+  if (world.phase === 'play') { turns(dt); simBalls(dt); }
   else if (world.phase === 'intro') world.ht += dt;
   const ph = world.phase;
   phases(dt);
@@ -795,6 +849,9 @@ function loop() {
   const ready = canAim();
   myRing.visible = !!(mineG && world.mode === 'match' && !mine.holed);
   if (myRing.visible) { myRing.position.set(mineG.position.x, 0.02, mineG.position.z); const s = ready ? 1 + Math.sin(time * 6) * 0.12 : 0.8; myRing.scale.set(s, s, s); myRing.material.color.set(ready ? 0xffffff : 0x8899aa); }
+  const upB = world.balls.get(world.turn), upG = balls3d.get(world.turn);
+  turnRing.visible = !!(upG && world.phase === 'play' && !world.rolling && !upB.done);
+  if (turnRing.visible) { turnRing.position.set(upG.position.x, 0.015, upG.position.z); const s = 1 + Math.sin(time * 4) * 0.1; turnRing.scale.set(s, s, s); turnRing.material.color.set(upB.color); }
   aimArrow.visible = !!(aim && ready && aim.p > 0.02 && mineG);
   if (aimArrow.visible) {
     aimArrow.position.set(mineG.position.x, 0.03, mineG.position.z);
