@@ -59,7 +59,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, gradient sky dome, glow void below
@@ -391,15 +390,13 @@ let kfDirty = true, kfT = 0;
 const names = createNameSync();
 function snapshot(withKf) {
   const s = {
-    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events, tr: trig,
+    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events, tr: trig,
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vy), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.ground ? 4 : 0), p.pts, p.wins, p.place]),
   };
   if (withKf) s.K = tiles.map((t) => t.state).join('');
   return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
-// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
   step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
@@ -417,7 +414,6 @@ function applySnap(s) {
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, y, z, vx, vy, vz, face, alive: !!(fl & 2), ground: !!(fl & 4), pts, wins, place });
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   for (const i of s.tr) triggerTile(i);
@@ -548,7 +544,7 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeBean(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const tx = v.x + v.vx * va, ty = v.ground ? v.y : v.y + v.vy * va - 0.5 * GRAV * va * va, tz = v.z + v.vz * va;
     const a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (g.position.distanceTo(_v.set(tx, ty, tz)) > 6) g.position.set(tx, ty, tz);

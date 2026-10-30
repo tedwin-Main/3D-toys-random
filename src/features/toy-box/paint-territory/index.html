@@ -59,7 +59,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -493,7 +492,7 @@ const KEY_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const names = createNameSync();
 function snapshot(withKey) {
   const s = {
-    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events, D: deltas,
+    g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events, D: deltas,
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), p.slot, p.bot ? 1 : 0, f2(p.bombCD)]),
     B: world.bombs.map((b) => [f2(b.sx), f2(b.sz), f2(b.tx), f2(b.tz), f2(b.t), b.dur, b.color]),
   };
@@ -501,8 +500,6 @@ function snapshot(withKey) {
   return names.stamp(s, world.players.values());
 }
 let snapAt = 0;
-// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: own blob moves on local input at once (no paint, no bombs)
 const pred = createPrediction({ step: (p, dt) => moveBlob(p, dt, world.phase === 'play'), live: () => true, angle: 'face' });
 function applySnap(s) {
@@ -521,7 +518,6 @@ function applySnap(s) {
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, vx, vz, face, slot, bombCD });
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   world.bombs = s.B.map(([sx, sz, tx, tz, t, dur, color]) => ({ sx, sz, tx, tz, t, dur, color }));
@@ -635,7 +631,7 @@ function loop() {
   for (const p of world.players.values()) {
     let b = blobs.get(p.id);
     if (!b) { b = makeBlob(p); blobs.set(p.id, b); b.position.set(p.x, 0, p.z); }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const tx = v.x + v.vx * va, tz = v.z + v.vz * va, k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     b.position.x += (tx - b.position.x) * k; b.position.z += (tz - b.position.z) * k;
     const sp = Math.hypot(p.vx, p.vz);

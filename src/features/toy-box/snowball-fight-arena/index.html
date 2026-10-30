@@ -65,7 +65,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, winter sky, low sun
@@ -484,15 +483,13 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), ev: events,
+    g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), ev: events,
     W: world.walls.map((s) => s.hp),
     B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)]),
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.face), f2(p.vx), f2(p.vz), p.hits, f2(p.frozen), f2(p.inv), p.score, p.dealt, p.ammo, p.bot ? 1 : 0]),
   }, world.players.values());
 }
 let snapAt = 0;
-// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
   step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
@@ -514,7 +511,6 @@ function applySnap(s) {
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, face, vx, vz, hits, frozen, inv, score, dealt, ammo });
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -661,7 +657,7 @@ function loop() {
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeKid(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const moving = p.frozen <= 0 && world.phase === 'play', tx = v.x + (moving ? v.vx * va : 0), tz = v.z + (moving ? v.vz * va : 0), a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;

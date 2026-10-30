@@ -58,7 +58,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, night stadium, floodlights
@@ -510,14 +509,12 @@ const names = createNameSync();
 function snapshot() {
   const b = world.ball;
   return names.stamp({
-    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), sc: world.score, ov: world.over ? 1 : 0, ev: events,
+    g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), sc: world.score, ov: world.over ? 1 : 0, ev: events,
     B: [f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)],
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), (p.bot ? 1 : 0) | (p.boosting ? 2 : 0), p.team, f2(p.boost), p.goals]),
   }, world.players.values());
 }
 let snapAt = 0;
-// Multiplayer > Guest interpolation: other cars + ball drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
   step: (p, dt) => { const keep = events; events = []; stepCar(p, dt); events = keep; },
@@ -531,7 +528,6 @@ function applySnap(s) {
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck, score: s.sc, over: !!s.ov });
   const [x, y, z, vx, vy, vz] = s.B;
   Object.assign(world.ball, { x, y, z, vx, vy, vz });
-  interp.push('ball', s.ts, world.ball);
   const seen = new Set();
   for (const [id, px, pz, h, pvx, pvz, steer, fl, team, boost, goals] of s.P) {
     seen.add(id);
@@ -540,7 +536,6 @@ function applySnap(s) {
     if (p.team !== team) { p.team = team; const g = cars3d.get(id); if (g) g.userData.paint.color.set(TEAM[team]); }
     Object.assign(p, { x: px, z: pz, h, vx: pvx, vz: pvz, steer, boosting: !!(fl & 2), boost, goals });
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -668,7 +663,7 @@ function loop() {
   for (const p of world.players.values()) {
     let g = cars3d.get(p.id);
     if (!g) { g = makeCar(p); cars3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
@@ -680,9 +675,9 @@ function loop() {
     u.body.rotation.z = -p.steer * Math.min(Math.hypot(p.vx, p.vz) / 20, 1) * 0.06;
     u.tag.visible = p.id !== lobby.room?.me;
   }
-  const b = (!hostSim && interp.at('ball', world.ball)) || world.ball, bage = b === world.ball ? age : 0;
-  const bx = b.x + b.vx * bage, bz = b.z + b.vz * bage, by = Math.max(BR, b.y + b.vy * bage - 12 * bage * bage);
-  const ba = hostSim || b !== world.ball ? 1 : 1 - Math.exp(-dt * 18);
+  const b = world.ball;
+  const bx = b.x + b.vx * age, bz = b.z + b.vz * age, by = Math.max(BR, b.y + b.vy * age - 12 * age * age);
+  const ba = hostSim ? 1 : 1 - Math.exp(-dt * 18);
   const prev = _w.copy(ball3d.position);
   ball3d.position.x += (bx - ball3d.position.x) * ba; ball3d.position.y += (by - ball3d.position.y) * ba; ball3d.position.z += (bz - ball3d.position.z) * ba;
   const mv = _v.copy(ball3d.position).sub(prev); mv.y = 0;

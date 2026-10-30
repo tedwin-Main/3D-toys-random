@@ -63,7 +63,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -553,7 +552,7 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), seed: world.seed, ord: world.order, ev: events,
+    g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), seed: world.seed, ord: world.order, ev: events,
     K: [...world.karts.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), p.lap, p.idx, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), f2(p.boost), p.item, p.place, f2(p.finishT), f2(p.spin), Math.round(p.prog)]),
     Bx: track.boxes.map((b) => (b.t > 0 ? 1 : 0)),
     Ba: world.bananas.map((b) => [f2(b.x), f2(b.z)]),
@@ -561,8 +560,6 @@ function snapshot() {
   }, world.karts.values());
 }
 let snapAt = 0;
-// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
   step: (p, dt) => { const keep = events; events = []; stepKart(p, dt); events = keep; },
@@ -583,7 +580,6 @@ function applySnap(s) {
     const p = world.karts.get(id) ?? addKart(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, vx, vz, steer, lap, idx, finished: !!(fl & 2), half: !!(fl & 4), boost, item, place, finishT, spin, prog });
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
     const fx = Math.sin(h), fz = Math.cos(h);
     p.vf = vx * fx + vz * fz; p.vl = vx * fz - vz * fx;
   }
@@ -739,7 +735,7 @@ function loop() {
   for (const p of world.karts.values()) {
     let k = karts3d.get(p.id);
     if (!k) { k = makeKart(p); karts3d.set(p.id, k); k.position.set(p.x, 0, p.z); k.rotation.y = p.h; }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 18);
     if (Math.hypot(tx - k.position.x, tz - k.position.z) > 10) k.position.set(tx, 0, tz);
     k.position.x += (tx - k.position.x) * a; k.position.z += (tz - k.position.z) * a;

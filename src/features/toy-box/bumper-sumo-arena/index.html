@@ -53,7 +53,6 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction } from '../common/own-prediction.js';
-import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -461,7 +460,7 @@ function onData(d, from) {
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    ts: hostClock(), g: 's', ph: world.phase, t: +world.t.toFixed(2), ring: +world.ring.toFixed(2), rd: world.round, win: world.winner, ev: events,
+    g: 's', ph: world.phase, t: +world.t.toFixed(2), ring: +world.ring.toFixed(2), rd: world.round, win: world.winner, ev: events,
     P: [...world.players.values()].map((p) => [p.id, +p.x.toFixed(2), +p.z.toFixed(2), +p.vx.toFixed(2), +p.vz.toFixed(2), +p.ang.toFixed(2), +p.y.toFixed(2), (p.alive ? 1 : 0) | (p.falling ? 2 : 0) | (p.inRound ? 4 : 0) | (p.bot ? 8 : 0), +p.dashT.toFixed(2), p.wins, +p.dashCD.toFixed(2), +p.vy.toFixed(2)]),
   }, world.players.values());
 }
@@ -478,14 +477,11 @@ function applySnap(s) {
     Object.assign(p, { x, z, vx, vz, ang, y, vy, alive: !!(fl & 1), falling: !!(fl & 2), inRound: !!(fl & 4), dashT, wins, dashCD });
     if (p.falling && p.y < -2.6) p.splashed = true;
     if (id === lobby.room.me) pred.correct(p);
-    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
   snapAt = performance.now();
 }
-// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
-const interp = createInterp();
 // Multiplayer > Guest prediction: my car moves on local input at once, host snapshots pull it back
 const pred = createPrediction({
   step: (p, dt) => moveCar(p, dt, world.phase === 'fight'),
@@ -591,12 +587,11 @@ function loop() {
     if (!c) { c = makeCar(p); cars.set(p.id, c); c.position.set(p.x, p.y, p.z); }
     // own car on guest: drawn straight from prediction
     const mine = !hostSim && pred.state && p.id === lobby.room?.me;
-    const v = (mine && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
-    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, ty = p.falling ? v.y + v.vy * va : v.y;
-    const k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 18);
+    const tx = mine ? pred.state.x : p.x + p.vx * age, tz = mine ? pred.state.z : p.z + p.vz * age, ty = p.falling ? p.y + p.vy * age : p.y;
+    const k = hostSim || mine ? 1 : 1 - Math.exp(-dt * 18);
     c.position.x += (tx - c.position.x) * k; c.position.z += (tz - c.position.z) * k; c.position.y += (ty - c.position.y) * k;
     if (world.mode === 'match' && !p.inRound) c.position.set(0, -40, 0);
-    let da = v.ang - c.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
+    let da = (mine ? pred.state.ang : p.ang) - c.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));
     c.rotation.y += da * Math.min(1, dt * 12);
     const sp = Math.hypot(p.vx, p.vz);
     c.userData.tilt.rotation.x = -Math.min(sp / 26, 0.25) + (p.dashT > 0 ? -0.15 : 0);
