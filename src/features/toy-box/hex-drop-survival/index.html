@@ -58,6 +58,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -396,6 +397,8 @@ function snapshot(withKf) {
   if (withKf) s.K = tiles.map((t) => t.state).join('');
   return names.stamp(s, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
@@ -429,7 +432,7 @@ function applySnap(s) {
     if (reset) { resetTiles(); for (let i = 0; i < tiles.length; i++) { const st = +s.K[i]; if (st === 1) triggerTile(i); else if (st === 2) { tiles[i].state = 2; tiles[i].drop = -15; drawTile(i); } } }
   }
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   const me = lobby.room?.me;
@@ -540,13 +543,13 @@ let specIdx = 0, specT = 0;
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeBean(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
     const tx = v.x + v.vx * va, ty = v.ground ? v.y : v.y + v.vy * va - 0.5 * GRAV * va * va, tz = v.z + v.vz * va;
-    const a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
+    const a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     if (g.position.distanceTo(_v.set(tx, ty, tz)) > 6) g.position.set(tx, ty, tz);
     g.position.x += (tx - g.position.x) * a; g.position.y += (ty - g.position.y) * a; g.position.z += (tz - g.position.z) * a;
     let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));

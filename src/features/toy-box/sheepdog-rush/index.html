@@ -52,6 +52,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
@@ -525,6 +526,8 @@ function snapshot() {
     S: world.sheep.flatMap((s) => [f1(s.x), f1(s.z), (s.gold ? 1 : 0) | (s.dead > 0 ? 2 : 0)]),
   }, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
@@ -550,7 +553,7 @@ function applySnap(s) {
   world.sheep.length = n;
   for (let i = 0; i < n; i++) Object.assign(world.sheep[i], { x: s.S[i * 3], z: s.S[i * 3 + 1], gold: !!(s.S[i * 3 + 2] & 1), dead: s.S[i * 3 + 2] & 2 ? 1 : 0 });
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   const me = lobby.room?.me, match = world.mode === 'match';
@@ -637,7 +640,7 @@ const camPos = new THREE.Vector3(0, 46, 30), camLook = new THREE.Vector3(), _v =
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   // pens: rebuild when the seat list changes (guests learn it from snapshots)
   const plist = [...world.players.values()].sort((a, b) => a.pen - b.pen);
   const key = plist.map((p) => `${p.id}:${p.pen}`).join(',');
@@ -655,7 +658,7 @@ function loop() {
     let g = players3d.get(p.id);
     if (!g) { g = makeDog(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
     let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
@@ -673,7 +676,7 @@ function loop() {
     g.visible = !s.dead;
     if (s.gold !== u.gold) { u.gold = s.gold; for (const m of u.wool) m.material = s.gold ? goldMat : woolMat; }
     if (s.dead) return;
-    const a = hostSim ? 1 : 1 - Math.exp(-dt * 12);
+    const a = hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(12));
     if (Math.hypot(s.x - g.position.x, s.z - g.position.z) > 6) g.position.set(s.x, 0, s.z);
     const dx = (s.x - g.position.x) * a, dz = (s.z - g.position.z) * a;
     g.position.x += dx; g.position.z += dz;

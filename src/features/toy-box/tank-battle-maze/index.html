@@ -63,6 +63,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -577,6 +578,8 @@ function snapshot() {
     C: world.crates.map((c) => [c.id, c.x, c.z, c.type]),
   }, world.tanks.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own tank drives on local input at once (no firing)
 const pred = createPrediction({
@@ -602,7 +605,7 @@ function applySnap(s) {
   world.shells = s.S.map(([x, z, vx, vz]) => ({ x, z, vx, vz }));
   world.crates = s.C.map(([id, x, z, type]) => ({ id, x, z, type }));
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 const feedEl = document.getElementById('feed');
 function playEvents(evs) {
@@ -763,14 +766,14 @@ const camPos = new THREE.Vector3(0, 90, 60), camLook = new THREE.Vector3();
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   const myId = lobby.room?.me;
   for (const p of world.tanks.values()) {
     let t = tanks3d.get(p.id);
     if (!t) { t = makeTank(p); tanks3d.set(p.id, t); t.position.set(p.x, 0, p.z); }
     t.visible = p.alive;
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
+    const k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     const sp = (p.moved ?? 0) * 9;
     const tx = v.x + (hostSim ? 0 : Math.sin(p.ang) * sp * va), tz = v.z + (hostSim ? 0 : Math.cos(p.ang) * sp * va);
     if (t.position.distanceTo(new THREE.Vector3(tx, 0, tz)) > 6) t.position.set(tx, 0, tz);

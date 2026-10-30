@@ -62,6 +62,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
@@ -559,6 +560,8 @@ function snapshot() {
     Sh: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.h)]),
   }, world.karts.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
@@ -588,7 +591,7 @@ function applySnap(s) {
   world.bananas = s.Ba.map(([x, z]) => ({ x, z }));
   world.shells = s.Sh.map(([x, z, h]) => ({ x, z, h }));
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   const me = lobby.room?.me;
@@ -731,12 +734,12 @@ let shake = 0, attractCam = 0, followId = null;
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   for (const p of world.karts.values()) {
     let k = karts3d.get(p.id);
     if (!k) { k = makeKart(p); karts3d.set(p.id, k); k.position.set(p.x, 0, p.z); k.rotation.y = p.h; }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 18);
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(18));
     if (Math.hypot(tx - k.position.x, tz - k.position.z) > 10) k.position.set(tx, 0, tz);
     k.position.x += (tx - k.position.x) * a; k.position.z += (tz - k.position.z) * a;
     let dh = v.h - k.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));

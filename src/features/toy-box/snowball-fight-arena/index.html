@@ -64,6 +64,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -489,6 +490,8 @@ function snapshot() {
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.face), f2(p.vx), f2(p.vz), p.hits, f2(p.frozen), f2(p.inv), p.score, p.dealt, p.ammo, p.bot ? 1 : 0]),
   }, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
@@ -514,7 +517,7 @@ function applySnap(s) {
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 let shake = 0;
 const hurtEl = document.getElementById('hurt'), feedEl = document.getElementById('feed');
@@ -652,13 +655,13 @@ const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 40, 40), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
-  const hostSim = isHostSim(), age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const hostSim = isHostSim(), age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   const meId = lobby.room?.me;
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeKid(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const moving = p.frozen <= 0 && world.phase === 'play', tx = v.x + (moving ? v.vx * va : 0), tz = v.z + (moving ? v.vz * va : 0), a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
+    const moving = p.frozen <= 0 && world.phase === 'play', tx = v.x + (moving ? v.vx * va : 0), tz = v.z + (moving ? v.vz * va : 0), a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) g.position.set(tx, 0, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
     let dh = v.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));

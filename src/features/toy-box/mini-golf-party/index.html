@@ -65,6 +65,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, sky, lights, sea far below the floating holes
@@ -637,6 +638,8 @@ function snapshot(withCard) {
   if (withCard) s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null)]);
   return names.stamp(s, world.balls.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
   names.read(s);
@@ -654,7 +657,7 @@ function applySnap(s) {
   for (const id of [...world.balls.keys()]) if (!seen.has(id)) removeBall(id);
   if (s.sc) for (const [id, sc] of s.sc) { const b = world.balls.get(id); if (b) b.scores = sc.map((v) => (v == null ? undefined : v)); }
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   const me = lobby.room?.me;
@@ -770,12 +773,12 @@ const camPos = new THREE.Vector3(10, 30, 40), camLook = new THREE.Vector3(10, 0,
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.1);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.1));
   const me = lobby.room?.me;
   for (const b of world.balls.values()) {
     let g = balls3d.get(b.id);
     if (!g) { g = makeBall(b); balls3d.set(b.id, g); g.position.set(b.x, R, b.z); }
-    const tx = b.x + b.vx * age, tz = b.z + b.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 18);
+    const tx = b.x + b.vx * age, tz = b.z + b.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(18));
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 3) g.position.set(tx, g.position.y, tz);
     const px = g.position.x, pz = g.position.z;
     g.position.x += (tx - px) * a; g.position.z += (tz - pz) * a;

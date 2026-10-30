@@ -58,6 +58,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -499,6 +500,8 @@ function snapshot(withKey) {
   if (withKey) { s.K = Array.from(grid, (v) => KEY_CHARS[v]).join(''); s.pal = palette; }
   return names.stamp(s, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own blob moves on local input at once (no paint, no bombs)
 const pred = createPrediction({ step: (p, dt) => moveBlob(p, dt, world.phase === 'play'), live: () => true, angle: 'face' });
@@ -522,7 +525,7 @@ function applySnap(s) {
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   world.bombs = s.B.map(([sx, sz, tx, tz, t, dur, color]) => ({ sx, sz, tx, tz, t, dur, color }));
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   for (const e of evs) {
@@ -627,12 +630,12 @@ function loop() {
   if (texDirty) refreshTex();
   floorMat.uniforms.uTime.value = time;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   for (const p of world.players.values()) {
     let b = blobs.get(p.id);
     if (!b) { b = makeBlob(p); blobs.set(p.id, b); b.position.set(p.x, 0, p.z); }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
+    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     b.position.x += (tx - b.position.x) * k; b.position.z += (tz - b.position.z) * k;
     const sp = Math.hypot(p.vx, p.vz);
     let da = v.face - b.rotation.y; da = Math.atan2(Math.sin(da), Math.cos(da));

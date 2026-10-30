@@ -53,6 +53,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, hot sky, lava glow light
@@ -476,6 +477,8 @@ function snapshot() {
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vy), f2(p.vz), f2(p.face), (p.out ? 1 : 0) | (p.bot ? 2 : 0) | (p.ground ? 4 : 0), p.place, f2(p.best)]),
   }, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
   names.read(s);
@@ -496,7 +499,7 @@ function applySnap(s) {
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 let shake = 0;
 function playEvents(evs) {
@@ -640,7 +643,7 @@ const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 10, 20), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
-  const hostSim = isHostSim(), age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const hostSim = isHostSim(), age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   const meId = lobby.room?.me;
   placePlats(world.time);
   crown.rotation.y += dt * 1.5;
@@ -654,7 +657,7 @@ function loop() {
     if (!g) { g = makeBlob(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
     const own = p.id === meId;
     const ex = own || hostSim ? 0 : age, gy = p.airborne ? -G * 0.5 * ex * ex : 0;
-    const tx = p.x + p.vx * ex, ty = Math.max(p.y + p.vy * ex + gy, p.out ? -99 : p.y - 2), tz = p.z + p.vz * ex, a = own || hostSim ? 1 : 1 - Math.exp(-dt * 18);
+    const tx = p.x + p.vx * ex, ty = Math.max(p.y + p.vy * ex + gy, p.out ? -99 : p.y - 2), tz = p.z + p.vz * ex, a = own || hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(18));
     if (Math.hypot(tx - g.position.x, ty - g.position.y, tz - g.position.z) > 5) g.position.set(tx, ty, tz);
     g.position.x += (tx - g.position.x) * a; g.position.y += (ty - g.position.y) * a; g.position.z += (tz - g.position.z) * a;
     let dh = p.face - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));

@@ -58,6 +58,7 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -478,6 +479,8 @@ function snapshot() {
     P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0), p.score, p.last]),
   }, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
   names.read(s);
@@ -491,7 +494,7 @@ function applySnap(s) {
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 let shake = 0;
 function playEvents(evs) {
@@ -588,14 +591,14 @@ let sweepT = 0;
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim(), meId = lobby.room?.me;
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.12);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   let idx = 0;
   const n = world.players.size;
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makePenguin(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
     const u = g.userData, sp = Math.hypot(p.vx, p.vz);
-    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * 16);
+    const tx = p.x + p.vx * age, tz = p.z + p.vz * age, a = hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
     // new round teleports everyone back to the line: snap instead of gliding 40 m
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) { g.position.set(tx, 0, tz); u.sink = 0; }
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;

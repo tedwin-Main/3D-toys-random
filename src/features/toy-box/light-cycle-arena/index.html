@@ -61,6 +61,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -410,6 +411,8 @@ function snapshot(withKf) {
   if (withKf) s.K = [...world.players.values()].map((p) => [p.id, p.corners]);
   return names.stamp(s, world.players.values());
 }
+// Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
+const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
   names.read(s);
@@ -427,7 +430,7 @@ function applySnap(s) {
   // a fresh round (count phase) brings derezzed trails back
   if (s.ph === 'count') for (const v of cycles3d.values()) v.derez = 0;
   playEvents(s.ev);
-  snapAt = performance.now();
+  snapAt = pacing.arrived();
 }
 function playEvents(evs) {
   const me = lobby.room?.me;
@@ -557,14 +560,14 @@ let camYaw = 0, specIdx = 0, specT = 0;
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, 0.1);
+  const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.1));
   for (const p of world.players.values()) {
     let v = cycles3d.get(p.id);
     if (!v) { v = makeCycle(p); cycles3d.set(p.id, v); v.g.position.set(p.x, 0, p.z); }
     const [dx, dz] = DIRS[p.dir], sp = p.alive && world.phase === 'play' ? (p.boost ? BOOST : SPEED) : 0;
     const tx = p.x + dx * sp * age, tz = p.z + dz * sp * age;
     // snap on turns (axis change) so the bike never cuts the corner
-    const a = hostSim ? 1 : 1 - Math.exp(-dt * 25);
+    const a = hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(25));
     if (Math.hypot(tx - v.g.position.x, tz - v.g.position.z) > 4) v.g.position.set(tx, 0, tz);
     v.g.position.x += (tx - v.g.position.x) * a; v.g.position.z += (tz - v.g.position.z) * a;
     const want = Math.atan2(dx, dz);
