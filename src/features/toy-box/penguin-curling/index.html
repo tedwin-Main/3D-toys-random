@@ -40,7 +40,7 @@
 <div id="board" class="card"></div>
 <div id="big"></div>
 <div id="power" class="card"><div id="powerFill"></div></div>
-<div id="hint" class="card"><b>A/D</b> aim · hold <b>Space</b> to charge, release to belly-slide · while sliding: hold <b>Space</b> to sweep (go farther), <b>A/D</b> to lean · stop closest to the 🐟</div>
+<div id="hint" class="card">On <b>your throw</b>: <b>A/D</b> aim · hold <b>Space</b> to charge, release to belly-slide · while sliding: hold <b>Space</b> to sweep (go farther), <b>A/D</b> to lean · pass the blue line, stop closest to the 🐟</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -49,7 +49,7 @@
 <script type="module">
 /**
  * FILE: src/features/toy-box/penguin-curling/index.html
- * PURPOSE: online penguin curling for up to 14: everyone aims + charges at once, belly-slides down the ice, sweeps and leans to stop nearest the fish, knocks rivals away; host-authoritative sim
+ * PURPOSE: online turn-based penguin curling for up to 14: one penguin throws at a time (leader first, last place holds the hammer), stopped penguins stay as stones to guard or knock out, sweep + lean while sliding, hog line; host-authoritative sim
  * UI: Penguin Curling page (lobby overlay, round counter, phase card, standings, power bar, banner, phone joystick + SLIDE)
  * USED BY: src/features/toy-box/index.html (iframe viewer)
  * KEY EXPORTS: none (standalone page)
@@ -244,6 +244,7 @@ const sfx = {
   splash() { noise(0.7, 0.2, 1600, 150); tone(520, 140, 0.35, 0.05); },
   sweep() { noise(0.07, 0.035, 5200, 2600); },
   point(n) { [880, 1108, 1318].slice(0, Math.min(3, Math.ceil(n / 2))).forEach((f, i) => tone(f, f, 0.12, 0.07, 'triangle', i * 0.08)); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
   beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
 };
@@ -251,25 +252,47 @@ const sfx = {
 // Game > World
 const BOT_NAMES = ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Mumble', 'Pebble', 'Iceberg', 'Snowy', 'Kowalski', 'Rico', 'Chilly', 'Frosty', 'Sardine', 'Puddles'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const ROUNDS = 8, AIM_T = 7, PR = 0.5, FR = 4.5, FR_SWEEP = 2.9, VMIN = 5, VMAX = 22, LEAN = 1.8;
-const world = { mode: 'attract', phase: 'count', t: 3, round: 0, rounds: ROUNDS, hx: 0, hz: -37, best: 0, players: new Map(), winner: null };
+const ROUNDS = 8, AIM_T = 10, PR = 0.5, FR = 4.5, FR_SWEEP = 2.9, VMIN = 5, VMAX = 22, LEAN = 1.8;
+const WAIT_Z = 3.6;
+// turn: id of the penguin throwing now; order: this round's throw order; ti: index of turn in order
+const world = { mode: 'attract', phase: 'count', t: 3, round: 0, rounds: ROUNDS, hx: 0, hz: -37, best: 0, players: new Map(), winner: null, turn: null, order: [], ti: -1 };
 let events = [];
 const rng = Math.random;
 function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, ax: 0, held: false, armed: false, charging: false, launched: false, out: false, sweep: false, score: 0, last: 0, plan: null, skill: 0.35 + rng() * 0.55 };
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, ax: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, score: 0, last: 0, plan: null, skill: 0.35 + rng() * 0.55 };
   world.players.set(id, p);
   return p;
 }
 function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
+// throw order: shuffled in round 1, then leader first so last place throws last (the hammer); ties keep last round's order
 function lineUp() {
-  const ps = [...world.players.values()], n = ps.length, gap = Math.min(1.6, 14 / Math.max(1, n - 1));
-  // rotate slots each round so nobody is stuck on the awkward outside angle
-  ps.forEach((p, k) => {
-    const slot = (k + world.round) % n;
-    Object.assign(p, { x: (slot - (n - 1) / 2) * gap, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, sweep: false, plan: null });
-  });
+  const ps = [...world.players.values()], prev = new Map(world.order.map((id, k) => [id, k]));
+  if (world.round === 1) ps.sort(() => rng() - 0.5);
+  else ps.sort((a, b) => b.score - a.score || (prev.get(a.id) ?? 99) - (prev.get(b.id) ?? 99));
+  for (const p of ps) Object.assign(p, { vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, plan: null });
+  Object.assign(world, { order: ps.map((p) => p.id), ti: -1, turn: null });
+  bench();
 }
+// penguins still to throw wait in a row behind the hack, next up on the left
+function bench() {
+  const wait = world.order.slice(world.ti + 1).map((id) => world.players.get(id)).filter((p) => p && !p.launched);
+  const n = wait.length, gap = Math.min(1.6, 14 / Math.max(1, n - 1));
+  wait.forEach((p, k) => Object.assign(p, { x: (k - (n - 1) / 2) * gap, z: WAIT_Z }));
+}
+// next thrower steps onto the hack; nobody left means the end is scored
+function nextTurn() {
+  do world.ti++; while (world.ti < world.order.length && !world.players.has(world.order[world.ti]));
+  if (world.ti >= world.order.length) { world.turn = null; scoreRound([...world.players.values()]); return; }
+  const p = world.players.get(world.order[world.ti]);
+  Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, armed: false, charging: false, plan: null });
+  world.turn = p.id;
+  bench();
+  world.phase = 'aim'; world.t = AIM_T;
+  events.push(['u', p.id]);
+}
+// fewer rounds in big rooms so 14 one-at-a-time throws per round stay a party game
+const roundsFor = (n) => clamp(Math.ceil(40 / Math.max(1, n)), 3, ROUNDS);
 function startRound() {
   world.round++;
   world.hx = (rng() - 0.5) * 8; world.hz = -33 - rng() * 7; world.best = 0;
@@ -278,7 +301,7 @@ function startRound() {
 }
 function startMatch() {
   for (const p of world.players.values()) { p.score = 0; p.last = 0; }
-  Object.assign(world, { round: 0, rounds: world.mode === 'attract' ? 3 : ROUNDS, winner: null });
+  Object.assign(world, { round: 0, rounds: world.mode === 'attract' ? 2 : roundsFor(world.players.size), winner: null, order: [] });
   startRound();
 }
 
@@ -293,7 +316,7 @@ function launch(p, pow = p.pow) {
 function stepPlayer(p, dt) {
   if (p.out) return;
   if (!p.launched) {
-    if (world.phase !== 'aim') return;
+    if (world.phase !== 'aim' || p.id !== world.turn) return;
     p.aim = clamp(p.aim + p.ax * 0.7 * dt, -0.4, 0.4);
     // must let go once per round so a key held from last round can't fire instantly
     if (!p.held) p.armed = true;
@@ -342,13 +365,15 @@ function collide(ps) {
 function botThink(p) {
   if (p.out) { p.held = false; return; }
   if (!p.launched) {
-    if (world.phase !== 'aim') { p.held = false; p.ax = 0; return; }
-    p.plan ??= { at: AIM_T - 0.6 - rng() * 4.5, tx: world.hx, tz: world.hz, want: null };
+    if (world.phase !== 'aim' || p.id !== world.turn) { p.held = false; p.ax = 0; return; }
+    p.plan ??= { at: AIM_T - 1 - rng() * 1.6, tx: world.hx, tz: world.hz, want: null };
     const pl = p.plan;
     if (pl.want === null && world.t <= pl.at + 0.8) {
       const sitters = [...world.players.values()].filter((q) => q !== p && q.launched && !q.out && Math.hypot(q.vx, q.vz) < 0.1 && Math.hypot(q.x - world.hx, q.z - world.hz) < 3.5);
       let extra = 0;
-      if (sitters.length && rng() < 0.45 * p.skill) {
+      // takeout: knock the rival sitting closest to the fish, more likely with the hammer (last throw of the end)
+      const hammer = world.ti === world.order.length - 1;
+      if (sitters.length && rng() < (hammer ? 0.85 : 0.45) * p.skill) {
         const t = sitters.sort((a, b) => Math.hypot(a.x - world.hx, a.z - world.hz) - Math.hypot(b.x - world.hx, b.z - world.hz))[0];
         pl.tx = t.x; pl.tz = t.z; extra = 4;
       }
@@ -369,7 +394,7 @@ function botThink(p) {
   p.ax = clamp(lat * 0.6, -1, 1) * p.skill;
 }
 
-// Game > Phases: countdown, aim (7 s), slide (until all stop), round scores, final standings
+// Game > Phases: countdown, then per throw: aim (10 s shot clock) > slide (until every penguin stops) > rest; round scores after the last throw, final standings
 let lastBeep = 0;
 function scoreRound(ps) {
   let best = null, bd = Infinity;
@@ -392,15 +417,26 @@ function phases(dt) {
   world.t -= dt;
   if (world.phase === 'count') {
     if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'aim'; world.t = AIM_T; }
+    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); nextTurn(); }
   } else if (world.phase === 'aim') {
-    if (world.t <= 0 || ps.every((p) => p.launched)) {
-      for (const p of ps) if (!p.launched) launch(p, p.charging ? p.pow : 0.5 + rng() * 0.2);
+    const p = world.players.get(world.turn);
+    // thrower left mid-turn: next one up
+    if (!p) nextTurn();
+    else if (p.launched || world.t <= 0) {
+      // shot clock ran out: a gentle push from wherever the meter was
+      if (!p.launched) launch(p, p.charging ? p.pow : 0.5 + rng() * 0.2);
       world.phase = 'slide'; world.t = 10;
     }
   } else if (world.phase === 'slide') {
-    if (world.t <= 0 || ps.every((p) => p.out || Math.hypot(p.vx, p.vz) < 0.05)) scoreRound(ps);
-  } else if (world.phase === 'score' && world.t <= 0) {
+    if (world.t <= 0 || ps.every((p) => p.out || Math.hypot(p.vx, p.vz) < 0.05)) {
+      for (const p of ps) p.vx = p.vz = 0;
+      // hog line: a throw that stops short of the blue line is out of play, off to the snow bank
+      const p = world.players.get(world.turn);
+      if (p && !p.out && p.z > HOG) { Object.assign(p, { out: true, hog: true, x: Math.sign(p.x || 1) * (XW + 1) }); events.push(['h', p.id]); }
+      world.phase = 'rest'; world.t = 0.8;
+    }
+  } else if (world.phase === 'rest' && world.t <= 0) nextTurn();
+  else if (world.phase === 'score' && world.t <= 0) {
     if (world.round < world.rounds) startRound();
     else {
       const top = ps.reduce((a, b) => (b.score > (a?.score ?? -1) ? b : a), null);
@@ -423,9 +459,9 @@ function startAttract() {
 // Multiplayer > Lobby
 const lobby = createLobby({
   game: 'penguin-curling', title: 'Penguin Curling', emoji: '🐧', accent: '#7fd1ff',
-  blurb: 'Everyone slides at once. Aim, charge, belly-slide down the ice and stop closest to the fish. Sweep to glide farther, lean to curl, knock rivals out of the rings.',
+  blurb: 'Curling, one penguin at a time. Aim, charge, belly-slide down the ice and stop closest to the fish. Stopped penguins stay put: guard the house or knock rivals out. Sweep to glide farther, lean to curl. Last place throws last.',
   maxBots: 13, defaultBots: 5, minPlayers: 2,
-  note: `Up to 14 penguins per room (humans + bots). ${ROUNDS} rounds, rings score 5/3/2/1, closest to the fish +2.`,
+  note: `Up to 14 penguins per room (humans + bots). One throw each per round, ${ROUNDS} rounds (3 in a full room), rings score 5/3/2/1, closest to the fish +2.`,
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
@@ -458,8 +494,9 @@ function onRoster(players) {
   for (const p of players) if (!world.players.has(p.id)) {
     // keep 14 seats: a late human takes the lowest-scoring bot's place
     if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.score - b.score)[0]; if (bot) removePlayer(bot.id); }
-    // late joiner sits out the current round at the side of the start line
-    Object.assign(addPlayer(p.id, p.nick, p.color, false), { x: XW - 0.6, z: 3, launched: world.phase !== 'count' });
+    // late joiner throws last this round, or waits at the side until the next one
+    const np = Object.assign(addPlayer(p.id, p.nick, p.color, false), { x: XW - 0.6, z: WAIT_Z });
+    if (['count', 'aim', 'slide', 'rest'].includes(world.phase)) { world.order.push(np.id); bench(); }
   }
 }
 
@@ -475,8 +512,8 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, rs: world.rounds, hx: f2(world.hx), hz: f2(world.hz), b: world.best, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0), p.score, p.last]),
+    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, rs: world.rounds, hx: f2(world.hx), hz: f2(world.hz), b: world.best, win: world.winner, tu: world.turn, o: world.order, ti: world.ti, ev: events,
+    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0) | (p.hog ? 32 : 0), p.score, p.last]),
   }, world.players.values());
 }
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
@@ -484,13 +521,13 @@ const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
   names.read(s);
-  Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, rounds: s.rs, hx: s.hx, hz: s.hz, best: s.b, winner: s.win });
+  Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, rounds: s.rs, hx: s.hx, hz: s.hz, best: s.b, winner: s.win, turn: s.tu, order: s.o, ti: s.ti });
   const seen = new Set();
   for (const [id, x, z, vx, vz, aim, pow, fl, score, last] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
-    Object.assign(p, { x, z, vx, vz, aim, pow, launched: !!(fl & 2), out: !!(fl & 4), charging: !!(fl & 8), sweep: !!(fl & 16), score, last });
+    Object.assign(p, { x, z, vx, vz, aim, pow, launched: !!(fl & 2), out: !!(fl & 4), charging: !!(fl & 8), sweep: !!(fl & 16), hog: !!(fl & 32), score, last });
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
   playEvents(s.ev);
@@ -506,6 +543,8 @@ function playEvents(evs) {
     else if (e[0] === 'l' && p) { burst(p.x, 0.2, p.z, 8, 2, 1); if (match) sfx.launch(e[1] === me); }
     else if (e[0] === 's' && p) { burst(p.x, -0.3, BACK - 1.1, 26, 3, 5); if (match) sfx.splash(); if (e[1] === me && match) flash('<small>too far!</small>💦 splash', 1.6); }
     else if (e[0] === 'p' && e[1] === me && match) sfx.point(e[2]);
+    else if (e[0] === 'u' && e[1] === me && match) { sfx.turn(); flash('<small>your throw</small>🐧', 1.4); }
+    else if (e[0] === 'h' && p) { burst(p.x, 0.6, p.z, 10, 2, 3); if (e[1] === me && match) flash('<small>stopped short of the blue line</small>hogged!', 1.6); }
     else if (e[0] === 'b' && match) { const b = world.players.get(e[1]); flash(b ? `<small>closest to the fish</small>🐟 ${esc(b.nick)} +${e[2]}` : '<small>nobody in the rings</small>🥶', 2.6); }
     else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
     else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you are the ice champion!' : 'ice champion'}</small>🏆 ${esc(p.nick)}`, 4); }
@@ -536,16 +575,17 @@ function hud(dt) {
   flashT -= dt;
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me), ph = world.phase, secs = Math.max(0, Math.ceil(world.t));
-  const mySp = me ? Math.hypot(me.vx, me.vz) : 0;
+  const mySp = me ? Math.hypot(me.vx, me.vz) : 0, tp = world.players.get(world.turn), myTurn = !!me && tp === me;
+  const nth = `${world.ti + 1}/${world.order.length}`, hammer = world.players.get(world.order[world.order.length - 1]);
   if (ph === 'count') big(world.round === 1 ? `<small>stop closest to the fish</small>${Math.max(1, secs)}` : `<small>get ready</small>round ${world.round}`);
   else if (ph === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${secs}s</small>🏆 ${esc(top?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
-  const t = ph === 'count' ? `🐧 round ${world.round} of ${world.rounds}`
-    : ph === 'aim' ? (me && !me.launched ? `aim · hold SLIDE to charge, release to go · ${secs}s` : `waiting for sliders · ${secs}s`)
-    : ph === 'slide' ? (me?.launched && !me.out && mySp > 0.3 ? '🧹 hold SLIDE to sweep farther · steer to lean' : 'sliding…')
+  const t = ph === 'count' ? `🐧 round ${world.round} of ${world.rounds}${hammer ? ` · ${hammer === me ? 'you have' : `${hammer.nick} has`} the last throw` : ''}`
+    : ph === 'aim' ? (myTurn ? `your throw ${nth} · hold SLIDE to charge, release to go · ${secs}s` : `🐧 ${tp?.nick ?? ''} throws ${nth} · ${secs}s`)
+    : ph === 'slide' || ph === 'rest' ? (me?.launched && !me.out && mySp > 0.3 ? '🧹 hold SLIDE to sweep farther · steer to lean' : `${tp?.nick ?? ''} sliding… ${nth}`)
     : ph === 'score' ? '🎯 round scores' : '🏁 final standings';
   if (t !== phaseText) { phaseText = t; phaseEl.textContent = t; }
-  const showPow = ph === 'aim' && me && !me.launched;
+  const showPow = ph === 'aim' && myTurn && !me.launched;
   powerEl.style.display = showPow ? 'block' : 'none';
   if (showPow) powerFill.style.width = `${Math.round(me.pow * 100)}%`;
   hudT -= dt;
@@ -555,7 +595,7 @@ function hud(dt) {
   document.getElementById('mine').textContent = me ? `you: ${me.score} pts · last round +${me.last}` : 'rings 5 / 3 / 2 / 1 · closest +2';
   const r = [...world.players.values()].sort((a, b) => b.score - a.score);
   const showLast = ph === 'score' || ph === 'final';
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.best && showLast ? '🐟 ' : ''}${esc(p.nick)}</span><small>${showLast && p.last ? `+${p.last}` : ''}</small><em>${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.best && showLast ? '🐟 ' : p.id === world.turn ? '▶ ' : ''}${esc(p.nick)}</span><small>${showLast && p.last ? `+${p.last}` : ''}</small><em>${p.score}</em></div>`).join('');
 }
 
 // Run engine > sim tick (worker)
@@ -602,29 +642,31 @@ function loop() {
     // new round teleports everyone back to the line: snap instead of gliding 40 m
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 6) { g.position.set(tx, 0, tz); u.sink = 0; }
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
-    u.sink = p.out ? Math.min(u.sink + dt, 2) : 0;
-    g.position.y = p.out ? -Math.min(1.4, u.sink * 1.2) + Math.sin(time * 6) * 0.05 : 0;
+    const swim = p.out && !p.hog;
+    u.sink = swim ? Math.min(u.sink + dt, 2) : 0;
+    // lake: bob and sink; hogged: stand on the snow bank
+    g.position.y = swim ? -Math.min(1.4, u.sink * 1.2) + Math.sin(time * 6) * 0.05 : p.hog ? 0.7 : 0;
     const heading = p.launched && sp > 0.3 ? Math.atan2(p.vx, p.vz) : !p.launched ? Math.atan2(Math.sin(p.aim), -Math.cos(p.aim)) : null;
     if (heading !== null) { let dh = heading - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); g.rotation.y += dh * Math.min(1, dt * 12); }
     const belly = p.launched && !p.out, k = Math.min(1, dt * 10);
     u.pose.rotation.x += ((belly ? 1.45 : p.charging ? -0.3 * p.pow : 0) - u.pose.rotation.x) * k;
     u.pose.position.y += ((belly ? 0.46 : 0.62) - u.pose.position.y) * k;
-    u.pose.rotation.z = p.out ? Math.sin(time * 14) * 0.4 : !p.launched ? Math.sin(time * 3 + p.id) * 0.05 : 0;
-    const flap = p.sweep ? Math.sin(time * 30) * 0.6 : p.out ? Math.sin(time * 20) : belly ? 1.1 : 0;
+    u.pose.rotation.z = swim ? Math.sin(time * 14) * 0.4 : !p.launched || p.hog ? Math.sin(time * 3 + p.id) * 0.05 : 0;
+    const flap = p.sweep ? Math.sin(time * 30) * 0.6 : swim ? Math.sin(time * 20) : belly ? 1.1 : 0;
     u.flips.forEach((f, s) => (f.rotation.z = (s ? 1 : -1) * (0.25 + Math.abs(flap))));
     u.tag.visible = !p.out || u.sink < 1;
     // neighbours on the start line alternate tag height so 14 names stay readable
     u.tag.position.y = p.launched ? 1.9 : 1.9 + ((idx++ + world.round) % n & 1) * 0.55;
     if (p.sweep && rng() < 0.4) burst(g.position.x + p.vx * 0.08, 0.1, g.position.z + p.vz * 0.08, 1, 1.2, 1);
   }
-  // own aim arrow: shows heading + charge while waiting on the line
-  const me = world.players.get(meId), mg = me && players3d.get(me.id);
-  arrow.visible = !!(mg && world.phase === 'aim' && !me.launched);
+  // thrower's aim arrow: heading + charge on the hack, shown to everyone
+  const me = world.players.get(meId), tp = world.players.get(world.turn), tg = tp && players3d.get(tp.id);
+  arrow.visible = !!(tg && world.phase === 'aim' && !tp.launched);
   if (arrow.visible) {
-    arrow.position.set(mg.position.x, 0, mg.position.z);
-    arrow.rotation.y = Math.atan2(Math.sin(me.aim), -Math.cos(me.aim));
-    arrow.scale.set(1, 1, 1.4 + me.pow * 3.5);
-    arrow.children[0].material.color.setHSL(0.36 - me.pow * 0.36, 0.9, 0.55);
+    arrow.position.set(tg.position.x, 0, tg.position.z);
+    arrow.rotation.y = Math.atan2(Math.sin(tp.aim), -Math.cos(tp.aim));
+    arrow.scale.set(1, 1, 1.4 + tp.pow * 3.5);
+    arrow.children[0].material.color.setHSL(0.36 - tp.pow * 0.36, 0.9, 0.55);
   }
   sweepT -= dt;
   if (me?.sweep && sweepT <= 0) { sweepT = 0.13; sfx.sweep(); }
@@ -644,11 +686,11 @@ function loop() {
   }
   snowGeo.attributes.position.needsUpdate = true;
   hud(dt);
-  // camera: start line while aiming, chase own penguin while it slides, house view for the finish
-  const fit = Math.max(1, 1.2 / camera.aspect), ph = world.phase, mySp = me ? Math.hypot(me.vx, me.vz) : 0;
+  // camera: hack while someone aims, chase whoever is throwing while it slides, house view for the finish
+  const fit = Math.max(1, 1.2 / camera.aspect), ph = world.phase, tSp = tp ? Math.hypot(tp.vx, tp.vz) : 0;
   let cp, cl;
-  if (mg && me.launched && !me.out && mySp > 1.2) { cp = _v.set(mg.position.x * 0.7 + world.hx * 0.3, 6 * fit, mg.position.z + 9 * fit); cl = [mg.position.x * 0.5 + world.hx * 0.5, 0, mg.position.z - 9]; }
-  else if (ph === 'count' || (ph === 'aim' && !me?.launched)) { const mx = mg ? mg.position.x : 0; cp = _v.set(mx * 0.3, 10.5 * fit, 13.5 * fit); cl = [mx * 0.2, 0, -15]; }
+  if (tg && tp.launched && !tp.out && tSp > 1.2) { cp = _v.set(tg.position.x * 0.7 + world.hx * 0.3, 6 * fit, tg.position.z + 9 * fit); cl = [tg.position.x * 0.5 + world.hx * 0.5, 0, tg.position.z - 9]; }
+  else if (ph === 'count' || (ph === 'aim' && !tp?.launched)) { cp = _v.set(0, 10.5 * fit, 13.5 * fit); cl = [0, 0, -15]; }
   else { cp = _v.set(world.hx * 0.5, 14 * fit, world.hz + 15 * fit); cl = [world.hx * 0.8, 0, world.hz + 1]; }
   camPos.lerp(cp, 1 - Math.exp(-dt * 2.2));
   camLook.lerp(_v.set(...cl), 1 - Math.exp(-dt * 2.2));
