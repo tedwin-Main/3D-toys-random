@@ -1,18 +1,45 @@
 /**
  * FILE: src/features/toy-box/common/room-client.js
- * PURPOSE: browser side of room relay: join/create room by code, roster + host tracking, send to all, one peer, or host
+ * PURPOSE: browser side of room relay: join/create room by code (Cloudflare relay first, same-origin Render relay fallback), roster + host tracking, send to all, one peer, or host
  * UI: every multiplayer toy (through room-lobby.js)
  * USED BY: components/room-lobby.js, multiplayer toy pages
  * KEY EXPORTS: connectRoom, startTicker
  */
 
-// Cloud Sync > join: resolves with live room handle once server confirms seat
-export function connectRoom({ game, nick, room }) {
+const CLOUD_RELAY = 'wss://toy-rooms.tedwin1996.workers.dev/3d-toys/rooms';
+const CONNECT_TIMEOUT_MS = 4000;
+
+// absolute path so toys work both standalone and inside shell iframe
+function sameOriginRelay() {
+  const url = new URL('/3d-toys/rooms', location.href);
+  url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.href;
+}
+// Cloud Sync > relay order: ?relay=cloud|local forces one; localhost/LAN stay on own server (offline dev, LAN parties)
+function relayUrls() {
+  const force = new URLSearchParams(location.search).get('relay');
+  if (force === 'cloud') return [CLOUD_RELAY];
+  if (force === 'local') return [sameOriginRelay()];
+  const lan = /^(localhost|127\.|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+  return lan ? [sameOriginRelay()] : [CLOUD_RELAY, sameOriginRelay()];
+}
+const unreachable = () => Object.assign(new Error('Room server unreachable. Start it: cd 3d-toys && npm start'), { unreachable: true });
+
+// Cloud Sync > join: tries each relay in order; moves on only when one is unreachable (not on "Room is full")
+export async function connectRoom(opts) {
+  let err;
+  for (const url of relayUrls()) {
+    try { return await openRoom(url, opts); } catch (e) { err = e; if (!e.unreachable) break; }
+  }
+  throw err;
+}
+
+// Cloud Sync > one relay: resolves with live room handle once server confirms seat
+function openRoom(url, { game, nick, room }) {
   return new Promise((resolve, reject) => {
-    // absolute path so toys work both standalone and inside shell iframe
-    const url = new URL('/3d-toys/rooms', location.href);
-    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(url);
+    // hung socket (blocked host, dead edge): give up so next relay gets a turn
+    const giveUp = setTimeout(() => { if (!joined) { reject(unreachable()); ws.close(); } }, CONNECT_TIMEOUT_MS);
     const handlers = { data: new Set(), roster: new Set(), host: new Set(), close: new Set() };
     const emit = (type, ...args) => handlers[type].forEach((fn) => fn(...args));
     let joined = false;
@@ -40,6 +67,7 @@ export function connectRoom({ game, nick, room }) {
       const m = JSON.parse(e.data);
       if (m.t === 'joined') {
         joined = true;
+        clearTimeout(giveUp);
         Object.assign(r, { me: m.id, code: m.room, host: m.host, color: m.color, slot: m.slot });
         resolve(r);
       } else if (m.t === 'error') {
@@ -52,8 +80,8 @@ export function connectRoom({ game, nick, room }) {
         if (was !== r.isHost) emit('host', r.isHost);
       } else if (m.t === 'data') emit('data', m.data, m.from);
     };
-    ws.onerror = () => { if (!joined) reject(new Error('Room server unreachable. Start it: cd 3d-toys && npm start')); };
-    ws.onclose = () => { hb(); if (joined) emit('close'); };
+    ws.onerror = () => { if (!joined) reject(unreachable()); };
+    ws.onclose = () => { hb(); clearTimeout(giveUp); if (joined) emit('close'); else reject(unreachable()); };
   });
 }
 
