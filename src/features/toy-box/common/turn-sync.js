@@ -2,7 +2,7 @@
  * FILE: src/features/toy-box/common/turn-sync.js
  * PURPOSE: state sync for turn-based / simultaneous-pick toys: host publishes whole game state only when it changes (versioned, sticky for late joiners), guests send numbered actions; a promoted guest keeps going from the last state it saw
  * UI: turn-based multiplayer toys (dice, board, artillery)
- * USED BY: bank-or-bust, fence-fields, siege-hills
+ * USED BY: bank-or-bust, fence-fields, siege-hills, treasure-auction, jar-guess, gem-diggers, lucky-low, picnic-dash
  * KEY EXPORTS: createTurnSync
  */
 

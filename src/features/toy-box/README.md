@@ -30,7 +30,7 @@ Notes:
 
 ## 3D toys
 
-- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: turn-based, last one standing, battle, racing & sports, party, creative, from each toy's `genre` in `common/toy-list.js`) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
+- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: turn-based, last one standing, bluff & bid, battle, racing & sports, party, creative, from each toy's `genre` in `common/toy-list.js`) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
 - `pelican-on-bicycle/`: pelican rides a bike over hills; WASD, bell, fish pickups.
 - `horse-race-track/`: 2-lap horse derby with betting, cheering, multi-camera.
 - `tiny-planet-world/`: walkable mini planet with day/night, villages, boats, tree planting.
@@ -84,10 +84,15 @@ Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `
 - `sheepdog-rush/`: Sheepdog Rush, online herding up to 14 with bots; boids flock (flee dogs, separation, cohesion, graze-wander), one pen per dog with gates cut in the ring fence, bark impulse ring, golden sheep worth 3, bots circle behind a sheep and walk it in, first to 30.
 - `balloon-battle/`: Balloon Battle, online balloon pop up to 14 with bots; stick sets heading with capped turn rate, lance-tip vs tail hit test, dash, 3 balloons + floating spare bundles (max 5), ghost respawn, confetti pops + pop feed, carousel + pillars, first to 20 pops.
 
-Turn-based games below sync through `common/turn-sync.js`: the host sends the whole game state only when it changes (versioned, sticky so late joiners get it), guests send numbered actions, and a promoted guest resumes from the last state it saw. Nothing moves between updates, so lag only delays a turn instead of making it jitter.
+Turn-based and secret-pick games below sync through `common/turn-sync.js` (secret picks, bids, guesses and steps stay on the host until the reveal; a promoted host asks for them again): the host sends the whole game state only when it changes (versioned, sticky so late joiners get it), guests send numbered actions, and a promoted guest resumes from the last state it saw. Nothing moves between updates, so lag only delays a turn instead of making it jitter.
 
 - `bank-or-bust/`: Bank or Bust, push-your-luck dice up to 14 with bots; one shared 2-dice roll per beat, pot grows for everyone still in, bank (button / Space) to keep it; a single 1 busts the round, snake eyes wipe the total, doubles count twice, first roll of a round is safe, bank grace for lag; tumbling 3D dice, pawns sit when banked and tip when bust, coin stacks.
 - `fence-fields/`: Fence Fields, dots and boxes up to 14 with bots on a 3D meadow; board size scales with player count (or host pick), one fence per turn, closing a pen claims it (owner-colored tile + grazing sheep) and keeps the turn, turn clock (timeout builds a random fence), bots take free pens, avoid third sides, then give away the shortest chain.
+- `treasure-auction/`: Treasure Auction, sealed-bid auction up to 14 with bots; every lot everyone bids in secret, treasure goes to the highest bid nobody matched (ties cancel), a cursed idol makes everyone pay their bid and sticks the lowest bidder with it; 40 coins each, score = coins + loot, 6/8/10 lots.
+- `jar-guess/`: Jar Guess, candy-jar estimation up to 14 with bots; seeded jar / tube / fishbowl / box packed bottom-up (every tab builds the same jar), drag to turn it, secret guesses, closest 5 / 3 / 2, within 10% = 1, exact +3, jars fill up each round.
+- `gem-diggers/`: Gem Diggers, turn-based digging up to 14 with bots on a seeded 8-12 square meadow; gem +3 and dig again, bomb −2, empty tiles show adjacent bomb and gem counts and flood open, turn clock (timeout digs a random tile), bots read the numbers.
+- `lucky-low/`: Lucky Low, bluffing numbers up to 14 with bots; secret picks from 1 to players+3 (6-16), the lowest number nobody else picked wins and scores its own value, tokens drop on numbered pillars in order on the reveal.
+- `picnic-dash/`: Picnic Dash, simultaneous-turn grid race up to 14 with bots; each turn everyone picks a step in secret and all critters hop at once, same square or swapping = both bounce, walking into a stander bounces, apples 1 / watermelons 3, trees never cut the meadow apart, 15/20/30 turns.
 - `siege-hills/`: Siege Hills, turn-based catapult artillery up to 14 with bots; side-on heightmap strip, drag-back slingshot aim with arc preview (no wind) or arrow keys, random wind per turn, host simulates each shot and guests replay its arc, craters carve the ground, blast falloff + direct-hit bonus + fall damage, tide rises each lap late in a round, survive +3 / knockout +1 over 1-5 rounds.
 
 ## How these were made

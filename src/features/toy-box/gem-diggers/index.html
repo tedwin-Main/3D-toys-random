@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Gem Diggers</title>
+<style>
+  :root { --ink: #fff; --card: rgba(18, 24, 14, 0.72); --gem: #5fe3ff; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a9d6f5; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; max-width: 250px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 40px; text-align: right; }
+  #board .row.me span { color: var(--gem); font-weight: 800; }
+  #board .row.turn { background: rgba(255, 255, 255, 0.12); border-radius: 6px; }
+  #turn { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 16px; font-weight: 800; display: none; white-space: nowrap; }
+  #big { position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.9; max-width: 300px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gem); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 900px) { #hint { display: none; } }
+  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } #board { top: auto; bottom: 12px; right: 10px; font-size: 11.5px; min-width: 150px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="turn" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card">On <b>your turn</b> click a grass tile to dig. 💎 gem = +3 and dig again · 💣 bomb = −2 · empty tiles show how many <b style="color:#ff6b6b">bombs</b> and <b style="color:#5fe3ff">gems</b> touch them. Most gems when the last one is found wins.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/gem-diggers/index.html
+ * PURPOSE: online turn-based dig game for 2-14 on a shared field: dig one tile per turn, gem = +3 and dig again, bomb = -2, empty tiles hint how many bombs and gems touch them; seeded field, host-run, state sent only on change
+ * UI: Gem Diggers page (lobby overlay, turn banner, scoreboard, 3D meadow of grass tiles with hint numbers, gems and craters)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, sky, sun, island under the field
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xa9d6f5);
+scene.fog = new THREE.Fog(0xa9d6f5, 30, 70);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 150);
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x6b8f4a, 1.2));
+const sun = new THREE.DirectionalLight(0xfff2d8, 2.2);
+sun.position.set(8, 18, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14 });
+scene.add(sun);
+const island = new THREE.Mesh(new THREE.CylinderGeometry(11, 6, 3, 9), new THREE.MeshStandardMaterial({ color: 0x8a5a33, flatShading: true }));
+island.position.y = -1.8;
+scene.add(island);
+
+// Field > tiles: grass block while hidden; dug = dirt pit with a hint decal, gem crystal or bomb crater
+const TILE = 1.2;
+const grassMat = new THREE.MeshStandardMaterial({ color: 0x6cc24a, roughness: 0.9 });
+const grassHot = new THREE.MeshStandardMaterial({ color: 0x9be36f, roughness: 0.9, emissive: 0x2a5a10, emissiveIntensity: 0.4 });
+const dirtMat = new THREE.MeshStandardMaterial({ color: 0x8b6239, roughness: 1 });
+const scorchMat = new THREE.MeshStandardMaterial({ color: 0x2b2420, roughness: 1 });
+const tileGeo = new RoundedBoxGeometry(TILE * 0.96, 0.5, TILE * 0.96, 2, 0.08);
+const gemGeo = new THREE.OctahedronGeometry(0.3, 0).scale(1, 1.4, 1);
+const bombGeo = new THREE.SphereGeometry(0.26, 16, 12);
+const decalCache = new Map();
+function decal(nb, ng) {
+  const key = `${nb}|${ng}`;
+  if (decalCache.has(key)) return decalCache.get(key);
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.font = '900 54px ui-rounded, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  if (nb && ng) { g.fillStyle = '#ff5d5d'; g.fillText(nb, 40, 66); g.fillStyle = '#5fe3ff'; g.fillText(ng, 88, 66); }
+  else if (nb) { g.fillStyle = '#ff5d5d'; g.fillText(nb, 64, 66); }
+  else if (ng) { g.fillStyle = '#5fe3ff'; g.fillText(ng, 64, 66); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false });
+  decalCache.set(key, m);
+  return m;
+}
+const field = new THREE.Group();
+scene.add(field);
+let tiles = [], fieldKey = '';
+function buildField(n) {
+  field.clear();
+  tiles = [];
+  const off = ((n - 1) * TILE) / 2;
+  for (let i = 0; i < n * n; i++) {
+    const x = (i % n) * TILE - off, z = Math.floor(i / n) * TILE - off;
+    const block = new THREE.Mesh(tileGeo, grassMat); block.position.set(x, 0.25, z); block.castShadow = block.receiveShadow = true; block.userData.i = i;
+    const pit = new THREE.Mesh(new THREE.BoxGeometry(TILE * 0.96, 0.1, TILE * 0.96), dirtMat); pit.position.set(x, -0.05, z); pit.receiveShadow = true;
+    field.add(block, pit);
+    tiles.push({ block, pit, x, z, shown: null, prop: null, lift: 1 });
+  }
+}
+// sync tile visuals to the revealed board
+function showCell(t, cell) {
+  t.shown = cell;
+  if (t.prop) { field.remove(t.prop); t.prop = null; }
+  if (!cell) return;
+  if (cell.k === 'g') {
+    const m = new THREE.Mesh(gemGeo, new THREE.MeshStandardMaterial({ color: 0x5fe3ff, emissive: 0x0a5a7a, emissiveIntensity: 0.6, roughness: 0.15, flatShading: true }));
+    m.position.set(t.x, 0.45, t.z); m.castShadow = true; t.prop = m;
+  } else if (cell.k === 'b') {
+    const m = new THREE.Mesh(bombGeo, scorchMat); m.position.set(t.x, 0.2, t.z); t.prop = m;
+    t.pit.material = scorchMat;
+  } else if (cell.nb || cell.ng) {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(TILE * 0.9, TILE * 0.9).rotateX(-Math.PI / 2), decal(cell.nb, cell.ng)); m.position.set(t.x, 0.005, t.z); t.prop = m;
+  }
+  if (t.prop) field.add(t.prop);
+}
+
+// FX > dirt / spark / smoke bursts
+const FX = 400, fxGeo = new THREE.BufferGeometry(), fxPos = new Float32Array(FX * 3), fxVel = new Float32Array(FX * 3), fxCol = new Float32Array(FX * 3), fxLife = new Float32Array(FX);
+fxGeo.setAttribute('position', new THREE.BufferAttribute(fxPos, 3));
+fxGeo.setAttribute('color', new THREE.BufferAttribute(fxCol, 3));
+const fx = new THREE.Points(fxGeo, new THREE.PointsMaterial({ size: 0.16, vertexColors: true }));
+fx.frustumCulled = false;
+scene.add(fx);
+for (let i = 0; i < FX; i++) fxPos[i * 3 + 1] = -99;
+let fxNext = 0;
+const _c = new THREE.Color();
+function burst(x, z, n, color, up = 5) {
+  for (let k = 0; k < n; k++) {
+    const i = fxNext++ % FX, a = Math.random() * Math.PI * 2, s = 1 + Math.random() * 2.5;
+    fxPos.set([x, 0.4, z], i * 3); fxVel.set([Math.cos(a) * s, up * (0.5 + Math.random()), Math.sin(a) * s], i * 3);
+    _c.set(color).toArray(fxCol, i * 3); fxLife[i] = 0.6 + Math.random() * 0.5;
+  }
+}
+
+// Players > diggers parked around the field edge with a shovel when it is their turn
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(18,24,14,0.78)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2, 0.5, 1); s.renderOrder = 5;
+  return s;
+}
+const pawns3d = new Map();
+function makeDigger(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.4, 6, 12), mat); torso.position.y = 0.5;
+  const hat = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xffd23f })); hat.position.y = 0.82;
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff6a0 })); lamp.position.set(0, 0.92, 0.26);
+  torso.castShadow = true;
+  body.add(torso, hat, lamp);
+  const shovel = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x8b5a2b })); stick.position.y = 0.45;
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.03), new THREE.MeshStandardMaterial({ color: 0xb0b8c0, metalness: 0.4, roughness: 0.4 }));
+  shovel.add(stick, blade); shovel.position.set(0.38, 0.1, 0.1); shovel.rotation.z = -0.3;
+  body.add(shovel);
+  const tag = nameTag(p.nick, p.color); tag.position.y = 1.5;
+  g.add(body, tag);
+  g.userData = { body, shovel };
+  scene.add(g);
+  return g;
+}
+
+// Audio > dig thunk, gem chime, boom, turn ping
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  dig() { noise(0.12, 0.12, 700, 200); },
+  gem(me) { [1319, 1760, 2093].forEach((f, i) => tone(f, f, 0.14, me ? 0.08 : 0.04, 'triangle', i * 0.06)); },
+  boom() { noise(0.6, 0.3, 300, 60); tone(120, 40, 0.5, 0.16, 'sawtooth'); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: seeded hidden field; gem = +3 + dig again, bomb = -2, empty = hint + turn passes; ends when every gem is out
+const INTRO = 2.5, FINAL_T = 12, GEM_PTS = 3, BOMB_PTS = -2, GEM_FRAC = 0.14, BOMB_FRAC = 0.12;
+const BOT_NAMES = ['Digby', 'Pickaxe Pat', 'Molely', 'Rocky', 'Gemma', 'Shovelina', 'Burrow', 'Nugget', 'Quartz', 'Spade', 'Tunnel Tim', 'Ore-lando', 'Pebbles', 'Drillbit'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// S: { mode, ph, tt, clock, n, seed, rev: [null | { k: 'g'|'b'|'e', nb, ng, by }], turn, last: { i, k, by, mv }, mv, P: [{ id, nick, color, bot, score, gems, skill }] }
+let S = null;
+const rng = Math.random;
+const player = (id) => S.P.find((p) => p.id === id);
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const sizeFor = (n) => (n <= 4 ? 8 : n <= 8 ? 10 : 12);
+function neighbors(i, n) {
+  const x = i % n, y = Math.floor(i / n), out = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < n && ny < n) out.push(ny * n + nx); }
+  return out;
+}
+// hidden layout from the seed: any tab (and a promoted host) rebuilds the same field
+let layoutKey = '', layout = [];
+function getLayout() {
+  const key = `${S.seed}|${S.n}`;
+  if (key === layoutKey) return layout;
+  const r = mulberry(S.seed), N = S.n * S.n, order = [...Array(N).keys()];
+  for (let i = N - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  const gems = Math.round(N * GEM_FRAC), bombs = Math.round(N * BOMB_FRAC);
+  layout = new Array(N).fill('e');
+  order.slice(0, gems).forEach((i) => (layout[i] = 'g'));
+  order.slice(gems, gems + bombs).forEach((i) => (layout[i] = 'b'));
+  layoutKey = key;
+  return layout;
+}
+const gemsTotal = () => getLayout().filter((k) => k === 'g').length;
+const gemsLeft = () => gemsTotal() - S.rev.filter((c) => c?.k === 'g').length;
+function cellInfo(i) {
+  const L = getLayout(), nbs = neighbors(i, S.n);
+  return { k: L[i], nb: nbs.filter((j) => L[j] === 'b').length, ng: nbs.filter((j) => L[j] === 'g').length };
+}
+function newMatchState(mode, P, clock) {
+  const n = sizeFor(P.length);
+  return { mode, ph: 'intro', tt: INTRO, clock, n, seed: 1 + Math.floor(rng() * 2 ** 30), rev: new Array(n * n).fill(null), turn: 0, last: null, mv: 0, P };
+}
+// host: one dig by the player whose turn it is; returns false when not allowed
+function dig(id, i) {
+  const p = S.P[S.turn];
+  if (S.ph !== 'play' || !p || p.id !== id || !Number.isInteger(i) || i < 0 || i >= S.rev.length || S.rev[i]) return false;
+  const c = cellInfo(i);
+  S.rev[i] = { ...c, by: id };
+  S.mv++;
+  S.last = { i, k: c.k, by: id, mv: S.mv };
+  if (c.k === 'g') { p.score += GEM_PTS; p.gems++; }
+  else if (c.k === 'b') p.score += BOMB_PTS;
+  else if (!c.nb && !c.ng) {
+    // open meadow: flood out to the next hint numbers (never uncovers gems or bombs)
+    const stack = [i];
+    while (stack.length) {
+      for (const j of neighbors(stack.pop(), S.n)) {
+        if (S.rev[j]) continue;
+        const cj = cellInfo(j);
+        if (cj.k !== 'e') continue;
+        S.rev[j] = { ...cj, by: id };
+        if (!cj.nb && !cj.ng) stack.push(j);
+      }
+    }
+  }
+  if (gemsLeft() === 0) { Object.assign(S, { ph: 'final', tt: FINAL_T }); return true; }
+  // gem keeps the shovel; anything else passes it on
+  if (c.k !== 'g') S.turn = (S.turn + 1) % S.P.length;
+  startTurn();
+  return true;
+}
+function startTurn() { S.tt = S.clock; const p = S.P[S.turn]; if (p) p.think = 0.9 + rng() * 1.3; }
+// bots: estimate gem / bomb odds from the hint numbers around each hidden tile, dig the best expected value
+function estimate() {
+  const L = S.rev, n = S.n, hidden = [];
+  for (let i = 0; i < L.length; i++) if (!L[i]) hidden.push(i);
+  const bombsLeft = Math.round(n * n * BOMB_FRAC) - L.filter((c) => c?.k === 'b').length;
+  const gB = Math.max(0, bombsLeft) / Math.max(1, hidden.length), gG = gemsLeft() / Math.max(1, hidden.length);
+  return hidden.map((i) => {
+    let pb = null, pg = null, sure0 = false, sureG = false, cnt = 0, sb = 0, sg = 0;
+    for (const j of neighbors(i, n)) {
+      const c = L[j];
+      if (!c || c.k !== 'e') continue;
+      const hn = neighbors(j, n).filter((q) => !L[q]);
+      const remB = c.nb - neighbors(j, n).filter((q) => L[q]?.k === 'b').length, remG = c.ng - neighbors(j, n).filter((q) => L[q]?.k === 'g').length;
+      const b = remB / hn.length, gg = remG / hn.length;
+      if (remB === 0 && remG === 0) sure0 = true;
+      if (b === 0 && gg === 1) sureG = true;
+      sb += b; sg += gg; cnt++;
+    }
+    if (cnt) { pb = sb / cnt; pg = sg / cnt; } else { pb = gB; pg = gG; }
+    if (sureG) { pb = 0; pg = 1; }
+    if (sure0) { pb = 0; pg = 0; }
+    return { i, v: pg * GEM_PTS - pb * -BOMB_PTS - (1 - pg - pb) * 0.4 };
+  });
+}
+function botMove(p) {
+  const opts = estimate().map((o) => ({ ...o, v: o.v + (rng() - 0.5) * (1.2 - p.skill) * 2 }));
+  return opts.sort((a, b) => b.v - a.v)[0]?.i;
+}
+// shot clock ran out: a random hidden tile, so waiting never beats choosing
+function autoDig() {
+  const hidden = S.rev.map((c, i) => (c ? -1 : i)).filter((i) => i >= 0);
+  dig(S.P[S.turn].id, hidden[Math.floor(rng() * hidden.length)]);
+}
+
+// Run engine > host tick: intro, bot turns, shot clock; publish when anything but the clock changed
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
+let lastSig = '', prevS = null;
+function hostTick(dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) { S.ph = 'play'; S.turn = 0; startTurn(); }
+  else if (S.ph === 'play') {
+    const p = S.P[S.turn];
+    if (!p) { S.turn = 0; startTurn(); }
+    else if (p.bot) { p.think -= dt; if (p.think <= 0) dig(p.id, botMove(p)); }
+    else if (S.tt <= 0) autoDig();
+  } else if (S.ph === 'final' && S.tt <= 0) {
+    if (S.mode === 'attract') startAttract();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+  const s = sig();
+  if (s !== lastSig) {
+    lastSig = s;
+    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
+    onChange(prevS, S);
+    prevS = JSON.parse(s);
+  }
+}
+function startAttract() {
+  const P = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.4 + rng() * 0.5 }));
+  S = newMatchState('attract', P, 15);
+  S.tt = 1;
+  prevS = null; lastSig = '';
+}
+
+// Multiplayer > lobby + state sync (host publishes S, guests send digs)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'dig' && S.mode === 'match') dig(from, a.i); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'gem-diggers', title: 'Gem Diggers', emoji: '⛏️', accent: '#5fe3ff',
+  blurb: 'Take turns digging one tile of a shared meadow. Gems score and let you dig again, bombs cost you. Empty tiles show how many bombs and gems touch them, so read the numbers.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 diggers (humans + bots). The field grows with the room: 8×8, 10×10 or 12×12.',
+  settings: [{ key: 'clock', label: 'Turn clock', options: [[10, '10 s'], [15, '15 s'], [25, '25 s']], value: 15 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    const P = [];
+    for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.35 + rng() * 0.55 });
+    S = newMatchState('match', P, settings.clock ?? 15);
+    prevS = null; lastSig = '';
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+  document.getElementById('turn').style.display = on ? 'block' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id)), cur = S.P[S.turn];
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
+  }
+  // keep the shovel with whoever had it (or the next seat if they left)
+  const k = S.P.indexOf(cur);
+  if (k >= 0) S.turn = k; else { S.turn %= Math.max(1, S.P.length); startTurn(); }
+}
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (`${cur.seed}|${cur.n}` !== fieldKey) { fieldKey = `${cur.seed}|${cur.n}`; buildField(cur.n); }
+  if (cur.last && cur.last.mv !== prev?.last?.mv) {
+    const t = tiles[cur.last.i], who = cur.P.find((p) => p.id === cur.last.by);
+    if (t) {
+      if (cur.last.k === 'g') { sfx.gem(cur.last.by === me); burst(t.x, t.z, 26, 0x5fe3ff); if (match) flash(`<small>${esc(who?.nick ?? '')} digs again</small>💎 +${GEM_PTS}`); }
+      else if (cur.last.k === 'b') { sfx.boom(); burst(t.x, t.z, 40, 0x555555, 7); burst(t.x, t.z, 20, 0xff8c2a, 5); shake = 0.5; if (match) flash(`<small>${esc(who?.nick ?? '')}</small>💣 ${BOMB_PTS}`); }
+      else { sfx.dig(); burst(t.x, t.z, 14, 0x8b6239, 4); }
+    }
+  }
+  if (match && cur.ph === 'play' && (prev?.turn !== cur.turn || prev?.ph !== 'play') && cur.P[cur.turn]?.id === me) sfx.turn();
+}
+
+// Input > hover + click a grass tile on my turn
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let hoverI = -1;
+function pickTile(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(tiles.filter((t) => !t.shown).map((t) => t.block), false)[0];
+  return hit ? hit.object.userData.i : -1;
+}
+const myTurn = () => S.mode === 'match' && S.ph === 'play' && S.P[S.turn]?.id === lobby.room?.me;
+addEventListener('pointermove', (e) => { hoverI = myTurn() ? pickTile(e) : -1; });
+addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || !myTurn()) return;
+  const i = pickTile(e);
+  if (i >= 0) sync.act({ t: 'dig', i });
+});
+
+// HUD > turn banner, scoreboard, banners
+const bigEl = document.getElementById('big'), turnEl = document.getElementById('turn');
+let bigText = '', flashT = 0, lastClock = 0, hudT = 0, shake = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 1.6; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function hud(dt) {
+  if (S.mode !== 'match') return;
+  flashT -= dt;
+  const me = player(lobby.room?.me), up = S.P[S.turn], clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.n}×${S.n} meadow · ${gemsTotal()} gems hidden</small>Gem Diggers`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>richest digger with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  turnEl.innerHTML = S.ph !== 'play' ? (S.ph === 'final' ? '🏁 all gems found' : '⛏️ get ready') : up?.id === me?.id ? `<b>Your dig</b> · ${clock}s` : `${esc(up?.nick ?? '')} is digging${up?.bot ? '' : ` · ${clock}s`}`;
+  if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = `💎 ${gemsLeft()} of ${gemsTotal()} left`;
+  document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--gem)">${me.score}</b> · ${me.gems} gems` : 'Watching';
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p === up && S.ph === 'play' ? 'turn' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p === up && S.ph === 'play' ? '⛏️ ' : ''}${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: dug tiles sink away, gems spin, diggers ring the field, active digger steps up
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 16, 14), camLook = new THREE.Vector3(0, 0, 0.5), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  tiles.forEach((t, i) => {
+    const cell = S.rev?.[i] ?? null;
+    if (cell !== t.shown && JSON.stringify(cell) !== JSON.stringify(t.shown)) showCell(t, cell);
+    t.lift += ((cell ? 0 : 1) - t.lift) * Math.min(1, dt * 8);
+    t.block.visible = t.lift > 0.02;
+    t.block.position.y = 0.25 - (1 - t.lift) * 0.6;
+    t.block.scale.setScalar(0.4 + t.lift * 0.6);
+    t.block.material = i === hoverI ? grassHot : grassMat;
+    if (t.prop && cell?.k === 'g') { t.prop.rotation.y = time * 1.5 + i; t.prop.position.y = 0.45 + Math.sin(time * 3 + i) * 0.06; }
+  });
+  for (let i = 0; i < FX; i++) {
+    if (fxLife[i] <= 0) continue;
+    fxLife[i] -= dt; fxVel[i * 3 + 1] -= 14 * dt;
+    for (let k = 0; k < 3; k++) fxPos[i * 3 + k] += fxVel[i * 3 + k] * dt;
+    if (fxLife[i] <= 0) fxPos[i * 3 + 1] = -99;
+  }
+  fxGeo.attributes.position.needsUpdate = true;
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id)) { scene.remove(g); pawns3d.delete(id); }
+  const half = (S.n * TILE) / 2 + 1.1, nP = S.P.length;
+  S.P.forEach((p, i) => {
+    let g = pawns3d.get(p.id);
+    if (!g) { g = makeDigger(p); pawns3d.set(p.id, g); }
+    // walk the square edge of the field
+    const u = (i + 0.5) / nP * 4, side = Math.floor(u), f = u - side, s = half * 2 * f - half;
+    const [x, z] = [[s, -half], [half, s], [-s, half], [-half, -s]][side];
+    const active = S.ph === 'play' && S.P[S.turn] === p;
+    g.position.set(x * (active ? 0.94 : 1), 0, z * (active ? 0.94 : 1));
+    g.lookAt(0, 0, 0);
+    g.userData.body.position.y = active ? Math.abs(Math.sin(time * 6)) * 0.15 : 0;
+    g.userData.shovel.rotation.x = active ? Math.sin(time * 8) * 0.5 : 0;
+  });
+  hud(dt);
+  const fit = Math.max(1, 1.15 / camera.aspect), d = (S.n * TILE) / 12;
+  camPos.lerp(_v.set(0, 16 * d * fit, 13 * d * fit), 1 - Math.exp(-dt * 3));
+  shake = Math.max(0, shake - dt);
+  camera.position.copy(camPos).add(_v.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

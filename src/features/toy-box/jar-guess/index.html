@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Jar Guess</title>
+<style>
+  :root { --ink: #fff; --card: rgba(20, 16, 40, 0.72); --pop: #ff8fd1; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f7e9d7; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; max-width: 240px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 200px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 80px; text-align: right; }
+  #board .row.me span { color: var(--pop); font-weight: 800; }
+  #big { position: fixed; top: 16%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; color: #fff; text-shadow: 0 4px 0 rgba(60, 20, 70, 0.45); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #guessbox { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 10px 12px; display: none; text-align: center; width: min(400px, calc(100% - 24px)); }
+  #guessbox .row { display: flex; gap: 6px; justify-content: center; align-items: center; }
+  #guessbox input[type=number] { font: inherit; font-size: 34px; font-weight: 900; width: 140px; text-align: center; border-radius: 12px; border: 0; padding: 4px; color: #2a1640; }
+  #guessbox button { font: inherit; font-weight: 800; color: inherit; background: rgba(255, 255, 255, 0.16); border: 0; border-radius: 10px; padding: 9px 11px; cursor: pointer; font-size: 15px; }
+  #guessbox #lockBtn { width: 100%; margin-top: 8px; font-size: 20px; padding: 12px; color: #2a1640; background: linear-gradient(#ffd0ec, #ff8fd1); box-shadow: 0 4px 0 #a8437e; }
+  #guessbox #lockBtn.locked { background: linear-gradient(#c9f7b5, #7ddc6a); box-shadow: 0 4px 0 #2f7a2f; }
+  #guessbox .s { font-size: 12.5px; opacity: 0.85; margin-top: 6px; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.9; max-width: 270px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--pop); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 900px) { #hint { display: none; } }
+  @media (max-width: 700px) { #big { top: 22%; } #board { top: auto; bottom: 200px; right: 10px; font-size: 11.5px; min-width: 160px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="guessbox" class="card">
+  <div class="row"><button data-d="-10">−10</button><button data-d="-1">−1</button><input id="guessIn" type="number" inputmode="numeric" min="1" max="999" value="" placeholder="?" /><button data-d="1">+1</button><button data-d="10">+10</button></div>
+  <button id="lockBtn">LOCK GUESS</button>
+  <div class="s" id="guessS"></div>
+</div>
+<div id="hint" class="card">How many candies are in the jar? <b>Drag</b> to turn it. Everyone guesses in secret; closest scores 5, then 3 and 2, anyone within 10% gets 1, an exact guess +3 bonus. <b>Enter</b> locks.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/jar-guess/index.html
+ * PURPOSE: online estimation party game for 2-14: a seeded glass jar of candies each round, everyone guesses the count in secret, closest scores most; host-run, guesses stay on the host until the reveal, state sent only on change
+ * UI: Jar Guess page (lobby overlay, guess box, scoreboard, banner, 3D kitchen table with a turnable jar + guessing pawns)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, warm kitchen light, wooden table
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf7e9d7);
+scene.fog = new THREE.Fog(0xf7e9d7, 26, 60);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 120);
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0xc9a77a, 1.3));
+const sun = new THREE.DirectionalLight(0xfff0d8, 2.2);
+sun.position.set(6, 14, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12 });
+scene.add(sun);
+const table = new THREE.Mesh(new RoundedBoxGeometry(18, 0.6, 12, 3, 0.2), new THREE.MeshStandardMaterial({ color: 0xc58a52, roughness: 0.7 }));
+table.position.y = -0.3; table.receiveShadow = true;
+const cloth = new THREE.Mesh(new THREE.CircleGeometry(3.2, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 }));
+cloth.position.y = 0.01; cloth.receiveShadow = true;
+scene.add(table, cloth);
+
+// Jar > seeded packing: lattice cells inside the jar shape, filled bottom-up, so every tab builds the same jar
+function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const SHAPES = {
+  cyl: { name: 'jar', h: 3.2, inside: (x, y, z) => Math.hypot(x, z) < 1.35, geo: () => new THREE.CylinderGeometry(1.45, 1.45, 3.3, 48, 1, true).translate(0, 1.65, 0) },
+  tall: { name: 'tube', h: 4.4, inside: (x, y, z) => Math.hypot(x, z) < 0.9, geo: () => new THREE.CylinderGeometry(1, 1, 4.5, 40, 1, true).translate(0, 2.25, 0) },
+  bowl: { name: 'fishbowl', h: 3.0, inside: (x, y, z) => Math.hypot(x, y - 1.6, z) < 1.55, geo: () => new THREE.SphereGeometry(1.7, 40, 28, 0, Math.PI * 2, 0.45, Math.PI - 0.45).translate(0, 1.6, 0) },
+  box: { name: 'box', h: 2.8, inside: (x, y, z) => Math.abs(x) < 1.2 && Math.abs(z) < 0.95, geo: () => new THREE.BoxGeometry(2.6, 2.9, 2.1).translate(0, 1.45, 0) },
+};
+const CANDY_COLORS = [0xff4d6d, 0xffd23f, 0x3ddc97, 0x4cc9f0, 0xb388ff, 0xff8c42, 0xffffff, 0xff70c6];
+function packJar(shape, n, seed) {
+  const sh = SHAPES[shape], r0 = mulberry(seed);
+  // shrink candies until the jar has room for all of them with a little headroom
+  let r = 0.42, cells = [];
+  for (let tries = 0; tries < 40; tries++) {
+    const d = r * 2.05;
+    cells = [];
+    for (let y = r; y < sh.h - r; y += d * 0.9) for (let x = -1.7; x <= 1.7; x += d) for (let z = -1.7; z <= 1.7; z += d) {
+      const ox = (Math.floor(y / d) % 2) * d * 0.5;
+      if (sh.inside(x + ox, y, z) && sh.inside(x + ox + Math.sign(x + ox) * r * 0.8, y, z + Math.sign(z) * r * 0.8)) cells.push([x + ox, y, z]);
+    }
+    if (cells.length >= n * 1.1) break;
+    r *= 0.92;
+  }
+  // bottom-up with seeded shuffles inside each layer, plus a little jitter so it looks poured
+  const byLayer = new Map();
+  for (const c of cells) { const k = c[1].toFixed(3); if (!byLayer.has(k)) byLayer.set(k, []); byLayer.get(k).push(c); }
+  const out = [];
+  for (const k of [...byLayer.keys()].sort((a, b) => a - b)) {
+    const layer = byLayer.get(k);
+    for (let i = layer.length - 1; i > 0; i--) { const j = Math.floor(r0() * (i + 1)); [layer[i], layer[j]] = [layer[j], layer[i]]; }
+    for (const [x, y, z] of layer) { if (out.length >= n) break; out.push([x + (r0() - 0.5) * r * 0.3, y + (r0() - 0.5) * r * 0.2, z + (r0() - 0.5) * r * 0.3, CANDY_COLORS[Math.floor(r0() * CANDY_COLORS.length)], r0() * 6.28]); }
+    if (out.length >= n) break;
+  }
+  return { r, pts: out };
+}
+const jar = new THREE.Group();
+scene.add(jar);
+const glassMat = new THREE.MeshStandardMaterial({ color: 0xd8f1ff, transparent: true, opacity: 0.22, roughness: 0.05, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false });
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xe6f6ff, transparent: true, opacity: 0.5, roughness: 0.1 });
+let candyMesh = null, jarKey = '', fillT = 1;
+function buildJar(j) {
+  jar.clear();
+  const sh = SHAPES[j.shape];
+  const glass = new THREE.Mesh(sh.geo(), glassMat); glass.renderOrder = 2;
+  jar.add(glass);
+  if (j.shape !== 'bowl') { const base = new THREE.Mesh(j.shape === 'box' ? new THREE.BoxGeometry(2.6, 0.08, 2.1) : new THREE.CylinderGeometry(j.shape === 'tall' ? 1 : 1.45, j.shape === 'tall' ? 1 : 1.45, 0.08, 40), rimMat); base.position.y = 0.04; jar.add(base); }
+  const { r, pts } = packJar(j.shape, j.n, j.seed);
+  const geo = j.candy === 'cube' ? new RoundedBoxGeometry(r * 1.5, r * 1.5, r * 1.5, 2, r * 0.3) : j.candy === 'bean' ? new THREE.SphereGeometry(r, 14, 10).scale(1.25, 0.85, 0.85) : new THREE.SphereGeometry(r, 14, 10);
+  candyMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.35 }), pts.length);
+  candyMesh.castShadow = true;
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color();
+  pts.forEach(([x, y, z, col, rot], i) => { q.setFromEuler(new THREE.Euler(rot, rot * 1.7, 0)); m.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1)); candyMesh.setMatrixAt(i, m); candyMesh.setColorAt(i, c.setHex(col)); });
+  candyMesh.userData.pts = pts;
+  jar.add(candyMesh);
+  fillT = 0;
+}
+// pour-in: candies appear bottom-up over the first seconds
+function pour(dt) {
+  if (!candyMesh || fillT >= 1) return;
+  fillT = Math.min(1, fillT + dt / 2.2);
+  candyMesh.count = Math.round(candyMesh.userData.pts.length * fillT);
+}
+// drag to turn the jar; idles with a slow spin
+let spin = 0, dragX = null, spinV = 0.25;
+addEventListener('pointerdown', (e) => { if (e.target === renderer.domElement) dragX = e.clientX; });
+addEventListener('pointermove', (e) => { if (dragX !== null) { spin += (e.clientX - dragX) * 0.01; spinV = (e.clientX - dragX) * 0.6; dragX = e.clientX; } });
+addEventListener('pointerup', () => (dragX = null));
+
+// Players > little pawns around the far edge with a guess card
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(20,16,40,0.78)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2, 0.5, 1); s.renderOrder = 5;
+  return s;
+}
+function cardSprite() {
+  const c = document.createElement('canvas'); c.width = 160; c.height = 96;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(1.25, 0.75, 1); s.renderOrder = 6;
+  s.userData = { c, t, key: null };
+  return s;
+}
+function drawCard(s, text, color, best) {
+  const key = `${text}|${best}`;
+  if (s.userData.key === key) return;
+  s.userData.key = key;
+  const g = s.userData.c.getContext('2d');
+  g.clearRect(0, 0, 160, 96);
+  s.visible = text !== '';
+  if (!s.visible) return;
+  g.fillStyle = best ? '#ffe066' : '#fff'; g.strokeStyle = color; g.lineWidth = 8;
+  g.beginPath(); g.roundRect(6, 6, 148, 84, 16); g.fill(); g.stroke();
+  g.fillStyle = '#2a1640'; g.font = '900 50px ui-rounded, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 80, 52, 136);
+  s.userData.t.needsUpdate = true;
+}
+const pawns3d = new Map();
+function makePawn(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.45 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.45, 6, 14), mat); torso.position.y = 0.55;
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x1b1b22 });
+  for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), eyeMat); e.position.set(s * 0.11, 0.78, 0.27); body.add(e); }
+  torso.castShadow = true; body.add(torso);
+  const tag = nameTag(p.nick, p.color); tag.position.y = 1.45;
+  const card = cardSprite(); card.position.y = 2.15;
+  g.add(body, tag, card);
+  g.userData = { body, card };
+  scene.add(g);
+  return g;
+}
+
+// Audio > candy pour rattle, lock blip, drumroll, cheer
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  pour() { for (let i = 0; i < 14; i++) setTimeout(() => tone(1800 + Math.random() * 1600, 1400, 0.03, 0.025, 'triangle'), i * 120 + Math.random() * 60); },
+  lock(me) { if (me) tone(700, 1050, 0.08, 0.07, 'triangle'); },
+  drum() { for (let i = 0; i < 10; i++) setTimeout(() => noise(0.05, 0.08, 500, 200), i * 70); },
+  reveal(me) { [659, 880, 1046].forEach((f, i) => tone(f, f, 0.16, me ? 0.09 : 0.04, 'square', i * 0.08)); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: secret guesses; points by closeness rank (ties share), within 10% = 1, exact +3
+const INTRO = 2.5, LOOK_T = 2.6, GUESS_T = 20, REVEAL_T = 6, FINAL_T = 12;
+const RANGES = [[15, 40], [30, 70], [50, 110], [80, 160], [120, 220], [160, 300], [200, 380], [260, 450]];
+const RANK_PTS = [5, 3, 2];
+const BOT_NAMES = ['Gumdrop', 'Counter', 'Sprinkles', 'Jellybean', 'Eyeball', 'Sugarplum', 'Lolly', 'Toffee', 'Nougat', 'Bonbon', 'Caramel', 'Fudge', 'Truffle', 'Mochi'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// S: { mode, ph, tt, rd, rounds, jar: { shape, candy, n, seed }, res: { g: {id: guess}, pts: {id: pts} }, P: [{ id, nick, color, bot, score, lock, skill, at }] }
+let S = null;
+const rng = Math.random;
+const secret = new Map();
+const player = (id) => S.P.find((p) => p.id === id);
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, skill: 0.3 + rng() * 0.6, at: 0 }; }
+function startRound(rd) {
+  secret.clear();
+  for (const p of S.P) p.lock = false;
+  const [lo, hi] = RANGES[Math.min(rd - 1, RANGES.length - 1)];
+  const shape = Object.keys(SHAPES)[Math.floor(rng() * 4)], candy = ['ball', 'bean', 'cube'][Math.floor(rng() * 3)];
+  Object.assign(S, { rd, ph: 'look', tt: LOOK_T, jar: { shape, candy, n: lo + Math.floor(rng() * (hi - lo + 1)), seed: 1 + Math.floor(rng() * 2 ** 30) }, res: null });
+}
+function placeGuess(id, v) {
+  const p = player(id);
+  if (!p || S.ph !== 'guess' || !Number.isInteger(v) || v < 1 || v > 9999) return false;
+  secret.set(id, v); p.lock = true;
+  return true;
+}
+// pure scoring so it can be checked on its own: guesses {id: g}, n = answer -> {id: pts}
+function scoreGuesses(g, n) {
+  const ids = Object.keys(g).filter((id) => g[id] != null);
+  const err = (id) => Math.abs(g[id] - n);
+  const errs = [...new Set(ids.map(err))].sort((a, b) => a - b);
+  const pts = {};
+  for (const id of ids) {
+    const rank = errs.indexOf(err(id));
+    pts[id] = (RANK_PTS[rank] ?? (err(id) <= n * 0.1 ? 1 : 0)) + (err(id) === 0 ? 3 : 0);
+  }
+  return pts;
+}
+function reveal() {
+  const g = {};
+  for (const p of S.P) g[p.id] = secret.get(p.id) ?? null;
+  const pts = scoreGuesses(g, S.jar.n);
+  for (const p of S.P) p.score += pts[p.id] ?? 0;
+  Object.assign(S, { ph: 'reveal', tt: REVEAL_T, res: { g, pts } });
+}
+// bots: lognormal error around the true count, sharper with skill
+function botGuess(p) {
+  const z = (rng() + rng() + rng() - 1.5) * 1.4;
+  return Math.max(1, Math.round(S.jar.n * Math.exp(z * (0.38 - p.skill * 0.28))));
+}
+
+// Run engine > host tick: phases, bots, publish when anything but the clock changed
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
+let lastSig = '', prevS = null;
+function hostTick(dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(1);
+  else if (S.ph === 'look' && S.tt <= 0) { Object.assign(S, { ph: 'guess', tt: GUESS_T }); for (const p of S.P) p.at = 3 + rng() * 12; }
+  else if (S.ph === 'guess') {
+    for (const p of S.P) if (p.bot && !p.lock && GUESS_T - S.tt >= p.at) placeGuess(p.id, botGuess(p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) reveal();
+  } else if (S.ph === 'reveal' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S.rd + 1);
+    else if (S.mode === 'attract') { for (const p of S.P) p.score = 0; startRound(1); }
+    else Object.assign(S, { ph: 'final', tt: FINAL_T });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  const s = sig();
+  if (s !== lastSig) {
+    lastSig = s;
+    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
+    onChange(prevS, S);
+    prevS = JSON.parse(s);
+  }
+}
+function startAttract() {
+  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 4, jar: null, res: null, P: [] };
+  for (let i = 0; i < 5; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
+  prevS = null; lastSig = '';
+}
+
+// Multiplayer > lobby + state sync (host publishes S without guesses, guests send guesses)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'guess' && S.mode === 'match') placeGuess(from, a.v); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'jar-guess', title: 'Jar Guess', emoji: '🍬', accent: '#ff8fd1',
+  blurb: 'How many candies are in the jar? Turn it, count a layer, multiply, and lock a secret guess. Closest scores most, and an exact guess earns a bonus.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 guessers (humans + bots). Everyone guesses at once; jars get fuller every round.',
+  settings: [{ key: 'rounds', label: 'Jars', options: [[4, '4'], [6, '6'], [8, '8']], value: 6 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', (isHost) => {
+      syncTop();
+      // promoted mid-guess: the sealed guesses left with the old host, so everyone guesses again
+      if (isHost && S?.mode === 'match' && S.ph === 'guess') { for (const p of S.P) p.lock = false; secret.clear(); S.tt = Math.max(S.tt, 10); }
+    });
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 6, jar: null, res: null, P: [] };
+    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    prevS = null; lastSig = '';
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push(newPlayer(p.id, p.nick, p.color, false));
+  }
+}
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (cur.jar && `${cur.rd}|${cur.jar.seed}` !== jarKey) { jarKey = `${cur.rd}|${cur.jar.seed}`; buildJar(cur.jar); if (match) sfx.pour(); }
+  if (prev?.ph !== cur.ph) {
+    if (cur.ph === 'guess') { guessIn.value = ''; if (match && innerWidth > 700) setTimeout(() => guessIn.focus(), 50); }
+    if (cur.ph === 'reveal' && cur.res) {
+      sfx.drum();
+      const top = cur.P.filter((p) => (cur.res.pts[p.id] ?? 0) >= 5).map((p) => p.nick);
+      setTimeout(() => { sfx.reveal(top.length && cur.res.pts[me] >= 5); }, 700);
+      flash(`<small>there were</small>${cur.jar.n} 🍬<small>${top.length ? `closest: ${esc(top.join(', '))}` : 'nobody guessed'}</small>`);
+    }
+  }
+  if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
+}
+
+// Input > guess box: number field, ±1/±10, Enter or LOCK sends it to the host
+const guessbox = document.getElementById('guessbox'), guessIn = document.getElementById('guessIn'), lockBtn = document.getElementById('lockBtn');
+guessbox.querySelectorAll('button[data-d]').forEach((b) => (b.onclick = () => (guessIn.value = Math.max(1, (+guessIn.value || 0) + +b.dataset.d))));
+function lockGuess() { const v = Math.round(+guessIn.value); if (S?.mode === 'match' && S.ph === 'guess' && player(lobby.room?.me) && v >= 1) sync.act({ t: 'guess', v }); }
+lockBtn.onclick = lockGuess;
+guessIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); lockGuess(); } });
+
+// HUD > round line, guess box, scoreboard with guesses on the reveal
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0, lastClock = 0, hudT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 4; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function hud(dt) {
+  if (S.mode !== 'match') { guessbox.style.display = 'none'; return; }
+  flashT -= dt;
+  const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.rounds} jars · guess the count in secret</small>Jar Guess`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>sharpest eye with ${w?.score ?? 0} pts</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'look') big(`<small>jar ${S.rd} of ${S.rounds}</small>Look closely…`);
+  else if (flashT <= 0) big('');
+  const guessing = me && S.ph === 'guess';
+  guessbox.style.display = guessing ? 'block' : 'none';
+  if (guessing) {
+    lockBtn.textContent = me.lock ? 'LOCKED ✓ (lock again to change)' : 'LOCK GUESS';
+    lockBtn.classList.toggle('locked', me.lock);
+    const waiting = S.P.filter((p) => !p.lock).length;
+    document.getElementById('guessS').textContent = `${clock}s · ${waiting ? `${waiting} still guessing` : 'all locked'} · drag the table to turn the ${SHAPES[S.jar.shape].name}`;
+    if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final scores' : `Jar ${S.rd} of ${S.rounds}`;
+  document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--pop)">${me.score}</b>${S.ph === 'reveal' && S.res ? ` · your guess ${S.res.g[me.id] ?? '—'} (+${S.res.pts[me.id] ?? 0})` : ''}` : 'Watching';
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  const rev = S.ph === 'reveal' && S.res;
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${rev ? `${S.res.g[p.id] ?? '—'} +${S.res.pts[p.id] ?? 0} · ` : S.ph === 'guess' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: jar pours + turns, pawns hold guess cards on the reveal
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 6, 11), camLook = new THREE.Vector3(0, 1.7, 0), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  pour(dt);
+  if (dragX === null) { spinV += (0.25 - spinV) * Math.min(1, dt * 1.5); spin += spinV * dt; }
+  jar.rotation.y = spin;
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id)) { scene.remove(g); pawns3d.delete(id); }
+  const n = S.P.length, best = S.res ? Math.max(...Object.values(S.res.pts)) : -1;
+  S.P.forEach((p, i) => {
+    let g = pawns3d.get(p.id);
+    if (!g) { g = makePawn(p); pawns3d.set(p.id, g); }
+    const a = n > 1 ? -1.25 + (2.5 * i) / (n - 1) : 0, r = 5.2;
+    g.position.set(Math.sin(a) * r * 1.35, 0, -Math.cos(a) * r + 1.2);
+    g.lookAt(0, 0, 1.2);
+    const rev = S.ph === 'reveal' && S.res, top = rev && (S.res.pts[p.id] ?? 0) === best && best > 0;
+    g.userData.body.position.y = top ? Math.abs(Math.sin(time * 7)) * 0.3 : S.ph === 'guess' && !p.lock ? Math.sin(time * 3 + i) * 0.04 : 0;
+    drawCard(g.userData.card, rev ? String(S.res.g[p.id] ?? '—') : S.ph === 'guess' && p.lock ? '✓' : '', p.color, top);
+  });
+  hud(dt);
+  const fit = Math.max(1, 1.25 / camera.aspect);
+  camPos.lerp(_v.set(0, 5.5 * fit, 11.5 * fit), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

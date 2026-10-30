@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Lucky Low</title>
+<style>
+  :root { --ink: #fff; --card: rgba(10, 14, 36, 0.74); --lucky: #7cf0b4; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1230; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; max-width: 250px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 60px; text-align: right; }
+  #board .row.me span { color: var(--lucky); font-weight: 800; }
+  #big { position: fixed; top: 22%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.4); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #pickbox { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px; display: none; width: min(560px, calc(100% - 20px)); text-align: center; }
+  #nums { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+  #nums button { font: inherit; font-size: 22px; font-weight: 900; color: #0d1230; background: #e8ecff; border: 0; border-radius: 12px; padding: 10px 0; cursor: pointer; box-shadow: 0 3px 0 #8a93c9; }
+  #nums button.on { background: var(--lucky); box-shadow: 0 3px 0 #2f9e68; }
+  #pickbox .s { font-size: 12.5px; opacity: 0.85; margin-top: 8px; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; max-width: 270px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--lucky); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 1000px) { #hint { display: none; } }
+  @media (max-width: 700px) { #big { top: 26%; } #board { top: auto; bottom: 190px; right: 10px; font-size: 11.5px; min-width: 150px; } #nums button { font-size: 18px; padding: 8px 0; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="pickbox" class="card"><div id="nums"></div><div class="s" id="pickS"></div></div>
+<div id="hint" class="card">Everyone picks a number in secret. The <b>lowest number nobody else picked</b> wins, and scores its own value: a lonely 1 is worth 1, a lonely 6 is worth 6. Number keys pick.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/lucky-low/index.html
+ * PURPOSE: online bluffing number game for 2-14: everyone picks a number in secret, the lowest number nobody else picked wins and scores its own value; host-run, picks stay on the host until the reveal, state sent only on change
+ * UI: Lucky Low page (lobby overlay, number pad, scoreboard, banner, 3D row of numbered pillars where tokens drop on the reveal)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, night arcade: dark floor, neon rim lights, starfield
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0d1230);
+scene.fog = new THREE.Fog(0x0d1230, 26, 60);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 150);
+scene.add(new THREE.HemisphereLight(0xb8c4ff, 0x10142e, 0.8));
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(4, 14, 10);
+key.castShadow = true;
+Object.assign(key.shadow.camera, { left: -16, right: 16, top: 10, bottom: -10 });
+scene.add(key);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(50, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x161c44, roughness: 0.6, metalness: 0.2 }));
+floor.receiveShadow = true;
+scene.add(floor);
+{
+  const n = 600, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, r = 40 + Math.random() * 20; pos.set([Math.cos(a) * r, 5 + Math.random() * 35, Math.sin(a) * r - 10], i * 3); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.18 })));
+}
+
+// Pillars > one numbered pillar per choice; tokens land on top on the reveal
+const pillars = new THREE.Group();
+scene.add(pillars);
+let cols = [], pillarK = 0;
+function numTex(v) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#e8ecff'; g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#0d1230'; g.font = '900 76px ui-rounded, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(v, 64, 70);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const sideMat = new THREE.MeshStandardMaterial({ color: 0x2a3270, roughness: 0.5 });
+function buildPillars(K) {
+  pillars.clear();
+  cols = [];
+  pillarK = K;
+  const gap = Math.min(1.6, 22 / K);
+  for (let v = 1; v <= K; v++) {
+    const x = (v - (K + 1) / 2) * gap, z = -Math.abs(v - (K + 1) / 2) * 0.12;
+    const face = new THREE.MeshStandardMaterial({ map: numTex(v), roughness: 0.4 });
+    const p = new THREE.Mesh(new THREE.BoxGeometry(gap * 0.82, 1.6, gap * 0.82), [sideMat, sideMat, sideMat, sideMat, face, sideMat]);
+    p.position.set(x, 0.8, z); p.castShadow = p.receiveShadow = true;
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(gap * 0.86, 0.06, gap * 0.86), new THREE.MeshBasicMaterial({ color: 0x3a4290 }));
+    glow.position.set(x, 1.63, z);
+    pillars.add(p, glow);
+    cols.push({ v, x, z, pillar: p, glow, gap });
+  }
+}
+
+// Tokens > player-colored coins: dropped on the reveal, clashes crack grey, the lucky one floats
+const tokens = [];
+const tokenGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.14, 24);
+function clearTokens() { for (const t of tokens) pillars.remove(t.m); tokens.length = 0; }
+function dropTokens(res, P) {
+  clearTokens();
+  const per = new Map();
+  for (const p of P) {
+    const v = res.picks[p.id];
+    if (v == null) continue;
+    const k = per.get(v) ?? 0; per.set(v, k + 1);
+    const col = cols[v - 1];
+    if (!col) continue;
+    const m = new THREE.Mesh(tokenGeo, new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.35, metalness: 0.2 }));
+    m.castShadow = true;
+    m.position.set(col.x, 9, col.z);
+    pillars.add(m);
+    // sweep the reveal from 1 upward: lower numbers land first
+    // wall-clock start, so a tab that drew no frames for a while still shows the right moment
+    tokens.push({ m, v, y: 1.72 + k * 0.15, at: performance.now() / 1000 + (v - 1) * 0.28 + k * 0.06, id: p.id, landed: false });
+  }
+}
+
+// Players > pawns standing in front of the pillars, holding up a ✓ once locked
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(10,14,36,0.8)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2, 0.5, 1); s.renderOrder = 5;
+  return s;
+}
+const checkTex = (() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#7cf0b4'; g.beginPath(); g.arc(32, 32, 28, 0, Math.PI * 2); g.fill(); g.fillStyle = '#0d1230'; g.font = '900 40px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('✓', 32, 35); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t; })();
+const pawns3d = new Map();
+function makePawn(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.4 });
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.38, 0.8, 18), mat); torso.position.y = 0.4;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 18, 12), mat); head.position.y = 1.02;
+  torso.castShadow = head.castShadow = true;
+  body.add(torso, head);
+  const tag = nameTag(p.nick, p.color); tag.position.y = 1.65;
+  const check = new THREE.Sprite(new THREE.SpriteMaterial({ map: checkTex, depthWrite: false, transparent: true })); check.scale.setScalar(0.5); check.position.y = 2.2; check.renderOrder = 6;
+  g.add(body, tag, check);
+  g.userData = { body, check };
+  scene.add(g);
+  return g;
+}
+
+// Audio > lock blip, token clinks, clash crunch, win chime
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  lock(me) { if (me) tone(760, 1140, 0.08, 0.07, 'triangle'); },
+  clink(v) { tone(500 + v * 60, 400 + v * 60, 0.06, 0.05, 'triangle'); },
+  clash() { noise(0.12, 0.1, 1200, 300); },
+  win(me) { [784, 988, 1319, 1568].forEach((f, i) => tone(f, f, 0.15, me ? 0.09 : 0.04, 'square', i * 0.08)); },
+  none() { tone(330, 220, 0.4, 0.06, 'triangle'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: secret picks 1..K; lowest pick nobody shares wins and scores its value
+const INTRO = 2.5, PICK_T = 12, REVEAL_T = 6.5, FINAL_T = 12;
+const BOT_NAMES = ['Lucky', 'Seven', 'Odds', 'Clover', 'Dicey', 'Fortuna', 'Penny', 'Wishbone', 'Horseshoe', 'Ladybug', 'Jinx', 'Charm', 'Ace', 'Rabbit'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// S: { mode, ph, tt, rd, rounds, K, res: { picks: {id: v}, win: id|null, v }, P: [{ id, nick, color, bot, score, lock, at, bias }] }
+let S = null;
+const rng = Math.random;
+const secret = new Map();
+const player = (id) => S.P.find((p) => p.id === id);
+const rangeFor = (n) => Math.max(6, Math.min(16, n + 3));
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, at: 0, bias: 0.6 + rng() * 1.4 }; }
+// pure rule so it can be checked on its own: picks {id: v} -> { win: id|null, v }
+function lowestUnique(picks) {
+  const count = new Map();
+  for (const v of Object.values(picks)) if (v != null) count.set(v, (count.get(v) ?? 0) + 1);
+  const lone = [...count].filter(([, n]) => n === 1).map(([v]) => v).sort((a, b) => a - b)[0];
+  if (lone == null) return { win: null, v: null };
+  return { win: Object.keys(picks).find((id) => picks[id] === lone), v: lone };
+}
+function startRound(rd) {
+  secret.clear();
+  for (const p of S.P) p.lock = false;
+  Object.assign(S, { rd, ph: 'pick', tt: PICK_T, K: rangeFor(S.P.length), res: null });
+  for (const p of S.P) p.at = 1 + rng() * 8;
+}
+function pick(id, v) {
+  const p = player(id);
+  if (!p || S.ph !== 'pick' || !Number.isInteger(v) || v < 1 || v > S.K) return false;
+  secret.set(id, v); p.lock = true;
+  return true;
+}
+function reveal() {
+  const picks = {};
+  for (const p of S.P) picks[p.id] = secret.get(p.id) ?? null;
+  const r = lowestUnique(picks);
+  const w = r.win != null ? player(+r.win) : null;
+  if (w) w.score += r.v;
+  Object.assign(S, { ph: 'reveal', tt: REVEAL_T, res: { picks, win: w?.id ?? null, v: r.v } });
+}
+// bots: lean low but scatter; each bot has its own taste for bigger numbers
+function botPick(p) {
+  const hi = Math.min(S.K, Math.max(3, Math.round(S.P.length * 0.9)));
+  return Math.min(S.K, 1 + Math.floor(hi * rng() ** p.bias));
+}
+
+// Run engine > host tick: phases, bots, publish when anything but the clock changed
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
+let lastSig = '', prevS = null;
+function hostTick(dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(1);
+  else if (S.ph === 'pick') {
+    for (const p of S.P) if (p.bot && !p.lock && PICK_T - S.tt >= p.at) pick(p.id, botPick(p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) reveal();
+  } else if (S.ph === 'reveal' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S.rd + 1);
+    else if (S.mode === 'attract') { for (const p of S.P) p.score = 0; startRound(1); }
+    else Object.assign(S, { ph: 'final', tt: FINAL_T });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  const s = sig();
+  if (s !== lastSig) {
+    lastSig = s;
+    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
+    onChange(prevS, S);
+    prevS = JSON.parse(s);
+  }
+}
+function startAttract() {
+  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 6, K: 8, res: null, P: [] };
+  for (let i = 0; i < 6; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
+  prevS = null; lastSig = '';
+}
+
+// Multiplayer > lobby + state sync (host publishes S without picks, guests send picks)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'pick' && S.mode === 'match') pick(from, a.v); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'lucky-low', title: 'Lucky Low', emoji: '🍀', accent: '#7cf0b4',
+  blurb: 'Everyone picks a number in secret. The lowest number nobody else picked wins, and scores its own value. Go low and clash, or go higher and hope nobody joins you.',
+  maxBots: 13, defaultBots: 4, minPlayers: 2,
+  note: 'Up to 14 players (humans + bots). The number range grows with the room, so there is always room to be alone.',
+  settings: [{ key: 'rounds', label: 'Rounds', options: [[8, '8'], [10, '10'], [12, '12']], value: 10 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', (isHost) => {
+      syncTop();
+      // promoted mid-pick: the sealed picks left with the old host, so everyone picks again
+      if (isHost && S?.mode === 'match' && S.ph === 'pick') { for (const p of S.P) { p.lock = false; p.at = 1 + rng() * 5; } secret.clear(); S.tt = PICK_T; }
+    });
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 10, K: 8, res: null, P: [] };
+    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    S.K = rangeFor(S.P.length);
+    prevS = null; lastSig = '';
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push(newPlayer(p.id, p.nick, p.color, false));
+  }
+}
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+let myPick = null;
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (cur.K !== pillarK) buildPillars(cur.K);
+  if (prev?.ph !== cur.ph || prev?.rd !== cur.rd) {
+    if (cur.ph === 'pick') { clearTokens(); myPick = null; buildPad(cur.K); }
+    if (cur.ph === 'reveal' && cur.res) {
+      dropTokens(cur.res, cur.P);
+      const w = cur.P.find((p) => p.id === cur.res.win);
+      setTimeout(() => {
+        if (w) { sfx.win(w.id === me); flash(`<small>lowest lonely number · +${cur.res.v}</small>🍀 ${esc(w.nick)}`); }
+        else { sfx.none(); flash('<small>every number was shared</small>Nobody'); }
+      }, Math.min(cur.K, (cur.res.v ?? cur.K)) * 280 + 400);
+    }
+  }
+  if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
+}
+
+// Input > number pad + number keys (0 = 10); picking again before the reveal changes it
+const pickbox = document.getElementById('pickbox'), numsEl = document.getElementById('nums');
+function buildPad(K) {
+  numsEl.innerHTML = '';
+  numsEl.style.gridTemplateColumns = `repeat(${K <= 8 ? K : Math.ceil(K / 2)}, 1fr)`;
+  for (let v = 1; v <= K; v++) {
+    const b = document.createElement('button');
+    b.textContent = v; b.dataset.v = v;
+    b.onclick = () => choose(v);
+    numsEl.append(b);
+  }
+}
+function choose(v) {
+  if (S?.mode !== 'match' || S.ph !== 'pick' || !player(lobby.room?.me) || v < 1 || v > S.K) return;
+  myPick = v;
+  sync.act({ t: 'pick', v });
+}
+addEventListener('keydown', (e) => { if (/^[0-9]$/.test(e.key)) choose(e.key === '0' ? 10 : +e.key); });
+
+// HUD > round line, pad, scoreboard with picks on the reveal
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0, lastClock = 0, hudT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 3; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function hud(dt) {
+  if (S.mode !== 'match') { pickbox.style.display = 'none'; return; }
+  flashT -= dt;
+  const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.rounds} rounds · numbers 1 to ${S.K}</small>Lucky Low`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>luckiest with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  const picking = me && S.ph === 'pick';
+  pickbox.style.display = picking ? 'block' : 'none';
+  if (picking) {
+    numsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.v === myPick && me.lock));
+    const waiting = S.P.filter((p) => !p.lock).length;
+    document.getElementById('pickS').textContent = `${clock}s · ${me.lock ? `you picked ${myPick ?? '✓'} (tap another to change)` : 'pick a number'} · ${waiting ? `${waiting} still picking` : 'all in'}`;
+    if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final scores' : `Round ${S.rd} of ${S.rounds}`;
+  document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--lucky)">${me.score}</b> · numbers 1–${S.K}` : 'Watching';
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  const rev = S.ph === 'reveal' && S.res;
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${rev && p.id === S.res.win ? '🍀 ' : ''}${esc(p.nick)}</span><em>${rev ? `picked ${S.res.picks[p.id] ?? '—'} · ` : S.ph === 'pick' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: tokens fall in number order, shared numbers grey out, the lucky token rises
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 7, 16), camLook = new THREE.Vector3(0, 1.4, 0), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const res = S.res, counts = new Map();
+  if (res) for (const v of Object.values(res.picks)) if (v != null) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const now = performance.now() / 1000;
+  for (const t of tokens) {
+    if (now < t.at) continue;
+    const u = Math.min(1, (now - t.at) / 0.45);
+    t.m.position.y = 9 - (9 - t.y) * u * u;
+    if (u >= 1 && !t.landed) { t.landed = true; if ((counts.get(t.v) ?? 0) > 1) sfx.clash(); else sfx.clink(t.v); }
+    if (t.landed) {
+      const shared = (counts.get(t.v) ?? 0) > 1, lucky = res && t.id === res.win;
+      if (shared) t.m.material.color.lerp(_v.set(0.25, 0.25, 0.3), Math.min(1, dt * 3));
+      if (lucky) { t.m.position.y = t.y + 0.4 + Math.sin(time * 4) * 0.12; t.m.rotation.y = time * 3; }
+    }
+  }
+  for (const c of cols) {
+    const hot = res && res.v === c.v && S.ph === 'reveal', shared = res && (counts.get(c.v) ?? 0) > 1;
+    c.glow.material.color.set(hot ? 0x7cf0b4 : shared ? 0x6a2030 : 0x3a4290);
+  }
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id)) { scene.remove(g); pawns3d.delete(id); }
+  const n = S.P.length;
+  S.P.forEach((p, i) => {
+    let g = pawns3d.get(p.id);
+    if (!g) { g = makePawn(p); pawns3d.set(p.id, g); }
+    const span = Math.min(20, n * 1.5), x = n > 1 ? -span / 2 + (span * i) / (n - 1) : 0;
+    g.position.set(x, 0, 4.2 + (i % 2) * 0.9);
+    g.rotation.y = Math.PI;
+    const lucky = S.ph === 'reveal' && res?.win === p.id;
+    g.userData.body.position.y = lucky ? Math.abs(Math.sin(time * 7)) * 0.35 : S.ph === 'pick' && !p.lock ? Math.sin(time * 3 + i) * 0.04 : 0;
+    g.userData.check.visible = S.ph === 'pick' && p.lock;
+  });
+  hud(dt);
+  const fit = Math.max(1, 1.5 / camera.aspect);
+  camPos.lerp(_v.set(0, 6 * fit, 15 * fit), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

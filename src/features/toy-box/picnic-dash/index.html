@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Picnic Dash</title>
+<style>
+  :root { --ink: #fff; --card: rgba(20, 34, 16, 0.72); --leaf: #b8f26a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #bfe7ff; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; max-width: 240px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 170px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+  #board .row.me span { color: var(--leaf); font-weight: 800; }
+  #big { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #pad { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 10px; display: none; text-align: center; }
+  #pad .g { display: grid; grid-template-columns: repeat(3, 58px); grid-template-rows: repeat(3, 52px); gap: 6px; justify-content: center; }
+  #pad button { font: inherit; font-size: 24px; font-weight: 900; color: #1a2a10; background: #eaffd8; border: 0; border-radius: 12px; cursor: pointer; box-shadow: 0 3px 0 #7fae5a; }
+  #pad button.on { background: var(--leaf); box-shadow: 0 3px 0 #4f8a1f; }
+  #pad .s { font-size: 12.5px; opacity: 0.88; margin-top: 8px; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.9; max-width: 280px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--leaf); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 1000px) { #hint { display: none; } }
+  @media (max-width: 700px) { #big { top: 24%; } #board { top: auto; bottom: 14px; right: 8px; font-size: 11px; min-width: 120px; } #pad { left: 12px; transform: none; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="pad" class="card"><div class="g">
+  <span></span><button data-d="0">▲</button><span></span>
+  <button data-d="3">◀</button><button data-d="4">●</button><button data-d="1">▶</button>
+  <span></span><button data-d="2">▼</button><span></span>
+</div><div class="s" id="padS"></div></div>
+<div id="hint" class="card">Everyone picks a step in secret (<b>WASD / arrows</b>, <b>Space</b> stay), then all critters move at once. Two heading for the same square, or swapping places, both bounce back. 🍎 = 1 · 🍉 = 3.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/picnic-dash/index.html
+ * PURPOSE: online simultaneous-turn grid game for 2-14: each turn everyone picks a step in secret, all moves resolve at once (same-square or swap = both bounce), critters grab picnic fruit; host-run, moves stay on the host until the reveal, state sent only on change
+ * UI: Picnic Dash page (lobby overlay, D-pad, scoreboard, banner, 3D picnic meadow grid with trees, fruit and hopping critters)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, sunny sky, meadow
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe7ff);
+scene.fog = new THREE.Fog(0xbfe7ff, 30, 70);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 150);
+scene.add(new THREE.HemisphereLight(0xf2fbff, 0x7aa65a, 1.3));
+const sun = new THREE.DirectionalLight(0xfff3dc, 2.3);
+sun.position.set(-8, 18, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14 });
+scene.add(sun);
+const meadow = new THREE.Mesh(new THREE.CircleGeometry(60, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x8cc96a, roughness: 1 }));
+meadow.position.y = -0.02; meadow.receiveShadow = true;
+scene.add(meadow);
+
+// Board > checkered picnic blanket squares, trees, fruit
+const CELL = 1.25;
+const board = new THREE.Group();
+scene.add(board);
+const sqA = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), sqB = new THREE.MeshStandardMaterial({ color: 0xef5a5a, roughness: 0.9 });
+const sqGeo = new RoundedBoxGeometry(CELL * 0.98, 0.12, CELL * 0.98, 2, 0.04);
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a4f2a }), leafMat = new THREE.MeshStandardMaterial({ color: 0x3f9a4a, flatShading: true });
+let boardKey = '', boardN = 0;
+const cellPos = (i, n) => [(i % n - (n - 1) / 2) * CELL, (Math.floor(i / n) - (n - 1) / 2) * CELL];
+function buildBoard(n, trees) {
+  board.clear();
+  boardN = n;
+  for (let i = 0; i < n * n; i++) {
+    const [x, z] = cellPos(i, n);
+    const sq = new THREE.Mesh(sqGeo, (i % n + Math.floor(i / n)) % 2 ? sqB : sqA);
+    sq.position.set(x, 0.06, z); sq.receiveShadow = true;
+    board.add(sq);
+  }
+  for (const i of trees) {
+    const [x, z] = cellPos(i, n), t = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.6, 8), trunkMat); trunk.position.y = 0.42;
+    const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 0), leafMat); crown.position.y = 1.05; crown.scale.y = 1.2;
+    trunk.castShadow = crown.castShadow = true;
+    t.add(trunk, crown); t.position.set(x, 0, z); t.rotation.y = i;
+    board.add(t);
+  }
+}
+const appleGeo = new THREE.SphereGeometry(0.24, 16, 12), melonGeo = new THREE.SphereGeometry(0.34, 18, 12).scale(1.25, 0.9, 0.9);
+const appleMat = new THREE.MeshStandardMaterial({ color: 0xe0303a, roughness: 0.35 }), melonMat = new THREE.MeshStandardMaterial({ color: 0x2f8f3a, roughness: 0.45 }), stemMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1a });
+const fruit3d = new Map();
+function makeFruit(f) {
+  const g = new THREE.Group();
+  const m = new THREE.Mesh(f.v > 1 ? melonGeo : appleGeo, f.v > 1 ? melonMat : appleMat); m.castShadow = true;
+  g.add(m);
+  if (f.v === 1) { const s = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.14, 5), stemMat); s.position.y = 0.26; g.add(s); }
+  const [x, z] = cellPos(f.i, boardN);
+  g.position.set(x, 0.38, z);
+  g.userData = { pop: 0 };
+  scene.add(g);
+  return g;
+}
+
+// Critters > round bunny-ish pawns in player color that hop between squares
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(20,34,16,0.8)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(1.8, 0.45, 1); s.renderOrder = 5;
+  return s;
+}
+const critters3d = new Map();
+const arrowMesh = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 4).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+arrowMesh.visible = false;
+scene.add(arrowMesh);
+function makeCritter(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+  const b = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 14), mat); b.scale.y = 0.9; b.position.y = 0.36;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), mat); head.position.set(0, 0.72, 0.12);
+  for (const s of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.26, 4, 8), mat); ear.position.set(s * 0.1, 1.02, 0.08); ear.rotation.z = s * 0.2; body.add(ear);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0x1b1b22 })); eye.position.set(s * 0.09, 0.78, 0.33); body.add(eye);
+  }
+  b.castShadow = head.castShadow = true;
+  body.add(b, head);
+  const tag = nameTag(p.nick, p.color); tag.position.y = 1.55;
+  g.add(body, tag);
+  g.userData = { body, from: null, to: null, t: 1 };
+  scene.add(g);
+  return g;
+}
+
+// Audio > hop, munch, bonk, tick
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  lock(me) { if (me) tone(700, 1000, 0.06, 0.06, 'triangle'); },
+  hop() { tone(420, 640, 0.08, 0.03, 'triangle'); },
+  munch(me, big) { (big ? [523, 659, 784] : [880]).forEach((f, i) => tone(f, f * 1.2, 0.1, me ? 0.08 : 0.03, 'square', i * 0.06)); },
+  bonk() { noise(0.08, 0.1, 900, 200); tone(200, 120, 0.1, 0.06, 'triangle'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: secret steps, simultaneous resolve (same target or swap = bounce, into a stander = bounce), fruit on arrival
+const INTRO = 2.5, PLAN_T = 7, MOVE_T = 1.5, FINAL_T = 12;
+const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [0, 0]];
+const BOT_NAMES = ['Hopper', 'Clover', 'Nibbles', 'Thumper', 'Biscuit', 'Muffin', 'Sprout', 'Pip', 'Waffles', 'Cocoa', 'Peanut', 'Tofu', 'Maple', 'Bun Bun'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// S: { mode, ph, tt, turn, turns, n, trees: [i], fruit: [{ i, v, id }], fid, P: [{ id, nick, color, bot, score, at, lock, from, want (revealed step), bounced, ate, think, skill }] }
+let S = null;
+const rng = Math.random;
+const secret = new Map();
+const player = (id) => S.P.find((p) => p.id === id);
+const sizeFor = (n) => (n <= 6 ? 9 : 11);
+function step(i, d, n, trees) {
+  const [dx, dz] = DIRS[d], x = (i % n) + dx, z = Math.floor(i / n) + dz;
+  if (x < 0 || z < 0 || x >= n || z >= n) return i;
+  const j = z * n + x;
+  return trees.includes(j) ? i : j;
+}
+// pure resolve so it can be checked on its own: at {id: cell}, dirs {id: d} -> {id: cell}
+function resolveMoves(at, dirs, n, trees) {
+  const ids = Object.keys(at), to = {};
+  for (const id of ids) to[id] = step(at[id], dirs[id] ?? 4, n, trees);
+  for (let changed = true; changed;) {
+    changed = false;
+    const claim = new Map();
+    for (const id of ids) claim.set(to[id], [...(claim.get(to[id]) ?? []), id]);
+    for (const id of ids) {
+      if (to[id] === at[id]) continue;
+      const crowd = claim.get(to[id]).length > 1;
+      // swap: both want each other's square
+      const swap = ids.some((o) => o !== id && to[o] === at[id] && at[o] === to[id]);
+      if (crowd || swap) { to[id] = at[id]; changed = true; }
+    }
+  }
+  return to;
+}
+function spawnFruit() {
+  const want = Math.max(4, Math.ceil(S.P.length * 0.8));
+  const busy = new Set([...S.trees, ...S.P.map((p) => p.at), ...S.fruit.map((f) => f.i)]);
+  const free = [...Array(S.n * S.n).keys()].filter((i) => !busy.has(i));
+  while (S.fruit.length < want && free.length) {
+    const i = free.splice(Math.floor(rng() * free.length), 1)[0];
+    S.fruit.push({ i, v: rng() < 0.2 ? 3 : 1, id: ++S.fid });
+  }
+}
+function newMatchState(mode, P, turns) {
+  const n = sizeFor(P.length);
+  // spawns spread round the edge, trees scattered but never cutting the meadow apart
+  const edge = [];
+  for (let k = 0; k < n - 1; k++) edge.push(k, (n - 1) + k * n, n * n - 1 - k, (n - 1 - k) * n);
+  P.forEach((p, k) => Object.assign(p, { at: edge[Math.floor((k * edge.length) / P.length)], lock: false, from: null, bounced: false }));
+  let trees = [];
+  for (let tries = 0; tries < 40; tries++) {
+    const spawns = new Set(P.map((p) => p.at));
+    trees = [...Array(n * n).keys()].filter((i) => !spawns.has(i) && rng() < 0.08);
+    if (connected(n, trees)) break;
+  }
+  const s = { mode, ph: 'intro', tt: INTRO, turn: 0, turns, n, trees, fruit: [], fid: 0, P };
+  S = s;
+  spawnFruit();
+  return s;
+}
+function connected(n, trees) {
+  const block = new Set(trees), start = [...Array(n * n).keys()].find((i) => !block.has(i)), seen = new Set([start]), q = [start];
+  while (q.length) { const i = q.shift(); for (let d = 0; d < 4; d++) { const j = step(i, d, n, trees); if (!seen.has(j)) { seen.add(j); q.push(j); } } }
+  return seen.size === n * n - block.size;
+}
+function plan(id, d) {
+  const p = player(id);
+  if (!p || S.ph !== 'plan' || !Number.isInteger(d) || d < 0 || d > 4) return false;
+  secret.set(id, d); p.lock = true;
+  return true;
+}
+function startPlan() {
+  secret.clear();
+  for (const p of S.P) { p.lock = false; p.think = 0.8 + rng() * 3.5; }
+  Object.assign(S, { ph: 'plan', tt: PLAN_T, turn: S.turn + 1 });
+}
+function resolveTurn() {
+  const at = {}, dirs = {};
+  for (const p of S.P) { at[p.id] = p.at; dirs[p.id] = secret.get(p.id) ?? 4; }
+  const to = resolveMoves(at, dirs, S.n, S.trees);
+  for (const p of S.P) {
+    const wanted = step(p.at, dirs[p.id], S.n, S.trees);
+    Object.assign(p, { from: p.at, at: to[p.id], want: dirs[p.id], bounced: wanted !== p.at && to[p.id] === p.at });
+    const k = S.fruit.findIndex((f) => f.i === p.at);
+    if (k >= 0) { p.score += S.fruit[k].v; p.ate = S.fruit[k].id; S.fruit.splice(k, 1); } else p.ate = 0;
+  }
+  spawnFruit();
+  Object.assign(S, { ph: 'move', tt: MOVE_T });
+}
+// bots: walk the shortest path to the best nearby fruit they can reach first, a little randomness on top
+function bfs(from) {
+  const dist = new Map([[from, 0]]), first = new Map(), q = [from];
+  while (q.length) {
+    const i = q.shift();
+    for (let d = 0; d < 4; d++) { const j = step(i, d, S.n, S.trees); if (dist.has(j)) continue; dist.set(j, dist.get(i) + 1); first.set(j, i === from ? d : first.get(i)); q.push(j); }
+  }
+  return { dist, first };
+}
+function botDir(p) {
+  if (rng() > 0.4 + p.skill * 0.6) return Math.floor(rng() * 5);
+  const mine = bfs(p.at), others = S.P.filter((q) => q !== p).map((q) => bfs(q.at).dist);
+  let best = null;
+  for (const f of S.fruit) {
+    const d = mine.dist.get(f.i);
+    if (d == null) continue;
+    const rival = Math.min(99, ...others.map((o) => o.get(f.i) ?? 99));
+    const score = f.v / (d + 0.5) * (rival < d ? 0.35 : rival === d ? 0.7 : 1);
+    if (!best || score > best.score) best = { f, score };
+  }
+  return best ? mine.first.get(best.f.i) ?? 4 : 4;
+}
+
+// Run engine > host tick: plan (bots decide), resolve, move animation, publish when anything but the clock changed
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
+let lastSig = '', prevS = null;
+function hostTick(dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startPlan();
+  else if (S.ph === 'plan') {
+    for (const p of S.P) if (p.bot && !p.lock && (p.think -= dt) <= 0) plan(p.id, botDir(p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) resolveTurn();
+  } else if (S.ph === 'move' && S.tt <= 0) {
+    if (S.turn < S.turns) startPlan();
+    else if (S.mode === 'attract') { const P = S.P.map((p) => ({ ...p, score: 0 })); newMatchState('attract', P, S.turns); S.tt = 1; }
+    else Object.assign(S, { ph: 'final', tt: FINAL_T });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  const s = sig();
+  if (s !== lastSig) {
+    lastSig = s;
+    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
+    onChange(prevS, S);
+    prevS = JSON.parse(s);
+  }
+}
+function startAttract() {
+  const P = [0, 1, 2, 3, 4].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, skill: 0.5 + rng() * 0.4 }));
+  newMatchState('attract', P, 14);
+  S.tt = 1;
+  prevS = null; lastSig = '';
+}
+
+// Multiplayer > lobby + state sync (host publishes S without planned steps, guests send steps)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'step' && S.mode === 'match') plan(from, a.d); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'picnic-dash', title: 'Picnic Dash', emoji: '🧺', accent: '#b8f26a',
+  blurb: 'Everyone picks a step in secret, then all critters hop at once. Grab apples and watermelons, but two critters heading for the same square bounce off each other. Outguess the table.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 critters (humans + bots). Moves resolve together each turn, so lag never matters.',
+  settings: [{ key: 'turns', label: 'Turns', options: [[15, '15'], [20, '20'], [30, '30']], value: 20 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', (isHost) => {
+      syncTop();
+      // promoted mid-plan: the old host took the planned steps, so everyone plans again
+      if (isHost && S?.mode === 'match' && S.ph === 'plan') { for (const p of S.P) { p.lock = false; p.think = 0.8 + rng() * 2; } secret.clear(); S.tt = PLAN_T; }
+    });
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    const P = [];
+    for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, skill: 0 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.5 });
+    newMatchState('match', P, settings.turns ?? 20);
+    prevS = null; lastSig = '';
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    // late joiner pops up on a free square
+    const busy = new Set([...S.trees, ...S.P.map((q) => q.at), ...S.fruit.map((f) => f.i)]);
+    const free = [...Array(S.n * S.n).keys()].filter((i) => !busy.has(i));
+    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, skill: 0, at: free[Math.floor(rng() * free.length)], lock: false, from: null, bounced: false });
+  }
+}
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+let myDir = null;
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (`${cur.n}|${cur.trees.join()}` !== boardKey) { boardKey = `${cur.n}|${cur.trees.join()}`; buildBoard(cur.n, cur.trees); for (const g of fruit3d.values()) scene.remove(g); fruit3d.clear(); }
+  // fruit appear / get eaten
+  const live = new Set(cur.fruit.map((f) => f.id));
+  for (const [id, g] of fruit3d) if (!live.has(id)) g.userData.eaten = true;
+  for (const f of cur.fruit) if (!fruit3d.has(f.id)) fruit3d.set(f.id, makeFruit(f));
+  if (prev?.ph !== cur.ph || prev?.turn !== cur.turn) {
+    if (cur.ph === 'plan') myDir = null;
+    if (cur.ph === 'move') {
+      sfx.hop();
+      for (const p of cur.P) {
+        const g = critters3d.get(p.id);
+        if (g) Object.assign(g.userData, { from: p.from, to: p.at, t: 0 });
+        if (p.bounced) setTimeout(() => sfx.bonk(), 300);
+        if (p.ate) { const big = !prev?.fruit?.find((f) => f.id === p.ate) ? false : prev.fruit.find((f) => f.id === p.ate).v > 1; setTimeout(() => sfx.munch(p.id === me, big), 450); }
+      }
+      const mine = cur.P.find((p) => p.id === me);
+      if (match && mine?.bounced) flash('<small>someone wanted that square too</small>BONK!');
+    }
+  }
+  if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
+}
+
+// Input > D-pad + WASD / arrows / Space; picking again before the reveal changes it
+const pad = document.getElementById('pad');
+function choose(d) {
+  if (S?.mode !== 'match' || S.ph !== 'plan' || !player(lobby.room?.me)) return;
+  myDir = d;
+  sync.act({ t: 'step', d });
+}
+pad.querySelectorAll('button').forEach((b) => (b.onclick = () => choose(+b.dataset.d)));
+const KEYS = { KeyW: 0, ArrowUp: 0, KeyD: 1, ArrowRight: 1, KeyS: 2, ArrowDown: 2, KeyA: 3, ArrowLeft: 3, Space: 4 };
+addEventListener('keydown', (e) => { if (e.code in KEYS) { e.preventDefault(); choose(KEYS[e.code]); } });
+
+// HUD > turn line, D-pad, scoreboard
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0, lastClock = 0, hudT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 1.4; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function hud(dt) {
+  if (S.mode !== 'match') { pad.style.display = 'none'; return; }
+  flashT -= dt;
+  const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.turns} turns · everyone moves at once</small>Picnic Dash`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>fullest belly with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  const planning = me && S.ph === 'plan';
+  pad.style.display = planning ? 'block' : 'none';
+  if (planning) {
+    pad.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.d === myDir && me.lock));
+    const waiting = S.P.filter((p) => !p.lock).length;
+    document.getElementById('padS').textContent = `${clock}s · ${me.lock ? 'step chosen (tap to change)' : 'pick a step'} · ${waiting ? `${waiting} deciding` : 'all set'}`;
+    if (clock !== lastClock && clock <= 2 && !me.lock) sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final scores' : `Turn ${Math.max(1, S.turn)} of ${S.turns}`;
+  document.getElementById('roundMeta').innerHTML = me ? `Fruit <b style="color:var(--leaf)">${me.score}</b>` : 'Watching';
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${S.ph === 'plan' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: critters hop (or bump and bounce back), fruit bob and shrink when eaten, my planned arrow
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 15, 12), camLook = new THREE.Vector3(0, 0, 0.6), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of critters3d) if (!ids.has(id)) { scene.remove(g); critters3d.delete(id); }
+  for (const p of S.P) {
+    let g = critters3d.get(p.id);
+    if (!g) { g = makeCritter(p); critters3d.set(p.id, g); }
+    const u = g.userData;
+    u.t = Math.min(1, u.t + dt / 0.55);
+    const from = u.from ?? p.at, to = u.to ?? p.at, [fx, fz] = cellPos(from, boardN), [tx, tz] = cellPos(to, boardN);
+    let x = fx + (tx - fx) * u.t, z = fz + (tz - fz) * u.t, y = Math.sin(u.t * Math.PI) * (from !== to ? 0.6 : 0);
+    // bounced: lunge half a square toward the wanted square and spring back
+    if (p.bounced && u.t < 1 && S.ph === 'move') { const [wx, wz] = DIRS[p.want ?? 4], k = Math.sin(u.t * Math.PI) * 0.42 * CELL; x += wx * k; z += wz * k; y = Math.sin(u.t * Math.PI) * 0.35; g.rotation.y = Math.atan2(wx, wz); }
+    if (u.t >= 1) { u.from = u.to = null; [x, z] = cellPos(p.at, boardN); y = S.ph === 'plan' && !p.lock ? Math.abs(Math.sin(time * 4 + p.id)) * 0.06 : 0; }
+    g.position.set(x, 0.12, z);
+    u.body.position.y = y;
+    if (from !== to) g.rotation.y = Math.atan2(tx - fx, tz - fz);
+    u.body.scale.set(1 + (p.bounced && u.t < 0.6 ? 0.15 : 0), 1 - (p.bounced && u.t < 0.6 ? 0.15 : 0), 1);
+  }
+  for (const [id, g] of fruit3d) {
+    if (g.userData.eaten) { g.userData.pop += dt * 3; g.scale.setScalar(Math.max(0, 1 - g.userData.pop)); if (g.userData.pop >= 1) { scene.remove(g); fruit3d.delete(id); } continue; }
+    g.userData.pop = Math.min(1, g.userData.pop + dt * 3);
+    g.scale.setScalar(g.userData.pop);
+    g.position.y = 0.38 + Math.sin(time * 3 + id) * 0.05;
+    g.rotation.y = time * 0.8 + id;
+  }
+  // my planned step: arrow on the square I am heading to
+  const me = S.mode === 'match' && player(lobby.room?.me);
+  arrowMesh.visible = !!(me && S.ph === 'plan' && myDir != null && myDir !== 4 && me.lock);
+  if (arrowMesh.visible) {
+    const [x, z] = cellPos(me.at, boardN), [dx, dz] = DIRS[myDir];
+    arrowMesh.position.set(x + dx * CELL * 0.62, 0.35, z + dz * CELL * 0.62);
+    arrowMesh.rotation.y = Math.atan2(dx, dz);
+    arrowMesh.material.color.set(me.color);
+  }
+  hud(dt);
+  const fit = Math.max(1, 1.15 / camera.aspect), d = (boardN * CELL) / 12;
+  camPos.lerp(_v.set(0, 15 * d * fit, 12 * d * fit), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

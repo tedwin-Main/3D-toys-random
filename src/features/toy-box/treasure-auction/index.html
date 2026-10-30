@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Treasure Auction</title>
+<style>
+  :root { --ink: #fff; --card: rgba(30, 10, 18, 0.72); --gold: #ffd166; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1c0810; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.88; max-width: 250px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 200px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 76px; text-align: right; }
+  #board .row.me span { color: var(--gold); font-weight: 800; }
+  #lot { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; display: none; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.4); }
+  #lot small { display: block; font-size: 13px; font-weight: 800; letter-spacing: 0.18em; opacity: 0.85; }
+  #lot b { font-size: clamp(30px, 6vw, 52px); font-weight: 900; }
+  #lot b.good { color: var(--gold); } #lot b.bad { color: #9cff6b; }
+  #big { position: fixed; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.4); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #bidbox { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 10px 12px; display: none; text-align: center; width: min(420px, calc(100% - 24px)); }
+  #bidbox .row { display: flex; gap: 6px; justify-content: center; align-items: center; }
+  #bidbox .v { font-size: 40px; font-weight: 900; color: var(--gold); min-width: 90px; font-variant-numeric: tabular-nums; }
+  #bidbox button { font: inherit; font-weight: 800; color: inherit; background: rgba(255, 255, 255, 0.14); border: 0; border-radius: 10px; padding: 9px 12px; cursor: pointer; font-size: 15px; }
+  #bidbox input { width: 100%; margin: 8px 0; accent-color: var(--gold); }
+  #bidbox #lockBtn { width: 100%; font-size: 20px; padding: 12px; color: #2a0b16; background: linear-gradient(#ffe08a, #ffb627); box-shadow: 0 4px 0 #a86a00; }
+  #bidbox #lockBtn.locked { background: linear-gradient(#b8f5a0, #6ad16a); box-shadow: 0 4px 0 #2f7a2f; }
+  #bidbox .s { font-size: 12.5px; opacity: 0.8; margin-top: 6px; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; max-width: 280px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gold); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 900px) { #hint { display: none; } }
+  @media (max-width: 700px) { #lot { top: 96px; } #board { top: auto; bottom: 236px; right: 10px; font-size: 11.5px; min-width: 160px; } #bidbox .v { font-size: 32px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="lot"><small id="lotKind">LOT</small><b id="lotName"></b></div>
+<div id="big"></div>
+<div id="bidbox" class="card">
+  <div class="row"><button data-d="-5">−5</button><button data-d="-1">−1</button><span class="v" id="bidV">0</span><button data-d="1">+1</button><button data-d="5">+5</button></div>
+  <input id="bidR" type="range" min="0" max="40" value="0" />
+  <button id="lockBtn">LOCK BID</button>
+  <div class="s" id="bidS"></div>
+</div>
+<div id="hint" class="card">Everyone bids in secret at once. <b>Treasure</b>: the highest bid nobody else matched wins it and pays. <b>Cursed</b>: everyone pays their bid, the lowest bidder takes the curse. Score = coins + loot. <b>←/→</b> ±1, <b>Shift</b> ±5, <b>Enter</b> lock.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/treasure-auction/index.html
+ * PURPOSE: online sealed-bid auction for 2-14: every lot everyone bids in secret at once; treasure goes to the highest unmatched bid, a cursed lot makes everyone pay and sticks the lowest bidder with it; score = coins + loot. Host-run, bids stay on the host until the reveal, state sent only on change
+ * UI: Treasure Auction page (lobby overlay, lot banner, bid box, scoreboard, 3D auction stage with bidder pawns + paddles)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, velvet hall, stage with pedestal under a spotlight
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1c0810);
+scene.fog = new THREE.Fog(0x1c0810, 24, 52);
+const camera = new THREE.PerspectiveCamera(44, innerWidth / innerHeight, 0.1, 120);
+scene.add(new THREE.HemisphereLight(0xffd9e6, 0x2a0c18, 0.75));
+const spot = new THREE.SpotLight(0xfff0d0, 320, 30, 0.42, 0.45, 1.5);
+spot.position.set(0, 12, 3);
+spot.target.position.set(0, 1.5, -3);
+spot.castShadow = true;
+spot.shadow.mapSize.set(1024, 1024);
+scene.add(spot, spot.target);
+const fill = new THREE.PointLight(0xff8fb0, 30, 25);
+fill.position.set(-6, 5, 6);
+scene.add(fill);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(40, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3a1020, roughness: 0.85 }));
+floor.receiveShadow = true;
+const stage = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.5, 0.6, 64), new THREE.MeshStandardMaterial({ color: 0x5c1830, roughness: 0.6 }));
+stage.position.set(0, 0.3, -3); stage.receiveShadow = stage.castShadow = true;
+const trim = new THREE.Mesh(new THREE.TorusGeometry(4.25, 0.07, 10, 80).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xd4a640, metalness: 0.4, roughness: 0.35 }));
+trim.position.set(0, 0.6, -3);
+const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.95, 1.4, 32), new THREE.MeshStandardMaterial({ color: 0xf2e6d8, roughness: 0.5 }));
+pedestal.position.set(0, 1.3, -3); pedestal.castShadow = pedestal.receiveShadow = true;
+// curtain backdrop: wavy red folds
+const curtain = new THREE.Mesh(new THREE.CylinderGeometry(16, 16, 14, 96, 1, true, Math.PI * 0.65, Math.PI * 0.7), new THREE.MeshStandardMaterial({ color: 0x8a1530, roughness: 0.9, side: THREE.BackSide }));
+{
+  const pos = curtain.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), z = pos.getZ(i), a = Math.atan2(x, z), w = Math.sin(a * 40) * 0.35; pos.setX(i, x + Math.sin(a) * w); pos.setZ(i, z + Math.cos(a) * w); }
+  curtain.geometry.computeVertexNormals();
+}
+curtain.position.set(0, 7, 2);
+scene.add(floor, stage, trim, pedestal, curtain);
+
+// Lots > procedural treasures (gem, chalice, crown) and cursed idol
+const gold = new THREE.MeshStandardMaterial({ color: 0xffc94a, metalness: 0.35, roughness: 0.3, emissive: 0x5a3a00, emissiveIntensity: 0.3 });
+function lotMesh(kind) {
+  const g = new THREE.Group();
+  if (kind === 'gem') {
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), new THREE.MeshStandardMaterial({ color: 0x4fd1ff, roughness: 0.1, metalness: 0.1, emissive: 0x0a4a70, emissiveIntensity: 0.5, flatShading: true }));
+    m.scale.y = 1.35; g.add(m);
+  } else if (kind === 'chalice') {
+    const pts = [[0, 0], [0.45, 0], [0.45, 0.06], [0.12, 0.15], [0.09, 0.55], [0.15, 0.62], [0.5, 0.85], [0.55, 1.2], [0.5, 1.2], [0.45, 0.9], [0.12, 0.68]].map(([x, y]) => new THREE.Vector2(x, y));
+    const m = new THREE.Mesh(new THREE.LatheGeometry(pts, 32), gold); m.position.y = -0.6; g.add(m);
+  } else if (kind === 'crown') {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.5, 0.35, 32, 1, true), gold); g.add(band);
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2, spike = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.38, 8), gold);
+      spike.position.set(Math.sin(a) * 0.53, 0.35, Math.cos(a) * 0.53); g.add(spike);
+      const jewel = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), new THREE.MeshStandardMaterial({ color: k % 2 ? 0xe63946 : 0x3a86ff, emissive: k % 2 ? 0x5a0010 : 0x001a5a }));
+      jewel.position.set(Math.sin(a) * 0.56, 0.05, Math.cos(a) * 0.56); g.add(jewel);
+    }
+  } else {
+    const stone = new THREE.MeshStandardMaterial({ color: 0x3d6b3a, roughness: 0.8, flatShading: true });
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 1), stone); head.scale.set(1, 1.15, 0.9); g.add(head);
+    for (const s of [-1, 1]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x9cff6b })); eye.position.set(s * 0.18, 0.1, 0.42); g.add(eye); }
+    const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.1), new THREE.MeshBasicMaterial({ color: 0x0b1a0a })); mouth.position.set(0, -0.22, 0.44); g.add(mouth);
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
+let lot3d = null, lotKey = '';
+const lotGlow = new THREE.PointLight(0xffd166, 0, 6);
+lotGlow.position.set(0, 3.2, -3);
+scene.add(lotGlow);
+
+// Bidders > pawns in an arc facing the stage: body, head, coin stack, name tag, bid paddle
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(30,10,18,0.8)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.1, 0.52, 1); s.renderOrder = 5;
+  return s;
+}
+// paddle: sprite redrawn with the revealed bid (or ✓ once locked)
+function paddleSprite() {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 128;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(0.9, 0.9, 1); s.renderOrder = 6;
+  s.userData = { c, t, text: null };
+  return s;
+}
+function drawPaddle(s, text, color, win) {
+  if (s.userData.text === `${text}|${win}`) return;
+  s.userData.text = `${text}|${win}`;
+  const g = s.userData.c.getContext('2d');
+  g.clearRect(0, 0, 128, 128);
+  if (text === '') { s.userData.t.needsUpdate = true; s.visible = false; return; }
+  s.visible = true;
+  g.fillStyle = win ? '#ffd166' : '#fff8ee'; g.strokeStyle = color; g.lineWidth = 10;
+  g.beginPath(); g.arc(64, 64, 54, 0, Math.PI * 2); g.fill(); g.stroke();
+  g.fillStyle = '#2a0b16'; g.font = `900 ${String(text).length > 2 ? 44 : 58}px ui-rounded, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(text, 64, 68);
+  s.userData.t.needsUpdate = true;
+}
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.3, roughness: 0.35, emissive: 0x6a4200, emissiveIntensity: 0.35 });
+const coinGeo = new THREE.CylinderGeometry(0.24, 0.24, 1, 20).translate(0, 0.5, 0);
+const pawns3d = new Map();
+function makePawn(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.4 });
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.42, 0.9, 20), mat); torso.position.y = 0.45;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 20, 14), mat); head.position.y = 1.15;
+  torso.castShadow = head.castShadow = true;
+  body.add(torso, head);
+  const stack = new THREE.Mesh(coinGeo, coinMat); stack.castShadow = true; stack.position.set(0.7, 0, 0);
+  const tag = nameTag(p.nick, p.color); tag.position.y = 1.85;
+  const paddle = paddleSprite(); paddle.position.set(0, 2.65, 0);
+  g.add(body, stack, tag, paddle);
+  g.userData = { body, stack, paddle, hop: 0, stackH: 0.01 };
+  scene.add(g);
+  return g;
+}
+
+// Audio > gavel, coin clink, curse groan, tick
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  gavel() { noise(0.06, 0.25, 900, 200); tone(180, 90, 0.12, 0.14, 'triangle'); },
+  lock(me) { if (me) tone(880, 1320, 0.08, 0.07, 'triangle'); },
+  win(me) { [784, 988, 1175, 1568].forEach((f, i) => tone(f, f, 0.14, me ? 0.09 : 0.04, 'square', i * 0.07)); },
+  curse() { tone(330, 110, 0.9, 0.12, 'sawtooth'); },
+  unsold() { tone(440, 330, 0.3, 0.06, 'triangle'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: sealed bids; treasure = highest unmatched bid wins and pays; cursed = all pay, lowest bid takes it
+const START_COINS = 40, INTRO = 2.5, SHOW_T = 2.4, BID_T = 15, RESULT_T = 4.5, FINAL_T = 12;
+const LOTS = { gem: ['Sky Gem', 4, 8], chalice: ['Royal Chalice', 8, 13], crown: ['Sun Crown', 13, 20], idol: ['Cursed Idol', -12, -4] };
+const BOT_NAMES = ['Baroness', 'Count Coin', 'Gilda', 'Sir Bidsalot', 'Madame Mint', 'Old Ledger', 'Rubyface', 'Duke Dollop', 'Lady Lux', 'Hammerhand', 'Magpie', 'Penny Pound', 'Viscount V', 'Goldtooth'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// S: { mode, ph, tt, rd, rounds, lot: { kind, name, v }, res: { bids: {id: bid}, win: [ids], unsold }, P: [{ id, nick, color, bot, coins, loot, lock, skill }] }
+let S = null;
+const rng = Math.random;
+const secret = new Map();
+const player = (id) => S.P.find((p) => p.id === id);
+const scoreOf = (p) => p.coins + p.loot;
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, coins: START_COINS, loot: 0, lock: false, skill: 0.4 + rng() * 0.5, at: 0 }; }
+function newLot(rd, rounds) {
+  // last lot is always a crown; otherwise one in four is cursed
+  const kind = rd === rounds ? 'crown' : rng() < 0.25 ? 'idol' : ['gem', 'gem', 'chalice', 'chalice', 'crown'][Math.floor(rng() * 5)];
+  const [name, lo, hi] = LOTS[kind];
+  return { kind, name, v: lo + Math.floor(rng() * (hi - lo + 1)) };
+}
+function startLot(rd) {
+  secret.clear();
+  for (const p of S.P) p.lock = false;
+  Object.assign(S, { rd, ph: 'show', tt: SHOW_T, lot: newLot(rd, S.rounds), res: null });
+}
+// host: a (re)bid before the reveal; returns true when accepted
+function placeBid(id, v) {
+  const p = player(id);
+  if (!p || S.ph !== 'bid' || !Number.isInteger(v) || v < 0 || v > p.coins) return false;
+  secret.set(id, v); p.lock = true;
+  return true;
+}
+function resolveLot() {
+  const bids = {};
+  for (const p of S.P) bids[p.id] = secret.get(p.id) ?? 0;
+  const res = { bids, win: [], unsold: false };
+  if (S.lot.v > 0) {
+    // ties cancel: the highest bid nobody else made wins
+    const count = new Map();
+    for (const v of Object.values(bids)) count.set(v, (count.get(v) ?? 0) + 1);
+    const top = Math.max(-1, ...[...count].filter(([v, n]) => n === 1 && v > 0).map(([v]) => v));
+    const w = top > 0 && S.P.find((p) => bids[p.id] === top);
+    if (w) { w.coins -= top; w.loot += S.lot.v; res.win = [w.id]; } else res.unsold = true;
+  } else {
+    // curse: everyone pays what they bid, lowest bid (all tied) takes it
+    for (const p of S.P) p.coins -= bids[p.id];
+    const low = Math.min(...S.P.map((p) => bids[p.id]));
+    for (const p of S.P) if (bids[p.id] === low) { p.loot += S.lot.v; res.win.push(p.id); }
+  }
+  Object.assign(S, { ph: 'result', tt: RESULT_T, res });
+}
+// bots: treasure = bid a share of its value (odd numbers dodge ties); curse = pay a little to dodge
+function botBid(p) {
+  const v = S.lot.v;
+  let b;
+  if (v > 0) {
+    const want = v * (0.3 + p.skill * 0.45 + (rng() - 0.5) * 0.3);
+    b = rng() < 0.12 ? 0 : Math.round(want) + (rng() < 0.5 ? 1 : 0);
+  } else b = rng() < 0.25 ? 0 : 1 + Math.floor(rng() * Math.min(4, -v / 3));
+  return Math.max(0, Math.min(p.coins, b));
+}
+function botsThink() {
+  for (const p of S.P) if (p.bot && !p.lock && BID_T - S.tt >= p.at) placeBid(p.id, botBid(p));
+}
+
+// Run engine > host tick: phases, bots, publish when anything but the clock changed
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
+let lastSig = '', prevS = null;
+function hostTick(dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startLot(1);
+  else if (S.ph === 'show' && S.tt <= 0) { Object.assign(S, { ph: 'bid', tt: BID_T }); for (const p of S.P) p.at = 1.5 + rng() * 9; }
+  else if (S.ph === 'bid') { botsThink(); if (S.tt <= 0 || S.P.every((p) => p.lock)) resolveLot(); }
+  else if (S.ph === 'result' && S.tt <= 0) {
+    if (S.rd < S.rounds) startLot(S.rd + 1);
+    else if (S.mode === 'attract') { for (const p of S.P) Object.assign(p, { coins: START_COINS, loot: 0 }); startLot(1); }
+    else Object.assign(S, { ph: 'final', tt: FINAL_T });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  const s = sig();
+  if (s !== lastSig) {
+    lastSig = s;
+    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
+    onChange(prevS, S);
+    prevS = JSON.parse(s);
+  }
+}
+function startAttract() {
+  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 6, lot: null, res: null, P: [] };
+  for (let i = 0; i < 6; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
+  prevS = null; lastSig = '';
+}
+
+// Multiplayer > lobby + state sync (host publishes S without bids, guests send bids)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'bid' && S.mode === 'match') placeBid(from, a.v); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'treasure-auction', title: 'Treasure Auction', emoji: '💎', accent: '#ffd166',
+  blurb: 'Everyone bids in secret at once. Treasure goes to the highest bid nobody else matched. A cursed lot makes everyone pay their bid, and the lowest bidder is stuck with it. Coins + loot wins.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: `Up to 14 bidders (humans + bots). ${START_COINS} coins each, bids are hidden until the gavel.`,
+  settings: [{ key: 'rounds', label: 'Lots', options: [[6, '6'], [8, '8'], [10, '10']], value: 8 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', (isHost) => {
+      syncTop();
+      // promoted mid-bid: the old host took the sealed bids with it, so everyone bids again
+      if (isHost && S?.mode === 'match' && S.ph === 'bid') { for (const p of S.P) p.lock = false; secret.clear(); S.tt = Math.max(S.tt, 8); }
+    });
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    myBid = 0;
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 8, lot: null, res: null, P: [] };
+    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    prevS = null; lastSig = '';
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+  document.getElementById('lot').style.display = on ? 'block' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    // late joiner takes a bot's seat when full and starts fresh with the opening purse
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => scoreOf(a) - scoreOf(c))[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push(newPlayer(p.id, p.nick, p.color, false));
+  }
+}
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+// effects on what changed (guests from host state, host + attract from its own ticks)
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (cur.lot && `${cur.rd}|${cur.lot.kind}` !== lotKey) { lotKey = `${cur.rd}|${cur.lot.kind}`; setLot(cur.lot.kind); }
+  if (prev?.ph !== cur.ph) {
+    if (cur.ph === 'bid' && match) { myBid = Math.min(myBid, player(me)?.coins ?? 0); sfx.gavel(); }
+    if (cur.ph === 'result' && cur.res) {
+      sfx.gavel();
+      const names = cur.res.win.map((id) => player(id)?.nick ?? '?');
+      if (cur.lot.v > 0) {
+        if (cur.res.unsold) { sfx.unsold(); flash('<small>every top bid was matched</small>Unsold'); }
+        else { sfx.win(cur.res.win[0] === me); flash(`<small>${esc(names[0])} pays ${cur.res.bids[cur.res.win[0]]} for +${cur.lot.v}</small>SOLD!`); }
+      } else { sfx.curse(); flash(`<small>${esc(names.slice(0, 3).join(', '))}${names.length > 3 ? ` +${names.length - 3}` : ''} ${cur.lot.v}</small>CURSED!`); }
+    }
+  }
+  if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
+}
+function setLot(kind) {
+  if (lot3d) scene.remove(lot3d);
+  lot3d = lotMesh(kind);
+  lot3d.position.set(0, 6, -3);
+  lot3d.userData.drop = 0;
+  scene.add(lot3d);
+}
+
+// Input > bid box (buttons, slider, keys), lock sends the sealed bid to the host
+let myBid = 0;
+const bidbox = document.getElementById('bidbox'), bidR = document.getElementById('bidR'), lockBtn = document.getElementById('lockBtn');
+function setBid(v) { const me = player(lobby.room?.me); myBid = Math.max(0, Math.min(me?.coins ?? 0, Math.round(v))); }
+bidbox.querySelectorAll('button[data-d]').forEach((b) => (b.onclick = () => setBid(myBid + +b.dataset.d)));
+bidR.oninput = () => setBid(+bidR.value);
+function lockBid() { if (S?.mode === 'match' && S.ph === 'bid' && player(lobby.room?.me)) sync.act({ t: 'bid', v: myBid }); }
+lockBtn.onclick = lockBid;
+addEventListener('keydown', (e) => {
+  if (S?.mode !== 'match' || S.ph !== 'bid') return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowUp') setBid(myBid + (e.shiftKey ? 5 : 1));
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') setBid(myBid - (e.shiftKey ? 5 : 1));
+  else if (e.key === 'Enter') lockBid();
+  else return;
+  e.preventDefault();
+});
+
+// HUD > lot banner, round line, bid box, scoreboard, banners
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0, lastClock = 0, hudT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 2.6; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function hud(dt) {
+  if (S.mode !== 'match') { bidbox.style.display = 'none'; return; }
+  flashT -= dt;
+  const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.rounds} lots · ${START_COINS} coins each · bids are secret</small>Treasure Auction`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => scoreOf(c) - scoreOf(a))[0]; big(`<small>richest with ${w ? scoreOf(w) : 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'show') big(`<small>lot ${S.rd} of ${S.rounds}</small>${S.lot.v > 0 ? '💎' : '💀'} ${esc(S.lot.name)}`);
+  else if (flashT <= 0) big('');
+  const bidding = me && S.ph === 'bid';
+  bidbox.style.display = bidding ? 'block' : 'none';
+  if (bidding) {
+    bidR.max = me.coins; bidR.value = myBid;
+    document.getElementById('bidV').textContent = myBid;
+    lockBtn.textContent = me.lock ? `LOCKED ✓ (lock again to change)` : 'LOCK BID';
+    lockBtn.classList.toggle('locked', me.lock);
+    const waiting = S.P.filter((p) => !p.lock).length;
+    document.getElementById('bidS').textContent = `${clock}s · ${waiting ? `${waiting} still bidding` : 'all locked'} · ${S.lot.v > 0 ? `worth +${S.lot.v}: profit if you pay less` : `curse ${S.lot.v}: everyone pays their bid, lowest takes it`}`;
+    if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  if (S.lot) {
+    document.getElementById('lotKind').textContent = `LOT ${S.rd} / ${S.rounds} · ${S.lot.v > 0 ? 'TREASURE' : 'CURSED'}`;
+    const ln = document.getElementById('lotName');
+    ln.textContent = `${S.lot.name} ${S.lot.v > 0 ? '+' : ''}${S.lot.v}`;
+    ln.className = S.lot.v > 0 ? 'good' : 'bad';
+  }
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final tally' : `Lot ${S.rd} of ${S.rounds}`;
+  document.getElementById('roundMeta').innerHTML = me ? `🪙 ${me.coins} coins · 💎 loot ${me.loot}<br>Score <b style="color:var(--gold)">${scoreOf(me)}</b>` : 'Watching';
+  const rows = [...S.P].sort((a, c) => scoreOf(c) - scoreOf(a));
+  const showBids = S.ph === 'result' && S.res;
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${showBids ? `bid ${S.res.bids[p.id]} · ` : S.ph === 'bid' ? (p.lock ? '✅ ' : '🤔 ') : ''}${scoreOf(p)}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: lot drops onto the pedestal, pawns in an arc, paddles show bids on the reveal
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 9, 14), camLook = new THREE.Vector3(0, 1.6, -1.5), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (lot3d) {
+    const u = lot3d.userData;
+    u.drop = Math.min(1, u.drop + dt * 1.6);
+    const e = 1 - (1 - u.drop) ** 3;
+    lot3d.position.y = 6 - (6 - 2.75) * e + Math.sin(time * 2) * 0.08 * e;
+    lot3d.rotation.y = time * 0.9;
+  }
+  const good = S.lot?.v > 0;
+  lotGlow.color.set(good ? 0xffd166 : 0x9cff6b);
+  lotGlow.intensity += (((S.ph === 'bid' || S.ph === 'show') ? 14 : 5) - lotGlow.intensity) * Math.min(1, dt * 4);
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id)) { scene.remove(g); pawns3d.delete(id); }
+  const n = S.P.length, maxScore = Math.max(START_COINS, ...S.P.map((p) => p.coins));
+  S.P.forEach((p, i) => {
+    let g = pawns3d.get(p.id);
+    if (!g) { g = makePawn(p); pawns3d.set(p.id, g); }
+    // two rows when crowded, front row first
+    const row = n > 8 && i % 2 ? 1 : 0, perRow = n > 8 ? Math.ceil(n / 2) : n, k = n > 8 ? Math.floor(i / 2) : i;
+    const span = Math.min(Math.PI * 0.75, 0.32 * perRow), a = perRow > 1 ? -span / 2 + (span * k) / (perRow - 1) : 0, r = 9 + row * 2.2;
+    g.position.set(Math.sin(a) * r, 0, -3 + Math.cos(a) * r);
+    g.rotation.y = a + Math.PI;
+    const u = g.userData, win = S.ph === 'result' && S.res?.win.includes(p.id);
+    u.hop = win ? Math.abs(Math.sin(time * 7)) * 0.35 : u.hop * 0.9;
+    u.body.position.y = u.hop;
+    u.stackH += (Math.max(0.03, (p.coins / maxScore) * 1.5) - u.stackH) * Math.min(1, dt * 5);
+    u.stack.scale.y = u.stackH;
+    const text = S.ph === 'result' && S.res ? S.res.bids[p.id] : S.ph === 'bid' && p.lock ? '✓' : '';
+    drawPaddle(u.paddle, text, p.color, win);
+  });
+  hud(dt);
+  // portrait: pull back and look down so the arc fits
+  const fit = Math.max(1, 1.3 / camera.aspect);
+  camPos.lerp(_v.set(0, 8.5 * fit, 3 + 12 * fit), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
