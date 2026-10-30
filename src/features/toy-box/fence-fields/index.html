@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Fence Fields</title>
+<style>
+  :root { --ink: #fff; --card: rgba(18, 34, 20, 0.7); --gold: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd8ff; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; }
+  #info .m b { color: var(--gold); }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 160px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.7; }
+  #board .row i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 30px; text-align: right; font-weight: 800; }
+  #board .row.me span { color: var(--gold); font-weight: 800; }
+  #board .row.up { background: rgba(255, 255, 255, 0.1); border-radius: 6px; }
+  #big { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(30px, 7vw, 66px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.28); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.88; max-width: 320px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gold); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 700px) { #hint { display: none; } }
+  @media (max-width: 700px) { #board { top: auto; bottom: 12px; right: 10px; font-size: 11.5px; min-width: 140px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="turnName"></div><div class="m" id="turnMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card">On <b>your turn</b>, tap a gap between two posts to build a fence. Close the <b>4th side</b> of a pen to claim it (a sheep moves in) and <b>go again</b>. Most pens wins.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/fence-fields/index.html
+ * PURPOSE: online turn-based dots-and-boxes for 2-14 on a 3D meadow: build one fence per turn, closing a pen claims it (sheep in your color) and gives another turn; board grows with player count, shot clock, chain-aware bots. Host-run, state sent only on change
+ * UI: Fence Fields page (lobby overlay, turn card, scoreboard, hover ghost fence, posts / fences / pens / sheep)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, sky, sun, meadow
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fd8ff);
+scene.fog = new THREE.Fog(0x9fd8ff, 40, 110);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
+scene.add(new THREE.HemisphereLight(0xeaf6ff, 0x5a7a3a, 1.4));
+const sun = new THREE.DirectionalLight(0xfff2de, 2.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0005;
+scene.add(sun, sun.target);
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const grassTex = canvasTex(256, 256, (g, w, h) => { g.fillStyle = '#6cbf4a'; g.fillRect(0, 0, w, h); for (let i = 0; i < 6000; i++) { const l = 35 + Math.random() * 25; g.fillStyle = `hsl(${95 + Math.random() * 20},55%,${l}%)`; g.fillRect(Math.random() * w, Math.random() * h, 1, 3); } });
+grassTex.repeat.set(20, 20);
+const meadow = new THREE.Mesh(new THREE.CircleGeometry(120, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
+meadow.receiveShadow = true;
+scene.add(meadow);
+// scenery ring: round trees around the field
+{
+  const trunk = new THREE.MeshStandardMaterial({ color: 0x7a4a2a }), leaf = new THREE.MeshStandardMaterial({ color: 0x3f9a3a, roughness: 0.9 });
+  for (let i = 0; i < 46; i++) {
+    const a = (i / 46) * Math.PI * 2 + Math.random() * 0.1, r = 34 + Math.random() * 18;
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 2, 8), trunk);
+    const c = new THREE.Mesh(new THREE.IcosahedronGeometry(1.6 + Math.random(), 1), leaf);
+    t.position.set(Math.cos(a) * r, 1, Math.sin(a) * r); c.position.set(t.position.x, 3 + Math.random(), t.position.z);
+    t.castShadow = c.castShadow = true;
+    scene.add(t, c);
+  }
+}
+
+// Board > geometry: C x R pens, posts at grid points; edges = horizontals (C per row, R+1 rows) then verticals (C+1 per row, R rows)
+const CELL = 2.4;
+const board = new THREE.Group();
+scene.add(board);
+const woodMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.75 });
+const postMat = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.8 });
+const railGeo = mergeGeometries([new THREE.BoxGeometry(CELL - 0.2, 0.12, 0.09).translate(0, 0.42, 0), new THREE.BoxGeometry(CELL - 0.2, 0.12, 0.09).translate(0, 0.78, 0)]);
+const WOOD = new THREE.Color(0xc89262);
+let G = null;
+function geom(C, R) {
+  const nh = C * (R + 1), nv = (C + 1) * R;
+  const ends = (e) => (e < nh ? [[e % C, Math.floor(e / C)], [e % C + 1, Math.floor(e / C)]] : [[(e - nh) % (C + 1), Math.floor((e - nh) / (C + 1))], [(e - nh) % (C + 1), Math.floor((e - nh) / (C + 1)) + 1]]);
+  // box (c, r) -> its four edge ids; edge -> the 1 or 2 boxes it borders
+  const boxEdges = (c, r) => [r * C + c, (r + 1) * C + c, nh + r * (C + 1) + c, nh + r * (C + 1) + c + 1];
+  const edgeBoxes = (e) => {
+    const out = [];
+    if (e < nh) { const c = e % C, r = Math.floor(e / C); if (r > 0) out.push((r - 1) * C + c); if (r < R) out.push(r * C + c); }
+    else { const k = e - nh, c = k % (C + 1), r = Math.floor(k / (C + 1)); if (c > 0) out.push(r * C + c - 1); if (c < C) out.push(r * C + c); }
+    return out;
+  };
+  return { C, R, nh, ne: nh + nv, nb: C * R, ends, boxEdges, edgeBoxes, ox: -(C * CELL) / 2, oz: -(R * CELL) / 2 };
+}
+const postPos = (c, r) => [G.ox + c * CELL, G.oz + r * CELL];
+let rails = null, posts = null, tiles = null, sheepBody = null, sheepHead = null;
+const anim = { rail: [], box: [] };
+function buildBoard(C, R) {
+  if (G && G.C === C && G.R === R) return;
+  G = geom(C, R);
+  for (const c of [...board.children]) { board.remove(c); c.geometry?.dispose(); }
+  const m = new THREE.Matrix4();
+  posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.13, 0.16, 1.1, 10).translate(0, 0.55, 0), postMat, (C + 1) * (R + 1));
+  for (let r = 0, k = 0; r <= R; r++) for (let c = 0; c <= C; c++, k++) { const [x, z] = postPos(c, r); posts.setMatrixAt(k, m.makeTranslation(x, 0, z)); }
+  posts.castShadow = true;
+  rails = new THREE.InstancedMesh(railGeo, woodMat, G.ne);
+  rails.castShadow = true;
+  for (let e = 0; e < G.ne; e++) rails.setColorAt(e, WOOD);
+  tiles = new THREE.InstancedMesh(new THREE.BoxGeometry(CELL - 0.1, 0.06, CELL - 0.1), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), G.nb);
+  tiles.receiveShadow = true;
+  sheepBody = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.45, 1).scale(1.2, 0.9, 0.9), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, flatShading: true }), G.nb);
+  sheepHead = new THREE.InstancedMesh(new THREE.SphereGeometry(0.2, 12, 10).scale(1.2, 1, 1), new THREE.MeshStandardMaterial({ color: 0x2a2a2a, roughness: 0.8 }), G.nb);
+  sheepBody.castShadow = true;
+  for (let b = 0; b < G.nb; b++) { tiles.setColorAt(b, new THREE.Color(0xffffff)); }
+  // mowed patch + post dots so the playing field reads as a board
+  const patch = new THREE.Mesh(new THREE.BoxGeometry(C * CELL + 1.6, 0.04, R * CELL + 1.6), new THREE.MeshStandardMaterial({ color: 0xb5e08a, roughness: 1 }));
+  patch.position.y = 0.01; patch.receiveShadow = true;
+  const dots = new THREE.InstancedMesh(new THREE.CircleGeometry(0.32, 16).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x6b8f3a }), (C + 1) * (R + 1));
+  for (let r = 0, k = 0; r <= R; r++) for (let c = 0; c <= C; c++, k++) { const [x, z] = postPos(c, r); dots.setMatrixAt(k, m.makeTranslation(x, 0.035, z)); }
+  board.add(patch, dots, posts, rails, tiles, sheepBody, sheepHead);
+  anim.rail = new Array(G.ne).fill(0);
+  anim.box = new Array(G.nb).fill(0);
+  hideAll();
+  const w = C * CELL, d = R * CELL;
+  Object.assign(sun.shadow.camera, { left: -w, right: w, top: d, bottom: -d, near: 1, far: 120 });
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.position.set(14, 34, 12);
+}
+function hideAll() {
+  const z = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let e = 0; e < G.ne; e++) rails.setMatrixAt(e, z);
+  for (let b = 0; b < G.nb; b++) { tiles.setMatrixAt(b, z); sheepBody.setMatrixAt(b, z); sheepHead.setMatrixAt(b, z); }
+}
+// ghost fence under the pointer + glow on the last fence built
+const ghost = new THREE.Mesh(railGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false }));
+ghost.visible = false;
+const lastGlow = new THREE.Mesh(new THREE.BoxGeometry(CELL - 0.1, 0.04, 0.5), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6, depthWrite: false }));
+lastGlow.visible = false;
+scene.add(ghost, lastGlow);
+function edgeXform(e) {
+  const [[c0, r0], [c1, r1]] = G.ends(e), [x0, z0] = postPos(c0, r0), [x1, z1] = postPos(c1, r1);
+  return { x: (x0 + x1) / 2, z: (z0 + z1) / 2, rot: r0 === r1 ? 0 : Math.PI / 2 };
+}
+
+// Audio > hammer knock, baa, turn chime
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  knock() { tone(180, 120, 0.06, 0.14, 'triangle'); noise(0.04, 0.12, 900, 300, 'bandpass'); },
+  baa() { tone(520, 470, 0.35, 0.07, 'sawtooth'); tone(530, 480, 0.35, 0.04, 'square', 0.02); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.07, 'square', i * 0.12)); },
+};
+
+// Game > rules: one fence per turn; closing pens scores them and keeps the turn
+const BOT_NAMES = ['Shep', 'Woolly', 'Farmer Fi', 'Bo Peep', 'Rambo', 'Fluff', 'Hay Day', 'Barley', 'Clover', 'Mutton', 'Fenceworth', 'Posty', 'Gate Kate', 'Pip'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0', '#00f5d4'];
+const INTRO = 2.2, BOT_THINK = [0.7, 1.4];
+// S.E: '0'/'1' per edge; S.O: owner id per box (null = open); S.F: who built each edge (for tint); S.order: turn order ids
+let S = null;
+const rng = Math.random;
+const player = (id) => S.P.find((p) => p.id === id);
+function sizeFor(n, pick) {
+  if (pick && pick !== 'auto') return +pick;
+  return n <= 2 ? 4 : n <= 4 ? 5 : n <= 7 ? 6 : n <= 10 ? 7 : 8;
+}
+function newState(mode, players, size, clock) {
+  const g = geom(size, size);
+  return { mode, ph: 'intro', tt: INTRO, C: size, R: size, clock, E: '0'.repeat(g.ne), F: new Array(g.ne).fill(null), O: new Array(g.nb).fill(null), P: players, turn: 0, last: -1, got: 0, mv: 0 };
+}
+const placed = (e) => S.E[e] === '1';
+const sides = (b) => G.boxEdges(b % G.C, Math.floor(b / G.C)).reduce((n, e) => n + placed(e), 0);
+// host: apply one fence; returns pens closed
+function build(id, e) {
+  if (S.ph !== 'play' || S.P[S.turn]?.id !== id || !(e >= 0 && e < G.ne) || placed(e)) return -1;
+  S.E = S.E.slice(0, e) + '1' + S.E.slice(e + 1);
+  S.F[e] = id; S.last = e; S.mv++;
+  let got = 0;
+  for (const b of G.edgeBoxes(e)) if (sides(b) === 4 && S.O[b] == null) { S.O[b] = id; got++; }
+  const p = player(id);
+  p.score += got;
+  S.got = got;
+  if (!S.E.includes('0')) { S.ph = 'final'; S.tt = 12; return got; }
+  // no pen closed: next player
+  if (!got) S.turn = (S.turn + 1) % S.P.length;
+  startTurn();
+  return got;
+}
+function startTurn() { S.tt = S.clock; const p = S.P[S.turn]; if (p) p.think = BOT_THINK[0] + rng() * (BOT_THINK[1] - BOT_THINK[0]); }
+// bots: take any pen; else a fence that doesn't hand over a 3rd side; else the move that gives away the smallest chain
+function chainIfGiven(e) {
+  // count pens the next player could sweep after edge e
+  const E = S.E.split('');
+  E[e] = '1';
+  const sideCount = (b) => G.boxEdges(b % G.C, Math.floor(b / G.C)).reduce((n, x) => n + (E[x] === '1'), 0);
+  let n = 0, again = true;
+  while (again) {
+    again = false;
+    for (let b = 0; b < G.nb; b++) if (sideCount(b) === 3) { const x = G.boxEdges(b % G.C, Math.floor(b / G.C)).find((q) => E[q] !== '1'); E[x] = '1'; n++; again = true; }
+  }
+  return n;
+}
+function botMove(p) {
+  const free = [];
+  for (let e = 0; e < G.ne; e++) if (!placed(e)) free.push(e);
+  const sloppy = rng() < (p.slop ?? 0.1);
+  const closing = free.filter((e) => G.edgeBoxes(e).some((b) => sides(b) === 3));
+  if (closing.length && !(sloppy && rng() < 0.4)) return closing[Math.floor(rng() * closing.length)];
+  const safe = free.filter((e) => G.edgeBoxes(e).every((b) => sides(b) < 2));
+  if (safe.length && !sloppy) return safe[Math.floor(rng() * safe.length)];
+  if (sloppy) return free[Math.floor(rng() * free.length)];
+  let best = null, bestN = Infinity;
+  for (const e of free) { const n = chainIfGiven(e) + rng() * 0.1; if (n < bestN) { bestN = n; best = e; } }
+  return best;
+}
+// timeout: build a random safe-ish fence for the idle player
+function autoMove() { const p = S.P[S.turn]; build(p.id, botMove({ slop: 0 })); }
+
+// Run engine > host tick: intro, bot turns, shot clock; publish on change
+let dirty = true;
+function hostTick(dt) {
+  if (!S) return;
+  const before = `${S.ph}|${S.mv}|${S.turn}|${S.P.length}`;
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) { S.ph = 'play'; S.turn = 0; startTurn(); }
+  else if (S.ph === 'play') {
+    const p = S.P[S.turn];
+    if (!p) { S.turn = 0; startTurn(); }
+    else if (p.bot) { p.think -= dt; if (p.think <= 0) build(p.id, botMove(p)); }
+    else if (S.tt <= 0) autoMove();
+  } else if (S.ph === 'final' && S.tt <= 0) {
+    if (S.mode === 'attract') startAttract();
+    else if (lobby.room?.isHost) lobby.backToLobby();
+  }
+  if (before !== `${S.ph}|${S.mv}|${S.turn}|${S.P.length}`) dirty = true;
+  if (dirty && S.mode === 'match' && lobby.room?.isHost) { sync.publish(S); dirty = false; }
+}
+function startAttract() {
+  const bots = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, slop: 0.15 }));
+  S = newState('attract', bots, 5, 10);
+  S.tt = 1;
+  resetView();
+}
+
+// Multiplayer > lobby + state sync (host publishes S, guests send fence picks)
+const sync = createTurnSync({
+  onState(s) { if (started) applyState(s); },
+  onAction(from, a) { if (a.t === 'edge' && S?.mode === 'match' && build(from, a.e) >= 0) dirty = true; },
+});
+let started = false;
+const lobby = createLobby({
+  game: 'fence-fields', title: 'Fence Fields', emoji: '🐑', accent: '#8ac926',
+  blurb: 'Take turns building one fence between two posts. Close the last side of a pen to claim it, a sheep moves in, and you go again. Most pens wins.',
+  maxBots: 13, defaultBots: 2, minPlayers: 2,
+  note: 'Up to 14 farmers (humans + bots). The field grows with the number of players.',
+  settings: [
+    { key: 'clock', label: 'Turn clock', options: [[10, '10 s'], [15, '15 s'], [25, '25 s']], value: 15 },
+    { key: 'size', label: 'Field', options: [['auto', 'Auto'], [4, '4×4'], [6, '6×6'], [8, '8×8']], value: 'auto' },
+  ],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost, settings }) {
+    started = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, slop: 0.06 + rng() * 0.14 });
+    // shuffle seats so the host doesn't always start
+    for (let i = P.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [P[i], P[j]] = [P[j], P[i]]; }
+    S = newState('match', P, sizeFor(P.length, settings.size), settings.clock ?? 15);
+    resetView();
+    dirty = true;
+  },
+  onLobby() { started = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S?.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id)), cur = S.P[S.turn]?.id;
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 });
+  // keep the turn with whoever had it; if they left, the next seat plays
+  const k = S.P.findIndex((p) => p.id === cur);
+  if (k >= 0) S.turn = k; else { S.turn = S.turn % Math.max(1, S.P.length); startTurn(); }
+  dirty = true;
+}
+// view: rebuild meshes for a fresh board, then animate what changes
+let shown = null;
+function resetView() { G = null; buildBoard(S.C, S.R); shown = { E: '0'.repeat(G.ne), O: new Array(G.nb).fill(null) }; }
+function applyState(s) {
+  const fresh = !S || S.C !== s.C || s.mv < S.mv || S.mode !== 'match';
+  S = s;
+  if (fresh) resetView();
+}
+// diff view against state: animate new fences / pens, chime on new turn (host + guests)
+let lastTurnKey = '';
+function syncView() {
+  if (!S || !G || !shown) return;
+  for (let e = 0; e < G.ne; e++) if (S.E[e] === '1' && shown.E[e] !== '1') { anim.rail[e] = 0.001; const p = player(S.F[e]); rails.setColorAt(e, WOOD.clone().lerp(new THREE.Color(p?.color ?? '#ffffff'), 0.35)); rails.instanceColor.needsUpdate = true; sfx.knock(); }
+  let baa = false;
+  for (let b = 0; b < G.nb; b++) if (S.O[b] != null && shown.O[b] == null) { anim.box[b] = 0.001; const p = player(S.O[b]); tiles.setColorAt(b, new THREE.Color(p?.color ?? '#ffffff').lerp(new THREE.Color(0xffffff), 0.25)); tiles.instanceColor.needsUpdate = true; baa = true; }
+  if (baa) sfx.baa();
+  shown.E = S.E; shown.O = S.O.slice();
+  // new turn (or extra turn after a pen): chime if it's mine
+  const key = `${S.ph}|${S.turn}|${S.mv}`;
+  if (key !== lastTurnKey) {
+    const wasFinal = lastTurnKey.startsWith('final');
+    lastTurnKey = key;
+    if (S.ph === 'final' && !wasFinal) sfx.win();
+    else if (myTurn()) { sfx.turn(); flash(S.got && S.mv ? '<small>pen closed</small>Go again!' : 'Your turn!'); }
+  }
+}
+
+// Input > pick the nearest open gap on the ground plane
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _p = new THREE.Vector3();
+function edgeAt(cx, cy) {
+  if (!G) return -1;
+  ndc.set((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  if (!ray.ray.intersectPlane(groundPlane, _p)) return -1;
+  let best = -1, bd = CELL * 0.42;
+  for (let e = 0; e < G.ne; e++) { if (placed(e)) continue; const t = edgeXform(e), d = Math.hypot(_p.x - t.x, _p.z - t.z); if (d < bd) { bd = d; best = e; } }
+  return best;
+}
+const myTurn = () => S?.mode === 'match' && S.ph === 'play' && S.P[S.turn]?.id === lobby.room?.me;
+let hover = -1, pending = -1, pendingT = 0;
+renderer.domElement.addEventListener('pointermove', (e) => { hover = myTurn() ? edgeAt(e.clientX, e.clientY) : -1; });
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || !myTurn()) return;
+  const edge = edgeAt(e.clientX, e.clientY);
+  if (edge < 0 || pending >= 0) return;
+  // show it at once; host confirms through state
+  pending = edge; pendingT = 1.5;
+  sync.act({ t: 'edge', e: edge });
+});
+
+// HUD > turn card, scoreboard, banners
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 1.4; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let hudT = 0, lastClock = 0;
+function hud(dt) {
+  if (S?.mode !== 'match') return;
+  flashT -= dt;
+  const up = S.P[S.turn], me = lobby.room?.me;
+  const clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>${S.C}×${S.R} field · ${S.P.length} farmers</small>Fence Fields`);
+  else if (S.ph === 'final') { const top = [...S.P].sort((a, c) => c.score - a.score); const tie = top[1] && top[1].score === top[0].score; big(`<small>${top[0]?.score ?? 0} pens</small>${tie ? '🤝 Tie!' : `🏆 ${esc(top[0]?.nick ?? '')}`}`); }
+  else if (flashT <= 0) big('');
+  if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  const left = S.E.split('').filter((c) => c === '0').length;
+  document.getElementById('turnName').innerHTML = S.ph !== 'play' ? (S.ph === 'final' ? 'Field full!' : 'Get ready') : up?.id === me ? '<span style="color:var(--gold)">Your turn</span>' : `${esc(up?.nick ?? '')}'s turn`;
+  document.getElementById('turnMeta').innerHTML = S.ph === 'play' ? `${up?.bot ? 'thinking…' : `<b>${clock}s</b> left`} · ${left} fences to go` : `${S.O.filter((o) => o == null).length} open pens`;
+  const rows = S.P.map((p, i) => ({ p, i })).sort((a, c) => c.p.score - a.p.score || a.i - c.i);
+  document.getElementById('board').innerHTML = rows.map(({ p, i }) => `<div class="row ${p.id === me ? 'me' : ''} ${i === S.turn && S.ph === 'play' ? 'up' : ''}"><b>${i === S.turn && S.ph === 'play' ? '▶' : ''}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
+}
+
+// Run engine > host / attract tick (worker keeps a background host tab ticking); guests just run the clock
+startTicker(20, (dt) => {
+  if (S?.mode === 'attract' || lobby.room?.isHost) { if (S?.mode === 'attract' || started) hostTick(dt); }
+  else if (S) S.tt -= dt;
+});
+
+// Run engine > render loop: fence rise, sheep pop + graze bob, ghost, camera fit
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 20, 18), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _t = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (S) {
+    if (!G || G.C !== S.C) resetView();
+    syncView();
+    for (let e = 0; e < G.ne; e++) {
+      const a = anim.rail[e];
+      if (!a) continue;
+      if (a < 1) anim.rail[e] = Math.min(1, a + dt * 4);
+      const t = edgeXform(e), k = anim.rail[e], h = k < 1 ? 1 + Math.sin(k * Math.PI) * 0.25 : 1;
+      rails.setMatrixAt(e, _m.compose(_t.set(t.x, (k - 1) * 0.8, t.z), _q.setFromAxisAngle(UP, t.rot), _s.set(1, h, 1)));
+    }
+    rails.instanceMatrix.needsUpdate = true;
+    for (let b = 0; b < G.nb; b++) {
+      const a = anim.box[b];
+      if (!a) continue;
+      if (a < 1) anim.box[b] = Math.min(1, a + dt * 2.5);
+      const k = anim.box[b], c = b % G.C, r = Math.floor(b / G.C);
+      const x = G.ox + (c + 0.5) * CELL, z = G.oz + (r + 0.5) * CELL;
+      tiles.setMatrixAt(b, _m.makeTranslation(x, 0.03, z));
+      // sheep drops in with a bounce, then grazes (head bob, slow turn)
+      const pop = k < 1 ? Math.sin(k * Math.PI * 0.5) * (1 + Math.sin(k * Math.PI) * 0.3) : 1;
+      const yaw = b * 2.1 + Math.sin(time * 0.3 + b) * 0.6, hop = k < 1 ? (1 - k) * 3 : Math.max(0, Math.sin(time * 3 + b * 1.7)) * 0.04;
+      _q.setFromAxisAngle(UP, yaw);
+      sheepBody.setMatrixAt(b, _m.compose(_t.set(x, 0.45 + hop, z), _q, _s.set(pop, pop, pop)));
+      const graze = Math.sin(time * 1.3 + b) * 0.12 - 0.05;
+      sheepHead.setMatrixAt(b, _m.compose(_t.set(x + Math.cos(yaw) * 0.6 * pop, 0.55 + graze + hop, z - Math.sin(yaw) * 0.6 * pop), _q, _s.set(pop, pop, pop)));
+    }
+    tiles.instanceMatrix.needsUpdate = true; sheepBody.instanceMatrix.needsUpdate = true; sheepHead.instanceMatrix.needsUpdate = true;
+    // optimistic pending fence until host state confirms it
+    pendingT -= dt;
+    if (pending >= 0 && (placed(pending) || pendingT <= 0 || !myTurn())) pending = -1;
+    const gh = pending >= 0 ? pending : myTurn() ? hover : -1;
+    ghost.visible = gh >= 0 && !placed(gh);
+    if (ghost.visible) { const t = edgeXform(gh); ghost.position.set(t.x, 0, t.z); ghost.rotation.y = t.rot; ghost.material.opacity = pending >= 0 ? 0.85 : 0.4 + Math.sin(time * 6) * 0.1; ghost.material.color.set(player(lobby.room?.me)?.color ?? '#ffffff'); }
+    lastGlow.visible = S.last >= 0;
+    if (lastGlow.visible) { const t = edgeXform(S.last); lastGlow.position.set(t.x, 0.03, t.z); lastGlow.rotation.y = t.rot; lastGlow.material.opacity = 0.35 + Math.sin(time * 5) * 0.2; lastGlow.material.color.set(player(S.F[S.last])?.color ?? '#ffffff'); }
+    hud(dt);
+    // camera: frame the whole field from the south, steeper on portrait screens
+    const w = G.C * CELL + 3, d = G.R * CELL + 3, fov = THREE.MathUtils.degToRad(camera.fov);
+    const need = Math.max(d * 1.1, w / camera.aspect) / (2 * Math.tan(fov / 2));
+    const pitch = camera.aspect < 0.8 ? 1.25 : 1.0;
+    camPos.lerp(_v.set(0, Math.sin(pitch) * need * 1.05, Math.cos(pitch) * need * 1.05 + 0.8), 1 - Math.exp(-dt * 3));
+    camLook.lerp(_v.set(0, 0, 0.8), 1 - Math.exp(-dt * 3));
+  }
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

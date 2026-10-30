@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Bank or Bust</title>
+<style>
+  :root { --ink: #fff; --card: rgba(24, 14, 8, 0.7); --gold: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2a160c; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.85; max-width: 240px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  #board .row.me span { color: var(--gold); font-weight: 800; }
+  #board .row.out { opacity: 0.5; }
+  #pot { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; display: none; text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); }
+  #pot small { display: block; font-size: 13px; font-weight: 800; letter-spacing: 0.2em; opacity: 0.8; }
+  #pot b { font-size: clamp(40px, 9vw, 72px); font-weight: 900; color: var(--gold); font-variant-numeric: tabular-nums; }
+  #big { position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(30px, 7vw, 68px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #bank { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); display: none; font: inherit; font-size: 26px; font-weight: 900; letter-spacing: 0.06em; color: #2a160c; background: linear-gradient(#ffe57a, #ffb627); border: 0; border-radius: 18px; padding: 16px 44px; box-shadow: 0 6px 0 #a86a00, 0 10px 24px rgba(0, 0, 0, 0.4); cursor: pointer; }
+  #bank:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 2px 0 #a86a00; }
+  #bank:disabled { filter: grayscale(1) brightness(0.7); cursor: default; }
+  #bank small { display: block; font-size: 13px; font-weight: 800; letter-spacing: 0; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.85; max-width: 300px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gold); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 700px) { #hint { display: none; } }
+  @media (max-width: 700px) { #pot { top: 96px; } #board { top: auto; bottom: 118px; right: 10px; font-size: 11.5px; min-width: 150px; } #bank { font-size: 22px; padding: 13px 36px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="pot"><small>ROUND POT</small><b id="potN">0</b></div>
+<div id="big"></div>
+<button id="bank">BANK<small id="bankSub"></small></button>
+<div id="hint" class="card">Two dice roll for everyone. Each roll adds to the pot of everyone still in. <b>Bank</b> (or <b>Space</b>) to keep it. A <b>⚀</b> busts the round, double <b>⚀</b> wipes your total.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/bank-or-bust/index.html
+ * PURPOSE: online push-your-luck dice for 2-14: one shared roll for everyone, each roll grows the pot of players still in, bank to keep it; a single 1 busts the round, snake eyes wipe the total. Host-run, state sent only on change
+ * UI: Bank or Bust page (lobby overlay, pot counter, BANK button, scoreboard, 3D dice table with pawns)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, lamp light over a felt table
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a160c);
+scene.fog = new THREE.Fog(0x2a160c, 22, 48);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+scene.add(new THREE.HemisphereLight(0xffe2c0, 0x2a160c, 0.9));
+const lamp = new THREE.SpotLight(0xffe0b0, 260, 30, 0.75, 0.5, 1.6);
+lamp.position.set(0, 13, 1);
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(2048, 2048);
+lamp.shadow.bias = -0.0004;
+scene.add(lamp, lamp.target);
+
+// Table > wood rim, green felt, dice tray in the middle
+function canvasTex(w, h, draw) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+const feltTex = canvasTex(256, 256, (g, w, h) => { g.fillStyle = '#1f7a45'; g.fillRect(0, 0, w, h); for (let i = 0; i < 9000; i++) { const v = Math.random() * 30 - 15; g.fillStyle = `rgba(${v > 0 ? 255 : 0},${v > 0 ? 255 : 0},${v > 0 ? 255 : 0},${Math.abs(v) / 200})`; g.fillRect(Math.random() * w, Math.random() * h, 1, 1); } });
+feltTex.repeat.set(4, 4);
+const woodTex = canvasTex(256, 64, (g, w, h) => { g.fillStyle = '#6b3a1e'; g.fillRect(0, 0, w, h); for (let i = 0; i < 40; i++) { g.strokeStyle = `rgba(30,12,4,${0.1 + Math.random() * 0.25})`; g.lineWidth = 1 + Math.random() * 2; g.beginPath(); const y = Math.random() * h; g.moveTo(0, y); g.bezierCurveTo(w / 3, y + Math.random() * 10 - 5, (2 * w) / 3, y + Math.random() * 10 - 5, w, y); g.stroke(); } });
+const TABLE_R = 7.2;
+const felt = new THREE.Mesh(new THREE.CylinderGeometry(TABLE_R, TABLE_R, 0.3, 72), new THREE.MeshStandardMaterial({ map: feltTex, roughness: 1 }));
+felt.position.y = -0.15; felt.receiveShadow = true;
+const rim = new THREE.Mesh(new THREE.TorusGeometry(TABLE_R + 0.15, 0.35, 16, 96).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.5 }));
+rim.position.y = 0.05; rim.castShadow = rim.receiveShadow = true;
+const base = new THREE.Mesh(new THREE.CylinderGeometry(TABLE_R + 0.3, TABLE_R - 1, 1.6, 72), new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.6 }));
+base.position.y = -1.1;
+const floor = new THREE.Mesh(new THREE.CircleGeometry(60, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3b2114, roughness: 0.9 }));
+floor.position.y = -6; floor.receiveShadow = true;
+const TRAY_W = 3.6, TRAY_D = 2.6;
+const tray = new THREE.Group();
+const trayMat = new THREE.MeshStandardMaterial({ color: 0x5a1f2a, roughness: 0.9 });
+const trayFloor = new THREE.Mesh(new THREE.BoxGeometry(TRAY_W, 0.06, TRAY_D), trayMat);
+trayFloor.position.y = 0.03; trayFloor.receiveShadow = true;
+tray.add(trayFloor);
+for (const [w, d, x, z] of [[TRAY_W + 0.3, 0.15, 0, TRAY_D / 2 + 0.07], [TRAY_W + 0.3, 0.15, 0, -TRAY_D / 2 - 0.07], [0.15, TRAY_D, TRAY_W / 2 + 0.07, 0], [0.15, TRAY_D, -TRAY_W / 2 - 0.07, 0]]) {
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 0.35, d), new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.5 }));
+  wall.position.set(x, 0.17, z); wall.castShadow = wall.receiveShadow = true;
+  tray.add(wall);
+}
+scene.add(felt, rim, base, floor, tray);
+
+// Dice > pip textures per face; face order +x,-x,+y,-y,+z,-z = 3,4,1,6,2,5 (opposites sum to 7)
+const FACE_VAL = [3, 4, 1, 6, 2, 5];
+const PIPS = { 1: [[0.5, 0.5]], 2: [[0.27, 0.27], [0.73, 0.73]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.27, 0.27], [0.73, 0.27], [0.27, 0.73], [0.73, 0.73]], 5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]], 6: [[0.27, 0.23], [0.73, 0.23], [0.27, 0.5], [0.73, 0.5], [0.27, 0.77], [0.73, 0.77]] };
+const dieMats = FACE_VAL.map((v) => new THREE.MeshStandardMaterial({ roughness: 0.25, map: canvasTex(128, 128, (g, w) => {
+  g.fillStyle = '#fbf6ee'; g.fillRect(0, 0, w, w);
+  g.fillStyle = v === 1 ? '#d6213b' : '#1b1b22';
+  for (const [x, y] of PIPS[v]) { g.beginPath(); g.arc(x * w, y * w, v === 1 ? 16 : 11, 0, Math.PI * 2); g.fill(); }
+}) }));
+const DIE = 0.62;
+const dieGeo = new RoundedBoxGeometry(DIE, DIE, DIE, 4, 0.1);
+const dice = [0, 1].map((k) => { const m = new THREE.Mesh(dieGeo, dieMats); m.castShadow = true; m.position.set(k ? 0.7 : -0.7, DIE / 2, 0); scene.add(m); return m; });
+// orientation that puts value v on top (+y)
+const X = new THREE.Vector3(1, 0, 0), Y = new THREE.Vector3(0, 1, 0), Z = new THREE.Vector3(0, 0, 1);
+const FACE_UP = { 1: new THREE.Quaternion(), 6: new THREE.Quaternion().setFromAxisAngle(X, Math.PI), 2: new THREE.Quaternion().setFromAxisAngle(X, -Math.PI / 2), 5: new THREE.Quaternion().setFromAxisAngle(X, Math.PI / 2), 3: new THREE.Quaternion().setFromAxisAngle(Z, Math.PI / 2), 4: new THREE.Quaternion().setFromAxisAngle(Z, -Math.PI / 2) };
+// tumble: thrown from the tray's near edge, bounces, spin unwinds onto the final face
+const TUMBLE = 1.3;
+const tumbles = [null, null];
+function startTumble(vals) {
+  vals.forEach((v, k) => {
+    const yaw = new THREE.Quaternion().setFromAxisAngle(Y, Math.random() * Math.PI * 2);
+    tumbles[k] = {
+      t: 0, from: new THREE.Vector3((k ? 1 : -1) * 0.5, 1.6, TRAY_D / 2 + 1.2),
+      to: new THREE.Vector3((k ? 1 : -1) * (0.55 + Math.random() * 0.35), DIE / 2, (Math.random() - 0.5) * 0.9),
+      final: yaw.multiply(FACE_UP[v].clone()), axis: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize(), spins: 3 + Math.random() * 2,
+    };
+  });
+}
+const _q = new THREE.Quaternion();
+function animDice(dt) {
+  tumbles.forEach((tb, k) => {
+    if (!tb) return;
+    tb.t = Math.min(TUMBLE, tb.t + dt);
+    const u = tb.t / TUMBLE, e = 1 - (1 - u) ** 3;
+    const d = dice[k];
+    d.position.lerpVectors(tb.from, tb.to, e);
+    // decaying bounces on top of the glide
+    d.position.y = tb.to.y + Math.abs(Math.sin(u * Math.PI * 3.5)) * 1.4 * (1 - u) ** 2 + (1 - e) * (tb.from.y - tb.to.y) * 0.4;
+    d.quaternion.copy(tb.final).multiply(_q.setFromAxisAngle(tb.axis, tb.spins * Math.PI * 2 * (1 - e)));
+    if (u >= 1) tumbles[k] = null;
+  });
+}
+
+// Pawns > one per player around the rim: body, head, name tag, coin stack of their total
+function nameTag(nick, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 28px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(24,14,8,0.78)'; g.beginPath(); g.roundRect(128 - w / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 19, 32, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 33, 200);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+  s.scale.set(2.2, 0.55, 1); s.renderOrder = 5;
+  return s;
+}
+// low metalness: no env map, so real metal would render dark
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xffc83d, metalness: 0.3, roughness: 0.35, emissive: 0x6a4200, emissiveIntensity: 0.35 });
+const coinGeo = new THREE.CylinderGeometry(0.28, 0.28, 1, 24).translate(0, 0.5, 0);
+const pawns3d = new Map();
+function makePawn(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.4 });
+  const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.42, 0.9, 24), mat);
+  torso.position.y = 0.45;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 16), mat);
+  head.position.y = 1.15;
+  torso.castShadow = head.castShadow = true;
+  body.add(torso, head);
+  const stack = new THREE.Mesh(coinGeo, coinMat);
+  stack.castShadow = true;
+  const tag = nameTag(p.nick, p.color);
+  g.add(body, stack, tag);
+  g.userData = { body, stack, tag, mat, tip: 0, sit: 0, stackH: 0.001 };
+  scene.add(g);
+  return g;
+}
+// pot pile: coins scattered beside the tray, count grows with the pot
+const POT_COINS = 90;
+const potPile = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.22, 0.22, 0.07, 18), coinMat, POT_COINS);
+potPile.castShadow = true;
+{
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
+  for (let i = 0; i < POT_COINS; i++) {
+    const side = i % 2 ? 1 : -1, a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 0.9;
+    q.setFromEuler(new THREE.Euler((Math.random() - 0.5) * 0.3, 0, (Math.random() - 0.5) * 0.3));
+    m.compose(new THREE.Vector3(side * (TRAY_W / 2 + 1.1) + Math.cos(a) * r, 0.04 + Math.floor(i / 30) * 0.07, Math.sin(a) * r * 0.8), q, s);
+    potPile.setMatrixAt(i, m);
+  }
+  potPile.count = 0;
+}
+scene.add(potPile);
+
+// Audio > dice rattle, bank ding, bust thud, snake-eyes slide
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  rattle() { for (let i = 0; i < 6; i++) setTimeout(() => noise(0.04, 0.12, 3000 + Math.random() * 2000, 1200, 'bandpass'), i * 90 + Math.random() * 40); },
+  land() { tone(200, 140, 0.08, 0.1, 'triangle'); },
+  bank(me) { [1047, 1319, 1568].forEach((f, i) => tone(f, f, 0.12, me ? 0.09 : 0.03, 'square', i * 0.06)); },
+  bust() { tone(220, 70, 0.5, 0.16, 'sawtooth'); noise(0.3, 0.2, 400, 100); },
+  snake() { tone(440, 110, 1.1, 0.14, 'sawtooth'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules: shared pot for everyone still in; one 1 = round bust, two 1s = total wiped; first roll of a round is safe
+const WAIT = 3.2, BUST_SHOW = 2.6, ROUND_SHOW = 3.5, INTRO = 2.5, BANK_GRACE = 0.35, MAX_ROLLS = 40;
+const BOT_NAMES = ['Lucky Lou', 'Dicey', 'Snake Eyes', 'High Roller', 'Penny', 'Cashout', 'Boxcars', 'Rattles', 'Gambit', 'Jackpot', 'Lady Luck', 'Odds', 'Ace', 'Chip'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// players: [{ id, nick, color, bot, total, bank: round winnings once banked (null = still in), bust, nerve }]
+let S = { mode: 'attract', ph: 'intro', tt: INTRO, rd: 1, rounds: 5, pot: 0, dice: [3, 4], roll: 0, rollAge: 9, last: '', P: [] };
+const rng = Math.random;
+const player = (id) => S.P.find((p) => p.id === id);
+const standing = () => S.P.filter((p) => p.bank == null && !p.bust);
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, total: 0, bank: null, bust: false, nerve: 10 + Math.floor(rng() * 26) }; }
+function startRound(rd) {
+  // first roll comes quickly: nothing to bank yet
+  Object.assign(S, { rd, ph: 'wait', tt: 1.4, pot: 0, roll: 0, last: '' });
+  for (const p of S.P) { p.bank = null; p.bust = false; }
+}
+function doBank(id) {
+  const p = player(id);
+  if (!p || p.bank != null || p.bust || S.roll === 0) return false;
+  // grace: a bank sent just before the dice left still counts
+  if (S.ph !== 'wait' && !(S.ph === 'roll' && S.rollAge < BANK_GRACE)) return false;
+  p.bank = S.pot; p.total += S.pot;
+  S.last = `b:${id}`;
+  return true;
+}
+function roll() {
+  let a = 1 + Math.floor(rng() * 6), b = 1 + Math.floor(rng() * 6);
+  if (S.roll === 0) while (a === 1 || b === 1) { a = 1 + Math.floor(rng() * 6); b = 1 + Math.floor(rng() * 6); }
+  Object.assign(S, { ph: 'roll', tt: TUMBLE, dice: [a, b], roll: S.roll + 1, rollAge: 0, last: '' });
+}
+function resolveRoll() {
+  const [a, b] = S.dice, ones = (a === 1) + (b === 1);
+  if (ones) {
+    for (const p of standing()) { p.bust = true; if (ones === 2) p.total = 0; }
+    Object.assign(S, { ph: 'bust', tt: BUST_SHOW, last: ones === 2 ? 'snake' : 'bust' });
+    return;
+  }
+  // doubles count twice
+  S.pot += a === b ? (a + b) * 2 : a + b;
+  Object.assign(S, { ph: 'wait', tt: WAIT, last: a === b ? 'dbl' : 'add' });
+  if (!standing().length || S.roll >= MAX_ROLLS) endRound();
+}
+function endRound() {
+  // anyone still in when the round is cut off (roll cap) keeps the pot
+  for (const p of standing()) { p.bank = S.pot; p.total += S.pot; }
+  Object.assign(S, { ph: 'round', tt: ROUND_SHOW });
+}
+// bots: bank once the pot reaches their nerve; push harder when behind late in the game
+function botsThink() {
+  if (S.ph !== 'wait' || S.roll === 0) return;
+  const lead = Math.max(...S.P.map((p) => p.total));
+  for (const p of standing()) {
+    if (!p.bot) continue;
+    const behind = lead - p.total, late = S.rd >= S.rounds - 1;
+    let want = p.nerve + (late && behind > 0 ? Math.min(behind, 40) : 0);
+    if (late && S.rd === S.rounds && p.total + S.pot > lead + 2 && p.total < lead) want = 0;
+    if (S.pot >= want && rng() < 0.8) doBank(p.id);
+  }
+}
+
+// Run engine > host tick: phase timers, publish only on change
+let dirty = true;
+function hostTick(dt) {
+  const before = `${S.ph}|${S.roll}|${S.last}|${S.P.map((p) => `${p.bank}${p.bust}`).join()}`;
+  S.tt -= dt; S.rollAge += dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(1);
+  else if (S.ph === 'wait') {
+    if (!standing().length) endRound();
+    else { if (S.roll > 0 && S.tt < WAIT - 0.9 - rng() * 0.6) botsThink(); if (S.tt <= 0) roll(); }
+  } else if (S.ph === 'roll' && S.tt <= 0) resolveRoll();
+  else if (S.ph === 'bust' && S.tt <= 0) endRound();
+  else if (S.ph === 'round' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S.rd + 1);
+    else if (S.mode === 'attract') { for (const p of S.P) p.total = 0; startRound(1); }
+    else Object.assign(S, { ph: 'final', tt: 12 });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  const after = `${S.ph}|${S.roll}|${S.last}|${S.P.map((p) => `${p.bank}${p.bust}`).join()}`;
+  if (before !== after) dirty = true;
+  if (dirty && S.mode === 'match' && lobby.room?.isHost) { sync.publish(S); dirty = false; }
+}
+function startAttract() {
+  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 5, pot: 0, dice: [3, 4], roll: 0, rollAge: 9, last: '', P: [] };
+  for (let i = 0; i < 6; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
+}
+
+// Multiplayer > lobby + state sync (host publishes S, guests send bank)
+const sync = createTurnSync({
+  onState(s) { if (S.mode === 'match' || lobbyStarted) applyState(s); },
+  onAction(from, a) { if (a.t === 'bank' && S.mode === 'match' && doBank(from)) dirty = true; },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'bank-or-bust', title: 'Bank or Bust', emoji: '🎲', accent: '#ffd23f',
+  blurb: 'One roll for the whole table. Every roll grows the pot for everyone still in. Bank to keep it, or push your luck: a single 1 busts the round, double 1s wipe your total.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 players (humans + bots). Everyone decides at once, so big rooms play just as fast.',
+  settings: [{ key: 'rounds', label: 'Rounds', options: [[3, '3'], [5, '5'], [7, '7']], value: 5 }],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 5, pot: 0, dice: [3, 4], roll: 0, rollAge: 9, last: '', P: [] };
+    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    dirty = true;
+  },
+  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+  document.getElementById('pot').style.display = on ? 'block' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id));
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  for (const p of players) if (!player(p.id)) {
+    // late joiner: sits out this round, starts level with last place
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.total - c.total)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    const np = newPlayer(p.id, p.nick, p.color, false);
+    np.total = Math.min(...S.P.map((q) => q.total), 0) || 0;
+    if (S.ph !== 'intro') np.bank = 0;
+    S.P.push(np);
+  }
+  dirty = true;
+}
+// guest: take host state, trigger dice / banners on what changed
+function applyState(s) {
+  const prev = S;
+  S = { ...s, P: s.P.map((p) => ({ ...p })) };
+  S.mode = 'match';
+  if (s.roll !== prev.roll && s.roll > 0) onNewRoll();
+  if (s.ph !== prev.ph || s.last !== prev.last) onEvent();
+  // a guest promoted to host must not replay what it already showed
+  lastRollSeen = S.roll; lastEvent = `${S.ph}|${S.last}`;
+}
+let lastRollSeen = 0, lastEvent = '';
+function onNewRoll() { startTumble(S.dice); sfx.rattle(); setTimeout(() => sfx.land(), TUMBLE * 900); }
+function onEvent() {
+  const me = lobby.room?.me;
+  if (S.ph === 'bust') { if (S.last === 'snake') { sfx.snake(); flash('<small>double 1s · everyone still in loses their total</small>SNAKE EYES'); } else { sfx.bust(); flash('<small>everyone still in loses the pot</small>BUST!'); } }
+  else if (S.last?.startsWith('b:')) { const id = +S.last.slice(2); const p = player(id); sfx.bank(id === me); if (id === me) flash(`<small>banked</small>+${p?.bank ?? 0}`); }
+  else if (S.ph === 'wait' && S.last === 'dbl') flash(`<small>doubles count twice</small>+${(S.dice[0] + S.dice[1]) * 2}`);
+}
+// host + attract side: same hooks fire off local state changes
+function localEvents() {
+  if (S.roll !== lastRollSeen) { lastRollSeen = S.roll; if (S.roll > 0) onNewRoll(); }
+  const ev = `${S.ph}|${S.last}`;
+  if (ev !== lastEvent) { lastEvent = ev; onEvent(); }
+}
+
+// Input > BANK button + Space
+const bankBtn = document.getElementById('bank');
+function canBank() { const p = player(lobby.room?.me); return S.mode === 'match' && p && p.bank == null && !p.bust && S.roll > 0 && (S.ph === 'wait' || (S.ph === 'roll' && S.rollAge < BANK_GRACE)); }
+function bank() { if (canBank()) sync.act({ t: 'bank' }); }
+bankBtn.onclick = bank;
+addEventListener('keydown', (e) => { if (e.code === 'Space' && !e.repeat) { e.preventDefault(); bank(); } });
+
+// HUD > round line, pot, button, scoreboard, banners
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 1.8; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let hudT = 0, lastClock = 0;
+function hud(dt) {
+  if (S.mode !== 'match') { bankBtn.style.display = 'none'; return; }
+  flashT -= dt;
+  const me = player(lobby.room?.me);
+  if (S.ph === 'intro') big(`<small>${S.rounds} rounds · bank before the 1</small>Bank or Bust`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.total - a.total)[0]; big(`<small>winner with ${w?.total ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'round' && flashT <= 0) big(`<small>round ${S.rd} done</small>${S.rd < S.rounds ? 'Next round…' : 'Final scores'}`);
+  else if (flashT <= 0) big('');
+  // button: visible while I am still in
+  const inRound = me && me.bank == null && !me.bust && ['wait', 'roll'].includes(S.ph);
+  bankBtn.style.display = inRound ? 'block' : 'none';
+  bankBtn.disabled = !canBank();
+  document.getElementById('bankSub').textContent = S.roll === 0 ? 'after the first roll' : `keep ${S.pot}`;
+  const clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'wait' && inRound && clock !== lastClock && clock <= 2) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('potN').textContent = S.pot;
+  document.getElementById('roundName').textContent = `Round ${S.rd} of ${S.rounds}`;
+  const status = !me ? 'Watching' : me.bust ? '💥 Busted this round' : me.bank != null ? `💰 Banked ${me.bank}` : S.ph === 'wait' ? `Still in · next roll in ${clock}s` : 'Still in';
+  document.getElementById('roundMeta').innerHTML = `${status}<br>Total <b style="color:var(--gold)">${me?.total ?? 0}</b> · roll ${S.roll}`;
+  const rows = [...S.P].sort((a, c) => c.total - a.total);
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p.bust ? 'out' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.bust ? '💥 ' : p.bank != null ? `💰+${p.bank} ` : '🎲 '}${p.total}</em></div>`).join('');
+}
+
+// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+startTicker(20, (dt) => {
+  if (S.mode === 'attract' || lobby.room?.isHost) { if (S.mode === 'attract' || lobbyStarted) hostTick(dt); }
+  else { S.tt -= dt; S.rollAge += dt; }
+});
+
+// Run engine > render loop: pawns around the rim, coin stacks, pot pile, dice
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 13, 13), camLook = new THREE.Vector3(0, 0, 0.5), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (S.mode === 'attract' || lobby.room?.isHost) localEvents();
+  animDice(dt);
+  // pawns: evenly spaced, my seat at the front
+  const meIdx = Math.max(0, S.P.findIndex((p) => p.id === lobby.room?.me));
+  const n = S.P.length, maxTotal = Math.max(30, ...S.P.map((p) => p.total));
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id)) { scene.remove(g); pawns3d.delete(id); }
+  S.P.forEach((p, i) => {
+    let g = pawns3d.get(p.id);
+    if (!g) { g = makePawn(p); pawns3d.set(p.id, g); }
+    const a = ((i - meIdx) / n) * Math.PI * 2, r = TABLE_R - 1;
+    g.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+    g.rotation.y = a + Math.PI;
+    const u = g.userData;
+    // banked = sit down, bust = tip over
+    u.sit += ((p.bank != null && !p.bust ? 1 : 0) - u.sit) * (1 - Math.exp(-dt * 8));
+    u.tip += ((p.bust ? 1 : 0) - u.tip) * (1 - Math.exp(-dt * 6));
+    u.body.scale.y = 1 - u.sit * 0.35;
+    u.body.rotation.x = -u.tip * 1.35;
+    u.body.position.y = S.ph === 'wait' && p.bank == null && !p.bust ? Math.abs(Math.sin(time * 5 + i)) * 0.08 : 0;
+    u.mat.color.set(p.bust ? 0x666666 : p.color);
+    u.stackH += (Math.max(0.02, (p.total / maxTotal) * 1.6) - u.stackH) * (1 - Math.exp(-dt * 5));
+    u.stack.scale.y = u.stackH;
+    u.stack.position.set(0.75, 0, 0.1);
+    u.tag.position.set(0, 1.85 - u.sit * 0.4 - u.tip * 0.7, 0);
+  });
+  potPile.count = Math.min(POT_COINS, Math.round(S.pot * 1.5));
+  potPile.instanceMatrix.needsUpdate = true;
+  hud(dt);
+  // camera: from my seat over the table toward the tray
+  // portrait: pull back and look more top-down so the whole rim fits; fog follows the distance
+  const fit = Math.max(1, 1.25 / camera.aspect), dist = 17.7 * fit;
+  camPos.lerp(_v.set(0, dist * (fit > 1.2 ? 0.86 : 0.7), dist * (fit > 1.2 ? 0.5 : 0.7)), 1 - Math.exp(-dt * 3));
+  scene.fog.near = dist + 6; scene.fog.far = dist * 2 + 20;
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

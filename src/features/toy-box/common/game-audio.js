@@ -2,7 +2,7 @@
  * FILE: src/features/toy-box/common/game-audio.js
  * PURPOSE: shared Web Audio synth for toys: lazy AudioContext unlocked on first tap/key, swept tone + filtered noise bursts
  * UI: sound effects in multiplayer toys
- * USED BY: balloon-battle, bomb-tag-arena, bumper-sumo-arena, hex-drop-survival, kart-race-online, king-of-the-hill, lava-rise-climb, light-cycle-arena, mini-golf-party, paint-territory, penguin-curling, pirate-cannon-clash, rocket-ball-soccer, sheepdog-rush, snowball-fight-arena, tank-battle-maze, voxel-build-together
+ * USED BY: balloon-battle, bank-or-bust, bomb-tag-arena, bumper-sumo-arena, fence-fields, hex-drop-survival, kart-race-online, king-of-the-hill, lava-rise-climb, light-cycle-arena, mini-golf-party, paint-territory, penguin-curling, pirate-cannon-clash, rocket-ball-soccer, sheepdog-rush, siege-hills, snowball-fight-arena, tank-battle-maze, voxel-build-together
  * KEY EXPORTS: createGameAudio
  */
 

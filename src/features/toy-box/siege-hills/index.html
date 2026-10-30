@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Siege Hills</title>
+<style>
+  :root { --ink: #fff; --card: rgba(22, 26, 40, 0.7); --gold: #ffd23f; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #ffcf9a; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; }
+  #info .m b { color: var(--gold); }
+  #wind { top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; font-size: 14px; font-weight: 800; display: none; white-space: nowrap; }
+  #wind i { display: inline-block; font-style: normal; transition: transform 0.3s; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 170px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 14px; opacity: 0.7; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row u { text-decoration: none; width: 38px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+  #board .row u s { display: block; height: 100%; background: #5ee07a; text-decoration: none; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 22px; text-align: right; font-weight: 800; }
+  #board .row.me span { color: var(--gold); font-weight: 800; }
+  #board .row.dead { opacity: 0.45; }
+  #big { position: fixed; top: 30%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(30px, 7vw, 66px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.28); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.88; max-width: 330px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gold); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 700px) { #hint { display: none; } }
+  @media (max-width: 700px) { #wind { top: 104px; } #board { top: auto; bottom: 12px; right: 10px; font-size: 11.5px; min-width: 150px; } }
+</style>
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="turnName"></div><div class="m" id="turnMeta"></div></div>
+<div id="wind" class="card"></div>
+<div id="board" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card">On <b>your turn</b>: drag back from anywhere and release to fling (or <b>←→</b> angle, <b>↑↓</b> power, <b>Space</b> fire). Mind the <b>wind</b>. Craters reshape the hills; low ground floods late in the round.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+/**
+ * FILE: src/features/toy-box/siege-hills/index.html
+ * PURPOSE: online turn-based catapult artillery for 2-14 on a side-on hill strip: drag to aim, wind each turn, boulders carve craters and knock catapults down, the tide rises late in a round; host simulates every shot, guests replay its arc; last catapult standing wins the round
+ * UI: Siege Hills page (lobby overlay, turn card, wind badge, HP scoreboard, slingshot aim + arc preview, 3D terrain strip, catapults, boulders, blasts)
+ * USED BY: src/features/toy-box/index.html (iframe viewer)
+ * KEY EXPORTS: none (standalone page)
+ */
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.js';
+import { startTicker } from '../common/room-client.js';
+import { createTurnSync } from '../common/turn-sync.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+// Scene > Renderer, camera, sunset sky, sea, lights
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.1, 600);
+{
+  // gradient sky dome
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, uniforms: {}, vertexShader: 'varying vec3 v; void main(){ v = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }', fragmentShader: 'varying vec3 v; void main(){ float h = clamp(v.y*1.6+0.25,0.,1.); gl_FragColor = vec4(mix(vec3(1.,0.72,0.48), vec3(0.36,0.55,0.92), h), 1.); }' }));
+  scene.add(sky);
+}
+scene.fog = new THREE.Fog(0xffc59a, 120, 380);
+scene.add(new THREE.HemisphereLight(0xffe6cc, 0x3a4a6a, 1.3));
+const sun = new THREE.DirectionalLight(0xffe0b8, 2.6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0006;
+scene.add(sun, sun.target);
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(1200, 400).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3f7fc8, roughness: 0.25, metalness: 0.1, transparent: true, opacity: 0.88 }));
+scene.add(sea);
+// far hills silhouettes
+{
+  const mat = new THREE.MeshBasicMaterial({ color: 0xd99a86, fog: true });
+  for (let i = 0; i < 18; i++) { const m = new THREE.Mesh(new THREE.ConeGeometry(20 + Math.random() * 30, 20 + Math.random() * 30, 5), mat); m.position.set(-150 + i * 22 + Math.random() * 10, 4, -90 - Math.random() * 40); scene.add(m); }
+}
+
+// Terrain > side-on strip: heights every STEP along x, extruded DEPTH along z; grass top, dirt face
+const STEP = 0.5, DEPTH = 7, FLOOR = -8, G = 20, MAX_SPEED = 31, BLAST = 2.7, CAT_R = 0.9;
+const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: false });
+const terrain = new THREE.Mesh(new THREE.BufferGeometry(), terrainMat);
+terrain.castShadow = terrain.receiveShadow = true;
+scene.add(terrain);
+const grassA = new THREE.Color(0x6cbf4a), grassB = new THREE.Color(0x58a83c), dirtTop = new THREE.Color(0x9a6a3e), dirtLow = new THREE.Color(0x5a3a22);
+function buildTerrain(H) {
+  const n = H.length, pos = [], col = [], idx = [];
+  // top surface: two rows (back z, front z)
+  for (let i = 0; i < n; i++) {
+    const x = i * STEP, c = (i % 4 < 2 ? grassA : grassB);
+    pos.push(x, H[i], -DEPTH / 2, x, H[i], DEPTH / 2);
+    col.push(c.r, c.g, c.b, c.r, c.g, c.b);
+  }
+  for (let i = 0; i < n - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  // front face: own vertices so the edge stays sharp
+  const f0 = n * 2;
+  for (let i = 0; i < n; i++) {
+    const x = i * STEP;
+    pos.push(x, H[i] - 0.05, DEPTH / 2, x, FLOOR, DEPTH / 2);
+    col.push(dirtTop.r, dirtTop.g, dirtTop.b, dirtLow.r, dirtLow.g, dirtLow.b);
+  }
+  for (let i = 0; i < n - 1; i++) { const a = f0 + i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  terrain.geometry.dispose();
+  terrain.geometry = g;
+}
+const heightAt = (H, x) => { const f = x / STEP, i = Math.floor(f); if (i < 0) return H[0]; if (i >= H.length - 1) return H[H.length - 1]; return H[i] + (H[i + 1] - H[i]) * (f - i); };
+// host: fresh hills for a round, flat pads where catapults stand
+function genTerrain(W, spots) {
+  const n = Math.round(W / STEP) + 1, H = new Array(n);
+  const ph = [Math.random() * 9, Math.random() * 9, Math.random() * 9], amp = [3.2, 1.6, 0.6], fr = [0.07 + Math.random() * 0.03, 0.19, 0.5];
+  for (let i = 0; i < n; i++) {
+    const x = i * STEP;
+    let h = 6.5;
+    for (let k = 0; k < 3; k++) h += Math.sin(x * fr[k] + ph[k]) * amp[k];
+    // gentle drop into the sea at both ends
+    const edge = Math.min(x, W - x);
+    if (edge < 6) h -= (6 - edge) * 1.1;
+    H[i] = Math.max(1, h);
+  }
+  for (const sx of spots) { const i0 = Math.round(sx / STEP); const ph2 = Math.max(H[i0], 3.5); for (let d = -3; d <= 3; d++) { const i = i0 + d; if (H[i] != null) H[i] = ph2 + (H[i] - ph2) * (Math.abs(d) / 3) ** 2; } }
+  return H.map((h) => Math.round(h * 100) / 100);
+}
+// carve a round crater; returns new heights
+function crater(H, ix, iy, r) {
+  const out = H.slice(), i0 = Math.floor((ix - r) / STEP), i1 = Math.ceil((ix + r) / STEP);
+  for (let i = Math.max(0, i0); i <= Math.min(H.length - 1, i1); i++) {
+    const dx = i * STEP - ix;
+    if (Math.abs(dx) > r) continue;
+    const bottom = iy - Math.sqrt(r * r - dx * dx) * 0.8;
+    if (out[i] > bottom) out[i] = Math.max(FLOOR + 1, Math.round(bottom * 100) / 100);
+  }
+  return out;
+}
+
+// Shots > shared ballistic sim (host resolves, bots plan): wind is horizontal acceleration
+function simulate(x0, y0, vx, vy, wind, H, cats, shooter, W) {
+  const dt = 1 / 120;
+  let x = x0, y = y0, t = 0;
+  for (; t < 9; t += dt) {
+    vx += wind * dt; vy -= G * dt;
+    x += vx * dt; y += vy * dt;
+    if (x < -2 || x > W + 2) return { ix: x, iy: y, ft: t, off: true };
+    for (const c of cats) if (c.alive && (c.id !== shooter || t > 0.35) && Math.hypot(x - c.x, y - (c.y + 0.6)) < CAT_R) return { ix: x, iy: y, ft: t, direct: c.id };
+    if (y <= heightAt(H, x)) return { ix: x, iy: heightAt(H, x), ft: t };
+  }
+  return { ix: x, iy: y, ft: t, off: true };
+}
+const launchPoint = (c) => ({ x: c.x, y: c.y + 1.4 });
+const velocity = (a, p) => ({ vx: Math.cos(a) * p * MAX_SPEED, vy: Math.sin(a) * p * MAX_SPEED });
+
+// Catapults > meshes: wheeled base, throwing arm, player banner, name + HP tag
+function tagCanvas() { const c = document.createElement('canvas'); c.width = 256; c.height = 80; return c; }
+function drawTag(c, nick, color, hp) {
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 80);
+  g.font = 'bold 26px ui-rounded, system-ui, sans-serif';
+  const w = Math.min(240, g.measureText(nick).width + 30);
+  g.fillStyle = 'rgba(22,26,40,0.78)'; g.beginPath(); g.roundRect(128 - w / 2, 4, w, 40, 20); g.fill();
+  g.fillStyle = color; g.beginPath(); g.arc(128 - w / 2 + 18, 24, 7, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(nick, 136, 25, 196);
+  g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.roundRect(68, 52, 120, 16, 8); g.fill();
+  g.fillStyle = hp > 50 ? '#5ee07a' : hp > 25 ? '#ffd23f' : '#ff5a5f'; g.beginPath(); g.roundRect(70, 54, 116 * Math.max(0, hp) / 100, 12, 6); g.fill();
+}
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x9a6a3e, roughness: 0.8 });
+const darkWood = new THREE.MeshStandardMaterial({ color: 0x5e3d22, roughness: 0.85 });
+const cats3d = new Map();
+function makeCat(p) {
+  const g = new THREE.Group(), body = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.3, 1.1), woodMat);
+  base.position.y = 0.45;
+  const wheels = [[-0.6, 0.6], [0.6, 0.6], [-0.6, -0.6], [0.6, -0.6]].map(([x, z]) => { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.14, 14).rotateX(Math.PI / 2), darkWood); w.position.set(x, 0.3, z); return w; });
+  const posts = [-0.4, 0.4].map((z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.9, 0.16), woodMat); m.position.set(0, 0.95, z); return m; });
+  const arm = new THREE.Group();
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.12, 0.12).translate(0.7, 0, 0), darkWood);
+  const cup = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), darkWood);
+  cup.position.set(1.5, 0.05, 0); cup.rotation.z = Math.PI;
+  arm.add(beam, cup); arm.position.set(0, 1.35, 0);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.4, 6), darkWood);
+  pole.position.set(-0.7, 1.2, -0.45);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.38).translate(0.3, 0, 0), new THREE.MeshStandardMaterial({ color: p.color, side: THREE.DoubleSide }));
+  flag.position.set(-0.7, 1.7, -0.45);
+  body.add(base, ...wheels, ...posts, arm, pole, flag);
+  body.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  const canvas = tagCanvas();
+  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, transparent: true }));
+  tag.scale.set(3.4, 1.06, 1); tag.position.y = 3; tag.renderOrder = 5;
+  g.add(body, tag);
+  g.userData = { body, arm, flag, canvas, tex, tag, hp: -1, fire: 0, y: null, sink: 0 };
+  scene.add(g);
+  return g;
+}
+
+// FX > boulder, trail, blast particles, aim arc dots
+const boulder = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), new THREE.MeshStandardMaterial({ color: 0x8a8a92, roughness: 0.9, flatShading: true }));
+boulder.castShadow = true; boulder.visible = false;
+scene.add(boulder);
+const PARTS = 500;
+const partGeo = new THREE.BufferGeometry();
+const partPos = new Float32Array(PARTS * 3), partVel = new Float32Array(PARTS * 3), partCol = new Float32Array(PARTS * 3), partLife = new Float32Array(PARTS);
+partGeo.setAttribute('position', new THREE.BufferAttribute(partPos, 3));
+partGeo.setAttribute('color', new THREE.BufferAttribute(partCol, 3));
+const parts = new THREE.Points(partGeo, new THREE.PointsMaterial({ size: 0.28, vertexColors: true }));
+parts.frustumCulled = false;
+scene.add(parts);
+for (let i = 0; i < PARTS; i++) partPos[i * 3 + 1] = -99;
+let partNext = 0;
+function spray(x, y, n, colors, speed = 7, up = 6, life = 1.2) {
+  for (let k = 0; k < n; k++) {
+    const i = partNext++ % PARTS, a = Math.random() * Math.PI, s = speed * (0.3 + Math.random());
+    partPos.set([x, y, (Math.random() - 0.5) * 2], i * 3);
+    partVel.set([Math.cos(a) * s, Math.sin(a) * s * 0.6 + up * Math.random(), (Math.random() - 0.5) * 4], i * 3);
+    const c = colors[Math.floor(Math.random() * colors.length)];
+    partCol.set([c.r, c.g, c.b], i * 3);
+    partLife[i] = life * (0.6 + Math.random() * 0.6);
+  }
+}
+const DIRT = [new THREE.Color(0x7a5230), new THREE.Color(0x5a3a22), new THREE.Color(0x6cbf4a)], FIRE = [new THREE.Color(0xffd23f), new THREE.Color(0xff8a3d), new THREE.Color(0xffffff)], SPLASH = [new THREE.Color(0xbfe4ff), new THREE.Color(0xffffff)];
+const flashLight = new THREE.PointLight(0xffb060, 0, 18);
+scene.add(flashLight);
+const DOTS = 28;
+const dots = new THREE.InstancedMesh(new THREE.SphereGeometry(0.09, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }), DOTS);
+dots.visible = false;
+scene.add(dots);
+
+// Audio > creak + whoosh, boom, splash, turn chime
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  fling() { tone(160, 90, 0.18, 0.12, 'triangle'); noise(0.35, 0.12, 2500, 600, 'bandpass'); },
+  boom(v = 1) { noise(0.7, 0.35 * v, 900, 60); tone(90, 40, 0.5, 0.2 * v, 'sine'); },
+  splash() { noise(0.6, 0.22, 2400, 300); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.07, 'square', i * 0.12)); },
+};
+
+// Game > rules: turn order over living catapults; blast damage falls off with distance; direct hit +25; tide rises after a few laps
+const BOT_NAMES = ['Trebuchet Tom', 'Rocky', 'Slinger', 'Big Bertha', 'Lobster', 'Hurl', 'Castle Cass', 'Pebbles', 'Boulder Bo', 'Fling', 'Mortimer', 'Duke', 'Ballista', 'Rampart'];
+const BOT_COLORS = ['#9b5de5', '#00bbf9', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0', '#00f5d4'];
+const INTRO = 2.5, ROUND_SHOW = 4, BLAST_SHOW = 1.4, TIDE_AFTER = 3, TIDE_STEP = 0.7;
+let S = null;
+const rng = Math.random;
+const player = (id) => S.P.find((p) => p.id === id);
+const alive = () => S.P.filter((p) => p.alive);
+function newRound(rd) {
+  const n = S.P.length, W = 44 + n * 11;
+  // spread catapults with jitter, shuffled seats
+  const seats = S.P.map((_, i) => (W / n) * (i + 0.5) + (rng() - 0.5) * (W / n) * 0.35).sort(() => rng() - 0.5);
+  S.W = W;
+  S.H = genTerrain(W, seats);
+  S.P.forEach((p, i) => Object.assign(p, { x: Math.round(seats[i] * 100) / 100, hp: 100, alive: true }));
+  S.P.forEach((p) => (p.y = heightAt(S.H, p.x)));
+  Object.assign(S, { rd, ph: 'intro', tt: INTRO, water: 0, shots: 0, shot: null, turn: Math.floor(rng() * n), lap: 0 });
+  newWind();
+}
+function newWind() { S.wind = Math.round((rng() * 2 - 1) * (4 + S.rd) * 10) / 10; }
+function nextTurn() {
+  const n = S.P.length;
+  for (let k = 1; k <= n; k++) { const j = (S.turn + k) % n; if (S.P[j].alive) { if (j <= S.turn) S.lap++; S.turn = j; break; } }
+  // late in the round the tide rises a step each lap
+  if (S.lap >= TIDE_AFTER && S.turn === S.P.findIndex((p) => p.alive)) {
+    S.water = Math.round((S.water + TIDE_STEP) * 100) / 100;
+    for (const p of alive()) if (p.y < S.water + 0.3) { p.hp = 0; p.alive = false; }
+  }
+  newWind();
+  Object.assign(S, { ph: 'aim', tt: S.clock });
+  const p = S.P[S.turn];
+  if (p?.bot) p.think = 1 + rng() * 1.2;
+}
+// host: resolve a whole shot now; guests replay the arc from S.shot
+function fire(id, a, pw) {
+  const p = S.P[S.turn];
+  if (S.ph !== 'aim' || !p || p.id !== id || !p.alive || !Number.isFinite(a) || !Number.isFinite(pw)) return false;
+  pw = Math.max(0.15, Math.min(1, pw));
+  const lp = launchPoint(p), v = velocity(a, pw);
+  const r = simulate(lp.x, lp.y, v.vx, v.vy, S.wind, S.H, S.P, p.id, S.W);
+  const hits = [], kills = [];
+  if (!r.off) {
+    S.H = crater(S.H, r.ix, r.iy, BLAST * 0.85);
+    for (const c of alive()) {
+      const d = Math.hypot(c.x - r.ix, c.y + 0.5 - r.iy);
+      let dmg = d < BLAST ? Math.round(55 * (1 - d / BLAST) ** 0.7) : 0;
+      if (r.direct === c.id) dmg += 25;
+      if (!dmg) continue;
+      c.hp = Math.max(0, c.hp - dmg);
+      hits.push([c.id, dmg]);
+    }
+    // settle on the new ground, fall damage for long drops, sink below the tide
+    for (const c of alive()) {
+      const ny = heightAt(S.H, c.x);
+      if (c.y - ny > 2.2) { c.hp = Math.max(0, c.hp - 10); }
+      c.y = Math.round(ny * 100) / 100;
+      if (c.y < S.water + 0.3) c.hp = 0;
+      if (c.hp <= 0) { c.alive = false; kills.push(c.id); if (c.id !== p.id) p.score += 1; }
+    }
+  }
+  S.shots++;
+  S.shot = { n: S.shots, by: p.id, x0: lp.x, y0: lp.y, vx: v.vx, vy: v.vy, w: S.wind, ft: Math.round(r.ft * 1000) / 1000, ix: r.ix, iy: r.iy, off: !!r.off, hits, kills };
+  Object.assign(S, { ph: 'fly', tt: r.ft + BLAST_SHOW });
+  return true;
+}
+// bots: search angle x power against a chosen rival, wind included; skill blurs the pick
+function botAim(p) {
+  const foes = alive().filter((c) => c.id !== p.id);
+  if (!foes.length) return { a: Math.PI / 4, p: 0.5 };
+  const t = foes.sort((a, c) => Math.abs(a.x - p.x) * (0.6 + rng() * 0.8) - Math.abs(c.x - p.x) * (0.6 + rng() * 0.8))[0];
+  const dir = t.x > p.x ? 1 : -1, lp = launchPoint(p);
+  let best = null;
+  for (let deg = 20; deg <= 78; deg += 3) for (let pw = 0.3; pw <= 1.001; pw += 0.035) {
+    const a = dir > 0 ? (deg * Math.PI) / 180 : Math.PI - (deg * Math.PI) / 180, v = velocity(a, pw);
+    const r = simulate(lp.x, lp.y, v.vx, v.vy, S.wind, S.H, S.P, p.id, S.W);
+    if (r.direct === p.id) continue;
+    const miss = r.direct === t.id ? 0 : Math.hypot(r.ix - t.x, r.iy - t.y) + (Math.hypot(r.ix - p.x, r.iy - p.y) < BLAST * 1.2 ? 50 : 0);
+    if (!best || miss < best.miss) best = { a, p: pw, miss };
+  }
+  const blur = p.skill ?? 0.5;
+  return { a: best.a + (rng() - 0.5) * 0.09 * (1.2 - blur), p: best.p * (1 + (rng() - 0.5) * 0.1 * (1.2 - blur)) };
+}
+
+// Run engine > host tick: phases, bots, clock; publish on change
+let dirty = true;
+function hostTick(dt) {
+  if (!S) return;
+  const before = `${S.ph}|${S.turn}|${S.shots}|${S.P.length}|${S.rd}`;
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) { Object.assign(S, { ph: 'aim', tt: S.clock }); const p = S.P[S.turn]; if (p?.bot) p.think = 1 + rng(); }
+  else if (S.ph === 'aim') {
+    const p = S.P[S.turn];
+    // the tide can finish a round between shots
+    if (alive().length <= 1) endRound();
+    else if (!p || !p.alive) nextTurn();
+    else if (p.bot) { p.think -= dt; if (p.think <= 0) { const b = botAim(p); fire(p.id, b.a, b.p); } }
+    else if (S.tt <= 0) nextTurn();
+  } else if (S.ph === 'fly' && S.tt <= 0) {
+    if (alive().length <= 1) endRound(); else nextTurn();
+  } else if (S.ph === 'round' && S.tt <= 0) {
+    if (S.mode === 'attract') { newRound(1); }
+    else if (S.rd < S.rounds) newRound(S.rd + 1);
+    else Object.assign(S, { ph: 'final', tt: 12 });
+  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
+  if (before !== `${S.ph}|${S.turn}|${S.shots}|${S.P.length}|${S.rd}`) dirty = true;
+  if (dirty && S.mode === 'match' && lobby.room?.isHost) { sync.publish(S); dirty = false; }
+}
+function endRound() {
+  const w = alive()[0];
+  if (w) w.score += 3;
+  Object.assign(S, { ph: 'round', tt: ROUND_SHOW, winner: w?.id ?? null });
+}
+function newState(mode, P, rounds, clock) { S = { mode, P, rounds, clock, rd: 1, ph: 'intro', tt: INTRO, W: 60, H: [], water: 0, wind: 0, shots: 0, shot: null, turn: 0, lap: 0 }; newRound(1); }
+function startAttract() {
+  const P = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.4 }));
+  newState('attract', P, 1, 10);
+  S.tt = 1;
+  resetView();
+}
+
+// Multiplayer > lobby + state sync (host publishes S, guests send shots)
+const sync = createTurnSync({
+  onState(s) { if (started) applyState(s); },
+  onAction(from, a) { if (a.t === 'fire' && S?.mode === 'match' && fire(from, a.a, a.p)) dirty = true; },
+});
+let started = false;
+const lobby = createLobby({
+  game: 'siege-hills', title: 'Siege Hills', emoji: '🏰', accent: '#ff8a3d',
+  blurb: 'Take turns flinging boulders across the hills. Drag back to aim, read the wind, carve craters under your rivals. Last catapult standing takes the round.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 catapults (humans + bots). Survive a round +3, each knockout +1.',
+  settings: [
+    { key: 'rounds', label: 'Rounds', options: [[1, '1'], [3, '3'], [5, '5']], value: 3 },
+    { key: 'clock', label: 'Turn clock', options: [[15, '15 s'], [20, '20 s'], [30, '30 s']], value: 20 },
+  ],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('roster', onRoster);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, isHost, settings }) {
+    started = true;
+    showHud(true);
+    syncTop();
+    if (!isHost) { if (sync.state) applyState(sync.state); return; }
+    const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.35 + rng() * 0.55 });
+    newState('match', P, settings.rounds ?? 3, settings.clock ?? 20);
+    resetView();
+    dirty = true;
+  },
+  onLobby() { started = false; showHud(false); big(''); startAttract(); },
+});
+function showHud(on) {
+  ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  ['top', 'wind'].forEach((id) => (document.getElementById(id).style.display = on ? 'flex' : 'none'));
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function onRoster(players) {
+  if (S?.mode !== 'match' || !lobby.room.isHost) return;
+  const ids = new Set(players.map((p) => p.id)), cur = S.P[S.turn]?.id;
+  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
+  // late joiner: waits out this round as a wreck, plays from the next one
+  for (const p of players) if (!player(p.id)) S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, x: -50, y: -50, hp: 0, alive: false });
+  const k = S.P.findIndex((p) => p.id === cur);
+  S.turn = k >= 0 ? k : S.turn % Math.max(1, S.P.length);
+  if (k < 0 && S.ph === 'aim') nextTurn();
+  dirty = true;
+}
+
+// View > what is drawn lags state by one shot: terrain + HP update when the boulder lands
+let view = null;
+function resetView() { view = { H: S.H.slice(), hp: new Map(S.P.map((p) => [p.id, p.hp])), y: new Map(S.P.map((p) => [p.id, p.y])), shotN: S.shots, flyT: -1, rd: S.rd, water: S.water }; buildTerrain(view.H); }
+function applyState(s) {
+  const fresh = !S || S.mode !== 'match' || s.rd !== S.rd || s.shots < S.shots;
+  S = s;
+  if (fresh || !view) resetView();
+}
+function landed() {
+  view.H = S.H.slice(); buildTerrain(view.H);
+  for (const p of S.P) { view.hp.set(p.id, p.hp); view.y.set(p.id, p.y); }
+  view.water = S.water;
+  const sh = S.shot;
+  if (!sh || sh.off) return;
+  const me = lobby.room?.me;
+  const wet = sh.iy < S.water + 0.2;
+  spray(sh.ix, sh.iy, 90, wet ? SPLASH : DIRT); spray(sh.ix, sh.iy + 0.3, 40, FIRE, 5, 3, 0.6);
+  flashLight.position.set(sh.ix, sh.iy + 1.5, 2); flashLight.intensity = 60;
+  shake = 0.6;
+  if (wet) sfx.splash(); else sfx.boom();
+  const kmine = sh.kills.includes(me);
+  if (kmine) flash('<small>your catapult is wrecked</small>💥 Knocked out');
+  else if (sh.by === me && sh.kills.length) flash(`<small>knockout</small>💥 ${sh.kills.map((id) => esc(player(id)?.nick ?? '')).join(', ')}`);
+  else { const h = sh.hits.find(([id]) => id === me); if (h) flash(`<small>you took a hit</small>-${h[1]}`); else if (sh.by === me && sh.hits.length) flash(`<small>direct damage</small>${sh.hits.reduce((s, [, d]) => s + d, 0)}`); }
+}
+// each frame: detect a new shot, replay its arc, land it; chime on my turn
+let lastKey = '', shake = 0;
+function syncView(dt) {
+  if (!S || !view) return;
+  if (S.shots !== view.shotN && S.shot && S.shot.n === S.shots) {
+    view.shotN = S.shots; view.flyT = 0;
+    const c = cats3d.get(S.shot.by); if (c) c.userData.fire = 1;
+    sfx.fling();
+  }
+  if (view.flyT >= 0) {
+    view.flyT += dt;
+    const sh = S.shot, t = Math.min(view.flyT, sh.ft);
+    boulder.visible = true;
+    boulder.position.set(sh.x0 + sh.vx * t + 0.5 * sh.w * t * t, sh.y0 + sh.vy * t - 0.5 * G * t * t, 0);
+    boulder.rotation.x += dt * 9; boulder.rotation.z += dt * 6;
+    if (view.flyT >= sh.ft) { view.flyT = -1; boulder.visible = false; landed(); }
+  } else if (S.ph === 'aim' || S.ph === 'intro') {
+    // catch up when idle (late join, missed frames)
+    if (view.water !== S.water) { view.water = S.water; for (const p of S.P) { view.hp.set(p.id, p.hp); view.y.set(p.id, p.y); } }
+  }
+  const key = `${S.ph}|${S.turn}|${S.rd}`;
+  if (key !== lastKey) {
+    const was = lastKey; lastKey = key;
+    if (S.ph === 'aim' && myTurn()) { sfx.turn(); flash('Your turn!'); aimA = S.P[S.turn].x < S.W / 2 ? Math.PI / 4 : (3 * Math.PI) / 4; aimP = 0.6; }
+    else if (S.ph === 'round' && !was.startsWith('round')) { const w = player(S.winner); sfx.win(); flash(`<small>round ${S.rd} · +3</small>${w ? `🏰 ${esc(w.nick)}` : 'Nobody survived!'}`); flashT = 3; }
+  }
+}
+
+// Input > slingshot drag (any pointer) or keys; arc preview without wind
+const myTurn = () => S?.mode === 'match' && S.ph === 'aim' && S.P[S.turn]?.id === lobby.room?.me && S.P[S.turn]?.alive;
+let drag = null, aimA = Math.PI / 4, aimP = 0.6, aiming = false;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || !myTurn()) return;
+  drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  const dx = drag.x - e.clientX, dy = e.clientY - drag.y, len = Math.hypot(dx, dy);
+  if (len < 8) return;
+  aimA = Math.atan2(dy, dx); aimP = Math.min(1, len / (Math.min(innerWidth, innerHeight) * 0.42));
+  aiming = true;
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  drag = null;
+  if (aiming && aimP > 0.12 && myTurn()) shoot();
+  aiming = false;
+});
+renderer.domElement.addEventListener('pointercancel', () => { drag = null; aiming = false; });
+addEventListener('keydown', (e) => {
+  if (!myTurn()) return;
+  if (e.code === 'ArrowLeft') { aimA = Math.min(Math.PI - 0.05, aimA + 0.03); aiming = true; }
+  if (e.code === 'ArrowRight') { aimA = Math.max(0.05, aimA - 0.03); aiming = true; }
+  if (e.code === 'ArrowUp') { aimP = Math.min(1, aimP + 0.02); aiming = true; }
+  if (e.code === 'ArrowDown') { aimP = Math.max(0.15, aimP - 0.02); aiming = true; }
+  if (e.code === 'Space' && !e.repeat) { e.preventDefault(); shoot(); aiming = false; }
+});
+function shoot() { sync.act({ t: 'fire', a: +aimA.toFixed(4), p: +aimP.toFixed(3) }); }
+
+// HUD > turn card, wind badge, scoreboard, banners
+const bigEl = document.getElementById('big');
+let bigText = '', flashT = 0;
+function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
+function flash(t) { big(t); flashT = 1.6; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let hudT = 0, lastClock = 0;
+function hud(dt) {
+  if (S?.mode !== 'match') return;
+  flashT -= dt;
+  const up = S.P[S.turn], me = lobby.room?.me, clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') big(`<small>round ${S.rd} of ${S.rounds} · ${S.P.length} catapults</small>Siege Hills`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>${w?.score ?? 0} points</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (flashT <= 0) big('');
+  if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  const tide = S.water > 0 ? ` · 🌊 tide ${S.water.toFixed(1)}` : '';
+  document.getElementById('turnName').innerHTML = S.ph === 'aim' ? (up?.id === me ? '<span style="color:var(--gold)">Your turn</span>' : `${esc(up?.nick ?? '')} aims`) : S.ph === 'fly' ? 'Incoming!' : `Round ${S.rd} of ${S.rounds}`;
+  document.getElementById('turnMeta').innerHTML = (S.ph === 'aim' ? (up?.bot ? 'thinking…' : `<b>${clock}s</b> left`) : `${alive().length} standing`) + tide;
+  const w = S.wind, wa = Math.abs(w);
+  document.getElementById('wind').innerHTML = `Wind <i style="transform:scaleX(${w < 0 ? -1 : 1})">${wa < 0.5 ? '·' : wa < 3 ? '➜' : wa < 6 ? '➜➜' : '➜➜➜'}</i> ${wa.toFixed(1)}`;
+  const rows = S.P.map((p, i) => ({ p, i })).sort((a, c) => c.p.score - a.p.score || a.i - c.i);
+  document.getElementById('board').innerHTML = rows.map(({ p, i }) => { const hp = view?.hp.get(p.id) ?? p.hp; return `<div class="row ${p.id === me ? 'me' : ''} ${hp <= 0 ? 'dead' : ''}"><b>${i === S.turn && S.ph === 'aim' ? '▶' : ''}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><u><s style="width:${Math.max(0, hp)}%"></s></u><em>${p.score}</em></div>`; }).join('');
+}
+
+// Run engine > host / attract tick (worker); guests run the clock only
+startTicker(20, (dt) => {
+  if (S?.mode === 'attract' || lobby.room?.isHost) { if (S?.mode === 'attract' || started) hostTick(dt); }
+  else if (S) S.tt -= dt;
+});
+
+// Run engine > render loop: catapults, arm swing, sinking wrecks, particles, arc preview, camera follow
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(30, 12, 50), camLook = new THREE.Vector3(30, 5, 0), _v = new THREE.Vector3(), _m = new THREE.Matrix4();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (S && view) {
+    syncView(dt);
+    const ids = new Set(S.P.map((p) => p.id));
+    for (const [id, g] of cats3d) if (!ids.has(id)) { scene.remove(g); cats3d.delete(id); }
+    for (const p of S.P) {
+      let g = cats3d.get(p.id);
+      if (!g) { g = makeCat(p); cats3d.set(p.id, g); }
+      const u = g.userData, hp = view.hp.get(p.id) ?? p.hp, ty = view.y.get(p.id) ?? p.y;
+      if (u.y == null || Math.abs(u.y - ty) > 6) u.y = ty;
+      u.y += (ty - u.y) * (1 - Math.exp(-dt * 6));
+      if (u.hp !== hp) { u.hp = hp; drawTag(u.canvas, p.nick, p.color, hp); u.tex.needsUpdate = true; }
+      const dead = hp <= 0;
+      u.sink += ((dead ? 1 : 0) - u.sink) * (1 - Math.exp(-dt * 2));
+      g.position.set(p.x, u.y - u.sink * 0.6, 0);
+      g.visible = p.x > -10;
+      // face the middle of the map, tilt with the ground slope
+      const face = p.x < S.W / 2 ? 0 : Math.PI, slope = Math.atan2(heightAt(view.H, p.x + 0.6) - heightAt(view.H, p.x - 0.6), 1.2);
+      u.body.rotation.set(0, face, (face ? -slope : slope) + u.sink * 0.5);
+      // arm: cocked back while idle, snaps forward on fire
+      u.fire = Math.max(0, u.fire - dt * 2.5);
+      u.arm.rotation.z = (u.fire > 0 ? 1.3 * Math.sin(u.fire * Math.PI) : -0.35) + (S.P[S.turn]?.id === p.id && S.ph === 'aim' ? Math.sin(time * 4) * 0.05 : 0);
+      u.flag.rotation.y = Math.sin(time * 3 + p.x) * 0.3 + (S.wind < 0 ? Math.PI : 0);
+      u.flag.material.color.set(dead ? 0x555555 : p.color);
+      u.tag.visible = !dead || u.sink < 0.9;
+    }
+    // aim arc: first ~40% of flight, no wind
+    const mine = myTurn() ? S.P[S.turn] : null;
+    dots.visible = !!mine;
+    if (mine) {
+      const lp = launchPoint(mine), v = velocity(aimA, aimP);
+      for (let k = 0; k < DOTS; k++) { const t = k * 0.045; dots.setMatrixAt(k, _m.makeTranslation(lp.x + v.vx * t, lp.y + v.vy * t - 0.5 * G * t * t, 0.2)); }
+      dots.instanceMatrix.needsUpdate = true;
+    }
+    sea.position.y = view.water - 0.05 + Math.sin(time * 0.8) * 0.04;
+    // particles
+    for (let i = 0; i < PARTS; i++) {
+      if (partLife[i] <= 0) continue;
+      partLife[i] -= dt; partVel[i * 3 + 1] -= 16 * dt;
+      for (let k = 0; k < 3; k++) partPos[i * 3 + k] += partVel[i * 3 + k] * dt;
+      if (partLife[i] <= 0) partPos[i * 3 + 1] = -99;
+    }
+    partGeo.attributes.position.needsUpdate = true; partGeo.attributes.color.needsUpdate = true;
+    flashLight.intensity *= Math.exp(-dt * 7);
+    hud(dt);
+    // camera: whole strip when it fits, else follow the action (shooter, boulder, impact)
+    const maxSpan = camera.aspect < 0.8 ? 30 : 62;
+    const fov = THREE.MathUtils.degToRad(camera.fov), span = Math.min(S.W + 8, maxSpan), dist = (span / 2) / (Math.tan(fov / 2) * camera.aspect);
+    let fx = S.W / 2;
+    if (S.W + 8 > maxSpan) {
+      if (view.flyT >= 0) fx = boulder.position.x;
+      else if (S.ph === 'aim' || S.ph === 'intro') fx = S.P[S.turn]?.x ?? fx;
+      else if (S.shot && !S.shot.off) fx = S.shot.ix;
+      fx = Math.max(span / 2 - 4, Math.min(S.W - span / 2 + 4, fx));
+    }
+    const fy = 5 + (camera.aspect < 0.8 ? 2 : 0);
+    camPos.lerp(_v.set(fx, fy + dist * 0.18, dist), 1 - Math.exp(-dt * (view.flyT >= 0 ? 4 : 2.5)));
+    camLook.lerp(_v.set(fx, fy, 0), 1 - Math.exp(-dt * (view.flyT >= 0 ? 4 : 2.5)));
+    shake *= Math.exp(-dt * 6);
+    const w = S.W;
+    Object.assign(sun.shadow.camera, { left: -w / 2 - 10, right: w / 2 + 10, top: 30, bottom: -30, near: 1, far: 200 });
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.position.set(w / 2 - 20, 50, 40); sun.target.position.set(w / 2, 0, 0);
+  }
+  camera.position.copy(camPos).add(_v.set((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, 0));
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
