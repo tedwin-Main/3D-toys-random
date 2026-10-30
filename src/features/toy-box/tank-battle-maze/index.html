@@ -64,6 +64,7 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
+import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, lights
@@ -571,13 +572,15 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events,
+    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events,
     T: [...world.tanks.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.ang), f2(p.tur), (p.alive ? 1 : 0) | (p.shield ? 2 : 0) | (p.inv > 0 ? 4 : 0) | (p.bot ? 8 : 0), p.kills, p.deaths, Math.ceil(p.triple), Math.ceil(p.speed), f2(p.moved ?? 0), f2(p.respawn)]),
     S: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.vx), f2(s.vz)]),
     C: world.crates.map((c) => [c.id, c.x, c.z, c.type]),
   }, world.tanks.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
+const interp = createInterp();
 // Multiplayer > Guest prediction: own tank drives on local input at once (no firing)
 const pred = createPrediction({
   step: (p, dt) => { if (world.phase === 'play') driveTank(p, dt); },
@@ -597,6 +600,7 @@ function applySnap(s) {
     const p = world.tanks.get(id) ?? addTank(id, ...names.name(id), !!(fl & 8));
     Object.assign(p, { x, z, ang, tur, alive: !!(fl & 1), shield: !!(fl & 2), inv: fl & 4 ? 1 : 0, kills, deaths, triple, speed, moved, respawn });
     if (id === lobby.room.me) pred.correct(p);
+    else interp.push(id, s.ts, p);
   }
   for (const id of [...world.tanks.keys()]) if (!seen.has(id)) removeTank(id);
   world.shells = s.S.map(([x, z, vx, vz]) => ({ x, z, vx, vz }));
@@ -769,7 +773,7 @@ function loop() {
     let t = tanks3d.get(p.id);
     if (!t) { t = makeTank(p); tanks3d.set(p.id, t); t.position.set(p.x, 0, p.z); }
     t.visible = p.alive;
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
     const k = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 16);
     const sp = (p.moved ?? 0) * 9;
     const tx = v.x + (hostSim ? 0 : Math.sin(p.ang) * sp * va), tz = v.z + (hostSim ? 0 : Math.cos(p.ang) * sp * va);

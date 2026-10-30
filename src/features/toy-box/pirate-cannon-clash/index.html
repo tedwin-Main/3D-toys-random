@@ -65,6 +65,7 @@ import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
+import { createInterp, hostClock } from '../common/snapshot-interp.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -437,12 +438,14 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const names = createNameSync();
 function snapshot() {
   return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
+    ts: hostClock(), g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
     B: barrels.map((b) => [b.x, b.z, b.t > 0 ? 1 : 0]),
     P: [...ships.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.speed), p.hp, (p.bot ? 1 : 0) | (p.sunk ? 2 : 0) | (p.inv > 0 ? 4 : 0), f2(p.sunk), p.kills, p.deaths, f2(Math.max(0, p.cdL)), f2(Math.max(0, p.cdR))]),
   }, ships.values());
 }
 let snapAt = 0;
+// Multiplayer > Guest interpolation: other players drawn ~100 ms back, between two real snapshots
+const interp = createInterp();
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
   step: (p, dt) => { const keep = events; events = []; stepShip(p, dt); events = keep; },
@@ -462,6 +465,7 @@ function applySnap(s) {
     const p = ships.get(id) ?? addShip(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, speed, hp, sunk, inv: fl & 4 ? 1 : 0, kills, deaths, cdL, cdR });
     if (id === lobby.room.me) pred.correct(p);
+    else interp.push(id, s.ts, p);
   }
   for (const id of [...ships.keys()]) if (!seen.has(id)) removeShip(id);
   playEvents(s.ev);
@@ -610,7 +614,7 @@ function loop() {
   for (const p of ships.values()) {
     let g = ships3d.get(p.id);
     if (!g) { g = makeShip(p); ships3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
-    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
+    const v = (!hostSim && p.id === lobby.room?.me && pred.state) || (!hostSim && interp.at(p.id, p)) || p, va = v === p ? age : 0;
     const tx = v.x + Math.sin(p.h) * p.speed * va, tz = v.z + Math.cos(p.h) * p.speed * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * 12);
     if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, g.position.y, tz);
     g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
