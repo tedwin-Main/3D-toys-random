@@ -1,6 +1,7 @@
 // Plays every multiplayer toy with 14 real browser tabs over a lagged relay and reports join, start, errors and latency.
 
-// Usage: node src/features/multiplayer-rooms/room-browser-test.js [--games=a,b] [--players=14] [--seconds=40] [--lag=40] [--jitter=15] [--url=http://host/3d-toys/] [--out=report.json]
+// Usage: node src/features/multiplayer-rooms/room-browser-test.js [--games=a,b] [--players=14] [--seconds=40] [--lag=40] [--jitter=15] [--url=http://host/3d-toys/] [--out=report.json] [--profile]
+// --profile: CPU profile of the host tab during play, prints the functions with the most self time
 // --lag / --jitter: one-way delay in ms added to every websocket message in each tab (both ways), order kept, like a phone on Render Singapore
 import { chromium } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
@@ -10,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { TOYS } from '../toy-box/common/toy-list.js';
 
 const arg = (k, d) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split('=').slice(1).join('=') ?? d;
+const PROFILE = process.argv.includes('--profile');
 const PLAYERS = +arg('players', 14), SECONDS = +arg('seconds', 40), LAG = +arg('lag', 40), JITTER = +arg('jitter', 15);
 const GAMES = arg('games', '') ? arg('games').split(',') : TOYS.filter((t) => t.players === 'multi').map((t) => t.dir);
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -26,11 +28,11 @@ if (!base) {
 
 // Browser > every tab: lagged websocket, probe replies, data timing, frame counter
 const INIT = (tab) => `(() => {
-  const LAG = ${LAG}, JIT = ${JITTER}, FPS = ${tab === 0 ? 4 : 1};
+  const LAG = ${LAG}, JIT = ${JITTER}, FPS = 0.2;
   const rt = window.__rt = { me: null, host: null, hostData: [], bytesIn: 0, rtts: [], frames: 0, started: 0, sent: 0, lag: [] };
   // event-loop lag: how late a 100 ms timer fires (machine load, not network)
   let lt = performance.now();
-  setInterval(() => { const n = performance.now(); if (rt.started) rt.lag.push(n - lt - 100); lt = n; }, 100);
+  setInterval(() => { const n = performance.now(); if (rt.started && n - rt.started > 8000) rt.lag.push(n - lt - 100); lt = n; }, 100);
   const delay = () => LAG + Math.random() * JIT;
   const N = window.WebSocket;
   window.WebSocket = class extends N {
@@ -49,7 +51,7 @@ const INIT = (tab) => `(() => {
           if (m?.t === 'data') {
             const d = m.data;
             if (d?._lobby === 'probe' && rt.me !== rt.host) this.send(JSON.stringify({ t: 'send', to: m.from, data: { _lobby: 'pack', ts: d.ts } }));
-            else if (d?._lobby === 'pack' && rt.me === rt.host) rt.rtts.push(performance.now() - d.ts);
+            else if (d?._lobby === 'pack' && rt.me === rt.host) rt.rtts.push([performance.now() - d.ts, d.ts - rt.started]);
             else if (d?._lobby === 'start') rt.started = performance.now();
             else if (!d?._lobby && m.from === rt.host && rt.started) rt.hostData.push(performance.now());
           }
@@ -66,7 +68,7 @@ const INIT = (tab) => `(() => {
     }
   };
   setInterval(() => { if (window.__ws && rt.me && rt.me === rt.host && rt.started) window.__ws.send(JSON.stringify({ t: 'send', data: { _lobby: 'probe', ts: performance.now() } })); }, 500);
-  // 14 software-rendered tabs share one CPU-emulated GPU: draw small (half-res, no MSAA) and few frames (host 4, guests 1) so the GPU queue never stalls game ticks and sockets
+  // 14 software-rendered tabs share one CPU-emulated GPU: draw small (half-res, no MSAA) and few frames (one per 5 s) so the GPU queue never stalls game ticks and sockets
   Object.defineProperty(window, 'devicePixelRatio', { get: () => 0.5 });
   // guest tabs keep their audio graph suspended (one shared CPU would mix 13 synth bands); the host tab plays sound like a real device
   if (${tab} > 0 && window.AudioContext) { const A = window.AudioContext; window.AudioContext = class extends A { constructor(...a) { super(...a); super.suspend(); } resume() { return Promise.resolve(); } }; }
@@ -75,6 +77,22 @@ const INIT = (tab) => `(() => {
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb) => { const at = performance.now(); return raf(function w(t) { if (performance.now() - at < 1000 / FPS - 4) return raf(w); cb(t); }); };
   const f = () => { rt.frames++; requestAnimationFrame(f); }; requestAnimationFrame(f);
+  // before the match, game tickers (>= 10 Hz worker) only drive the attract demo behind the lobby: deliver 1 tick in 8 so 14 tabs can join without
+  // each simulating a full bot match; the room heartbeat ticker (0.2 Hz) and everything after the start run untouched
+  const NB = window.Blob, cou = URL.createObjectURL.bind(URL), tickMs = new Map();
+  window.Blob = class extends NB { constructor(parts, o) { super(parts, o); try { const m = /postMessage\\(0\\), ([\\d.]+)\\)/.exec((parts || []).join('')); if (m) this.__ms = +m[1]; } catch {} } };
+  URL.createObjectURL = (b) => { const u = cou(b); if (b && b.__ms) tickMs.set(u, b.__ms); return u; };
+  const NWk = window.Worker;
+  window.Worker = class extends NWk {
+    constructor(u, o) {
+      super(u, o);
+      const ms = tickMs.get(String(u));
+      if (!ms || ms >= 100) return;
+      let h = null, n = 0;
+      Object.defineProperty(this, 'onmessage', { get: () => h, set: (fn) => { h = fn; } });
+      super.addEventListener('message', (e) => { if (rt.started || ++n % 8 === 0) h?.call(this, e); });
+    }
+  };
 })();`;
 
 // Browser > chaos player: clicks game buttons, taps the canvas, types guesses, presses and holds keys
@@ -116,6 +134,7 @@ async function chaos(page, until) {
   }
 }
 
+const WARMUP_MS = 8000;
 const pct = (a, q) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * q))]; };
 const med = (a) => pct(a, 0.5);
 const r1 = (v) => (Number.isFinite(v) ? Math.round(v) : null);
@@ -139,7 +158,7 @@ async function runGame(browser, dir) {
       ctxs.push(ctx); pages.push(page);
     }
     const joinRoom = async (page, i, code) => {
-      await page.goto(`${base}${dir}/${code ? `?room=${code}` : ''}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${base}${dir}/${code ? `?room=${code}` : ''}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForSelector('.lb-nick', { timeout: 30000 });
       await page.fill('.lb-nick', `P${i + 1}`);
       await page.click(code ? '.lb-join' : '.lb-create');
@@ -157,7 +176,16 @@ async function runGame(browser, dir) {
     out.started = startedFlags.filter(Boolean).length;
     out.startMs = Date.now() - t0;
     const until = Date.now() + SECONDS * 1000;
+    const cdp = PROFILE ? await ctxs[0].newCDPSession(pages[0]) : null;
+    if (cdp) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.start'); }
     await Promise.all(pages.map((p) => chaos(p, until)));
+    if (cdp) {
+      const { profile } = await cdp.send('Profiler.stop');
+      const self = new Map(), dts = profile.timeDeltas, byId = new Map(profile.nodes.map((n) => [n.id, n]));
+      profile.samples.forEach((id, i) => { const f = byId.get(id).callFrame, k = `${f.functionName || '(anon)'} ${f.url.split('/').slice(-2).join('/')}:${f.lineNumber + 1}`; self.set(k, (self.get(k) ?? 0) + (dts[i] ?? 0)); });
+      const total = [...self.values()].reduce((a, b) => a + b, 0);
+      out.profile = [...self].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, us]) => `${(us / total * 100).toFixed(1)}% ${k}`);
+    }
     const stats = await Promise.all(pages.map((p) => p.evaluate(() => ({ ...window.__rt, now: performance.now(), lobbyHidden: document.querySelector('.lb-wrap')?.hidden === true }))));
     const host = stats[0], guests = stats.slice(1);
     const gaps = [], rates = [], fps = [], quiet = [];
@@ -175,7 +203,9 @@ async function runGame(browser, dir) {
       guestsWithoutHostData: quiet.length,
       hostMsgsPerSec: +med(rates).toFixed(1),
       hostGapMs: { p50: r1(pct(gaps, 0.5)), p95: r1(pct(gaps, 0.95)), max: r1(gaps.length ? Math.max(...gaps) : NaN) },
-      rttMs: { n: host.rtts.length, p50: r1(pct(host.rtts, 0.5)), p95: r1(pct(host.rtts, 0.95)), max: r1(host.rtts.length ? Math.max(...host.rtts) : NaN) },
+      // steady state = probes sent 8 s or more after the start (the first frames compile every shader, seconds on a software GPU)
+      rttMs: (() => { const all = host.rtts.map(([v]) => v), st = host.rtts.filter(([, t]) => t >= WARMUP_MS).map(([v]) => v), warm = host.rtts.filter(([, t]) => t < WARMUP_MS).map(([v]) => v);
+        return { n: st.length, p50: r1(pct(st, 0.5)), p95: r1(pct(st, 0.95)), max: r1(st.length ? Math.max(...st) : NaN), warmupMax: r1(warm.length ? Math.max(...warm) : NaN), allP95: r1(pct(all, 0.95)) }; })(),
       kbInPerGuest: +(med(guests.map((g) => g.bytesIn)) / 1024 / SECONDS).toFixed(1),
       fpsMedian: +med(fps).toFixed(1),
       loopLagMs: { p95: r1(pct(lags, 0.95)), max: r1(lags.length ? Math.max(...lags) : NaN), host95: r1(pct(host.lag, 0.95)) },
@@ -200,9 +230,10 @@ const results = [];
 for (const dir of GAMES) {
   const r = await runGame(browser, dir);
   results.push(r);
-  const rtt = r.rttMs ? `rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max}` : '';
+  const rtt = r.rttMs ? `rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max} (warm-up max ${r.rttMs.warmupMax})` : '';
   console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} (host ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
   for (const e of r.errors) console.log(`      ${e}`);
+  for (const l of r.profile ?? []) console.log(`      profile ${l}`);
 }
 await browser.close();
 server?.kill();
