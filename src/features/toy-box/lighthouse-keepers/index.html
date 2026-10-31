@@ -105,7 +105,22 @@ const JOBS = { N: 'Patch north', E: 'Patch east', S: 'Patch south', W: 'Patch we
 const BOT_NAMES = ['Gull', 'Barnacle', 'Skipper', 'Tidewell', 'Mariner', 'Puffin', 'Anchor', 'Coral', 'Driftwood', 'Harbor', 'Kelp', 'Lantern', 'Shoal', 'Squall'];
 // card kinds: wave (one wall), swell (all walls), rain (flood), gale (lamp), bolt (lamp + random wall), surge (two walls), lull (calm, crate refills)
 const DECK = [['wave', 3], ['wave', 3], ['wave', 4], ['wave', 4], ['wave', 5], ['swell', 1], ['swell', 1], ['rain', 3], ['rain', 4], ['gale', 3], ['gale', 4], ['bolt', 3], ['surge', 3], ['surge', 3], ['lull', 0], ['rain', 2], ['wave', 2], ['gale', 2]];
-const scale = (S, base) => Math.max(1, Math.round(base * (0.55 + S.P.length * 0.24) * S.diff));
+// a card keeps its own strength (times difficulty); bigger crews face more cards per turn instead, so no single card can breach a wall
+const scale = (S, base) => Math.max(1, Math.round(base * S.diff));
+// storm rate: half a card per turn solo, about one per 3.5 keepers in a crowd; leftover fractions carry over, so the forecast knows exactly how many come
+const stormRate = (S) => Math.max(0.5, S.P.length / 3.5);
+const cardsPerTurn = (S, ahead = 0) => Math.floor((S.debt ?? 0) + stormRate(S) * (1 + ahead)) - Math.floor((S.debt ?? 0) + stormRate(S) * ahead);
+// apply one card to tracks t = { walls, flood, lamp } (used by the real storm and by bots planning ahead)
+function applyCard(S, t, c) {
+  const k = scale(S, c.b);
+  if (c.k === 'wave') t.walls[c.s] += k;
+  if (c.k === 'swell') t.walls = t.walls.map((w) => w + k);
+  if (c.k === 'rain') t.flood += k;
+  if (c.k === 'gale') t.lamp -= k;
+  if (c.k === 'bolt') { t.lamp -= k; t.walls[c.s] += Math.ceil(k / 2); }
+  if (c.k === 'surge') { t.walls[c.s] += k; t.walls[(c.s + 2) % 4] += k; }
+}
+const deck = (n) => Array.from({ length: n }, drawCard);
 function cardText(S, c) {
   if (!c) return '';
   const k = scale(S, c.b);
@@ -115,10 +130,10 @@ function drawCard() { const [k, b] = pickOne(DECK); return { k, b, s: Math.floor
 
 function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, sup: 3, job: null, lock: false, at: 0, did: 0 }; }
 function newMatch(settings, P) {
-  return { ph: 'intro', tt: T.intro, turn: 0, turns: settings.turns ?? 12, diff: settings.diff ?? 1, walls: [2, 2, 2, 2], flood: 1, lamp: 8, fore: [drawCard(), drawCard()], last: null, outcome: null, why: '', games: 0, wins: 0, P };
+  return { ph: 'intro', tt: T.intro, turn: 0, turns: settings.turns ?? 12, diff: settings.diff ?? 1, walls: [2, 2, 2, 2], flood: 1, lamp: 8, debt: 0, fore: deck(8), last: null, outcome: null, why: '', games: 0, wins: 0, P };
 }
 function resetBoard(S) {
-  Object.assign(S, { turn: 0, walls: [2, 2, 2, 2], flood: 1, lamp: 8, fore: [drawCard(), drawCard()], last: null, outcome: null, why: '' });
+  Object.assign(S, { turn: 0, walls: [2, 2, 2, 2], flood: 1, lamp: 8, debt: 0, fore: deck(8), last: null, outcome: null, why: '' });
   for (const p of S.P) Object.assign(p, { sup: 3, job: null, lock: false, did: 0 });
 }
 function startPlan(S) {
@@ -142,21 +157,20 @@ function resolve(S) {
     else if (job === 'fuel') { gain = Math.min(2, MAX - S.lamp); S.lamp += gain; }
     p.did += gain; p.score += gain; log.fixed += gain;
   }
-  const c = S.fore.shift(), k = scale(S, c.b);
-  if (c.k === 'wave') S.walls[c.s] += k;
-  if (c.k === 'swell') S.walls = S.walls.map((w) => w + k);
-  if (c.k === 'rain') S.flood += k;
-  if (c.k === 'gale') S.lamp -= k;
-  if (c.k === 'bolt') { S.lamp -= k; S.walls[c.s] += Math.ceil(k / 2); }
-  if (c.k === 'surge') { S.walls[c.s] += k; S.walls[(c.s + 2) % 4] += k; }
-  if (c.k === 'lull') for (const p of S.P) p.sup = Math.min(5, p.sup + 1);
+  // the forecast queue always holds two turns of cards for the current crew size
+  const per = cardsPerTurn(S);
+  while (S.fore.length < per + cardsPerTurn(S, 1)) S.fore.push(drawCard());
+  const cards = S.fore.splice(0, per);
+  S.debt = (S.debt + stormRate(S)) % 1;
+  for (const c of cards) { applyCard(S, S, c); if (c.k === 'lull') for (const p of S.P) p.sup = Math.min(5, p.sup + 1); }
+  const c = cards.find((x) => x.k !== 'lull') ?? cards[0] ?? null;
   // cracked walls leak; the lamp burns oil every turn
   S.flood += S.walls.filter((w) => w >= MAX / 2).length;
   S.lamp -= 1;
   S.walls = S.walls.map((w) => Math.min(MAX, Math.max(0, w)));
   S.flood = Math.min(MAX, Math.max(0, S.flood)); S.lamp = Math.min(MAX, Math.max(0, S.lamp));
-  S.fore.push(drawCard());
-  S.last = { c, text: cardText(S, c), fixed: log.fixed };
+  while (S.fore.length < cardsPerTurn(S) + cardsPerTurn(S, 1)) S.fore.push(drawCard());
+  S.last = { c, text: cards.length ? cards.map((x) => cardText(S, x)).join(' · ') : 'Calm turn: no storm card', fixed: log.fixed };
   Object.assign(S, { ph: 'storm', tt: T.storm });
   const broke = S.walls.findIndex((w) => w >= MAX);
   if (broke >= 0) return end(S, false, `the ${SIDES[broke]} wall gave way`);
@@ -173,15 +187,10 @@ function end(S, won, why) {
 // Bots > look at the forecast and the team's plans, take the most urgent job nobody covers yet
 function botJob(S, p) {
   if (p.sup <= 0) return 'scav';
-  const c = S.fore[0], k = scale(S, c.b);
-  const walls = [...S.walls];
-  let flood = S.flood + 0, lamp = S.lamp - 1;
-  if (c.k === 'wave') walls[c.s] += k;
-  if (c.k === 'swell') walls.forEach((_, i) => (walls[i] += k));
-  if (c.k === 'surge') { walls[c.s] += k; walls[(c.s + 2) % 4] += k; }
-  if (c.k === 'bolt') { walls[c.s] += Math.ceil(k / 2); lamp -= k; }
-  if (c.k === 'rain') flood += k;
-  if (c.k === 'gale') lamp -= k;
+  const t = { walls: [...S.walls], flood: S.flood, lamp: S.lamp - 1 };
+  for (const c of S.fore.slice(0, cardsPerTurn(S))) applyCard(S, t, c);
+  const walls = t.walls;
+  let flood = t.flood, lamp = t.lamp;
   // credit jobs teammates already locked in
   for (const q of S.P) if (q.lock && q.job && q !== p) {
     if ('NESW'.includes(q.job)) walls['NESW'.indexOf(q.job)] -= 2;
@@ -231,7 +240,7 @@ let flash = 0;
 function change(prev, cur) {
   if (prev?.ph !== cur.ph) {
     if (cur.ph === 'storm' && cur.last) {
-      const k = cur.last.c.k;
+      const k = cur.last.c?.k ?? 'lull';
       if (k === 'bolt' || k === 'gale') { sfx.thunder(); flash = 1; } else if (k !== 'lull') sfx.wave();
       if (cur.last.fixed) sfx.hammer();
     }
@@ -280,7 +289,7 @@ function hudFrame(S, dt) {
   document.getElementById('meters').innerHTML = SIDES.map((s, i) => bar(`${s} wall`, S.walls[i] / MAX, col(S.walls[i] / MAX), `${S.walls[i]}/${MAX}`)).join('')
     + bar('Flood', S.flood / MAX, col(S.flood / MAX), `${S.flood}/${MAX}`)
     + bar('Lamp oil', S.lamp / MAX, col(1 - S.lamp / MAX), `${S.lamp}/${MAX}`)
-    + `<div id="fore">Next: <b>${esc(cardText(S, S.fore[0]))}</b><br><span style="opacity:.7">Then: ${esc(cardText(S, S.fore[1]))}</span></div>`;
+    + `<div id="fore">Next: <b>${S.fore.slice(0, cardsPerTurn(S)).map((c) => esc(cardText(S, c))).join('<br>') || 'calm'}</b><br><span style="opacity:.7">Then: ${S.fore.slice(cardsPerTurn(S), cardsPerTurn(S) + cardsPerTurn(S, 1)).map((c) => esc(cardText(S, c))).join(' · ') || 'calm'}</span></div>`;
   if (!match) return;
   hud.info(S.ph === 'final' ? 'Storm over' : `Turn ${Math.max(1, S.turn)} of ${S.turns}`, `Team of ${S.P.length}${me ? ` · your repairs <b style="color:var(--accent)">${me.did}</b>` : ''}`);
   const rows = [...S.P].sort((a, c) => c.did - a.did);
@@ -293,10 +302,10 @@ const game = createTableGame({
     game: 'lighthouse-keepers', title: 'Lighthouse Keepers', emoji: '🗼', accent: '#ffd25a',
     blurb: 'Co-op for 1-14: everyone against the storm. Each turn the whole crew picks a job at once (patch walls, pump water, fuel the lamp, scavenge) before the forecast storm card hits. Survive until the tide turns.',
     defaultBots: 3, minPlayers: 1,
-    note: 'Up to 14 keepers (humans + bots). The storm grows with the crew. Plans are shown to everyone so you can split the work.',
+    note: 'Up to 14 keepers (humans + bots). Bigger crews face more storm cards per turn (about one per 3.5 keepers; half a card a turn solo). Plans are shown to everyone so you can split the work.',
     settings: [
       { key: 'turns', label: 'Length', options: [[10, '10 turns'], [12, '12 turns'], [16, '16 turns']], value: 12 },
-      { key: 'diff', label: 'Storm', options: [[0.8, 'Squall'], [1, 'Gale'], [1.25, 'Hurricane']], value: 1 },
+      { key: 'diff', label: 'Storm', options: [[0.8, 'Squall'], [1, 'Gale'], [1.15, 'Hurricane']], value: 1 },
     ],
   },
   botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
