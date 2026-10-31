@@ -215,9 +215,11 @@ async function runGame(browser, dir) {
   }
   out.errors = [...new Set(errors)].slice(0, 8);
   out.errorCount = errors.length;
+  // a short match may finish inside the window (everyone back in the lobby together): fine, as long as all tabs agree
+  out.matchEnded = out.stillInMatch === 0;
   // floor = two lagged hops each way; stable = the tail stays close to the median
   const floor = 4 * LAG + 2 * JITTER;
-  out.pass = !out.fatal && out.joined === PLAYERS && out.started === PLAYERS && out.stillInMatch === PLAYERS && out.guestsWithoutHostData === 0 && out.errorCount === 0 && out.rttMs?.n > 20 && out.rttMs.p95 < floor + 250;
+  out.pass = !out.fatal && out.joined === PLAYERS && out.started === PLAYERS && (out.stillInMatch === PLAYERS || out.stillInMatch === 0) && out.guestsWithoutHostData === 0 && out.errorCount === 0 && out.rttMs?.n > 20 && out.rttMs.p95 < floor + 250;
   for (const c of ctxs) await c.close().catch(() => {});
   return out;
 }
@@ -231,7 +233,7 @@ for (const dir of GAMES) {
   const r = await runGame(browser, dir);
   results.push(r);
   const rtt = r.rttMs ? `rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max} (warm-up max ${r.rttMs.warmupMax})` : '';
-  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} (host ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
+  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}${r.matchEnded ? ' (match over, all back in lobby)' : ''}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} (host ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
   for (const e of r.errors) console.log(`      ${e}`);
   for (const l of r.profile ?? []) console.log(`      profile ${l}`);
 }
