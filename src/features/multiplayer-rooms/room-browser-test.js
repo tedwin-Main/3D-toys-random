@@ -1,7 +1,7 @@
 // Plays every multiplayer toy with 14 real browser tabs over a lagged relay and reports join, start, errors and latency.
 
 // Usage: node src/features/multiplayer-rooms/room-browser-test.js [--games=a,b] [--players=14] [--seconds=40] [--lag=40] [--jitter=15] [--url=http://host/3d-toys/] [--out=report.json] [--profile]
-// --profile: CPU profile of the host tab during play, prints the functions with the most self time
+// --guest-fps: frames per second each guest tab draws (default 0.2); --profile[=tab]: CPU profile of one tab during play (default 0 = host), prints the functions with the most self time
 // --lag / --jitter: one-way delay in ms added to every websocket message in each tab (both ways), order kept, like a phone on Render Singapore
 import { chromium } from 'playwright';
 import { spawn, execFileSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto';
 import { TOYS } from '../toy-box/common/toy-list.js';
 
 const arg = (k, d) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split('=').slice(1).join('=') ?? d;
-const PROFILE = process.argv.includes('--profile');
+const PROFILE = process.argv.some((a) => a.startsWith('--profile')), PROFILE_TAB = +arg('profile', 0) || 0, GUEST_FPS = +arg('guest-fps', 0.2);
 const PLAYERS = +arg('players', 14), SECONDS = +arg('seconds', 40), LAG = +arg('lag', 40), JITTER = +arg('jitter', 15);
 const GAMES = arg('games', '') ? arg('games').split(',') : TOYS.filter((t) => t.players === 'multi').map((t) => t.dir);
 const ROOT = join(import.meta.dirname, '..', '..', '..');
@@ -28,7 +28,7 @@ if (!base) {
 
 // Browser > every tab: lagged websocket, probe replies, data timing, frame counter
 const INIT = (tab) => `(() => {
-  const LAG = ${LAG}, JIT = ${JITTER}, FPS = 0.2;
+  const LAG = ${LAG}, JIT = ${JITTER}, FPS = ${tab === 0 ? 0.2 : GUEST_FPS};
   const rt = window.__rt = { me: null, host: null, hostData: [], bytesIn: 0, rtts: [], frames: 0, started: 0, sent: 0, lag: [] };
   // event-loop lag: how late a 100 ms timer fires (machine load, not network)
   let lt = performance.now();
@@ -168,15 +168,15 @@ async function runGame(browser, dir) {
     const code = (await pages[0].textContent('.lb-code')).trim();
     out.room = code;
     for (let i = 1; i < PLAYERS; i += 4) await Promise.all(pages.slice(i, i + 4).map((p, k) => joinRoom(p, i + k, code)));
-    await pages[0].waitForFunction((n) => document.querySelectorAll('.lb-players .lb-chip').length >= n, PLAYERS, { timeout: 20000 });
+    await pages[0].waitForFunction((n) => document.querySelectorAll('.lb-players .lb-chip').length >= n, PLAYERS, { timeout: 20000, polling: 250 });
     out.joined = await pages[0].evaluate(() => document.querySelectorAll('.lb-players .lb-chip').length);
     await pages[0].click('.lb-start');
     const t0 = Date.now();
-    const startedFlags = await Promise.all(pages.map((p) => p.waitForFunction(() => document.querySelector('.lb-wrap')?.hidden === true, null, { timeout: 15000 }).then(() => true, () => false)));
+    const startedFlags = await Promise.all(pages.map((p) => p.waitForFunction(() => document.querySelector('.lb-wrap')?.hidden === true, null, { timeout: 15000, polling: 250 }).then(() => true, () => false)));
     out.started = startedFlags.filter(Boolean).length;
     out.startMs = Date.now() - t0;
     const until = Date.now() + SECONDS * 1000;
-    const cdp = PROFILE ? await ctxs[0].newCDPSession(pages[0]) : null;
+    const cdp = PROFILE ? await ctxs[PROFILE_TAB].newCDPSession(pages[PROFILE_TAB]) : null;
     if (cdp) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.start'); }
     await Promise.all(pages.map((p) => chaos(p, until)));
     if (cdp) {
@@ -233,7 +233,7 @@ for (const dir of GAMES) {
   const r = await runGame(browser, dir);
   results.push(r);
   const rtt = r.rttMs ? `rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max} (warm-up max ${r.rttMs.warmupMax})` : '';
-  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}${r.matchEnded ? ' (match over, all back in lobby)' : ''}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} (host ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
+  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}${r.matchEnded ? ' (match over, all back in lobby)' : ''}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} max ${r.loopLagMs?.max ?? '-'} (host p95 ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
   for (const e of r.errors) console.log(`      ${e}`);
   for (const l of r.profile ?? []) console.log(`      profile ${l}`);
 }

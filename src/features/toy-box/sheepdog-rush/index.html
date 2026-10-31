@@ -42,6 +42,7 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -113,10 +114,28 @@ const penGroup = new THREE.Group();
 scene.add(penGroup);
 let pens = [], penKey = '';
 const penAngle = (k, n) => (k / n) * Math.PI * 2 + 0.3;
+// fences: every rail and post is baked into one merged mesh per material when the pens are built (hundreds of meshes -> a handful of draw calls)
+const fenceBits = new Map(), _fenceM = new THREE.Matrix4(), _fenceQ = new THREE.Quaternion(), _fenceUp = new THREE.Vector3(0, 1, 0);
+function fenceBit(group, mat, geo, x, y, z, ry, sx = 1, sy = 1) {
+  group.updateMatrix();
+  _fenceM.compose(new THREE.Vector3(x, y, z), _fenceQ.setFromAxisAngle(_fenceUp, ry), new THREE.Vector3(sx, sy, 1));
+  if (group !== penGroup) _fenceM.premultiply(group.matrix);
+  if (!fenceBits.has(mat)) fenceBits.set(mat, []);
+  fenceBits.get(mat).push(geo.clone().applyMatrix4(_fenceM));
+}
 function rail(group, x0, z0, x1, z1, mat = woodMat) {
   const l = Math.hypot(x1 - x0, z1 - z0);
-  for (const y of [0.45, 0.95]) { const r = new THREE.Mesh(railGeo, mat); r.scale.x = l; r.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); r.rotation.y = -Math.atan2(z1 - z0, x1 - x0); r.castShadow = true; group.add(r); }
-  for (const [x, z] of [[x0, z0], [x1, z1]]) { const p = new THREE.Mesh(postGeo, mat); p.position.set(x, 0.65, z); p.castShadow = true; group.add(p); }
+  for (const y of [0.45, 0.95]) fenceBit(group, mat, railGeo, (x0 + x1) / 2, y, (z0 + z1) / 2, -Math.atan2(z1 - z0, x1 - x0), l);
+  for (const [x, z] of [[x0, z0], [x1, z1]]) fenceBit(group, mat, postGeo, x, 0.65, z, 0);
+}
+function bakeFences() {
+  for (const [mat, geos] of fenceBits) {
+    const m = new THREE.Mesh(mergeGeometries(geos), mat);
+    m.castShadow = true; m.userData.baked = true;
+    penGroup.add(m);
+    geos.forEach((g) => g.dispose());
+  }
+  fenceBits.clear();
 }
 function penSign(nick, color, n) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 96;
@@ -128,6 +147,7 @@ function penSign(nick, color, n) {
   return c;
 }
 function buildPens(list) {
+  penGroup.traverse((o) => { if (o.userData.baked) o.geometry.dispose(); });
   penGroup.clear();
   const n = list.length, half = GATE_W / 2 / R_FIELD;
   pens = list.map(({ id, nick, color }, k) => {
@@ -161,7 +181,8 @@ function buildPens(list) {
     rail(penGroup, Math.sin(t0) * R_FIELD, Math.cos(t0) * R_FIELD, Math.sin(t1) * R_FIELD, Math.cos(t1) * R_FIELD);
   }
   // gate posts so each opening is clearly framed even where the ring step skipped them
-  for (const p of pens) for (const s of [-1, 1]) { const th = p.a + s * p.half, post = new THREE.Mesh(postGeo, woodMat); post.position.set(Math.sin(th) * R_FIELD, 0.65, Math.cos(th) * R_FIELD); post.scale.y = 1.4; penGroup.add(post); }
+  for (const p of pens) for (const s of [-1, 1]) { const th = p.a + s * p.half; fenceBit(penGroup, woodMat, postGeo, Math.sin(th) * R_FIELD, 0.65, Math.cos(th) * R_FIELD, 0, 1, 1.4); }
+  bakeFences();
 }
 // Run engine > which pen gate (if any) is at this field angle
 function gateAt(x, z) {
@@ -185,7 +206,8 @@ function nameTag(nick, color) {
   s.scale.set(2.2, 0.55, 1); s.position.y = 1.9; s.renderOrder = 5;
   return s;
 }
-const ballGeo = new THREE.SphereGeometry(1, 18, 14), legGeo = new THREE.CylinderGeometry(0.07, 0.06, 0.5, 6);
+// dogs are seen from high up: 216-triangle balls keep them smooth at a fraction of the cost
+const ballGeo = new THREE.SphereGeometry(1, 12, 9), legGeo = new THREE.CylinderGeometry(0.07, 0.06, 0.5, 6);
 const furMat = new THREE.MeshStandardMaterial({ color: 0x1f2128, roughness: 0.8 }), chestMat = new THREE.MeshStandardMaterial({ color: 0xf5f2ea, roughness: 0.8 });
 function blob(mat, [sx, sy, sz], [x, y, z]) { const m = new THREE.Mesh(ballGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); m.castShadow = true; return m; }
 const players3d = new Map();
@@ -214,22 +236,43 @@ function makeDog(p) {
 const woolMat = new THREE.MeshStandardMaterial({ color: 0xf7f4ec, roughness: 1 });
 const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, roughness: 0.35, metalness: 0.6, emissive: 0x6a4a00, emissiveIntensity: 0.4 });
 const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.7 });
-const sheep3d = [];
-function makeSheep() {
-  const g = new THREE.Group(), body = new THREE.Group(), wool = [];
-  for (const [x, y, z, r] of [[0, 0.7, 0, 0.5], [0, 0.82, 0.28, 0.36], [0, 0.82, -0.28, 0.38], [0.22, 0.74, 0, 0.34], [-0.22, 0.74, 0, 0.34], [0, 0.98, 0, 0.32]]) {
-    const m = new THREE.Mesh(ballGeo, woolMat); m.scale.setScalar(r); m.position.set(x, y, z); m.castShadow = true; body.add(m); wool.push(m);
+// the whole flock is five instanced meshes (white wool, golden wool, faces, ears, legs): ~10 draw calls instead of ~13 meshes per sheep
+// sheep are small on screen: a low-poly ball (160 triangles) per wool puff instead of the dogs' 500
+const flockBall = new THREE.SphereGeometry(1, 10, 8);
+const MAX_SHEEP = 50, WOOL = [[0, 0.7, 0, 0.5], [0, 0.82, 0.28, 0.36], [0, 0.82, -0.28, 0.38], [0.22, 0.74, 0, 0.34], [-0.22, 0.74, 0, 0.34], [0, 0.98, 0, 0.32]];
+const LEGS = [[-0.18, 0.25], [0.18, 0.25], [-0.18, -0.25], [0.18, -0.25]];
+function flockMesh(geo, mat, n, shadow) { const m = new THREE.InstancedMesh(geo, mat, n); m.castShadow = shadow; m.frustumCulled = false; m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); return m; }
+const flock = {
+  wool: flockMesh(flockBall, woolMat, MAX_SHEEP * WOOL.length, true),
+  gold: flockMesh(flockBall, goldMat, MAX_SHEEP * WOOL.length, true),
+  head: flockMesh(flockBall, faceMat, MAX_SHEEP, false),
+  ear: flockMesh(flockBall, faceMat, MAX_SHEEP * 2, false),
+  leg: flockMesh(legGeo, faceMat, MAX_SHEEP * 4, false),
+};
+const sheepView = [];
+const _fRoot = new THREE.Matrix4(), _fBody = new THREE.Matrix4(), _fPart = new THREE.Matrix4(), _fHead = new THREE.Matrix4(), _fM = new THREE.Matrix4(), _fZero = new THREE.Matrix4().makeScale(0, 0, 0);
+const _fQ = new THREE.Quaternion(), _fE = new THREE.Euler(), _fV = new THREE.Vector3(), _fS = new THREE.Vector3();
+const compose = (out, x, y, z, rx, ry, sx, sy = sx, sz = sx) => out.compose(_fV.set(x, y, z), _fQ.setFromEuler(_fE.set(rx, ry, 0)), _fS.set(sx, sy, sz));
+// one sheep's parts into the instance buffers (hidden = zero scale)
+function placeSheep(i, v, visible) {
+  if (!visible) {
+    for (let k = 0; k < WOOL.length; k++) { flock.wool.setMatrixAt(i * WOOL.length + k, _fZero); flock.gold.setMatrixAt(i * WOOL.length + k, _fZero); }
+    flock.head.setMatrixAt(i, _fZero); for (let k = 0; k < 2; k++) flock.ear.setMatrixAt(i * 2 + k, _fZero); for (let k = 0; k < 4; k++) flock.leg.setMatrixAt(i * 4 + k, _fZero);
+    return;
   }
-  const head = blob(faceMat, [0.18, 0.2, 0.24], [0, 0.82, 0.62]);
-  for (const s of [-1, 1]) head.add(blob(faceMat, [0.7, 0.25, 0.4], [s * 1.1, 0.4, -0.2]));
-  const legs = [[-0.18, 0.25], [0.18, 0.25], [-0.18, -0.25], [0.18, -0.25]].map(([x, z]) => { const l = new THREE.Mesh(legGeo, faceMat); l.position.set(x, 0.25, z); body.add(l); return l; });
-  body.add(head);
-  g.add(body);
-  g.scale.setScalar(1.25);
-  g.userData = { body, wool, legs, gold: false, h: 0 };
-  scene.add(g);
-  return g;
+  compose(_fRoot, v.x, 0, v.z, 0, v.ry, 1.25);
+  _fBody.copy(_fRoot).multiply(compose(_fM, 0, v.bob, 0, 0, 0, 1));
+  WOOL.forEach(([x, y, z, r], k) => {
+    _fPart.copy(_fBody).multiply(compose(_fM, x, y, z, 0, 0, r));
+    (v.gold ? flock.gold : flock.wool).setMatrixAt(i * WOOL.length + k, _fPart);
+    (v.gold ? flock.wool : flock.gold).setMatrixAt(i * WOOL.length + k, _fZero);
+  });
+  _fHead.copy(_fBody).multiply(compose(_fM, 0, 0.82, 0.62, 0, 0, 0.18, 0.2, 0.24));
+  flock.head.setMatrixAt(i, _fHead);
+  [-1, 1].forEach((s, k) => flock.ear.setMatrixAt(i * 2 + k, _fPart.copy(_fHead).multiply(compose(_fM, s * 1.1, 0.4, -0.2, 0, 0, 0.7, 0.25, 0.4))));
+  LEGS.forEach(([x, z], k) => flock.leg.setMatrixAt(i * 4 + k, _fPart.copy(_fBody).multiply(compose(_fM, x, 0.25, z, v.swing * (k % 2 ? -1 : 1), 0, 1))));
 }
+function flockDone() { for (const m of Object.values(flock)) m.instanceMatrix.needsUpdate = true; }
 
 // FX > wool puffs when sheep are penned, bark rings
 const PUFF = 500;
@@ -663,25 +706,26 @@ function loop() {
     u.head.rotation.x = p.barkT > 0 ? -0.4 : 0;
   }
   world.sheep.forEach((s, i) => {
-    let g = sheep3d[i];
-    if (!g) { g = sheep3d[i] = makeSheep(); g.position.set(s.x, 0, s.z); }
-    const u = g.userData;
-    g.visible = !s.dead;
-    if (s.gold !== u.gold) { u.gold = s.gold; for (const m of u.wool) m.material = s.gold ? goldMat : woolMat; }
-    if (s.dead) return;
+    if (i >= MAX_SHEEP) return;
+    let v = sheepView[i];
+    if (!v) v = sheepView[i] = { x: s.x, z: s.z, ry: 0, h: 0, bob: 0, swing: 0, gold: false };
+    v.gold = s.gold;
+    if (s.dead) return placeSheep(i, v, false);
     const a = hostSim ? 1 : 1 - Math.exp(-dt * pacing.rate(12));
-    if (Math.hypot(s.x - g.position.x, s.z - g.position.z) > 6) g.position.set(s.x, 0, s.z);
-    const dx = (s.x - g.position.x) * a, dz = (s.z - g.position.z) * a;
-    g.position.x += dx; g.position.z += dz;
+    if (Math.hypot(s.x - v.x, s.z - v.z) > 6) { v.x = s.x; v.z = s.z; }
+    const dx = (s.x - v.x) * a, dz = (s.z - v.z) * a;
+    v.x += dx; v.z += dz;
     const sp = Math.hypot(dx, dz) / Math.max(dt, 1e-3);
-    if (sp > 0.3) { u.h = Math.atan2(dx, dz); }
-    let dh = u.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    g.rotation.y += dh * Math.min(1, dt * 8);
+    if (sp > 0.3) v.h = Math.atan2(dx, dz);
+    let dh = v.h - v.ry; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
+    v.ry += dh * Math.min(1, dt * 8);
     const k = Math.min(sp / S_MAX, 1), ph = time * 14 + i;
-    u.body.position.y = Math.abs(Math.sin(ph)) * k * 0.2;
-    u.legs.forEach((l, j) => (l.rotation.x = Math.sin(ph + (j % 2 ? Math.PI : 0)) * k * 0.7));
+    v.bob = Math.abs(Math.sin(ph)) * k * 0.2;
+    v.swing = Math.sin(ph) * k * 0.7;
+    placeSheep(i, v, true);
   });
-  for (let i = world.sheep.length; i < sheep3d.length; i++) sheep3d[i].visible = false;
+  for (let i = world.sheep.length; i < MAX_SHEEP; i++) placeSheep(i, null, false);
+  flockDone();
   for (const r of rings) {
     if (r.userData.t >= 1) continue;
     r.userData.t += dt / 0.5;
