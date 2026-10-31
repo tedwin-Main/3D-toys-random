@@ -42,7 +42,7 @@
 <div id="clock" class="card">2:00</div>
 <div id="board" class="card"></div>
 <div id="feed"></div>
-<div id="me" class="card"><span>❄ ammo</span><div class="pips ammo" id="ammo"></div><span>hits</span><div class="pips hits" id="hits"></div></div>
+<div id="me" class="card"><span>ammo</span><div class="pips ammo" id="ammo"></div><span>hits</span><div class="pips hits" id="hits"></div></div>
 <div id="big"></div>
 <div id="hint" class="card"><b>WASD</b> move · <b>mouse</b> aim · <b>click / hold</b> throw · lob over the forts · 3 hits freezes a player</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
@@ -432,7 +432,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     spawnAll();
   },
   onLobby() {
@@ -531,9 +531,9 @@ function playEvents(evs) {
       if (v) puff(v.x, 1.2, v.z, 40, 0x9fdcff, 6);
       if (match) {
         sfx.freeze();
-        if (v && by) addFeed(`<b style="color:${by.color}">${esc(by.nick)}</b> ❄ froze <b style="color:${v.color}">${esc(v.nick)}</b>`);
-        if (e[1] === me) flash(`<small>frozen by ${esc(by?.nick ?? '?')}</small>🧊 BRRR`, 1.6);
-        else if (e[2] === me) flash(`<small>you froze ${esc(v?.nick ?? '?')}</small>❄ +1`, 1.2);
+        if (v && by) addFeed(`<b style="color:${by.color}">${esc(by.nick)}</b> froze <b style="color:${v.color}">${esc(v.nick)}</b>`);
+        if (e[1] === me) flash(`<small>frozen by ${esc(by?.nick ?? '?')}</small>BRRR`, 1.6);
+        else if (e[2] === me) flash(`<small>you froze ${esc(v?.nick ?? '?')}</small>+1`, 1.2);
       }
     } else if (e[0] === 'u') { const v = world.players.get(e[1]); if (v) puff(v.x, 1.2, v.z, 24, 0x9fdcff, 5); if (match && v) sfx.crack(); }
     else if (e[0] === 's') { splat(e[1], e[2]); puff(e[1], 0.15, e[2], 8, 0xffffff, 2); if (match) sfx.splat(vol(e[1], e[2]) * 0.6); }
@@ -597,7 +597,7 @@ function hud(dt) {
   if (world.phase === 'count') big(`<small>get ready</small>${Math.max(1, Math.ceil(world.t))}`);
   else if (world.phase === 'final') {
     const top = ranked()[0];
-    big(`<small>back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 <span style="color:${top?.color}">${esc(top?.nick ?? '')}</span>`);
+    big(`<small>back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small><span style="color:${top?.color}">${esc(top?.nick ?? '')}</span>`);
   } else if (flashT <= 0) big('');
   hudT -= dt;
   if (hudT > 0) return;
@@ -606,7 +606,7 @@ function hud(dt) {
   document.getElementById('clock').textContent = `${Math.floor(c / 60)}:${String(Math.floor(c % 60)).padStart(2, '0')}`;
   document.getElementById('ammo').innerHTML = pips(MAX_AMMO, me?.ammo ?? 0);
   document.getElementById('hits').innerHTML = pips(HITS, me?.frozen > 0 ? HITS : me?.hits ?? 0);
-  document.getElementById('board').innerHTML = ranked().map((p, i) => `<div class="row ${p.id === meId ? 'me' : ''} ${p.frozen > 0 ? 'out' : ''}">${i + 1}. <i style="background:${p.color}"></i><span>${p.frozen > 0 ? '🧊 ' : ''}${esc(p.nick)}</span><b>❄ ${p.score}</b></div>`).join('');
+  document.getElementById('board').innerHTML = ranked().map((p, i) => `<div class="row ${p.id === meId ? 'me' : ''} ${p.frozen > 0 ? 'out' : ''}">${i + 1}. <i style="background:${p.color}"></i><span>${p.frozen > 0 ? '<b style="color:#8fd3ff">FROZEN</b> ' : ''}${esc(p.nick)}</span><b>${p.score}</b></div>`).join('');
 }
 
 // Run engine > sim tick (worker)

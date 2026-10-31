@@ -325,7 +325,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 8, lot: null, res: null, P: [] };
     for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true));
     prevS = null; lastSig = '';
   },
   onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
@@ -405,8 +405,8 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.rounds} lots · ${START_COINS} coins each · bids are secret</small>Treasure Auction`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => scoreOf(c) - scoreOf(a))[0]; big(`<small>richest with ${w ? scoreOf(w) : 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
-  else if (S.ph === 'show') big(`<small>lot ${S.rd} of ${S.rounds}</small>${S.lot.v > 0 ? '💎' : '💀'} ${esc(S.lot.name)}`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => scoreOf(c) - scoreOf(a))[0]; big(`<small>richest with ${w ? scoreOf(w) : 0}</small>${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'show') big(`<small>lot ${S.rd} of ${S.rounds}</small>${S.lot.v > 0 ? '' : 'Cursed: '}${esc(S.lot.name)}`);
   else if (flashT <= 0) big('');
   const bidding = me && S.ph === 'bid';
   bidbox.style.display = bidding ? 'block' : 'none';
@@ -430,10 +430,10 @@ function hud(dt) {
     ln.className = S.lot.v > 0 ? 'good' : 'bad';
   }
   document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final tally' : `Lot ${S.rd} of ${S.rounds}`;
-  document.getElementById('roundMeta').innerHTML = me ? `🪙 ${me.coins} coins · 💎 loot ${me.loot}<br>Score <b style="color:var(--gold)">${scoreOf(me)}</b>` : 'Watching';
+  document.getElementById('roundMeta').innerHTML = me ? `${me.coins} coins · loot ${me.loot}<br>Score <b style="color:var(--gold)">${scoreOf(me)}</b>` : 'Watching';
   const rows = [...S.P].sort((a, c) => scoreOf(c) - scoreOf(a));
   const showBids = S.ph === 'result' && S.res;
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${showBids ? `bid ${S.res.bids[p.id]} · ` : S.ph === 'bid' ? (p.lock ? '✅ ' : '🤔 ') : ''}${scoreOf(p)}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${showBids ? `bid ${S.res.bids[p.id]} · ` : S.ph === 'bid' ? (p.lock ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#7cf0b4;margin-right:4px"></span>' : '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffcf5a;margin-right:4px"></span>') : ''}${scoreOf(p)}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

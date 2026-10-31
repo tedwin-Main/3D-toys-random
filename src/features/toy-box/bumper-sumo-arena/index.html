@@ -417,7 +417,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     for (const p of world.players.values()) p.wins = 0;
     startRound();
   },
@@ -537,7 +537,7 @@ function hud() {
   if (world.phase === 'count') big(`${Math.max(1, Math.ceil(world.t))}<small>Round ${world.round}${meIn && !meIn.inRound ? ' · spectating' : ''}</small>`);
   else if (world.phase === 'fight') big(world.t < 0.8 ? 'BUMP!' : meIn && meIn.inRound && !meIn.alive && world.players.size > 1 ? '<small>splash! watching…</small>' : '');
   else if (world.phase === 'roundEnd') big(world.winner != null ? `${nameOf(world.winner)}<small>takes round ${world.round}</small>` : 'Draw!<small>everyone went swimming</small>');
-  else if (world.phase === 'matchEnd') big(`🏆 ${nameOf(world.winner)}<small>wins the match</small>`);
+  else if (world.phase === 'matchEnd') big(`${nameOf(world.winner)}<small>wins the match</small>`);
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 

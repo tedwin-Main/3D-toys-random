@@ -42,7 +42,7 @@
 <div id="fuse" class="card"></div>
 <div id="board" class="card"></div>
 <div id="big"></div>
-<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> dash · holding the 💣? bump someone to pass it before the fuse runs out</div>
+<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> dash · holding the bomb? bump someone to pass it before the fuse runs out</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <div id="stick"><div></div></div>
 <button id="dashBtn">DASH</button>
@@ -385,7 +385,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startRound();
   },
   onLobby() {
@@ -458,12 +458,12 @@ function playEvents(evs) {
   const me = lobby.room?.me, match = world.mode === 'match';
   for (const e of evs) {
     const p = world.players.get(e[1]);
-    if (e[0] === 'p') { sfx.pass(e[1] === me || e[2] === me); if (e[2] === me && match) flash('<small>pass it on!</small>💣 YOU', 1.2); else if (e[1] === me && match) flash('<small>phew</small>passed!', 0.9); }
-    else if (e[0] === 'b' && p) { explode(e[2], e[3], p.color); if (gameAudio.ctx) sfx.boom(); shake = 0.6; if (e[1] === me && match) flash('<small>kaboom</small>💥 You blew up', 2.2); }
+    if (e[0] === 'p') { sfx.pass(e[1] === me || e[2] === me); if (e[2] === me && match) flash('<small>pass it on!</small>YOU', 1.2); else if (e[1] === me && match) flash('<small>phew</small>passed!', 0.9); }
+    else if (e[0] === 'b' && p) { explode(e[2], e[3], p.color); if (gameAudio.ctx) sfx.boom(); shake = 0.6; if (e[1] === me && match) flash('<small>kaboom</small>You blew up', 2.2); }
     else if (e[0] === 'd' && e[1] === me) sfx.dash();
-    else if (e[0] === 'a' && match) flash(`<small>wave · ${e[1]} bomb${e[1] > 1 ? 's' : ''} lit</small>🔥 RUN!`, 1.2);
+    else if (e[0] === 'a' && match) flash(`<small>wave · ${e[1]} bomb${e[1] > 1 ? 's' : ''} lit</small>RUN!`, 1.2);
     else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
-    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last one standing'}</small>👑 ${esc(p.nick)}`, 3.5); }
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last one standing'}</small>${esc(p.nick)}`, 3.5); }
   }
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -504,10 +504,10 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>Round ${world.round} of ${ROUNDS}</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
-  else if (flashT <= 0) big(world.phase !== 'round' && me && !me.alive ? '<small>spectating</small>' : me?.bomb && world.phase === 'play' ? '<small>you have the bomb</small>💣' : '');
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${esc(top?.nick ?? '')}`); }
+  else if (flashT <= 0) big(world.phase !== 'round' && me && !me.alive ? '<small>spectating</small>' : me?.bomb && world.phase === 'play' ? '<small>you have the bomb</small>Pass it' : '');
   fuseEl.style.display = world.phase === 'play' ? 'block' : 'none';
-  fuseEl.textContent = `💣 ${Math.max(0, world.fuse).toFixed(1)}s`;
+  fuseEl.textContent = `Fuse ${Math.max(0, world.fuse).toFixed(1)}s`;
   fuseEl.classList.toggle('hot', world.fuse < 3);
   hudT -= dt;
   if (hudT > 0) return;
@@ -516,7 +516,7 @@ function hud(dt) {
   document.getElementById('alive').innerHTML = `${alive}<small> / ${ps.length} alive</small>`;
   document.getElementById('round').textContent = `Round ${world.round} of ${ROUNDS}${me ? ` · you: ${me.pts} pts` : ''}`;
   const r = ps.sort((a, b) => b.pts - a.pts || b.alive - a.alive);
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.bomb ? '💣 ' : ''}${esc(p.nick)}</span><em>${'👑'.repeat(p.wins)} ${p.pts}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.bomb ? '<b style="color:#ff6b3d">BOMB</b> ' : ''}${esc(p.nick)}</span><em>${p.wins ? `<small>${p.wins}W</small> ` : ''}${p.pts}</em></div>`).join('');
 }
 
 // Run engine > sim tick (worker)

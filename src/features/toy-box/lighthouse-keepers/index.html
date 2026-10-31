@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Lighthouse Keepers</title>
+<style>
+  #meters { top: 62px; left: 14px; padding: 9px 12px; display: none; width: 220px; font-size: 12.5px; }
+  .meter { margin: 4px 0; }
+  .meter .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; margin-top: 2px; }
+  .meter .bar i { display: block; height: 100%; border-radius: 4px; transition: width 0.4s; }
+  .meter span { display: flex; justify-content: space-between; }
+  #fore { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.14); }
+  #fore b { color: var(--accent); }
+  #dock .sup { font-weight: 800; color: var(--accent); }
+  @media (max-width: 700px) { #meters { top: auto; bottom: 200px; left: 8px; width: 170px; font-size: 11px; } }
+</style>
+</head>
+<body>
+<div id="meters" class="card" data-hud></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, shuffle, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#ffd25a', bg: '#0c1622', hint: 'Everyone against the storm. Each turn pick one job together: <b>patch</b> a wall, <b>pump</b> water, <b>fuel</b> the lamp, or <b>scavenge</b> supplies. The forecast shows what hits next. Survive until the tide turns.' });
+
+// Scene > rock island, striped lighthouse, rolling sea, rain
+const { renderer, scene, camera, hemi, key } = createStage({ bg: 0x0c1622, fog: [20, 70] });
+hemi.intensity = 0.55; key.intensity = 1.1;
+const seaGeo = new THREE.PlaneGeometry(120, 120, 60, 60).rotateX(-Math.PI / 2);
+const sea = new THREE.Mesh(seaGeo, new THREE.MeshStandardMaterial({ color: 0x1d4a66, roughness: 0.35, metalness: 0.1, flatShading: true }));
+scene.add(sea);
+const seaBase = seaGeo.attributes.position.array.slice();
+const rock = new THREE.Mesh(new THREE.CylinderGeometry(6.2, 7.5, 2.4, 14, 1), new THREE.MeshStandardMaterial({ color: 0x4a4f57, roughness: 0.95, flatShading: true }));
+rock.position.y = 0.4; rock.receiveShadow = true;
+scene.add(rock);
+const tower = new THREE.Group();
+scene.add(tower);
+for (let i = 0; i < 6; i++) {
+  const seg = new THREE.Mesh(new THREE.CylinderGeometry(1.35 - i * 0.1, 1.45 - i * 0.1, 1.2, 24), new THREE.MeshStandardMaterial({ color: i % 2 ? 0xd8312f : 0xf2efe6, roughness: 0.6 }));
+  seg.position.y = 2.2 + i * 1.2; seg.castShadow = true;
+  tower.add(seg);
+}
+const lampRoom = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.85, 1, 16), new THREE.MeshStandardMaterial({ color: 0xfff1b0, emissive: 0xffd25a, emissiveIntensity: 1, transparent: true, opacity: 0.85 }));
+lampRoom.position.y = 9.7;
+const roof = new THREE.Mesh(new THREE.ConeGeometry(1.1, 1, 16), new THREE.MeshStandardMaterial({ color: 0x22262c }));
+roof.position.y = 10.7;
+tower.add(lampRoom, roof);
+const beam = new THREE.Mesh(new THREE.ConeGeometry(2.4, 26, 24, 1, true).translate(0, -13, 0).rotateZ(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff3b0, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide }));
+beam.position.y = 9.7;
+tower.add(beam);
+const lampLight = new THREE.PointLight(0xffd25a, 30, 30, 1.5);
+lampLight.position.y = 9.7;
+tower.add(lampLight);
+// four wall segments around the base: green when sound, red when about to breach
+const SIDES = ['North', 'East', 'South', 'West'];
+const wallSegs = SIDES.map((_, i) => {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 1.1, 12, 1, true, i * Math.PI / 2 - Math.PI / 4 + 0.08, Math.PI / 2 - 0.16), new THREE.MeshStandardMaterial({ color: 0x55c27a, side: THREE.DoubleSide, roughness: 0.7 }));
+  m.position.y = 2.15; m.castShadow = true;
+  scene.add(m);
+  return m;
+});
+const floodWater = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 1, 24), new THREE.MeshStandardMaterial({ color: 0x3aa0ff, transparent: true, opacity: 0.6 }));
+floodWater.position.y = 1.6;
+scene.add(floodWater);
+const rainN = 900, rainPos = new Float32Array(rainN * 3);
+for (let i = 0; i < rainN; i++) rainPos.set([(Math.random() - 0.5) * 60, Math.random() * 30, (Math.random() - 0.5) * 60], i * 3);
+const rainGeo = new THREE.BufferGeometry(); rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rain = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: 0x9fc4e8, size: 0.12, transparent: true, opacity: 0.6 }));
+scene.add(rain);
+const flashLight = new THREE.DirectionalLight(0xdfe8ff, 0);
+flashLight.position.set(-10, 20, -5);
+scene.add(flashLight);
+
+// Players > keepers on the rock; their planned job floats above them
+const pawns = createPawns(scene, { height: 0.8 });
+const jobTex = {};
+const JOB_COL = { N: '#55c27a', E: '#55c27a', S: '#55c27a', W: '#55c27a', pump: '#3aa0ff', fuel: '#ffd25a', scav: '#c9a27a' };
+const JOB_TXT = { N: 'N', E: 'E', S: 'S', W: 'W', pump: 'Pump', fuel: 'Fuel', scav: 'Get' };
+for (const k of Object.keys(JOB_TXT)) jobTex[k] = badgeTex(JOB_TXT[k], JOB_COL[k]);
+const thinkTex = badgeTex('dot', '#59657a', '#e8ecff');
+function setBadge(g, tex) { if (g.userData.bt === tex) return; g.userData.bt = tex; g.userData.slot.clear(); if (tex) g.userData.slot.add(badge(tex, 0.5)); }
+
+// Audio > waves, thunder, hammer, pump, win / lose
+const { tone, noise } = createGameAudio({ noiseSeconds: 2 });
+const sfx = {
+  wave() { noise(1.1, 0.12, 900, 120); },
+  thunder() { noise(1.6, 0.2, 400, 60); },
+  hammer() { [0, 0.12, 0.24].forEach((d) => noise(0.05, 0.08, 2500, 800, 'bandpass', d)); },
+  pump() { tone(180, 120, 0.3, 0.05, 'sawtooth'); },
+  lock(me) { if (me) tone(760, 1140, 0.08, 0.07, 'triangle'); },
+  win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, f, 0.25, 0.07, 'triangle', i * 0.12)); },
+  lose() { [392, 349, 311, 262].forEach((f, i) => tone(f, f * 0.97, 0.35, 0.07, 'sine', i * 0.2)); },
+};
+
+// Rules > tracks 0..12: wall damage (breach at 12), flood (sinks at 12), lamp (dark at 0); everyone acts at once, then the storm card hits
+const MAX = 12, T = { intro: 3, plan: 16, storm: 4.5, final: 12 };
+const JOBS = { N: 'Patch north', E: 'Patch east', S: 'Patch south', W: 'Patch west', pump: 'Pump water', fuel: 'Fuel the lamp', scav: 'Scavenge' };
+const BOT_NAMES = ['Gull', 'Barnacle', 'Skipper', 'Tidewell', 'Mariner', 'Puffin', 'Anchor', 'Coral', 'Driftwood', 'Harbor', 'Kelp', 'Lantern', 'Shoal', 'Squall'];
+// card kinds: wave (one wall), swell (all walls), rain (flood), gale (lamp), bolt (lamp + random wall), surge (two walls), lull (calm, crate refills)
+const DECK = [['wave', 3], ['wave', 3], ['wave', 4], ['wave', 4], ['wave', 5], ['swell', 1], ['swell', 1], ['rain', 3], ['rain', 4], ['gale', 3], ['gale', 4], ['bolt', 3], ['surge', 3], ['surge', 3], ['lull', 0], ['rain', 2], ['wave', 2], ['gale', 2]];
+const scale = (S, base) => Math.max(1, Math.round(base * (0.55 + S.P.length * 0.24) * S.diff));
+function cardText(S, c) {
+  if (!c) return '';
+  const k = scale(S, c.b);
+  return { wave: `Wave hits the ${SIDES[c.s]} wall +${k}`, swell: `Swell: every wall +${k}`, rain: `Downpour: flood +${k}`, gale: `Gale: lamp −${k}`, bolt: `Lightning: lamp −${k}, ${SIDES[c.s]} wall +${Math.ceil(k / 2)}`, surge: `Surge: ${SIDES[c.s]} and ${SIDES[(c.s + 2) % 4]} walls +${k}`, lull: 'Lull: calm sea, +1 supply each' }[c.k];
+}
+function drawCard() { const [k, b] = pickOne(DECK); return { k, b, s: Math.floor(Math.random() * 4) }; }
+
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, sup: 3, job: null, lock: false, at: 0, did: 0 }; }
+function newMatch(settings, P) {
+  return { ph: 'intro', tt: T.intro, turn: 0, turns: settings.turns ?? 12, diff: settings.diff ?? 1, walls: [2, 2, 2, 2], flood: 1, lamp: 8, fore: [drawCard(), drawCard()], last: null, outcome: null, why: '', games: 0, wins: 0, P };
+}
+function resetBoard(S) {
+  Object.assign(S, { turn: 0, walls: [2, 2, 2, 2], flood: 1, lamp: 8, fore: [drawCard(), drawCard()], last: null, outcome: null, why: '' });
+  for (const p of S.P) Object.assign(p, { sup: 3, job: null, lock: false, did: 0 });
+}
+function startPlan(S) {
+  S.turn++;
+  for (const p of S.P) { p.job = null; p.lock = false; p.at = 2 + Math.random() * 9; }
+  Object.assign(S, { ph: 'plan', tt: T.plan });
+}
+function canDo(p, job) { return job === 'scav' || p.sup > 0; }
+// everyone's job lands first, then the storm card, then leaks and the lamp burns down
+function resolve(S) {
+  const log = { fixed: 0 };
+  for (const p of S.P) {
+    let job = p.job;
+    if (!job || !canDo(p, job)) job = 'scav';
+    p.job = job;
+    if (job === 'scav') { p.sup = Math.min(5, p.sup + 2); continue; }
+    p.sup--;
+    let gain = 0;
+    if ('NESW'.includes(job)) { const i = 'NESW'.indexOf(job); gain = Math.min(2, S.walls[i]); S.walls[i] -= gain; }
+    else if (job === 'pump') { gain = Math.min(2, S.flood); S.flood -= gain; }
+    else if (job === 'fuel') { gain = Math.min(2, MAX - S.lamp); S.lamp += gain; }
+    p.did += gain; p.score += gain; log.fixed += gain;
+  }
+  const c = S.fore.shift(), k = scale(S, c.b);
+  if (c.k === 'wave') S.walls[c.s] += k;
+  if (c.k === 'swell') S.walls = S.walls.map((w) => w + k);
+  if (c.k === 'rain') S.flood += k;
+  if (c.k === 'gale') S.lamp -= k;
+  if (c.k === 'bolt') { S.lamp -= k; S.walls[c.s] += Math.ceil(k / 2); }
+  if (c.k === 'surge') { S.walls[c.s] += k; S.walls[(c.s + 2) % 4] += k; }
+  if (c.k === 'lull') for (const p of S.P) p.sup = Math.min(5, p.sup + 1);
+  // cracked walls leak; the lamp burns oil every turn
+  S.flood += S.walls.filter((w) => w >= MAX / 2).length;
+  S.lamp -= 1;
+  S.walls = S.walls.map((w) => Math.min(MAX, Math.max(0, w)));
+  S.flood = Math.min(MAX, Math.max(0, S.flood)); S.lamp = Math.min(MAX, Math.max(0, S.lamp));
+  S.fore.push(drawCard());
+  S.last = { c, text: cardText(S, c), fixed: log.fixed };
+  Object.assign(S, { ph: 'storm', tt: T.storm });
+  const broke = S.walls.findIndex((w) => w >= MAX);
+  if (broke >= 0) return end(S, false, `the ${SIDES[broke]} wall gave way`);
+  if (S.flood >= MAX) return end(S, false, 'the lighthouse flooded');
+  if (S.lamp <= 0) return end(S, false, 'the lamp went dark');
+  if (S.turn >= S.turns) return end(S, true, 'the tide turned and the ships came home');
+}
+function end(S, won, why) {
+  S.games++;
+  if (won) { S.wins++; for (const p of S.P) p.score += 10; }
+  Object.assign(S, { outcome: won ? 'won' : 'lost', why });
+}
+
+// Bots > look at the forecast and the team's plans, take the most urgent job nobody covers yet
+function botJob(S, p) {
+  if (p.sup <= 0) return 'scav';
+  const c = S.fore[0], k = scale(S, c.b);
+  const walls = [...S.walls];
+  let flood = S.flood + 0, lamp = S.lamp - 1;
+  if (c.k === 'wave') walls[c.s] += k;
+  if (c.k === 'swell') walls.forEach((_, i) => (walls[i] += k));
+  if (c.k === 'surge') { walls[c.s] += k; walls[(c.s + 2) % 4] += k; }
+  if (c.k === 'bolt') { walls[c.s] += Math.ceil(k / 2); lamp -= k; }
+  if (c.k === 'rain') flood += k;
+  if (c.k === 'gale') lamp -= k;
+  // credit jobs teammates already locked in
+  for (const q of S.P) if (q.lock && q.job && q !== p) {
+    if ('NESW'.includes(q.job)) walls['NESW'.indexOf(q.job)] -= 2;
+    if (q.job === 'pump') flood -= 2;
+    if (q.job === 'fuel') lamp += 2;
+  }
+  flood += walls.filter((w) => w >= MAX / 2).length;
+  const need = [...walls.map((w, i) => ['NESW'[i], w / MAX]), ['pump', flood / MAX], ['fuel', (MAX - lamp) / MAX]];
+  need.sort((a, b) => b[1] - a[1]);
+  const [job, urgency] = need[0];
+  if (urgency < 0.45 && p.sup <= 2) return 'scav';
+  return Math.random() < 0.85 ? job : need[1][0];
+}
+
+// Run engine > host tick
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startPlan(S);
+  else if (S.ph === 'plan') {
+    for (const p of S.P) if (p.bot && !p.lock && T.plan - S.tt >= p.at) { p.job = botJob(S, p); p.lock = true; }
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) resolve(S);
+  } else if (S.ph === 'storm' && S.tt <= 0) {
+    if (S.outcome) Object.assign(S, { ph: 'final', tt: T.final });
+    else startPlan(S);
+  } else if (S.ph === 'final' && S.tt <= 0) {
+    if (S.mode === 'attract') { resetBoard(S); startPlan(S); }
+    else if (game.isHost) game.backToLobby();
+  }
+}
+function action(S, from, a) {
+  const p = S.P.find((q) => q.id === from);
+  if (!p || S.ph !== 'plan') return;
+  if (a.t === 'job' && JOBS[a.job] && canDo(p, a.job)) { p.job = a.job; p.lock = true; }
+}
+// plans are public in this co-op game, so a promoted host just keeps going
+function promote(S) { if (S.ph === 'plan') S.tt = Math.max(S.tt, 6); }
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ turns: 12, diff: 1 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// View > state changes
+let flash = 0;
+function change(prev, cur) {
+  if (prev?.ph !== cur.ph) {
+    if (cur.ph === 'storm' && cur.last) {
+      const k = cur.last.c.k;
+      if (k === 'bolt' || k === 'gale') { sfx.thunder(); flash = 1; } else if (k !== 'lull') sfx.wave();
+      if (cur.last.fixed) sfx.hammer();
+    }
+    if (cur.ph === 'final') (cur.outcome === 'won' ? sfx.win : sfx.lose)();
+  }
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === game.me);
+  dockKey = '';
+}
+
+// Input > job buttons (keys 1-7)
+let dockKey = '';
+const ORDER = ['N', 'E', 'S', 'W', 'pump', 'fuel', 'scav'];
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock, show = me && S.ph === 'plan';
+  const key = JSON.stringify([show, me?.job, me?.sup, S.turn]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  dock.innerHTML = `<div class="btns">${ORDER.map((j, i) => `<button data-j="${j}" class="${me.job === j ? 'on' : ''}" ${canDo(me, j) ? '' : 'disabled'}>${i + 1} · ${JOBS[j]}</button>`).join('')}</div><div class="s" id="dockS"></div>`;
+  dock.querySelectorAll('[data-j]').forEach((b) => (b.onclick = () => choose(b.dataset.j)));
+}
+function choose(job) { const me = game.mine(); if (me && game.S.ph === 'plan' && canDo(me, job)) game.act({ t: 'job', job }); }
+addEventListener('keydown', (e) => { const i = +e.key - 1; if (i >= 0 && i < ORDER.length) choose(ORDER[i]); });
+
+// HUD > meters, forecast, team board
+let hudT = 0;
+const col = (v) => (v >= 0.75 ? '#ff5a5f' : v >= 0.5 ? '#ffb347' : '#55c27a');
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.turns} turns until the tide turns</small>Lighthouse Keepers`);
+    else if (S.ph === 'storm') hud.big(`<small>${esc(S.last?.text ?? '')}</small>${S.outcome ? (S.outcome === 'won' ? 'Safe harbor' : 'Lost') : `Turn ${S.turn}`}`);
+    else if (S.ph === 'final') hud.big(`<small>${esc(S.why)}</small>${S.outcome === 'won' ? 'The keepers held' : 'The storm won'}`);
+    else hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) ds.innerHTML = `${clock}s · supplies <span class="sup">${me.sup}/5</span> · ${me.lock ? `you: ${JOBS[me.job]}` : 'pick a job'} · ${S.P.filter((p) => !p.lock).length} still deciding`;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.2;
+  const bar = (label, v, color, right) => `<div class="meter"><span><b>${label}</b><em>${right}</em></span><div class="bar"><i style="width:${Math.round(v * 100)}%;background:${color}"></i></div></div>`;
+  document.getElementById('meters').style.display = match ? 'block' : 'none';
+  document.getElementById('meters').innerHTML = SIDES.map((s, i) => bar(`${s} wall`, S.walls[i] / MAX, col(S.walls[i] / MAX), `${S.walls[i]}/${MAX}`)).join('')
+    + bar('Flood', S.flood / MAX, col(S.flood / MAX), `${S.flood}/${MAX}`)
+    + bar('Lamp oil', S.lamp / MAX, col(1 - S.lamp / MAX), `${S.lamp}/${MAX}`)
+    + `<div id="fore">Next: <b>${esc(cardText(S, S.fore[0]))}</b><br><span style="opacity:.7">Then: ${esc(cardText(S, S.fore[1]))}</span></div>`;
+  if (!match) return;
+  hud.info(S.ph === 'final' ? 'Storm over' : `Turn ${Math.max(1, S.turn)} of ${S.turns}`, `Team of ${S.P.length}${me ? ` · your repairs <b style="color:var(--accent)">${me.did}</b>` : ''}`);
+  const rows = [...S.P].sort((a, c) => c.did - a.did);
+  hud.board(rows.map((p) => ({ p, right: S.ph === 'plan' ? (p.lock ? `${JOBS[p.job].replace('Patch ', '').replace(' water', '').replace(' the lamp', '')}` : '<span class="mk dot"></span>') + ` · ${p.sup}` : `${p.did} fixed` })), game.me);
+}
+
+// Multiplayer > kit
+const game = createTableGame({
+  lobby: {
+    game: 'lighthouse-keepers', title: 'Lighthouse Keepers', emoji: '🗼', accent: '#ffd25a',
+    blurb: 'Co-op for 1-14: everyone against the storm. Each turn the whole crew picks a job at once (patch walls, pump water, fuel the lamp, scavenge) before the forecast storm card hits. Survive until the tide turns.',
+    defaultBots: 3, minPlayers: 1,
+    note: 'Up to 14 keepers (humans + bots). The storm grows with the crew. Plans are shown to everyone so you can split the work.',
+    settings: [
+      { key: 'turns', label: 'Length', options: [[10, '10 turns'], [12, '12 turns'], [16, '16 turns']], value: 12 },
+      { key: 'diff', label: 'Storm', options: [[0.8, 'Squall'], [1, 'Gale'], [1.25, 'Hurricane']], value: 1 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+  joined(S, p) { if (S.ph === 'plan') p.at = 0; },
+});
+
+// Run engine > render: sea swell grows with danger, lamp beam sweeps, keepers ring the rock
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 10, 22), look = new THREE.Vector3(0, 4, 0);
+const _c = new THREE.Color();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  const danger = Math.max(...S.walls, S.flood, MAX - S.lamp) / MAX;
+  const pos = seaGeo.attributes.position.array, amp = 0.25 + danger * 0.9;
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = seaBase[i], z = seaBase[i + 2];
+    pos[i + 1] = Math.sin(x * 0.25 + time * 1.3) * amp + Math.cos(z * 0.3 + time * 1.1) * amp * 0.7 - 0.3;
+  }
+  seaGeo.attributes.position.needsUpdate = true;
+  seaGeo.computeVertexNormals();
+  const rp = rainGeo.attributes.position.array;
+  for (let i = 1; i < rp.length; i += 3) { rp[i] -= dt * 22; if (rp[i] < 0) rp[i] += 30; }
+  rainGeo.attributes.position.needsUpdate = true;
+  rain.material.opacity = 0.3 + danger * 0.5;
+  const lit = S.lamp / MAX;
+  beam.rotation.y = time * 0.9;
+  beam.material.opacity = 0.05 + lit * 0.22;
+  lampLight.intensity = 6 + lit * 40;
+  lampRoom.material.emissiveIntensity = 0.2 + lit;
+  S.walls.forEach((w, i) => wallSegs[i].material.color.copy(_c.set(col(w / MAX))));
+  floodWater.scale.y = 0.05 + (S.flood / MAX) * 2.2;
+  floodWater.position.y = 1.6 + floodWater.scale.y / 2;
+  flash = Math.max(0, flash - dt * 2.5);
+  flashLight.intensity = flash * 6 * (Math.random() > 0.3 ? 1 : 0.2);
+  pawns.prune(S.P);
+  const spots = ringSpots(S.P.length, { r: 4.3 });
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i];
+    g.position.set(sp.x, 1.6, sp.z);
+    g.rotation.y = sp.face + Math.PI;
+    const working = S.ph === 'storm' && p.job && p.job !== 'scav';
+    g.userData.body.position.y = working ? Math.abs(Math.sin(time * 10 + i)) * 0.15 : S.ph === 'final' && S.outcome === 'won' ? Math.abs(Math.sin(time * 6 + i)) * 0.3 : 0;
+    g.userData.body.rotation.z = S.outcome === 'lost' && S.ph === 'final' ? 0.5 : 0;
+    setBadge(g, S.ph === 'plan' ? (p.lock && p.job ? jobTex[p.job] : thinkTex) : S.ph === 'storm' && p.job ? jobTex[p.job] : null);
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.4 / camera.aspect);
+  camPos.lerp(new THREE.Vector3(Math.sin(time * 0.05) * 6, 9 * fit, 20 * fit), 1 - Math.exp(-dt * 2));
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

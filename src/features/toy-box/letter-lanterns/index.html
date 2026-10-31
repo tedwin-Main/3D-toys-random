@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Letter Lanterns</title>
+<style>
+  #dock .letters button { width: 46px; font-size: 20px; text-transform: uppercase; }
+  #dock .letters button.used { opacity: 0.3; }
+  #dock .entry { display: flex; gap: 6px; margin: 8px 0 0; }
+  #dock .entry input { flex: 1; min-width: 0; font: inherit; font-size: 20px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; padding: 8px 10px; border-radius: 10px; border: 2px solid #3a3550; background: #120f1c; color: inherit; outline: none; }
+  #dock .entry input.ok { border-color: #7cf0b4; } #dock .entry input.bad { border-color: #ff6b6b; }
+  #reveal { top: 62px; left: 14px; padding: 8px 12px; display: none; font-size: 13px; max-height: 50vh; overflow: auto; min-width: 220px; }
+  #reveal .w { display: flex; gap: 8px; justify-content: space-between; padding: 1px 0; }
+  #reveal .w b { letter-spacing: 0.08em; text-transform: uppercase; }
+  #reveal .w.x b { text-decoration: line-through; opacity: 0.55; }
+  @media (max-width: 700px) { #dock .letters button { width: 34px; font-size: 16px; padding: 7px 0; } #reveal { top: auto; bottom: 230px; max-height: 26vh; font-size: 11.5px; } }
+</style>
+</head>
+<body>
+<div id="reveal" class="card"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, textSprite, shuffle, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#ffb347', bg: '#0b1030', hint: 'Nine letters hang over the river. Build the longest word you can in secret (each lantern once). A word scores its length <b>only if nobody else wrote it too</b>, so the obvious word is a trap.' });
+
+// Words > shared list (popular English words, 3-9 letters); every tab loads it so you see a typo before you send
+let WORDS = new Set(), WORD_LIST = [];
+fetch('./words.txt').then((r) => r.text()).then((t) => { WORD_LIST = t.split('\n').map((w) => w.trim()).filter(Boolean); WORDS = new Set(WORD_LIST); }).catch(() => {});
+// bots skip a few words that would read badly on screen
+const BOT_SKIP = /^(ass|damn|hell|crap|piss|shit|fuck|bitch|dick|cock|slut|whore|bastard|nazi|rape)/;
+const fits = (word, letters) => { const pool = [...letters]; for (const ch of word) { const i = pool.indexOf(ch); if (i < 0) return false; pool.splice(i, 1); } return true; };
+
+// Rules > letters weighted like English, 3-4 vowels, rerolled until a 6+ letter word exists
+const VOWELS = 'aaaeeeeiiioooouu', CONS = 'bbccddddffgghhhhjkllllmmnnnnnnppqrrrrrrsssssstttttttvwwxyyz';
+function drawLetters(rng = Math.random) {
+  for (let tries = 0; tries < 60; tries++) {
+    const nv = 3 + (rng() < 0.5 ? 1 : 0), out = [];
+    for (let i = 0; i < 9; i++) out.push(i < nv ? pickOne([...VOWELS], rng) : pickOne([...CONS], rng));
+    shuffle(out, rng);
+    const s = out.join('');
+    if (!WORD_LIST.length || WORD_LIST.some((w) => w.length >= 6 && fits(w, s))) return s;
+  }
+  return 'retainsol';
+}
+const T = { intro: 3, reveal: 7, final: 12 };
+const BOT_NAMES = ['Quill', 'Scribble', 'Vowel', 'Syllable', 'Inkwell', 'Glyph', 'Riddle', 'Lexi', 'Parchment', 'Serif', 'Comma', 'Rhyme', 'Cursive', 'Scroll'];
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, at: 0, len: 3 + Math.floor(Math.random() * 4) }; }
+function newMatch(settings, P) { return { ph: 'intro', tt: T.intro, rd: 0, rounds: settings.rounds ?? 6, writeT: settings.time ?? 30, letters: '', res: null, P }; }
+function startRound(S) {
+  S.rd++;
+  S._words = {};
+  for (const p of S.P) { p.lock = false; p.at = 6 + Math.random() * (S.writeT - 8); }
+  Object.assign(S, { ph: 'write', tt: S.writeT, letters: drawLetters(), res: null });
+  S._cands = WORD_LIST.filter((w) => fits(w, S.letters));
+}
+function check(S, word) {
+  if (typeof word !== 'string') return 'empty';
+  const w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (w.length < 3) return 'too short';
+  if (!fits(w, S.letters)) return 'uses letters you do not have';
+  if (WORDS.size && !WORDS.has(w)) return 'not in the word list';
+  return null;
+}
+function submit(S, id, word) {
+  const p = S.P.find((q) => q.id === id);
+  if (!p || S.ph !== 'write') return;
+  const w = String(word ?? '').toLowerCase().replace(/[^a-z]/g, '').slice(0, 9);
+  const why = check(S, w);
+  game.tell(id, { rd: S.rd, word: w, ok: !why, why });
+  if (why) return;
+  S._words[id] = w; p.lock = true;
+}
+// reveal: valid words score their length, +2 for the longest lonely word; any word written twice scores nothing
+function reveal(S) {
+  const words = {}, count = new Map();
+  for (const p of S.P) { const w = S._words[p.id] ?? null; words[p.id] = w; if (w) count.set(w, (count.get(w) ?? 0) + 1); }
+  const lonely = Object.values(words).filter((w) => w && count.get(w) === 1);
+  const longest = Math.max(0, ...lonely.map((w) => w.length));
+  const pts = {};
+  for (const p of S.P) {
+    const w = words[p.id];
+    let n = 0;
+    if (w && count.get(w) === 1) n = w.length + (w.length === longest ? 2 : 0) + (w.length === 9 ? 5 : 0);
+    pts[p.id] = n; p.score += n;
+  }
+  Object.assign(S, { ph: 'reveal', tt: T.reveal, res: { words, pts, longest, clash: [...count].filter(([, c]) => c > 1).map(([w]) => w) } });
+}
+// bots: find words that fit, aim for their own comfortable length; common short words collide on purpose sometimes
+function botWord(S, p) {
+  const c = (S._cands ?? []).filter((w) => !BOT_SKIP.test(w));
+  if (!c.length) return null;
+  const want = Math.min(9, p.len + Math.floor(Math.random() * 3) - 1);
+  const pool = c.filter((w) => w.length === want);
+  if (Math.random() < 0.2) { const short = c.filter((w) => w.length <= 4); if (short.length) return short[0]; }
+  return pickOne(pool.length ? pool : c.filter((w) => w.length <= want).sort((a, b) => b.length - a.length).slice(0, 8));
+}
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) { if (!WORD_LIST.length) return; startRound(S); }
+  else if (S.ph === 'write') {
+    for (const p of S.P) if (p.bot && !p.lock && S.writeT - S.tt >= p.at) { const w = botWord(S, p); if (w) { S._words[p.id] = w; p.lock = true; } else p.at += 5; }
+    if (S.tt <= 0) reveal(S);
+  } else if (S.ph === 'reveal' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S);
+    else if (S.mode === 'attract') { S.rd = 0; for (const p of S.P) p.score = 0; startRound(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+function action(S, from, a) {
+  if (a.t === 'word') submit(S, from, a.w);
+  if (a.t === 'resend' && S.ph === 'write' && a.rd === S.rd) submit(S, from, a.w);
+}
+// promoted host: the hidden words left with the old host; everyone's tab re-sends its last accepted word
+function promote(S) {
+  S._words = {};
+  S._cands = WORD_LIST.filter((w) => fits(w, S.letters));
+  for (const p of S.P) if (!p.bot) p.lock = false; else { p.lock = false; p.at = S.writeT - S.tt + 1 + Math.random() * 4; }
+  if (myWord?.rd === S.rd && myWord.ok) submit(S, game.me, myWord.word);
+  S.ask = (S.ask ?? 0) + 1;
+  if (S.ph === 'write') S.tt = Math.max(S.tt, 8);
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ rounds: 6, time: 12 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// Scene > night river, a string of paper lanterns with the letters, pawns on the bank
+const { renderer, scene, camera, hemi, key } = createStage({ bg: 0x0b1030, fog: [22, 70] });
+hemi.intensity = 0.45; key.intensity = 0.5;
+const water = new THREE.Mesh(new THREE.PlaneGeometry(120, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x14244e, roughness: 0.2, metalness: 0.4 }));
+water.position.set(0, -0.3, -10);
+const bank = new THREE.Mesh(new THREE.BoxGeometry(60, 0.6, 12), new THREE.MeshStandardMaterial({ color: 0x2a4a2e, roughness: 0.9 }));
+bank.position.set(0, -0.3, 6); bank.receiveShadow = true;
+scene.add(water, bank);
+const rope = new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(-13, 7.5, -3), new THREE.Vector3(0, 5.2, -3), new THREE.Vector3(13, 7.5, -3)), 30, 0.03, 6), new THREE.MeshBasicMaterial({ color: 0x2a2018 }));
+scene.add(rope);
+for (const x of [-13, 13]) { const post = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 8, 8), new THREE.MeshStandardMaterial({ color: 0x5a3a22 })); post.position.set(x, 3.6, -3); scene.add(post); }
+const stars = new THREE.Points(new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(Float32Array.from({ length: 1500 }, (_, i) => (i % 3 === 1 ? 8 + Math.random() * 30 : (Math.random() - 0.5) * 120) + (i % 3 === 2 ? -30 : 0)), 3)), new THREE.PointsMaterial({ color: 0xffffff, size: 0.15 }));
+scene.add(stars);
+const lanterns = [];
+function letterTex(ch) {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 160;
+  const g = c.getContext('2d');
+  const grd = g.createLinearGradient(0, 0, 0, 160); grd.addColorStop(0, '#ffd27a'); grd.addColorStop(1, '#ff8a3d');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 160);
+  g.fillStyle = '#4a1a08'; g.font = '900 96px ui-rounded, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(ch.toUpperCase(), 64, 86);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+let lanternKey = '';
+function buildLanterns(letters) {
+  if (letters === lanternKey) return;
+  lanternKey = letters;
+  for (const l of lanterns) scene.remove(l.g);
+  lanterns.length = 0;
+  [...letters].forEach((ch, i) => {
+    const x = (i - 4) * 2.6, y = 7.5 - 2.3 * (1 - (x / 13) ** 2) - 1.1;
+    const g = new THREE.Group();
+    const tex = letterTex(ch);
+    // glow comes from the paper texture itself, so the ink stays dark
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.5, 16, 1, true), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.55, side: THREE.DoubleSide }));
+    // cylinder UVs put the middle of the texture at the back: turn the paper so the letter faces the river bank
+    body.rotation.y = Math.PI;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.75, 0.2, 16), new THREE.MeshStandardMaterial({ color: 0x5a2010 }));
+    cap.position.y = 0.85;
+    const bot = cap.clone(); bot.rotation.x = Math.PI; bot.position.y = -0.85;
+    const light = new THREE.PointLight(0xffa040, 2.5, 6, 2);
+    g.add(body, cap, bot, light);
+    g.position.set(x, y, -3);
+    scene.add(g);
+    lanterns.push({ g, body, ch, x, y });
+  });
+}
+const pawns = createPawns(scene);
+const tickTex = badgeTex('tick'), dotTex = badgeTex('dot', '#59657a', '#e8ecff');
+const floaters = [];
+function floatWord(p, w, lonely, pts, g) {
+  const s = textSprite(w.toUpperCase(), { font: '900 52px ui-rounded, system-ui, sans-serif', color: lonely ? '#4a1a08' : '#e8ecff', bg: lonely ? '#ffd27a' : 'rgba(80,90,120,0.8)', w: 384, h: 96, scale: 0.55 });
+  s.position.copy(g.position).add(new THREE.Vector3(0, 2.8, 0));
+  scene.add(s);
+  floaters.push({ s, vy: lonely ? 0.5 : -0.6, life: T.reveal, lonely });
+}
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  ok() { tone(880, 1320, 0.1, 0.06, 'triangle'); },
+  bad() { tone(300, 200, 0.15, 0.05, 'square'); },
+  key() { tone(1200, 1100, 0.03, 0.02, 'sine'); },
+  reveal() { [523, 659, 784].forEach((f, i) => tone(f, f, 0.2, 0.05, 'triangle', i * 0.1)); },
+  clash() { noise(0.2, 0.06, 800, 200); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// View
+let myWord = null;
+function change(prev, cur) {
+  buildLanterns(cur.letters || '         '.replace(/ /g, '?'));
+  if (prev?.ph !== cur.ph || prev?.rd !== cur.rd) {
+    if (cur.ph === 'write') { entry = ''; myWord = null; dockKey = ''; }
+    if (cur.ph === 'reveal' && cur.res) {
+      sfx.reveal();
+      cur.P.forEach((p) => { const w = cur.res.words[p.id]; const g = pawns.map.get(p.id); if (w && g) floatWord(p, w, !cur.res.clash.includes(w), cur.res.pts[p.id], g); });
+      if (cur.res.clash.length) setTimeout(sfx.clash, 500);
+    }
+  }
+  if (cur.ask && cur.ask !== prev?.ask && !game.isHost && myWord?.rd === cur.rd && myWord.ok) game.act({ t: 'resend', rd: cur.rd, w: myWord.word });
+  renderReveal(cur);
+}
+function renderReveal(S) {
+  const el = document.getElementById('reveal');
+  const show = S.mode === 'match' && (S.ph === 'reveal' || S.ph === 'final') && S.res;
+  el.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  const rows = S.P.map((p) => ({ p, w: S.res.words[p.id], n: S.res.pts[p.id] ?? 0 })).sort((a, b) => b.n - a.n);
+  el.innerHTML = `<div style="font-weight:800;margin-bottom:4px">Round ${S.rd} words</div>` + rows.map(({ p, w, n }) => `<div class="w ${w && S.res.clash.includes(w) ? 'x' : ''}"><span style="color:${p.color}">${esc(p.nick)}</span><b>${w ? esc(w) : '—'}</b><em>${w && S.res.clash.includes(w) ? 'clash' : `+${n}`}</em></div>`).join('');
+}
+
+// Input > tap lanterns or type; the word is checked here first, then by the host
+let entry = '', dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock, show = me && S.ph === 'write';
+  const key = JSON.stringify([show, S.rd, entry, myWord]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  const used = [...entry];
+  const letterBtns = [...S.letters].map((ch, i) => {
+    const k = used.indexOf(ch);
+    const isUsed = k >= 0 && (used.splice(k, 1), true);
+    return `<button data-i="${i}" class="${isUsed ? 'used' : ''}">${ch}</button>`;
+  }).join('');
+  const why = entry ? check(S, entry) : null;
+  dock.innerHTML = `<div class="btns letters">${letterBtns}</div>
+    <div class="entry"><input id="wordIn" maxlength="9" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="your word" value="${esc(entry)}" class="${entry ? (why ? 'bad' : 'ok') : ''}" /><button class="pill" data-back>Del</button><button class="pill on" data-send ${entry && !why ? '' : 'disabled'}>Send</button></div>
+    <div class="s" id="dockS"></div>`;
+  const inp = dock.querySelector('#wordIn');
+  inp.oninput = () => { entry = inp.value.toLowerCase().replace(/[^a-z]/g, '').slice(0, 9); const pos = entry.length; dockKey = ''; renderDock(S); const n = dock.querySelector('#wordIn'); n.focus(); n.setSelectionRange(pos, pos); };
+  inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') send(); };
+  dock.querySelectorAll('[data-i]').forEach((b) => (b.onclick = () => { if (entry.length < 9 && !b.classList.contains('used')) { entry += S.letters[+b.dataset.i]; sfx.key(); dockKey = ''; } }));
+  dock.querySelector('[data-back]').onclick = () => { entry = entry.slice(0, -1); dockKey = ''; };
+  dock.querySelector('[data-send]').onclick = send;
+}
+function send() {
+  const S = game.S;
+  if (!entry || check(S, entry)) { sfx.bad(); return; }
+  game.act({ t: 'word', w: entry });
+}
+
+// HUD
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds} rounds · ${S.writeT}s each</small>Letter Lanterns`);
+    else if (S.ph === 'write') hud.big(clock <= 5 ? `<small>seconds left</small>${clock}` : '');
+    else if (S.ph === 'reveal' && S.res) hud.big(`<small>${S.res.clash.length ? `${S.res.clash.length} word${S.res.clash.length > 1 ? 's' : ''} clashed` : 'no clashes'}</small>Round ${S.rd}`);
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} points</small>${esc(w?.nick ?? '')} wins`); }
+    else hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) {
+    const why = entry ? check(S, entry) : null;
+    ds.textContent = `${clock}s · ${myWord?.rd === S.rd ? (myWord.ok ? `sent: ${myWord.word.toUpperCase()} (send another to change)` : `host says: ${myWord.why}`) : why ? why : entry ? `${entry.length} letters, looks good` : 'tap lanterns or type'} · ${S.P.filter((p) => p.lock).length}/${S.P.length} in`;
+    if (clock !== lastClock && clock <= 3) sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Round ${Math.max(1, S.rd)} of ${S.rounds}`, me ? `Score <b style="color:var(--accent)">${me.score}</b> · lonely words only` : 'Watching');
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, right: S.ph === 'write' ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : S.ph === 'reveal' ? `+${S.res?.pts[p.id] ?? 0} · ${p.score}` : `${p.score}` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'letter-lanterns', title: 'Letter Lanterns', emoji: '🏮', accent: '#ffb347',
+    blurb: 'Word game for 1-14. Nine shared letters, everyone writes the longest word they can in secret. A word only scores if nobody else wrote the same one, so go long or go weird.',
+    defaultBots: 5, minPlayers: 1,
+    note: 'Up to 14 players (humans + bots). Score = word length, +2 for the longest lonely word, +5 for using all nine.',
+    settings: [
+      { key: 'rounds', label: 'Rounds', options: [[4, '4'], [6, '6'], [8, '8']], value: 6 },
+      { key: 'time', label: 'Time', options: [[30, '30 s'], [45, '45 s'], [60, '60 s']], value: 30 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+  private(v) { if (v.rd === game.S?.rd) { myWord = v; (v.ok ? sfx.ok : sfx.bad)(); dockKey = ''; } },
+});
+
+// Run engine > render: lanterns sway, words float up (lonely) or sink into the river (clashed)
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  buildLanterns(S.letters || '?????????');
+  const usedNow = [...entry];
+  lanterns.forEach((l, i) => {
+    l.g.rotation.z = Math.sin(time * 1.2 + i) * 0.08;
+    l.g.position.y = l.y + Math.sin(time * 1.5 + i * 0.7) * 0.08;
+    const k = usedNow.indexOf(l.ch), used = S.ph === 'write' && k >= 0;
+    if (used) usedNow.splice(k, 1);
+    l.body.material.emissiveIntensity = used ? 1.1 : 0.55;
+  });
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.life -= dt; f.s.position.y += f.vy * dt; f.s.material.opacity = Math.min(1, f.life);
+    if (f.life <= 0) { scene.remove(f.s); f.s.material.map.dispose(); floaters.splice(i, 1); }
+  }
+  pawns.prune(S.P);
+  const spots = ringSpots(S.P.length, { r: 9, arc: Math.PI * 0.75, center: Math.PI / 2 });
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i];
+    g.position.set(sp.x, 0, sp.z - 3);
+    g.rotation.y = sp.face;
+    g.userData.body.position.y = S.ph === 'reveal' && (S.res?.pts[p.id] ?? 0) > 0 ? Math.abs(Math.sin(time * 6 + i)) * 0.25 : 0;
+    const want = S.ph === 'write' ? (p.lock ? tickTex : dotTex) : null, slot = g.userData.slot;
+    if (slot.userData.t !== want) { slot.clear(); slot.userData.t = want; if (want) slot.add(badge(want, 0.45)); }
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.35 / camera.aspect);
+  camera.position.set(0, 4.5 * fit, 14 * fit);
+  camera.lookAt(0, 3.4, -2);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+// the intro waits for the word list before the first round
+game.start();
+loop();
+</script>
+</body>
+</html>

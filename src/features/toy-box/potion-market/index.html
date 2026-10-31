@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Potion Market</title>
+<style>
+  #recipes { top: 62px; left: 14px; padding: 8px 12px; display: none; font-size: 12.5px; min-width: 210px; }
+  #recipes .r { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; align-items: center; }
+  #recipes .r em { font-style: normal; font-weight: 900; color: var(--accent); }
+  .ing { display: inline-block; width: 13px; height: 13px; border-radius: 3px; transform: rotate(45deg) scale(0.85); margin: 0 2px; vertical-align: -1px; }
+  #dock .cards { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  #dock .cards button { width: 74px; height: 96px; border-radius: 10px; padding: 6px 4px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; font-size: 11.5px; color: #1a1020; box-shadow: 0 3px 0 rgba(0,0,0,0.35); }
+  #dock .cards button .gemc { width: 34px; height: 34px; border-radius: 6px; transform: rotate(45deg); margin-top: 10px; box-shadow: inset -4px -4px 0 rgba(0,0,0,0.2), inset 3px 3px 0 rgba(255,255,255,0.45); }
+  #dock .cards button.on { outline: 3px solid #fff; transform: translateY(-4px); }
+  #dock .mine { margin-top: 6px; font-size: 12px; }
+  @media (max-width: 700px) { #recipes { top: auto; bottom: 230px; font-size: 11px; min-width: 0; } #dock .cards button { width: 52px; height: 74px; font-size: 10px; } #dock .cards button .gemc { width: 24px; height: 24px; } }
+</style>
+</head>
+<body>
+<div id="recipes" class="card" data-hud></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, shuffle, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#c77dff', bg: '#1b1226', hint: 'Every pick, everyone takes one ingredient card in secret from the pack in front of them, then packs pass on. At the end of a round your basket brews into the posted recipes. A recipe pays less the more brewers make it, so read the market.' });
+
+// Rules > five ingredients plus a rare wild Phoenix Feather (counts as any)
+const ING = [['Moonpetal', '#5fa8ff'], ['Emberroot', '#ff5a4f'], ['Frostcap', '#bff3ff'], ['Glowmoss', '#7be35f'], ['Starsalt', '#ffd23f'], ['Phoenix', '#ff8fd8']];
+const WILD = 5;
+const drawCard = (r = Math.random) => (r() < 0.07 ? WILD : Math.floor(r() * 5));
+// recipes: { need: [counts per ingredient] } or { same: n } (n of one kind) or { diff: n } (n different kinds); pts = base price
+function makeRecipes() {
+  const out = [], kinds = shuffle([0, 1, 2, 3, 4]);
+  const a = [0, 0, 0, 0, 0]; a[kinds[0]] = 2; a[kinds[1]] = 1;
+  out.push({ need: a, pts: 6 });
+  const b = [0, 0, 0, 0, 0]; b[kinds[2]] = 1; b[kinds[3]] = 1; b[kinds[4]] = 1;
+  out.push(pickOne([{ need: b, pts: 7 }, { same: 3, pts: 8 }, { diff: 4, pts: 9 }]));
+  const c = [0, 0, 0, 0, 0]; c[kinds[1]] = 2; c[kinds[3]] = 2;
+  out.push(pickOne([{ need: c, pts: 10 }, { same: 4, pts: 12 }, { diff: 5, pts: 14 }, { same: 2, pts: 3 }]));
+  return out;
+}
+// try one recipe on a basket (counts + wilds); returns the leftover basket or null
+function useRecipe(c, w, r) {
+  if (r.need) {
+    const left = [...c]; let ww = w;
+    for (let k = 0; k < 5; k++) { const take = Math.min(left[k], r.need[k]); left[k] -= take; ww -= r.need[k] - take; }
+    return ww >= 0 ? [left, ww] : null;
+  }
+  if (r.same) {
+    let best = null;
+    for (let k = 0; k < 5; k++) { const use = Math.min(c[k], r.same), ww = w - (r.same - use); if (ww >= 0 && use > 0) { const left = [...c]; left[k] -= use; if (!best || ww > best[1]) best = [left, ww]; } }
+    return best;
+  }
+  const have = [0, 1, 2, 3, 4].filter((k) => c[k] > 0).sort((x, y) => c[y] - c[x]);
+  const take = have.slice(0, r.diff), ww = w - (r.diff - take.length);
+  if (ww < 0) return null;
+  const left = [...c]; for (const k of take) left[k]--;
+  return [left, ww];
+}
+// best brew: brute force over recipe orders (baskets are small); returns recipe indices used
+function bestBrew(cards, recipes) {
+  const c = [0, 0, 0, 0, 0]; let w = 0;
+  for (const x of cards) if (x === WILD) w++; else c[x]++;
+  const memo = new Map();
+  const go = (c, w) => {
+    const key = c.join() + '|' + w;
+    if (memo.has(key)) return memo.get(key);
+    let best = { pts: 0, used: [] };
+    recipes.forEach((r, i) => { const nx = useRecipe(c, w, r); if (nx) { const sub = go(nx[0], nx[1]); if (sub.pts + r.pts > best.pts) best = { pts: sub.pts + r.pts, used: [i, ...sub.used] }; } });
+    memo.set(key, best);
+    return best;
+  };
+  return go(c, w);
+}
+// market: a recipe pays its base minus one for every other brew of it this round, never below half
+const payout = (r, brews) => Math.max(Math.ceil(r.pts / 2), r.pts - (brews - 1));
+
+const T = { intro: 3, pick: 10, show: 1.6, brew: 7, final: 12 }, PACK = 6;
+const BOT_NAMES = ['Mortar', 'Pestle', 'Elixir', 'Tincture', 'Sprig', 'Philter', 'Vial', 'Bramble', 'Thistle', 'Nettle', 'Cinder', 'Dewdrop', 'Saffron', 'Mandrake'];
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, basket: [], lock: false, at: 0, brewed: null }; }
+function newMatch(settings, P) { return { ph: 'intro', tt: T.intro, rd: 0, rounds: settings.rounds ?? 3, pickN: 0, recipes: [], res: null, P }; }
+function startRound(S) {
+  S.rd++;
+  S._packs = {};
+  for (const p of S.P) { p.basket = []; p.brewed = null; S._packs[p.id] = Array.from({ length: PACK }, () => drawCard()); }
+  Object.assign(S, { recipes: makeRecipes(), pickN: 0, res: null });
+  startPick(S);
+}
+function startPick(S) {
+  S.pickN++;
+  S._picks = {};
+  for (const p of S.P) { p.lock = false; p.at = 1.5 + Math.random() * 5; game.tell(p.id, { rd: S.rd, pick: S.pickN, pack: S._packs[p.id] ?? [] }); }
+  Object.assign(S, { ph: 'pick', tt: T.pick });
+}
+function pick(S, id, i) {
+  const p = S.P.find((q) => q.id === id), pack = S._packs?.[id];
+  if (!p || S.ph !== 'pick' || !pack || !Number.isInteger(i) || i < 0 || i >= pack.length) return;
+  S._picks[id] = i; p.lock = true;
+}
+// everyone's pick is revealed at once, then packs pass (left on odd rounds, right on even)
+function revealPicks(S) {
+  for (const p of S.P) {
+    const pack = S._packs[p.id] ?? [];
+    if (!pack.length) continue;
+    const i = S._picks[p.id] ?? (p.bot ? botPick(S, p) : Math.floor(Math.random() * pack.length));
+    p.basket.push(pack.splice(i, 1)[0]);
+  }
+  const ids = S.P.map((p) => p.id), dir = S.rd % 2 ? 1 : -1, next = {};
+  ids.forEach((id, k) => (next[ids[(k + dir + ids.length) % ids.length]] = S._packs[id] ?? []));
+  S._packs = next;
+  Object.assign(S, { ph: 'show', tt: T.show });
+}
+function brew(S) {
+  const plans = new Map(), count = S.recipes.map(() => 0);
+  for (const p of S.P) { const b = bestBrew(p.basket, S.recipes); plans.set(p.id, b); for (const i of b.used) count[i]++; }
+  for (const p of S.P) {
+    const used = plans.get(p.id).used, pts = used.reduce((a, i) => a + payout(S.recipes[i], count[i]), 0);
+    p.brewed = { used, pts };
+    p.score += pts;
+  }
+  Object.assign(S, { ph: 'brew', tt: T.brew, res: { count } });
+}
+// bots: take the card that raises their best brew most, with a taste for wilds and a dash of randomness
+function botPick(S, p) {
+  const pack = S._packs[p.id] ?? [];
+  const base = bestBrew(p.basket, S.recipes).pts;
+  let best = 0, bv = -1;
+  pack.forEach((c, i) => { const v = bestBrew([...p.basket, c], S.recipes).pts - base + (c === WILD ? 1.5 : 0) + Math.random() * 1.2; if (v > bv) { bv = v; best = i; } });
+  return best;
+}
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(S);
+  else if (S.ph === 'pick') {
+    for (const p of S.P) if (p.bot && !p.lock && T.pick - S.tt >= p.at) pick(S, p.id, botPick(S, p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) revealPicks(S);
+  } else if (S.ph === 'show' && S.tt <= 0) {
+    if (S.pickN < PACK) startPick(S); else brew(S);
+  } else if (S.ph === 'brew' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S);
+    else if (S.mode === 'attract') { S.rd = 0; for (const p of S.P) p.score = 0; startRound(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+function action(S, from, a) { if (a.t === 'pick') pick(S, from, a.i); }
+// promoted host: the hidden packs left with the old host; deal fresh packs of the same size
+function promote(S) {
+  S._packs = {}; S._picks = {};
+  const left = PACK - S.pickN + (S.ph === 'pick' ? 1 : 0);
+  for (const p of S.P) S._packs[p.id] = Array.from({ length: Math.max(0, left) }, () => drawCard());
+  if (S.ph === 'pick') { S.pickN--; startPick(S); }
+}
+function joined(S, p) {
+  // a newcomer starts with an empty basket and a pack of the current size
+  if (S._packs) { const n = S._packs[S.P[0]?.id]?.length ?? 0; S._packs[p.id] = Array.from({ length: n }, () => drawCard()); if (S.ph === 'pick') game.tell(p.id, { rd: S.rd, pick: S.pickN, pack: S._packs[p.id] }); }
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ rounds: 3 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// Scene > round market table, bubbling cauldron, recipe boards, a basket of crystals per player
+const { renderer, scene, camera, hemi } = createStage({ bg: 0x1b1226, fog: [20, 55] });
+hemi.intensity = 0.7;
+const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.9 }));
+floor.receiveShadow = true;
+const table = new THREE.Mesh(new THREE.CylinderGeometry(4.6, 4.6, 0.25, 40), new THREE.MeshStandardMaterial({ color: 0x6b4426, roughness: 0.6 }));
+table.position.y = 1; table.receiveShadow = true;
+const cauldron = new THREE.Mesh(new THREE.SphereGeometry(1.1, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.62), new THREE.MeshStandardMaterial({ color: 0x24262c, metalness: 0.6, roughness: 0.4, side: THREE.DoubleSide }));
+cauldron.position.y = 2.1; cauldron.rotation.x = Math.PI;
+const brewTop = new THREE.Mesh(new THREE.CircleGeometry(0.95, 24).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc77dff, emissive: 0xc77dff, emissiveIntensity: 0.6 }));
+brewTop.position.y = 2.55;
+const glow = new THREE.PointLight(0xc77dff, 12, 10, 1.8);
+glow.position.y = 3.2;
+scene.add(floor, table, cauldron, brewTop, glow);
+const bubbles = Array.from({ length: 10 }, () => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), brewTop.material); b.userData.t = Math.random(); scene.add(b); return b; });
+const crystalGeo = new THREE.OctahedronGeometry(0.16, 0);
+const ingMats = ING.map(([, c]) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.25, roughness: 0.2 }));
+const pawns = createPawns(scene, { onMake(g) { const b = new THREE.Group(); b.position.set(0, 1.18, 1.1); g.add(b); g.userData.basket = b; g.userData.bkey = ''; } });
+const tickTex = badgeTex('tick'), dotTex = badgeTex('dot', '#59657a', '#e8ecff');
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  pick(me) { if (me) tone(700, 1050, 0.08, 0.06, 'triangle'); },
+  deal() { noise(0.12, 0.04, 3000, 1200, 'bandpass'); },
+  brew() { for (let i = 0; i < 6; i++) tone(300 + i * 60, 600 + i * 40, 0.12, 0.04, 'sine', i * 0.09); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.06, 'triangle', i * 0.1)); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// View
+let myPack = null, chosen = null;
+function change(prev, cur) {
+  if (prev?.ph !== cur.ph) {
+    if (cur.ph === 'show') sfx.deal();
+    if (cur.ph === 'brew') sfx.brew();
+    if (cur.ph === 'final') sfx.win();
+  }
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.pick(p.id === game.me);
+  renderRecipes(cur);
+  dockKey = '';
+}
+const recipeText = (r) => r.need ? r.need.map((n, k) => '<span class="ing" style="background:' + ING[k][1] + '"></span>'.repeat(n)).join('') : r.same ? `${r.same} of a kind` : `${r.diff} different`;
+function renderRecipes(S) {
+  const el = document.getElementById('recipes');
+  el.innerHTML = `<div style="font-weight:800;margin-bottom:4px">Recipes · round ${Math.max(1, S.rd)}</div>` + (S.recipes ?? []).map((r, i) => `<div class="r"><span>${recipeText(r)}</span><em>${S.ph === 'brew' && S.res ? `${payout(r, S.res.count[i])} <small style="opacity:.7">(${S.res.count[i]} brewed)</small>` : r.pts}</em></div>`).join('') + '<div style="opacity:.7;margin-top:4px;font-size:11.5px">Phoenix feather counts as any ingredient.</div>';
+}
+
+// Input > tap a card in your pack (keys 1-6)
+let dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock;
+  const show = me && S.ph === 'pick' && myPack?.rd === S.rd && myPack.pick === S.pickN && myPack.pack.length;
+  const key = JSON.stringify([show, chosen, myPack?.pick, me?.basket?.length]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  dock.innerHTML = `<div class="cards">${myPack.pack.map((c, i) => `<button data-i="${i}" class="${chosen === i ? 'on' : ''}" style="background:linear-gradient(#fff8ec,#e8dcc8)"><span class="gemc" style="background:${ING[c][1]}"></span><b>${ING[c][0]}</b></button>`).join('')}</div>
+    <div class="mine">Your basket: ${me.basket.length ? me.basket.map((c) => `<span class="ing" style="background:${ING[c][1]}"></span>`).join('') : 'empty'} · would brew <b>${bestBrew(me.basket, S.recipes).pts}</b></div><div class="s" id="dockS"></div>`;
+  dock.querySelectorAll('[data-i]').forEach((b) => (b.onclick = () => choose(+b.dataset.i)));
+}
+function choose(i) { if (game.S?.ph === 'pick' && myPack?.pack[i] != null) { chosen = i; dockKey = ''; game.act({ t: 'pick', i }); } }
+addEventListener('keydown', (e) => { if (/^[1-6]$/.test(e.key)) choose(+e.key - 1); });
+
+// HUD
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds} rounds · ${PACK} picks each</small>Potion Market`);
+    else if (S.ph === 'brew') { const top = [...S.P].sort((a, c) => (c.brewed?.pts ?? 0) - (a.brewed?.pts ?? 0))[0]; hud.big(`<small>best brew this round · ${top?.brewed?.pts ?? 0}</small>${esc(top?.nick ?? '')}`); }
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} gold</small>${esc(w?.nick ?? '')} wins`); }
+    else hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) { ds.textContent = `${clock}s · pick ${S.pickN} of ${PACK} · ${me.lock ? 'picked (tap another to change)' : 'pick one'} · ${S.P.filter((p) => !p.lock).length} still picking`; if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick(); }
+  lastClock = clock;
+  document.getElementById('recipes').style.display = match ? 'block' : 'none';
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Round ${Math.max(1, S.rd)} of ${S.rounds}`, me ? `Gold <b style="color:var(--accent)">${me.score}</b> · pick ${S.pickN}/${PACK}` : 'Watching');
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, right: S.ph === 'pick' ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : S.ph === 'brew' ? `+${p.brewed?.pts ?? 0} · ${p.score}` : `${p.score}` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'potion-market', title: 'Potion Market', emoji: '🧪', accent: '#c77dff',
+    blurb: 'Card draft for 2-14. Everyone picks an ingredient in secret from the pack in front of them, then the packs pass on. Brew your basket into posted recipes; crowded recipes pay less.',
+    defaultBots: 5, minPlayers: 2,
+    note: 'Up to 14 players (humans + bots). Picks are revealed together, so you can see what the table is collecting.',
+    settings: [{ key: 'rounds', label: 'Rounds', options: [[2, '2'], [3, '3'], [4, '4']], value: 3 }],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, joined, change,
+  private(v) { if (v.pack) { myPack = v; chosen = null; dockKey = ''; } },
+});
+
+// Run engine > render
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  const boil = S.ph === 'brew' ? 2.5 : 1;
+  bubbles.forEach((b, i) => { b.userData.t = (b.userData.t + dt * 0.5 * boil) % 1; const a = i * 2.4; b.position.set(Math.cos(a) * 0.5, 2.55 + b.userData.t * 0.9, Math.sin(a) * 0.5); b.scale.setScalar(1 - b.userData.t); });
+  glow.intensity = 10 + Math.sin(time * 5) * 2 + (boil - 1) * 8;
+  pawns.prune(S.P);
+  const spots = ringSpots(S.P.length, { r: S.P.length > 9 ? 5.6 : 5 });
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i], u = g.userData;
+    g.position.set(sp.x, 0, sp.z);
+    g.rotation.y = sp.face;
+    const bkey = p.basket.join();
+    if (bkey !== u.bkey) {
+      u.bkey = bkey; u.basket.clear();
+      p.basket.forEach((c, k) => { const m = new THREE.Mesh(crystalGeo, ingMats[c]); m.position.set((k % 4 - 1.5) * 0.3, 0.2 + Math.floor(k / 4) * 0.3, 0); u.basket.add(m); });
+    }
+    u.basket.children.forEach((m, k) => (m.rotation.y = time * 1.5 + k));
+    u.body.position.y = S.ph === 'brew' && (p.brewed?.pts ?? 0) > 0 ? Math.abs(Math.sin(time * 6 + i)) * 0.2 : 0;
+    const want = S.ph === 'pick' ? (p.lock ? tickTex : dotTex) : null;
+    if (u.slot.userData.t !== want) { u.slot.clear(); u.slot.userData.t = want; if (want) u.slot.add(badge(want, 0.45)); }
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.35 / camera.aspect);
+  camera.position.set(0, 10 * fit, 11 * fit);
+  camera.lookAt(0, 1.4, 0);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

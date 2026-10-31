@@ -350,7 +350,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startRound();
   },
   onLobby() {
@@ -436,7 +436,7 @@ function playEvents(evs) {
       if (Math.hypot(e[2] - camLook.x, e[3] - camLook.z) < 60 || e[1] === me) sfx.crash(e[1] === me);
       if (e[1] === me && world.mode === 'match') flash(`<small>derezzed</small>${ord(e[4])} place`);
     } else if (e[0] === 'c') { if (world.mode === 'match') { sfx.beep(e[1] === 0); if (e[1] === 0) flash('GO!', 0.8); } }
-    else if (e[0] === 'w' && p) { if (world.mode === 'match') sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last cycle running'}</small>🏆 ${esc(p.nick)}`, 3.5); }
+    else if (e[0] === 'w' && p) { if (world.mode === 'match') sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last cycle running'}</small>${esc(p.nick)}`, 3.5); }
   }
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -484,7 +484,7 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>Round ${world.round} of ${ROUNDS}</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${esc(top?.nick ?? '')}`); }
   else if (flashT <= 0) big(world.phase === 'play' && me && !me.alive ? '<small>spectating</small>' : '');
   document.querySelector('#energy div').style.width = `${Math.round((me?.energy ?? 0) * 100)}%`;
   hudT -= dt;
@@ -494,7 +494,7 @@ function hud(dt) {
   document.getElementById('alive').innerHTML = `${alive}<small> / ${ps.length} riding</small>`;
   document.getElementById('round').textContent = `Round ${world.round} of ${ROUNDS}${me ? ` · you: ${me.pts} pts` : ''}`;
   const r = ps.sort((a, b) => b.pts - a.pts || b.alive - a.alive);
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color};color:${p.color}"></i><span>${esc(p.nick)}</span><em>${'🏆'.repeat(Math.min(p.wins, 3))} ${p.pts}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color};color:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.wins ? `<small>${p.wins}W</small> ` : ''}${p.pts}</em></div>`).join('');
 }
 const mapC = document.getElementById('map'), mg = mapC.getContext('2d');
 function drawMap() {

@@ -323,7 +323,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 6, jar: null, res: null, P: [] };
     for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true));
     prevS = null; lastSig = '';
   },
   onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
@@ -357,7 +357,7 @@ function onChange(prev, cur) {
       sfx.drum();
       const top = cur.P.filter((p) => (cur.res.pts[p.id] ?? 0) >= 5).map((p) => p.nick);
       setTimeout(() => { sfx.reveal(top.length && cur.res.pts[me] >= 5); }, 700);
-      flash(`<small>there were</small>${cur.jar.n} 🍬<small>${top.length ? `closest: ${esc(top.join(', '))}` : 'nobody guessed'}</small>`);
+      flash(`<small>there were</small>${cur.jar.n} candies<small>${top.length ? `closest: ${esc(top.join(', '))}` : 'nobody guessed'}</small>`);
     }
   }
   if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
@@ -381,7 +381,7 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.rounds} jars · guess the count in secret</small>Jar Guess`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>sharpest eye with ${w?.score ?? 0} pts</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>sharpest eye with ${w?.score ?? 0} pts</small>${esc(w?.nick ?? '')}`); }
   else if (S.ph === 'look') big(`<small>jar ${S.rd} of ${S.rounds}</small>Look closely…`);
   else if (flashT <= 0) big('');
   const guessing = me && S.ph === 'guess';
@@ -401,7 +401,7 @@ function hud(dt) {
   document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--pop)">${me.score}</b>${S.ph === 'reveal' && S.res ? ` · your guess ${S.res.g[me.id] ?? '—'} (+${S.res.pts[me.id] ?? 0})` : ''}` : 'Watching';
   const rows = [...S.P].sort((a, c) => c.score - a.score);
   const rev = S.ph === 'reveal' && S.res;
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${rev ? `${S.res.g[p.id] ?? '—'} +${S.res.pts[p.id] ?? 0} · ` : S.ph === 'guess' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${rev ? `${S.res.g[p.id] ?? '—'} +${S.res.pts[p.id] ?? 0} · ` : S.ph === 'guess' ? (p.lock ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#7cf0b4;margin-right:4px"></span>' : '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffcf5a;margin-right:4px"></span>') : ''}${p.score}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

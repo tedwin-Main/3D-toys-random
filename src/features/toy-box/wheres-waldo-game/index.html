@@ -1923,7 +1923,7 @@ function hostInit(settings, bots) {
   for (const p of lobby.room.players) addSeat(p.id, p.nick, false);
   // hide needs a second seat; lone host gets one bot
   const n = H.mode === 'hide' ? Math.max(bots, 2 - lobby.room.players.length) : bots;
-  for (let i = 0; i < n; i++) addSeat(-1 - i, `${BOT_NAMES[i]} 🤖`, true);
+  for (let i = 0; i < n; i++) addSeat(-1 - i, `${BOT_NAMES[i]} bot`, true);
   const seats = [...H.players.values()];
   const humans = seats.filter((p) => !p.bot).map((p) => p.id);
   // every human hides once; bots top up to 5 rounds so a big bot table stays short
@@ -2417,7 +2417,7 @@ function renderSide() {
   $('mapPill').style.display = theme ? '' : 'none';
   if (theme) $('mapPill').textContent = getTheme(theme).name;
   $('lobbyBtn').style.display = inMatch && host ? '' : 'none';
-  $('scores').innerHTML = inMatch && v ? v.players.map((p) => `<span class="score${p.found ? ' found' : ''}${p.hiding ? ' hiding' : ''}${p.connected ? '' : ' gone'}${p.id === me() ? ' me' : ''}">${esc(p.nick)} ${p.score}${p.hiding ? ' 🙈' : ''}${p.found ? ' ✓' : ''}</span>`).join('') : '';
+  $('scores').innerHTML = inMatch && v ? v.players.map((p) => `<span class="score${p.found ? ' found' : ''}${p.hiding ? ' hiding' : ''}${p.connected ? '' : ' gone'}${p.id === me() ? ' me' : ''}">${esc(p.nick)} ${p.score}${p.hiding ? ' (hiding)' : ''}${p.found ? ' ✓' : ''}</span>`).join('') : '';
   let hint = 'Spot Waldo in a seeded crowd of lookalikes. Create or join a room to play.';
   if (inMatch) {
     if (ui.place) hint = 'You are the hider. Click a spot in the crowd. Edges, empty ground and behind-scenery spots are rejected — and you score nothing if nobody finds you.';
@@ -2453,7 +2453,7 @@ function toast(text) {
 }
 
 // HUD > buttons: mute, lobby, next round, final screen
-const syncMute = () => ($('mute').textContent = isMuted() ? '🔇' : '🔊');
+const syncMute = () => ($('mute').textContent = isMuted() ? 'Sound off' : 'Sound on');
 $('mute').onclick = () => { setMuted(!isMuted()); syncMute(); };
 $('lobbyBtn').onclick = () => lobby.backToLobby();
 $('nextBtn').onclick = () => { if (lobby.room?.isHost) hostNext(); };

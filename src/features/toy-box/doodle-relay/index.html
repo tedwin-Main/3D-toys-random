@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Doodle Relay</title>
+<style>
+  #feed { left: 14px; bottom: 14px; width: min(300px, calc(100% - 28px)); padding: 8px; display: none; font-size: 12.5px; max-height: 32vh; overflow: auto; }
+  #feed div { line-height: 1.35; }
+  #feed i { font-style: normal; font-weight: 800; }
+  #feed .ok { color: #7cf0b4; font-weight: 800; }
+  #word { top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; display: none; font-size: 22px; font-weight: 900; letter-spacing: 0.25em; }
+  #dock .pal button { width: 34px; height: 34px; border-radius: 50%; padding: 0; }
+  #dock .guess { display: flex; gap: 6px; }
+  #dock .guess input { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 8px 10px; border-radius: 10px; border: 2px solid #3a3550; background: #120f1c; color: inherit; outline: none; }
+  @media (max-width: 700px) { #feed { bottom: auto; top: 110px; width: 190px; max-height: 22vh; font-size: 11px; } #word { font-size: 16px; top: 60px; } }
+</style>
+</head>
+<body>
+<div id="word" class="card"></div>
+<div id="feed" class="card" data-hud></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, shuffle, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#5fd0ff', bg: '#f1e6d2', hint: 'One player draws a secret word on the easel, everyone else types guesses. Faster correct guesses score more, and the artist scores for every correct guess. Strokes travel in small batches, so lag never shows.' });
+
+// Prompts > simple things to draw; the ones bots can draw have a recipe below
+const PROMPTS = ['sun', 'house', 'tree', 'fish', 'cat', 'star', 'heart', 'flower', 'boat', 'moon', 'cloud', 'apple', 'snowman', 'umbrella', 'mountain', 'balloon', 'smile', 'rocket', 'ice cream', 'car', 'bicycle', 'guitar', 'pizza', 'castle', 'rainbow', 'spider', 'robot', 'banana', 'dragon', 'clock', 'key', 'lighthouse', 'penguin', 'cactus', 'crown', 'anchor', 'kite', 'mushroom', 'owl', 'turtle', 'volcano', 'whale', 'snail', 'teapot', 'ladder', 'candle', 'glasses', 'hammer', 'bridge', 'tent'];
+// recipes: strokes in 0..1000 board units, drawn by bot artists
+const circle = (cx, cy, r, n = 24) => Array.from({ length: n + 1 }, (_, i) => [cx + Math.cos((i / n) * Math.PI * 2) * r, cy + Math.sin((i / n) * Math.PI * 2) * r]).flat();
+const line = (...p) => p.flat();
+const RECIPES = {
+  sun: () => [[4, circle(500, 380, 140)], ...Array.from({ length: 10 }, (_, i) => { const a = (i / 10) * Math.PI * 2; return [4, line([500 + Math.cos(a) * 180, 380 + Math.sin(a) * 180], [500 + Math.cos(a) * 260, 380 + Math.sin(a) * 260])]; })],
+  house: () => [[0, line([300, 700], [300, 420], [700, 420], [700, 700], [300, 700])], [1, line([260, 440], [500, 230], [740, 440])], [5, line([450, 700], [450, 560], [550, 560], [550, 700])], [2, line([340, 470], [420, 470], [420, 530], [340, 530], [340, 470])]],
+  tree: () => [[5, line([470, 750], [470, 520]), ], [5, line([530, 750], [530, 520])], [3, circle(500, 400, 170)], [3, circle(420, 470, 90)], [3, circle(590, 460, 100)]],
+  fish: () => [[2, line([250, 400], [450, 300], [650, 400], [450, 500], [250, 400])], [2, line([650, 400], [780, 300], [780, 500], [650, 400])], [0, circle(330, 390, 12, 8)]],
+  cat: () => [[0, circle(500, 450, 170)], [0, line([360, 360], [380, 220], [450, 300])], [0, line([550, 300], [620, 220], [640, 360])], [0, circle(440, 420, 15, 8)], [0, circle(560, 420, 15, 8)], [1, line([480, 490], [500, 510], [520, 490])], [0, line([330, 500], [420, 490])], [0, line([580, 490], [670, 500])]],
+  star: () => [[4, line(...Array.from({ length: 11 }, (_, i) => { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 110 : 260; return [500 + Math.cos(a) * r, 450 + Math.sin(a) * r]; }))]],
+  heart: () => [[1, line(...Array.from({ length: 41 }, (_, i) => { const t = (i / 40) * Math.PI * 2; return [500 + 16 * Math.sin(t) ** 3 * 16, 420 - (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) * 16]; }))]],
+  flower: () => [[3, line([500, 800], [500, 450])], ...Array.from({ length: 6 }, (_, i) => { const a = (i / 6) * Math.PI * 2; return [1, circle(500 + Math.cos(a) * 90, 380 + Math.sin(a) * 90, 60, 14)]; }), [4, circle(500, 380, 50, 14)]],
+  boat: () => [[5, line([250, 550], [750, 550], [650, 680], [350, 680], [250, 550])], [0, line([500, 550], [500, 220])], [1, line([500, 240], [690, 520], [500, 520])], [2, line([150, 720], [250, 700], [350, 720], [450, 700], [550, 720], [650, 700], [750, 720], [850, 700])]],
+  moon: () => [[4, line(...Array.from({ length: 21 }, (_, i) => { const a = Math.PI * 0.35 + (i / 20) * Math.PI * 1.3; return [500 + Math.cos(a) * 220, 450 + Math.sin(a) * 220]; }), ...Array.from({ length: 21 }, (_, i) => { const a = Math.PI * 1.65 - (i / 20) * Math.PI * 1.3; return [560 + Math.cos(a) * 170, 450 + Math.sin(a) * 170]; }))]],
+  cloud: () => [[2, circle(400, 450, 110)], [2, circle(540, 390, 140)], [2, circle(660, 470, 100)]],
+  apple: () => [[1, circle(500, 480, 200)], [5, line([500, 280], [520, 190])], [3, line([520, 230], [620, 180], [560, 260], [520, 230])]],
+  snowman: () => [[0, circle(500, 640, 160)], [0, circle(500, 380, 110)], [0, circle(500, 200, 75)], [4, line([500, 200], [570, 215])], [0, circle(475, 185, 8, 6)], [0, circle(525, 185, 8, 6)]],
+  umbrella: () => [[1, line(...Array.from({ length: 21 }, (_, i) => { const a = Math.PI + (i / 20) * Math.PI; return [500 + Math.cos(a) * 280, 420 + Math.sin(a) * 220]; }), [220, 420])], [0, line([500, 420], [500, 720], [440, 740], [430, 690])]],
+  mountain: () => [[0, line([150, 750], [400, 300], [520, 480], [640, 260], [880, 750])], [0, line([350, 390], [400, 360], [450, 390])]],
+  balloon: () => [[1, circle(500, 380, 170)], [0, line([500, 550], [520, 620], [480, 700], [510, 800])]],
+  smile: () => [[4, circle(500, 450, 260)], [0, circle(420, 380, 25, 10)], [0, circle(580, 380, 25, 10)], [0, line(...Array.from({ length: 13 }, (_, i) => { const a = Math.PI * 0.15 + (i / 12) * Math.PI * 0.7; return [500 + Math.cos(a) * 160, 460 + Math.sin(a) * 140]; }))]],
+  rocket: () => [[0, line([500, 150], [580, 300], [580, 620], [420, 620], [420, 300], [500, 150])], [2, circle(500, 380, 40, 12)], [1, line([420, 520], [340, 660], [420, 620])], [1, line([580, 520], [660, 660], [580, 620])], [4, line([460, 640], [500, 760], [540, 640])]],
+  'ice cream': () => [[5, line([380, 450], [500, 800], [620, 450])], [1, circle(500, 380, 130)]],
+  car: () => [[1, line([200, 600], [200, 480], [320, 480], [400, 370], [620, 370], [700, 480], [800, 480], [800, 600], [200, 600])], [0, circle(330, 610, 60, 16)], [0, circle(670, 610, 60, 16)]],
+};
+const BOT_DRAWS = Object.keys(RECIPES);
+const COLORS = ['#22252c', '#e2433b', '#2f7ee6', '#2fa84f', '#f59a1b', '#8a5a2b'];
+
+// Scene > sunny art studio with a big easel; the drawing is a canvas texture on the board
+const { renderer, scene, camera } = createStage({ bg: 0xf1e6d2, fog: [24, 60] });
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc89b6a, roughness: 0.8 }));
+floor.receiveShadow = true;
+scene.add(floor);
+const back = new THREE.Mesh(new THREE.PlaneGeometry(60, 20), new THREE.MeshStandardMaterial({ color: 0xe8d8bc }));
+back.position.set(0, 10, -8);
+scene.add(back);
+const board = document.createElement('canvas');
+board.width = 1000; board.height = 750;
+const bctx = board.getContext('2d');
+const boardTex = new THREE.CanvasTexture(board);
+boardTex.colorSpace = THREE.SRGBColorSpace;
+const BW = 8, BH = 6;
+const easelBoard = new THREE.Mesh(new THREE.PlaneGeometry(BW, BH), new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.9 }));
+easelBoard.position.set(0, 4.6, -1.5);
+const frame = new THREE.Mesh(new THREE.BoxGeometry(BW + 0.4, BH + 0.4, 0.15), new THREE.MeshStandardMaterial({ color: 0x8a5a2b }));
+frame.position.set(0, 4.6, -1.62); frame.castShadow = true;
+scene.add(easelBoard, frame);
+for (const x of [-3.2, 3.2]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 8.5, 0.25), frame.material); leg.position.set(x, 3.6, -1.9); leg.rotation.z = x > 0 ? -0.06 : 0.06; scene.add(leg); }
+const pawns = createPawns(scene);
+const penTex = badgeTex('Art', '#5fd0ff'), tickTex = badgeTex('tick');
+
+// Ink > strokes per turn: { s (stroke id), c (color), w (width), pts: [x, y, ...] }; drawn as they arrive
+let ink = { turn: -1, strokes: new Map() };
+// the canvas goes to the GPU at most once per frame, however many stroke batches arrive
+let inkDirty = true;
+function clearBoard() { bctx.fillStyle = '#fffdf6'; bctx.fillRect(0, 0, 1000, 750); inkDirty = true; }
+clearBoard();
+function addInk(turn, d) {
+  if (turn !== ink.turn) { ink = { turn, strokes: new Map() }; clearBoard(); }
+  if (d.clear) { ink.strokes.clear(); clearBoard(); return; }
+  let st = ink.strokes.get(d.s);
+  if (!st) { st = { c: d.c, w: d.w, pts: [] }; ink.strokes.set(d.s, st); }
+  const from = st.pts.length;
+  st.pts.push(...d.pts);
+  bctx.strokeStyle = COLORS[st.c] ?? '#222'; bctx.lineWidth = st.w; bctx.lineCap = bctx.lineJoin = 'round';
+  bctx.beginPath();
+  const start = Math.max(0, from - 2);
+  bctx.moveTo(st.pts[start], st.pts[start + 1] * 0.75);
+  for (let i = start + 2; i < st.pts.length; i += 2) bctx.lineTo(st.pts[i], st.pts[i + 1] * 0.75);
+  if (st.pts.length === 2) bctx.lineTo(st.pts[0] + 0.1, st.pts[1] * 0.75);
+  bctx.stroke();
+  inkDirty = true;
+}
+// host keeps the turn's ink so a late joiner or a fresh tab can catch up
+let hostInk = [];
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  correct(me) { [784, 988, 1319].forEach((f, i) => tone(f, f, 0.14, me ? 0.08 : 0.04, 'triangle', i * 0.07)); },
+  wrong() { tone(500, 480, 0.04, 0.02, 'sine'); },
+  close() { tone(660, 700, 0.12, 0.05, 'triangle'); },
+  turn() { [523, 659].forEach((f, i) => tone(f, f, 0.18, 0.05, 'triangle', i * 0.1)); },
+  scratch() { noise(0.05, 0.015, 3000, 2000, 'bandpass'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Rules > turns: choose (artist picks one of three words), draw, reveal
+const T = { intro: 3, choose: 9, reveal: 5, final: 12 };
+const BOT_NAMES = ['Crayon', 'Doodle', 'Easel', 'Palette', 'Sketch', 'Pastel', 'Charcoal', 'Gouache', 'Smudge', 'Brushy', 'Inky', 'Marker', 'Chalk', 'Stencil'];
+const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z ]/g, '').replace(/\s+/g, ' ').trim();
+function lev(a, b) { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j; for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, got: false, at: 0, drew: 0 }; }
+function newMatch(settings, P) { return { ph: 'intro', tt: T.intro, turn: 0, turns: settings.turns ?? 0, drawT: settings.time ?? 60, artist: null, hint: '', feed: [], fn: 0, solved: 0, res: null, P }; }
+const totalTurns = (S) => (S.turns || Math.min(14, S.P.length));
+function nextArtist(S) {
+  const pool = [...S.P].sort((a, b) => a.drew - b.drew || (S.P.indexOf(a) - S.P.indexOf(b)));
+  return pool[0];
+}
+function startTurn(S) {
+  S.turn++;
+  const a = nextArtist(S);
+  if (!a) return;
+  a.drew++;
+  for (const p of S.P) { p.got = false; p.at = 0; }
+  S._opts = a.bot ? [pickOne(BOT_DRAWS)] : shuffle([...PROMPTS]).slice(0, 3);
+  S._word = null;
+  hostInk = [];
+  Object.assign(S, { ph: 'choose', tt: a.bot ? 1.5 : T.choose, artist: a.id, hint: '', solved: 0, res: null });
+  game.tell(a.id, { turn: S.turn, opts: S._opts });
+}
+function chooseWord(S, w) {
+  S._word = w;
+  for (const p of S.P) if (p.bot && p.id !== S.artist) p.at = S.drawT * (0.25 + Math.random() * 0.6);
+  Object.assign(S, { ph: 'draw', tt: S.drawT, hint: w.replace(/[a-z]/g, '_') });
+  game.tell(S.artist, { turn: S.turn, word: w });
+  if (S.P.find((p) => p.id === S.artist)?.bot) botStrokes = RECIPES[w]?.() ?? [], botI = 0, botT = 0;
+}
+function feed(S, id, text, ok = false) { S.feed.push({ n: ++S.fn, id, text, ok }); if (S.feed.length > 30) S.feed.shift(); }
+function guess(S, id, text) {
+  const p = S.P.find((q) => q.id === id);
+  if (!p || S.ph !== 'draw' || id === S.artist || p.got) return;
+  const g = norm(text).slice(0, 30);
+  if (!g) return;
+  if (g === S._word) {
+    p.got = true;
+    const pts = Math.max(3, 10 - S.solved * 1) + Math.round((S.tt / S.drawT) * 4);
+    p.score += pts; S.solved++;
+    const art = S.P.find((q) => q.id === S.artist);
+    if (art) art.score += 2;
+    feed(S, id, `guessed it (+${pts})`, true);
+    if (S.P.every((q) => q.id === S.artist || q.got)) S.tt = Math.min(S.tt, 1.5);
+  } else {
+    if (lev(g, S._word) <= 1 && g.length > 2) game.tell(id, { turn: S.turn, close: g });
+    feed(S, id, g);
+  }
+}
+function endTurn(S) { Object.assign(S, { ph: 'reveal', tt: T.reveal, res: { word: S._word ?? '?', solved: S.solved } }); }
+
+// Bots > bot artists trace a recipe; bot guessers type wrong words, then get it right on their own clock
+let botStrokes = [], botI = 0, botT = 0, botSid = 0;
+function botArtist(S, dt) {
+  botT += dt;
+  if (botI >= botStrokes.length || botT < 0.6) return;
+  botT = 0;
+  const [c, pts] = botStrokes[botI++];
+  const jit = pts.map((v) => Math.round(v + (Math.random() - 0.5) * 14));
+  const d = { s: ++botSid, c, w: 9, pts: jit };
+  hostInk.push(d);
+  addInk(S.turn, d);
+  game.stream({ turn: S.turn, ...d });
+}
+function botGuesses(S, dt) {
+  const artistBot = S.P.find((p) => p.id === S.artist)?.bot;
+  for (const p of S.P) {
+    if (!p.bot || p.got || p.id === S.artist) continue;
+    if (Math.random() < dt * 0.12) guess(S, p.id, pickOne(PROMPTS.filter((w) => w !== S._word)));
+    // a bot only "sees" a bot drawing; human drawings get lucky guesses late in the turn
+    const sees = artistBot || Math.random() < 0.35;
+    if (sees && S.drawT - S.tt >= p.at) guess(S, p.id, S._word);
+    else if (S.drawT - S.tt >= p.at) p.at += 8;
+  }
+}
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startTurn(S);
+  else if (S.ph === 'choose') {
+    if (!S.P.find((p) => p.id === S.artist)) return startTurn(S);
+    if (S.tt <= 0) chooseWord(S, S._opts[0]);
+  } else if (S.ph === 'draw') {
+    if (!S.P.find((p) => p.id === S.artist)) return endTurn(S);
+    if (S.P.find((p) => p.id === S.artist)?.bot) botArtist(S, dt);
+    botGuesses(S, dt);
+    // halfway, show one letter
+    if (S.tt < S.drawT * 0.5 && !S.hint.includes('·') && S._word) { const idx = [...S._word].findIndex((ch) => ch !== ' '); S.hint = [...S.hint].map((ch, i) => (i === idx ? S._word[i] : ch)).join('') + '·'; }
+    if (S.tt <= 0) endTurn(S);
+  } else if (S.ph === 'reveal' && S.tt <= 0) {
+    if (S.turn < totalTurns(S)) startTurn(S);
+    else if (S.mode === 'attract') { S.turn = 0; for (const p of S.P) { p.score = 0; p.drew = 0; } startTurn(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+function action(S, from, a) {
+  if (a.t === 'choose' && S.ph === 'choose' && from === S.artist && S._opts?.includes(a.w)) chooseWord(S, a.w);
+  if (a.t === 'guess') guess(S, from, a.text);
+}
+// promoted host: the secret word left with the old host, so this turn is skipped
+function promote(S) { S._opts = []; S._word = null; if (S.ph === 'choose' || S.ph === 'draw') { feed(S, 0, 'Host left: skipping this turn.'); Object.assign(S, { ph: 'reveal', tt: 3, res: { word: '(host left)', solved: S.solved } }); } }
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ turns: 6, time: 25 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// View
+let mine = { turn: -1 }, lastFeed = 0;
+function change(prev, cur) {
+  if (prev?.turn !== cur.turn) { addInk(cur.turn, { clear: true }); if (cur.mode === 'match') sfx.turn(); dockKey = ''; }
+  if (prev?.ph !== cur.ph) dockKey = '';
+  const fresh = (cur.feed ?? []).filter((f) => f.n > lastFeed);
+  for (const f of fresh) if (cur.mode === 'match') (f.ok ? () => sfx.correct(f.id === game.me) : sfx.wrong)();
+  lastFeed = cur.feed?.at(-1)?.n ?? 0;
+  renderFeed(cur);
+}
+function renderFeed(S) {
+  const el = document.getElementById('feed');
+  el.innerHTML = (S.feed ?? []).slice(-12).map((f) => { const p = S.P.find((q) => q.id === f.id); return f.id ? `<div class="${f.ok ? 'ok' : ''}"><i style="color:${p?.color ?? '#fff'}">${esc(p?.nick ?? '?')}</i> ${esc(f.text)}</div>` : `<div style="opacity:.7">${esc(f.text)}</div>`; }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+// Input > artist draws on the easel (raycast to the board), batches go out every 80 ms; guessers type
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let drawing = null, pending = null, sid = 0, color = 0, width = 9, lastSend = 0;
+function boardPoint(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(easelBoard)[0];
+  return hit ? [Math.round(hit.uv.x * 1000), Math.round((1 - hit.uv.y) * 1000)] : null;
+}
+const amArtist = () => game.S?.mode === 'match' && game.S.ph === 'draw' && game.S.artist === game.me;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!amArtist()) return;
+  const pt = boardPoint(e);
+  if (!pt) return;
+  drawing = { s: (game.me * 1000 + ++sid) % 1e9, c: color, w: width };
+  pending = { ...drawing, pts: [...pt] };
+  addInk(game.S.turn, { ...drawing, pts: pt });
+});
+addEventListener('pointermove', (e) => {
+  if (!drawing || !amArtist()) return;
+  const pt = boardPoint(e);
+  if (!pt) return;
+  pending ??= { ...drawing, pts: [] };
+  pending.pts.push(...pt);
+  addInk(game.S.turn, { ...drawing, pts: pt });
+  if (Math.random() < 0.1) sfx.scratch();
+});
+addEventListener('pointerup', () => { flushInk(); drawing = null; });
+function flushInk() {
+  if (!pending?.pts.length) return;
+  const d = { turn: game.S.turn, ...pending };
+  game.stream(d);
+  // the host keeps every stroke of the turn (its own too) for late joiners
+  if (game.isHost) hostInk.push(d);
+  pending = drawing ? { ...drawing, pts: [] } : null;
+  lastSend = performance.now();
+}
+let dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock;
+  const artistChoosing = S.ph === 'choose' && S.artist === game.me && mine.turn === S.turn && mine.opts;
+  const artistDrawing = S.ph === 'draw' && S.artist === game.me;
+  const guessing = S.ph === 'draw' && me && S.artist !== game.me;
+  const key = JSON.stringify([artistChoosing, artistDrawing, guessing, me?.got, color, width, S.turn]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = artistChoosing || artistDrawing || guessing ? 'block' : 'none';
+  if (artistChoosing) {
+    dock.innerHTML = `<div class="s" style="margin:0 0 6px;font-weight:800;font-size:14px">Pick a word to draw</div><div class="btns">${mine.opts.map((w) => `<button data-w="${esc(w)}">${esc(w)}</button>`).join('')}</div>`;
+    dock.querySelectorAll('[data-w]').forEach((b) => (b.onclick = () => game.act({ t: 'choose', w: b.dataset.w })));
+  } else if (artistDrawing) {
+    dock.innerHTML = `<div class="btns pal">${COLORS.map((c, i) => `<button data-c="${i}" class="${color === i ? 'on' : ''}" style="background:${c};${color === i ? 'outline:3px solid #fff' : ''}"></button>`).join('')}<button data-w="5" class="${width === 5 ? 'on' : ''}" style="width:auto;padding:0 10px;border-radius:10px">Thin</button><button data-w="14" class="${width === 14 ? 'on' : ''}" style="width:auto;padding:0 10px;border-radius:10px">Thick</button><button data-clear style="width:auto;padding:0 10px;border-radius:10px">Clear</button></div><div class="s" id="dockS"></div>`;
+    dock.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => { color = +b.dataset.c; dockKey = ''; }));
+    dock.querySelectorAll('[data-w]').forEach((b) => (b.onclick = () => { width = +b.dataset.w; dockKey = ''; }));
+    dock.querySelector('[data-clear]').onclick = () => { const d = { turn: S.turn, clear: true }; addInk(S.turn, d); game.stream(d); if (game.isHost) hostInk.push(d); };
+  } else if (guessing) {
+    dock.innerHTML = me.got ? '<div class="s" style="font-size:15px;font-weight:800;color:#7cf0b4">You got it. Watch the others guess.</div>' : `<div class="guess"><input id="guessIn" maxlength="30" autocomplete="off" placeholder="type your guess" /><button class="pill on" data-g>Guess</button></div><div class="s" id="dockS"></div>`;
+    const inp = dock.querySelector('#guessIn');
+    if (inp) {
+      const go = () => { if (inp.value.trim()) { game.act({ t: 'guess', text: inp.value }); inp.value = ''; } };
+      inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') go(); };
+      dock.querySelector('[data-g]').onclick = go;
+    }
+  }
+}
+
+// HUD
+let hudT = 0, lastClock = 0, closeT = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  const art = S.P.find((p) => p.id === S.artist);
+  const wordEl = document.getElementById('word');
+  const myWord = S.artist === game.me && mine.turn === S.turn && mine.word;
+  wordEl.style.display = match && S.ph === 'draw' ? 'block' : 'none';
+  wordEl.textContent = myWord ? mine.word.toUpperCase() : (S.hint || '').replace('·', '').split('').join(' ').toUpperCase();
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${totalTurns(S)} artists · ${S.drawT}s each</small>Doodle Relay`);
+    else if (S.ph === 'choose') hud.big(S.artist === game.me ? '<small>pick a word below</small>Your turn to draw' : `<small>is picking a word</small>${esc(art?.nick ?? '')}`);
+    else if (S.ph === 'reveal' && S.res) hud.big(`<small>${S.res.solved} guessed it</small>${esc(S.res.word.toUpperCase())}`);
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} points</small>${esc(w?.nick ?? '')} wins`); }
+    else if (S.ph === 'draw' && closeT > 0) hud.big('<small>one letter off</small>So close');
+    else hud.big('');
+  } else hud.big('');
+  closeT -= dt;
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds) { ds.textContent = S.artist === game.me ? `${clock}s · drawing ${myWord ? myWord.toUpperCase() : ''} · ${S.solved} guessed` : `${clock}s · ${S.solved} guessed so far`; if (clock !== lastClock && clock <= 3 && S.ph === 'draw') sfx.tick(); }
+  lastClock = clock;
+  if (amArtist() && pending?.pts.length && performance.now() - lastSend > 80) flushInk();
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Turn ${Math.max(1, S.turn)} of ${totalTurns(S)}`, `${art ? `Artist: <b style="color:${art.color}">${esc(art.nick)}</b>` : ''}${me ? ` · score <b style="color:var(--accent)">${me.score}</b>` : ''}`);
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, tag: p.id === S.artist ? '<span class="chip">art</span>' : '', right: `${p.got ? '<span class="mk tick"></span>' : ''}${p.score}` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'doodle-relay', title: 'Doodle Relay', emoji: '🎨', accent: '#5fd0ff',
+    blurb: 'Drawing and guessing for 2-14. One artist draws a secret word on the easel, everyone else types guesses. Faster correct guesses score more; the artist scores for every correct guess.',
+    defaultBots: 4, minPlayers: 2,
+    note: 'Up to 14 players (humans + bots). Bot artists draw simple things; bots guess human drawings only now and then.',
+    settings: [
+      { key: 'turns', label: 'Artists', options: [[0, 'Everyone once'], [6, '6 turns'], [10, '10 turns']], value: 0 },
+      { key: 'time', label: 'Draw time', options: [[45, '45 s'], [60, '60 s'], [80, '80 s']], value: 60 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+  private(v) {
+    if (v.ink) { for (const d of v.ink) addInk(v.turn, d); return; }
+    if (v.close) { closeT = 2; sfx.close(); return; }
+    mine = { ...(mine.turn === v.turn ? mine : {}), ...v };
+    dockKey = '';
+  },
+  stream(from, d) { if (d && Number.isInteger(d.turn)) { addInk(d.turn, d); if (game.isHost) hostInk.push(d); } },
+  joined(S, p) { if (S.ph === 'draw') game.tell(p.id, { turn: S.turn, ink: hostInk }); },
+});
+
+// Run engine > render
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  if (inkDirty) { boardTex.needsUpdate = true; inkDirty = false; }
+  pawns.prune(S.P);
+  const others = S.P.filter((p) => p.id !== S.artist);
+  const spots = ringSpots(others.length, { r: 8.5, arc: Math.PI * 0.8, center: Math.PI / 2 });
+  others.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i];
+    g.position.set(sp.x, 0, sp.z - 1);
+    g.rotation.y = Math.atan2(-sp.x, -(sp.z - 1) - 1.5);
+    g.userData.body.position.y = p.got ? Math.abs(Math.sin(time * 6 + i)) * 0.25 : 0;
+    const want = p.got ? tickTex : null, slot = g.userData.slot;
+    if (slot.userData.t !== want) { slot.clear(); slot.userData.t = want; if (want) slot.add(badge(want, 0.45)); }
+  });
+  const art = S.P.find((p) => p.id === S.artist);
+  if (art) {
+    const g = pawns.get(art);
+    g.position.set(-5.2, 0, -0.6);
+    g.rotation.y = 0.9;
+    g.userData.body.rotation.z = S.ph === 'draw' ? Math.sin(time * 8) * 0.06 : 0;
+    const slot = g.userData.slot;
+    if (slot.userData.t !== penTex) { slot.clear(); slot.userData.t = penTex; slot.add(badge(penTex, 0.5)); }
+  }
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.4 / camera.aspect);
+  camera.position.set(0, 5.2, 7.5 * fit + 1.5);
+  camera.lookAt(0, 4.1, -1.5);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

@@ -630,7 +630,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'intro'; return; }
     for (const p of lobby.room.players) addBall(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addBall(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addBall(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     loadHole(0);
   },
   onLobby() {
@@ -785,7 +785,7 @@ function hud(dt) {
     const rows = [...world.balls.values()].sort((a, c) => score(a) - score(c));
     const head = `<tr><th></th>${HOLES.map((h, i) => `<th>${i + 1}</th>`).join('')}<th>Tot</th></tr><tr><th>Par</th>${HOLES.map((h) => `<th>${h.par}</th>`).join('')}<th>${HOLES.reduce((s, h) => s + h.par, 0)}</th></tr>`;
     const body = rows.map((b) => `<tr><td class="n" style="color:${b.color}">${esc(b.nick)}</td>${HOLES.map((h, i) => { const v = b.scores[i]; return `<td class="${v == null ? '' : v < h.par ? 'bd' : v > h.par ? 'bg' : ''}">${v ?? '·'}</td>`; }).join('')}<td class="t">${score(b)}</td></tr>`).join('');
-    const title = world.phase === 'final' ? `🏆 ${esc(rows[0]?.nick ?? '')} wins!` : `⛳ After hole ${world.hole + 1}`;
+    const title = world.phase === 'final' ? `${esc(rows[0]?.nick ?? '')} wins!` : `After hole ${world.hole + 1}`;
     const foot = world.phase === 'final' ? `back to lobby in ${Math.max(0, Math.ceil(world.t))}s` : `next hole in ${Math.max(0, Math.ceil(world.t))}s`;
     card.innerHTML = `<h2>${title}</h2><table>${head}${body}</table><div class="foot">${foot}</div>`;
     card.style.display = 'block';

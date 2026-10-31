@@ -325,7 +325,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 5, pot: 0, dice: [3, 4], roll: 0, rollAge: 9, last: '', P: [] };
     for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true));
     dirty = true;
   },
   onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
@@ -395,7 +395,7 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me);
   if (S.ph === 'intro') big(`<small>${S.rounds} rounds · bank before the 1</small>Bank or Bust`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.total - a.total)[0]; big(`<small>winner with ${w?.total ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.total - a.total)[0]; big(`<small>winner with ${w?.total ?? 0}</small>${esc(w?.nick ?? '')}`); }
   else if (S.ph === 'round' && flashT <= 0) big(`<small>round ${S.rd} done</small>${S.rd < S.rounds ? 'Next round…' : 'Final scores'}`);
   else if (flashT <= 0) big('');
   // button: visible while I am still in
@@ -411,10 +411,10 @@ function hud(dt) {
   hudT = 0.15;
   document.getElementById('potN').textContent = S.pot;
   document.getElementById('roundName').textContent = `Round ${S.rd} of ${S.rounds}`;
-  const status = !me ? 'Watching' : me.bust ? '💥 Busted this round' : me.bank != null ? `💰 Banked ${me.bank}` : S.ph === 'wait' ? `Still in · next roll in ${clock}s` : 'Still in';
+  const status = !me ? 'Watching' : me.bust ? 'Busted this round' : me.bank != null ? `Banked ${me.bank}` : S.ph === 'wait' ? `Still in · next roll in ${clock}s` : 'Still in';
   document.getElementById('roundMeta').innerHTML = `${status}<br>Total <b style="color:var(--gold)">${me?.total ?? 0}</b> · roll ${S.roll}`;
   const rows = [...S.P].sort((a, c) => c.total - a.total);
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p.bust ? 'out' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.bust ? '💥 ' : p.bank != null ? `💰+${p.bank} ` : '🎲 '}${p.total}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p.bust ? 'out' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.bust ? '<b style="color:#ff6b6b">bust</b> ' : p.bank != null ? `<b style="color:#7cf0b4">+${p.bank}</b> ` : '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffcf5a;margin-right:4px"></span>'}${p.total}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

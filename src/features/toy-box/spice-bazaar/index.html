@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Spice Bazaar</title>
+<style>
+  #news { top: 14px; left: 50%; transform: translateX(-50%); padding: 7px 14px; display: none; font-size: 14px; font-weight: 700; max-width: min(560px, calc(100% - 200px)); text-align: center; }
+  #dock .row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin: 4px 0; text-align: left; }
+  #dock .row .nm { font-size: 13px; line-height: 1.25; }
+  #dock .row .nm b { display: block; font-size: 15px; }
+  #dock .row .btns { justify-content: flex-start; }
+  #dock .row .btns button { font-size: 13px; padding: 7px 9px; min-width: 44px; }
+  #dock .row .btns button.sell { background: #ffd0d0; } #dock .row .btns button.buy { background: #d0ffe0; }
+  #dock .row .btns button.on { background: var(--accent); }
+  @media (max-width: 700px) { #news { max-width: calc(100% - 20px); top: 60px; font-size: 12px; } #dock .row { grid-template-columns: 80px 1fr; } #dock .row .btns button { min-width: 34px; padding: 6px 5px; font-size: 11.5px; } }
+</style>
+</head>
+<body>
+<div id="news" class="card"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#ffb02e', bg: '#3a2414', hint: 'Every round everyone places secret buy and sell orders at once. The crowd moves the price: if everyone buys, everyone pays more. Rumors hint where spices are heading; overheated prices can crash. Richest trader at the closing bell wins.' });
+
+// Rules > three spices; hidden value drifts with news, price chases demand and the value; bubbles can pop
+const SP = [['Saffron', '#ffb02e'], ['Cinnamon', '#a0522d'], ['Pepper', '#d23c2c']];
+const STEPS = [-3, -1, 0, 1, 3];
+const START_CASH = 100, BASE = [20, 12, 8];
+const T = { intro: 3, news: 3.5, market: 4.5, final: 12 };
+const BOT_NAMES = ['Merchant', 'Caravan', 'Trader', 'Broker', 'Peddler', 'Vizier', 'Haggler', 'Camel', 'Dhow', 'Silk', 'Lantern', 'Bazaar', 'Souk', 'Sultan'];
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: START_CASH, cash: START_CASH, stock: [0, 0, 0], lock: false, at: 0, style: pickOne(['momentum', 'value', 'value', 'contrarian']) }; }
+function newMatch(settings, P) {
+  const S = { ph: 'intro', tt: T.intro, rd: 0, rounds: settings.rounds ?? 12, ordT: settings.time ?? 15, price: [...BASE], hist: BASE.map((b) => [b]), news: null, res: null, P };
+  S._value = [...BASE];
+  return S;
+}
+const worth = (S, p) => p.cash + p.stock.reduce((a, n, k) => a + n * S.price[k], 0);
+const NEWS_UP = ['Rumor: {s} harvest ruined by storms', 'A sultan\'s feast wants all the {s}', 'Ships of {s} lost at sea', 'Royal cooks swear by {s}'];
+const NEWS_DOWN = ['A huge {s} caravan is on its way', 'Doctors warn against too much {s}', 'New {s} fields bloom in the valley', 'Cheap {s} floods the docks'];
+function startRound(S) {
+  S.rd++;
+  S._orders = {};
+  for (const p of S.P) { p.lock = false; p.at = 2 + Math.random() * (S.ordT - 4); }
+  // half the rounds bring a headline; most are true
+  let news = null;
+  if (Math.random() < 0.55) {
+    const k = Math.floor(Math.random() * 3), up = Math.random() < 0.5, truth = Math.random() < 0.72;
+    news = { k, up, text: pickOne(up ? NEWS_UP : NEWS_DOWN).replace('{s}', SP[k][0]) };
+    S._value[k] *= (up === truth ? 1.28 : 0.8);
+  }
+  // values wander a little every round
+  S._value = S._value.map((v, k) => Math.max(BASE[k] * 0.35, v * (0.96 + Math.random() * 0.08)));
+  Object.assign(S, { ph: news ? 'news' : 'orders', tt: news ? T.news : S.ordT, news, res: null });
+}
+function setOrder(S, id, o) {
+  const p = S.P.find((q) => q.id === id);
+  if (!p || S.ph !== 'orders' || !Array.isArray(o) || o.length !== 3 || !o.every((n) => STEPS.includes(n))) return;
+  S._orders[id] = [...o]; p.lock = true;
+}
+function market(S) {
+  const n = Math.max(4, S.P.length), old = [...S.price], net = [0, 0, 0];
+  const orders = {};
+  for (const p of S.P) {
+    const o = S._orders[p.id] ?? (p.bot ? botOrder(S, p) : [0, 0, 0]);
+    // no short selling; sells capped by what you hold
+    orders[p.id] = o.map((q, k) => (q < 0 ? -Math.min(-q, p.stock[k]) : q));
+    orders[p.id].forEach((q, k) => (net[k] += q));
+  }
+  const crash = [];
+  S.price = old.map((pr, k) => {
+    const v = S._value[k], momentum = S.hist[k].length > 1 ? (pr - S.hist[k].at(-2)) / pr : 0;
+    let np = pr * (1 + 0.16 * (net[k] / n)) + (v - pr) * 0.12 + pr * momentum * 0.35;
+    np *= 0.98 + Math.random() * 0.04;
+    // a price far above its value can pop
+    if (np > v * 1.7 && Math.random() < 0.4) { np = v * (0.6 + Math.random() * 0.25); crash.push(k); }
+    return Math.max(1, Math.round(np * 10) / 10);
+  });
+  // everyone trades at the midpoint of the old and new price; buys stop when the cash runs out
+  const fill = {};
+  for (const p of S.P) {
+    fill[p.id] = [0, 0, 0];
+    orders[p.id].forEach((q, k) => {
+      const at = (old[k] + S.price[k]) / 2;
+      if (q < 0) { p.stock[k] += q; p.cash += -q * at; fill[p.id][k] = q; }
+      else if (q > 0) { const can = Math.min(q, Math.floor(p.cash / at)); p.stock[k] += can; p.cash -= can * at; fill[p.id][k] = can; }
+    });
+    p.cash = Math.round(p.cash * 10) / 10;
+  }
+  S.price.forEach((pr, k) => { S.hist[k].push(pr); if (S.hist[k].length > 16) S.hist[k].shift(); });
+  for (const p of S.P) p.score = Math.round(worth(S, p));
+  Object.assign(S, { ph: 'market', tt: T.market, res: { net, crash, fill, old } });
+}
+// bots: momentum chases the last move, value buys below its own guess, contrarians fade the crowd; news tilts all of them
+function botOrder(S, p) {
+  return [0, 1, 2].map((k) => {
+    const h = S.hist[k], last = h.length > 1 ? h.at(-1) - h.at(-2) : 0, pr = S.price[k];
+    let want = 0;
+    const guess = BASE[k] * (S.news?.k === k ? (S.news.up ? 1.25 : 0.8) : 1);
+    if (p.style === 'momentum') want = last > 0 ? 1 : last < 0 ? -1 : 0;
+    else if (p.style === 'value') want = pr < guess * 0.85 ? 1 : pr > guess * 1.2 ? -1 : 0;
+    else want = last > pr * 0.1 ? -1 : last < -pr * 0.1 ? 1 : 0;
+    if (S.news?.k === k && Math.random() < 0.6) want += S.news.up ? 1 : -1;
+    if (Math.random() < 0.25) want += Math.random() < 0.5 ? 1 : -1;
+    const q = Math.max(-3, Math.min(3, want * (Math.random() < 0.4 ? 3 : 1)));
+    return STEPS.includes(q) ? q : Math.sign(q);
+  });
+}
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(S);
+  else if (S.ph === 'news' && S.tt <= 0) Object.assign(S, { ph: 'orders', tt: S.ordT });
+  else if (S.ph === 'orders') {
+    for (const p of S.P) if (p.bot && !p.lock && S.ordT - S.tt >= p.at) setOrder(S, p.id, botOrder(S, p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) market(S);
+  } else if (S.ph === 'market' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S);
+    else if (S.mode === 'attract') { S.rd = 0; S.price = [...BASE]; S._value = [...BASE]; S.hist = BASE.map((b) => [b]); for (const p of S.P) Object.assign(p, { cash: START_CASH, stock: [0, 0, 0], score: START_CASH }); startRound(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+function action(S, from, a) { if (a.t === 'order') setOrder(S, from, a.o); }
+// promoted host: hidden values left with the old host; restart them near today's prices, orders get re-sent
+function promote(S) {
+  S._value = S.price.map((pr) => pr * (0.9 + Math.random() * 0.2));
+  S._orders = {};
+  if (S.ph === 'orders') { for (const p of S.P) p.lock = false; S.tt = Math.max(S.tt, 6); S.ask = (S.ask ?? 0) + 1; if (sent?.rd === S.rd) setOrder(S, game.me, sent.o); }
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 7; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c'][i], true));
+  const S = newMatch({ rounds: 12, time: 4 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// Scene > market square: three stalls with spice heaps (height = price), a price board, traders around
+const { renderer, scene, camera, hemi, key } = createStage({ bg: 0x3a2414, fog: [24, 60] });
+hemi.color.set(0xffe2b8); key.color.set(0xffd8a0);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc9a46a, roughness: 0.95 }));
+ground.receiveShadow = true;
+scene.add(ground);
+const heaps = SP.map(([, c], k) => {
+  const g = new THREE.Group(), x = (k - 1) * 4.2;
+  const table = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 2), new THREE.MeshStandardMaterial({ color: 0x7a4a26 }));
+  table.position.y = 0.5; table.castShadow = table.receiveShadow = true;
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.1, 2.4), new THREE.MeshStandardMaterial({ color: [0xd23c2c, 0x2a7fd8, 0x2fa84f][k] }));
+  awning.position.set(0, 3.4, -0.2); awning.rotation.x = 0.15;
+  for (const sx of [-1.5, 1.5]) { const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 3.4), table.material); pole.position.set(sx, 1.7, -1); g.add(pole); }
+  const heap = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1, 24), new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }));
+  heap.position.y = 1.5; heap.castShadow = true;
+  g.add(table, awning, heap);
+  g.position.set(x, 0, -2.5);
+  scene.add(g);
+  return { g, heap, shake: 0, h: 1 };
+});
+const chartCanvas = document.createElement('canvas');
+chartCanvas.width = 512; chartCanvas.height = 256;
+const chartTex = new THREE.CanvasTexture(chartCanvas);
+chartTex.colorSpace = THREE.SRGBColorSpace;
+const chart = new THREE.Mesh(new THREE.PlaneGeometry(8, 4), new THREE.MeshBasicMaterial({ map: chartTex }));
+chart.position.set(0, 6.4, -5);
+scene.add(chart);
+function drawChart(S) {
+  const g = chartCanvas.getContext('2d');
+  g.fillStyle = '#20140c'; g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = 'rgba(255,255,255,0.08)'; g.lineWidth = 1;
+  for (let y = 32; y < 256; y += 32) { g.beginPath(); g.moveTo(0, y); g.lineTo(512, y); g.stroke(); }
+  const max = Math.max(5, ...S.hist.flat()) * 1.1;
+  S.hist.forEach((h, k) => {
+    g.strokeStyle = SP[k][1]; g.lineWidth = 4; g.beginPath();
+    h.forEach((v, i) => { const x = 20 + (i / 15) * 400, y = 236 - (v / max) * 216; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+    g.fillStyle = SP[k][1]; g.font = 'bold 22px ui-rounded, system-ui, sans-serif';
+    g.fillText(`${SP[k][0]} ${S.price[k].toFixed(1)}`, 330, 40 + k * 30);
+  });
+  chartTex.needsUpdate = true;
+}
+const pawns = createPawns(scene);
+const tickTex = badgeTex('tick'), dotTex = badgeTex('dot', '#59657a', '#e8ecff');
+const coinGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.04, 12), coinMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, metalness: 0.8, roughness: 0.25 });
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  bell() { [880, 1320].forEach((f, i) => tone(f, f * 0.99, 0.6, 0.05, 'sine', i * 0.05)); },
+  coins() { for (let i = 0; i < 5; i++) tone(2000 + Math.random() * 800, 1800, 0.05, 0.03, 'triangle', i * 0.05); },
+  crash() { noise(0.6, 0.12, 1500, 80); tone(400, 60, 0.6, 0.06, 'sawtooth'); },
+  news() { tone(660, 660, 0.12, 0.05, 'square'); tone(880, 880, 0.12, 0.05, 'square', 0.14); },
+  lock(me) { if (me) tone(760, 1140, 0.08, 0.07, 'triangle'); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// View
+let draft = [0, 0, 0], sent = null;
+function change(prev, cur) {
+  if (prev?.ph !== cur.ph || prev?.rd !== cur.rd) {
+    if (cur.ph === 'news') sfx.news();
+    if (cur.ph === 'orders') { draft = [0, 0, 0]; sent = null; dockKey = ''; }
+    if (cur.ph === 'market' && cur.res) { sfx.coins(); if (cur.res.crash.length) { setTimeout(sfx.crash, 200); for (const k of cur.res.crash) heaps[k].shake = 1; } }
+    if (cur.ph === 'final') sfx.bell();
+  }
+  if (cur.ask && cur.ask !== prev?.ask && !game.isHost && sent?.rd === cur.rd) game.act({ t: 'order', o: sent.o });
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === game.me);
+  drawChart(cur);
+  dockKey = '';
+}
+
+// Input > per spice: sell 3, sell 1, hold, buy 1, buy 3; every tap re-sends your whole order
+let dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock, on = me && S.ph === 'orders';
+  const key = JSON.stringify([on, draft, S.rd, me?.cash]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = on ? 'block' : 'none';
+  if (!on) return;
+  dock.innerHTML = SP.map(([name, c], k) => `<div class="row"><div class="nm"><b style="color:${c}">${name}</b>${S.price[k].toFixed(1)} · you hold ${me.stock[k]}</div><div class="btns">${STEPS.map((q) => `<button data-k="${k}" data-q="${q}" class="${q < 0 ? 'sell' : q > 0 ? 'buy' : ''} ${draft[k] === q ? 'on' : ''}" ${q < 0 && me.stock[k] < -q ? 'disabled' : ''}>${q < 0 ? `Sell ${-q}` : q > 0 ? `Buy ${q}` : 'Hold'}</button>`).join('')}</div></div>`).join('') + '<div class="s" id="dockS"></div>';
+  dock.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => { draft[+b.dataset.k] = +b.dataset.q; sent = { rd: S.rd, o: [...draft] }; game.act({ t: 'order', o: draft }); dockKey = ''; }));
+}
+
+// HUD
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  const newsEl = document.getElementById('news');
+  newsEl.style.display = match && S.news && (S.ph === 'news' || S.ph === 'orders') ? 'block' : 'none';
+  if (S.news) newsEl.textContent = S.news.text;
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds} rounds · ${START_CASH} coins each</small>Spice Bazaar`);
+    else if (S.ph === 'news') hud.big('<small>word around the market</small>News');
+    else if (S.ph === 'market' && S.res) hud.big(S.res.crash.length ? `<small>${S.res.crash.map((k) => SP[k][0]).join(' and ')} crashed</small>Crash` : `<small>${SP.map(([n], k) => `${n} ${S.price[k] >= S.res.old[k] ? '+' : ''}${(S.price[k] - S.res.old[k]).toFixed(1)}`).join(' · ')}</small>Round ${S.rd}`);
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>worth ${w?.score ?? 0} coins</small>${esc(w?.nick ?? '')} wins`); }
+    else hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) { ds.textContent = `${clock}s · cash ${me.cash.toFixed(1)} · ${S.P.filter((p) => !p.lock).length} traders still deciding`; if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick(); }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Closing bell' : `Round ${Math.max(1, S.rd)} of ${S.rounds}`, me ? `Worth <b style="color:var(--accent)">${me.score}</b> · cash ${me.cash.toFixed(0)} · ${SP.map(([n], k) => `${n.slice(0, 3)} ${me.stock[k]}`).join(' ')}` : 'Watching');
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, right: S.ph === 'orders' ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : `${p.score}` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'spice-bazaar', title: 'Spice Bazaar', emoji: '💰', accent: '#ffb02e',
+    blurb: 'Trading for 1-14. Each round everyone places secret buy and sell orders for saffron, cinnamon and pepper; the whole crowd moves the price at once. Ride the rumors, dodge the crashes, be richest at the closing bell.',
+    defaultBots: 6, minPlayers: 1,
+    note: 'Up to 14 traders (humans + bots). Everyone trades at the midpoint of the old and new price, so crowded trades cost more.',
+    settings: [
+      { key: 'rounds', label: 'Rounds', options: [[10, '10'], [12, '12'], [15, '15']], value: 12 },
+      { key: 'time', label: 'Order time', options: [[12, '12 s'], [15, '15 s'], [20, '20 s']], value: 15 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+  joined(S, p) { if (S.ph !== 'orders') p.lock = true; },
+});
+
+// Run engine > render: heaps grow with price and slump on a crash; coin stacks show each trader's wealth
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  heaps.forEach((h, k) => {
+    const target = 0.5 + (S.price[k] / BASE[k]) * 0.9;
+    h.h += (target - h.h) * Math.min(1, dt * 3);
+    h.shake = Math.max(0, h.shake - dt);
+    h.heap.scale.set(1 + h.shake * 0.4, h.h, 1 + h.shake * 0.4);
+    h.heap.position.set(Math.sin(time * 40) * h.shake * 0.1, 1 + h.h / 2, 0);
+  });
+  pawns.prune(S.P);
+  const spots = ringSpots(S.P.length, { r: 8, arc: Math.PI * 0.95, center: Math.PI / 2 });
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i], u = g.userData;
+    g.position.set(sp.x, 0, sp.z - 1);
+    g.rotation.y = sp.face;
+    const coins = Math.max(0, Math.min(12, Math.round(p.score / 25)));
+    if (u.coins !== coins) {
+      u.coins = coins;
+      u.stack?.removeFromParent();
+      u.stack = new THREE.Group();
+      for (let c = 0; c < coins; c++) { const m = new THREE.Mesh(coinGeo, coinMat); m.position.y = c * 0.05; u.stack.add(m); }
+      u.stack.position.set(0.55, 0, 0.3);
+      g.add(u.stack);
+    }
+    u.body.position.y = S.ph === 'market' && S.res?.fill[p.id]?.some((n) => n) ? Math.abs(Math.sin(time * 8 + i)) * 0.12 : 0;
+    const want = S.ph === 'orders' ? (p.lock ? tickTex : dotTex) : null;
+    if (u.slot.userData.t !== want) { u.slot.clear(); u.slot.userData.t = want; if (want) u.slot.add(badge(want, 0.45)); }
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.35 / camera.aspect);
+  camera.position.set(0, 7.5 * fit, 13 * fit);
+  camera.lookAt(0, 2.4, -1.5);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

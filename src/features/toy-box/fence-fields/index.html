@@ -297,7 +297,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, slop: 0.06 + rng() * 0.14 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} bot`, color: BOT_COLORS[i], bot: true, score: 0, slop: 0.06 + rng() * 0.14 });
     // shuffle seats so the host doesn't always start
     for (let i = P.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [P[i], P[j]] = [P[j], P[i]]; }
     S = newState('match', P, sizeFor(P.length, settings.size), settings.clock ?? 15);
@@ -385,7 +385,7 @@ function hud(dt) {
   const up = S.P[S.turn], me = lobby.room?.me;
   const clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.C}×${S.R} field · ${S.P.length} farmers</small>Fence Fields`);
-  else if (S.ph === 'final') { const top = [...S.P].sort((a, c) => c.score - a.score); const tie = top[1] && top[1].score === top[0].score; big(`<small>${top[0]?.score ?? 0} pens</small>${tie ? '🤝 Tie!' : `🏆 ${esc(top[0]?.nick ?? '')}`}`); }
+  else if (S.ph === 'final') { const top = [...S.P].sort((a, c) => c.score - a.score); const tie = top[1] && top[1].score === top[0].score; big(`<small>${top[0]?.score ?? 0} pens</small>${tie ? 'Tie!' : `${esc(top[0]?.nick ?? '')}`}`); }
   else if (flashT <= 0) big('');
   if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
   lastClock = clock;

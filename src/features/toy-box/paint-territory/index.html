@@ -446,7 +446,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startMatch();
   },
   onLobby() {
@@ -574,11 +574,11 @@ function hud(dt) {
   document.getElementById('clock').textContent = `${Math.floor(m / 60)}:${String(Math.floor(m % 60)).padStart(2, '0')}`;
   if (world.phase === 'count') big(`${Math.max(1, Math.ceil(world.t))}<small>paint everything</small>`);
   else if (world.phase === 'play') big(world.t > MATCH_TIME - 1 ? 'SPLAT!' : world.t < 10 ? `${Math.ceil(world.t)}` : '');
-  else if (world.phase === 'end') { const w = world.players.get(world.winner); big(w ? `🏆 ${esc(w.nick)}<small>${(w.tiles * 100).toFixed(1)}% of the floor</small>` : 'Time!'); }
+  else if (world.phase === 'end') { const w = world.players.get(world.winner); big(w ? `${esc(w.nick)}<small>${(w.tiles * 100).toFixed(1)}% of the floor</small>` : 'Time!'); }
   const me = world.players.get(lobby.room?.me);
   const bombEl = document.getElementById('bomb');
   bombEl.style.display = me && world.phase === 'play' ? 'block' : 'none';
-  if (me) bombEl.textContent = me.bombCD > 0 ? `💣 bomb in ${Math.ceil(me.bombCD)}s` : '💣 bomb ready (Space)';
+  if (me) bombEl.textContent = me.bombCD > 0 ? `Bomb in ${Math.ceil(me.bombCD)}s` : 'Bomb ready (Space)';
 }
 
 // Run engine > sim tick (worker)

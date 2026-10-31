@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Sushi Belt Memory</title>
+<style>
+  .dish { display: inline-block; width: 30px; height: 30px; border-radius: 50%; background: #f6f2ea; border: 3px solid #d8cfc0; position: relative; vertical-align: middle; }
+  .dish i { position: absolute; inset: 6px; border-radius: 6px; }
+  .dish i.roll { border-radius: 50%; border: 3px solid #1d2a1d; }
+  #dock .slots { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px; min-height: 36px; }
+  #dock .slots span.empty { width: 30px; height: 30px; border-radius: 50%; border: 2px dashed rgba(255,255,255,0.35); display: inline-block; }
+  #dock .menu button { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; padding: 6px 6px; min-width: 62px; }
+  #answer { top: 62px; left: 14px; padding: 8px 12px; display: none; font-size: 12.5px; }
+  @media (max-width: 700px) { #dock .menu button { min-width: 48px; font-size: 9.5px; } .dish { width: 24px; height: 24px; } }
+</style>
+</head>
+<body>
+<div id="answer" class="card"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, esc, badgeTex, badge, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#ff7a59', bg: '#2a1a14', hint: 'Watch the dishes ride past on the belt, then rebuild the order in secret. One point per dish in the right spot, a bonus for a perfect plate. The belt gets longer every round.' });
+
+// Dishes > eight kinds: nigiri (rice + topping) or maki (roll with a colored center)
+const DISH = [['Tuna', '#e2433b', 'n'], ['Salmon', '#ff8a4f', 'n'], ['Egg', '#ffd23f', 'n'], ['Eel', '#6b3a22', 'n'], ['Cucumber', '#5fd068', 'm'], ['Avocado', '#a8d86a', 'm'], ['Roe', '#ff6a1a', 'g'], ['Shrimp', '#ffb0a0', 'n']];
+const dishHtml = (k) => `<span class="dish"><i class="${DISH[k][2] === 'n' ? '' : 'roll'}" style="background:${DISH[k][1]}"></i></span>`;
+
+// Scene > wooden counter, conveyor belt, chef behind it, diners on stools in front
+const { renderer, scene, camera, hemi } = createStage({ bg: 0x2a1a14, fog: [20, 55] });
+hemi.intensity = 0.8;
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 40).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x4a3426, roughness: 0.85 }));
+floor.receiveShadow = true;
+scene.add(floor);
+const counter = new THREE.Mesh(new THREE.BoxGeometry(26, 1.6, 3), new THREE.MeshStandardMaterial({ color: 0xc89b6a, roughness: 0.6 }));
+counter.position.set(0, 0.8, 0); counter.castShadow = counter.receiveShadow = true;
+scene.add(counter);
+const beltTex = (() => { const c = document.createElement('canvas'); c.width = 64; c.height = 16; const g = c.getContext('2d'); g.fillStyle = '#3a3f48'; g.fillRect(0, 0, 64, 16); g.fillStyle = '#2a2e35'; g.fillRect(0, 0, 6, 16); const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(40, 1); return t; })();
+const belt = new THREE.Mesh(new THREE.BoxGeometry(26, 0.12, 1.4), new THREE.MeshStandardMaterial({ map: beltTex, roughness: 0.5 }));
+belt.position.set(0, 1.66, -0.2);
+scene.add(belt);
+const backWall = new THREE.Mesh(new THREE.PlaneGeometry(60, 14), new THREE.MeshStandardMaterial({ color: 0x5a2a20 }));
+backWall.position.set(0, 7, -6);
+scene.add(backWall);
+for (let i = 0; i < 6; i++) { const l = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), new THREE.MeshStandardMaterial({ color: 0xff5a3a, emissive: 0xff3a1a, emissiveIntensity: 0.7 })); l.position.set(-10 + i * 4, 6.5, -4); l.scale.y = 1.3; scene.add(l); }
+const chef = createPawns(scene, { height: 1.4 }).get({ id: 0, nick: 'Chef', color: '#f2f2f2' });
+chef.position.set(0, 0, -3); chef.rotation.y = 0;
+const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.3, 0.5, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+hat.position.y = 1.95; chef.userData.body.add(hat);
+// dish meshes by kind
+const plateGeo = new THREE.CylinderGeometry(0.5, 0.42, 0.08, 24), plateMat = new THREE.MeshStandardMaterial({ color: 0xf6f2ea, roughness: 0.4 });
+const riceGeo = new THREE.BoxGeometry(0.5, 0.18, 0.28), riceMat = new THREE.MeshStandardMaterial({ color: 0xfbfaf4, roughness: 0.9 });
+const topGeo = new THREE.BoxGeometry(0.56, 0.08, 0.32), rollGeo = new THREE.CylinderGeometry(0.17, 0.17, 0.22, 16), noriMat = new THREE.MeshStandardMaterial({ color: 0x1d2a1d, roughness: 0.8 });
+function makeDish(k) {
+  const g = new THREE.Group();
+  const plate = new THREE.Mesh(plateGeo, plateMat); plate.castShadow = true; g.add(plate);
+  const col = new THREE.MeshStandardMaterial({ color: DISH[k][1], roughness: 0.4 });
+  if (DISH[k][2] === 'n') { const r = new THREE.Mesh(riceGeo, riceMat); r.position.y = 0.13; const t = new THREE.Mesh(topGeo, col); t.position.y = 0.26; g.add(r, t); }
+  else for (const x of [-0.2, 0.2]) { const r = new THREE.Mesh(rollGeo, DISH[k][2] === 'g' ? col : noriMat); r.position.set(x, 0.15, 0); const c = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.23, 12), DISH[k][2] === 'g' ? noriMat : col); c.position.copy(r.position); g.add(r, c); }
+  return g;
+}
+const pawns = createPawns(scene);
+const tickTex = badgeTex('tick'), dotTex = badgeTex('dot', '#59657a', '#e8ecff'), starTex = badgeTex('star', '#ffd23f');
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  dish(k) { tone(500 + k * 70, 520 + k * 70, 0.12, 0.05, 'triangle'); },
+  tap() { tone(900, 1000, 0.04, 0.03, 'sine'); },
+  lock(me) { if (me) tone(760, 1140, 0.08, 0.07, 'triangle'); },
+  reveal() { noise(0.15, 0.04, 2000, 800, 'bandpass'); [523, 659, 784].forEach((f, i) => tone(f, f, 0.15, 0.05, 'triangle', i * 0.1)); },
+  perfect() { [784, 988, 1175, 1568].forEach((f, i) => tone(f, f, 0.15, 0.07, 'square', i * 0.08)); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Rules > belt of length 4 + round (max 11); everyone watches the same seeded belt, then answers in secret
+const T = { intro: 3, reveal: 6, final: 12 };
+const BOT_NAMES = ['Wasabi', 'Nori', 'Ginger', 'Tempura', 'Mochi', 'Miso', 'Ramen', 'Udon', 'Matcha', 'Yuzu', 'Tofu', 'Sesame', 'Ponzu', 'Daikon'];
+const beltLen = (S) => Math.min(11, 3 + S.rd);
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, at: 0, last: 0, perfect: 0, mem: 0.88 + Math.random() * 0.1 }; }
+function newMatch(settings, P) { return { ph: 'intro', tt: T.intro, rd: 0, rounds: settings.rounds ?? 6, gap: settings.speed ?? 1, seq: [], res: null, P }; }
+function startRound(S) {
+  S.rd++;
+  S._ans = {};
+  const n = beltLen(S), seq = [];
+  for (let i = 0; i < n; i++) { let k; do k = Math.floor(Math.random() * DISH.length); while (seq.length && k === seq.at(-1) && Math.random() < 0.7); seq.push(k); }
+  for (const p of S.P) { p.lock = false; p.last = 0; }
+  // watch time: every dish rides the whole belt (dishes enter one gap apart)
+  Object.assign(S, { ph: 'watch', tt: n * S.gap + RIDE + 0.5, seq, res: null });
+}
+const RIDE = 4.5;
+function startRecall(S) {
+  const n = S.seq.length;
+  for (const p of S.P) p.at = 3 + Math.random() * (n * 1.2);
+  Object.assign(S, { ph: 'recall', tt: 8 + n * 1.6 });
+}
+function answer(S, id, list) {
+  const p = S.P.find((q) => q.id === id);
+  if (!p || S.ph !== 'recall' || !Array.isArray(list) || list.length !== S.seq.length || !list.every((k) => Number.isInteger(k) && k >= 0 && k < DISH.length)) return;
+  S._ans[id] = [...list]; p.lock = true;
+}
+function reveal(S) {
+  const ans = {}, pts = {};
+  for (const p of S.P) {
+    const a = S._ans[p.id] ?? null;
+    ans[p.id] = a;
+    let n = 0;
+    if (a) for (let i = 0; i < S.seq.length; i++) if (a[i] === S.seq[i]) n++;
+    const perfect = a && n === S.seq.length;
+    pts[p.id] = n + (perfect ? 3 : 0);
+    p.score += pts[p.id]; p.last = pts[p.id];
+    if (perfect) p.perfect++;
+  }
+  Object.assign(S, { ph: 'reveal', tt: T.reveal, res: { ans, pts } });
+}
+// bots: each dish remembered with a chance that fades along a longer belt; misses become a look-alike guess
+function botAnswer(S, p) { return S.seq.map((k, i) => (Math.random() < p.mem ** (1 + i * 0.35 + S.seq.length * 0.08) ? k : Math.floor(Math.random() * DISH.length))); }
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startRound(S);
+  else if (S.ph === 'watch' && S.tt <= 0) startRecall(S);
+  else if (S.ph === 'recall') {
+    const span = 8 + S.seq.length * 1.6;
+    for (const p of S.P) if (p.bot && !p.lock && span - S.tt >= p.at) answer(S, p.id, botAnswer(S, p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) reveal(S);
+  } else if (S.ph === 'reveal' && S.tt <= 0) {
+    if (S.rd < S.rounds) startRound(S);
+    else if (S.mode === 'attract') { S.rd = 0; for (const p of S.P) p.score = 0; startRound(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+function action(S, from, a) { if (a.t === 'answer') answer(S, from, a.list); }
+// promoted host: sealed answers left with the old host; humans re-send automatically, bots answer again
+function promote(S) {
+  S._ans = {};
+  for (const p of S.P) if (p.bot) p.lock = false;
+  if (S.ph === 'recall') { for (const p of S.P) if (!p.bot) p.lock = false; S.tt = Math.max(S.tt, 6); S.ask = (S.ask ?? 0) + 1; if (sent?.rd === S.rd) answer(S, game.me, sent.list); }
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ rounds: 5, speed: 0.9 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// View > the belt plays locally from the moment the watch phase arrives, so lag only delays the start
+let show = null, sent = null;
+function change(prev, cur) {
+  if (prev?.ph !== cur.ph || prev?.rd !== cur.rd) {
+    if (cur.ph === 'watch') { startShow(cur); picks = []; sent = null; }
+    if (cur.ph === 'recall') { clearShow(); dockKey = ''; }
+    if (cur.ph === 'reveal') { sfx.reveal(); if (cur.res?.pts[game.me] >= cur.seq.length + 3) setTimeout(sfx.perfect, 300); }
+  }
+  if (cur.ask && cur.ask !== prev?.ask && !game.isHost && sent?.rd === cur.rd) game.act({ t: 'answer', list: sent.list });
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === game.me);
+  renderAnswer(cur);
+}
+function startShow(S) {
+  clearShow();
+  show = { t: 0, gap: S.gap, items: S.seq.map((k, i) => ({ k, at: i * S.gap, m: null, played: false })) };
+}
+function clearShow() { if (show) for (const it of show.items) if (it.m) scene.remove(it.m); show = null; }
+function renderAnswer(S) {
+  const el = document.getElementById('answer');
+  const on = S.mode === 'match' && S.ph === 'reveal';
+  el.style.display = on ? 'block' : 'none';
+  if (on) el.innerHTML = `<div style="font-weight:800;margin-bottom:4px">The belt was</div>${S.seq.map(dishHtml).join(' ')}${S.res?.ans[game.me] ? `<div style="margin:6px 0 2px;font-weight:800">You said</div>${S.res.ans[game.me].map((k, i) => `<span style="opacity:${k === S.seq[i] ? 1 : 0.35}">${dishHtml(k)}</span>`).join(' ')}` : ''}`;
+}
+
+// Input > tap dishes in order (keys 1-8), Undo, Send
+let picks = [], dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock, on = me && S.ph === 'recall';
+  const key = JSON.stringify([on, picks, me?.lock, S.rd]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = on ? 'block' : 'none';
+  if (!on) return;
+  const n = S.seq.length;
+  dock.innerHTML = `<div class="slots">${Array.from({ length: n }, (_, i) => (picks[i] != null ? dishHtml(picks[i]) : '<span class="empty"></span>')).join('')}</div>
+    <div class="btns menu">${DISH.map(([name], k) => `<button data-k="${k}">${dishHtml(k)}${k + 1} ${name}</button>`).join('')}</div>
+    <div class="btns" style="margin-top:8px"><button data-undo>Undo</button><button data-send class="on" ${picks.length === n ? '' : 'disabled'}>${me.lock ? 'Sent, send again' : 'Send order'}</button></div><div class="s" id="dockS"></div>`;
+  dock.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => add(+b.dataset.k)));
+  dock.querySelector('[data-undo]').onclick = () => { picks.pop(); dockKey = ''; };
+  dock.querySelector('[data-send]').onclick = send;
+}
+function add(k) { const S = game.S; if (S?.ph === 'recall' && picks.length < S.seq.length) { picks.push(k); sfx.tap(); dockKey = ''; } }
+function send() { const S = game.S; if (S?.ph === 'recall' && picks.length === S.seq.length) { sent = { rd: S.rd, list: [...picks] }; game.act({ t: 'answer', list: picks }); dockKey = ''; } }
+addEventListener('keydown', (e) => { if (/^[1-8]$/.test(e.key)) add(+e.key - 1); else if (e.key === 'Backspace') { picks.pop(); dockKey = ''; } else if (e.key === 'Enter') send(); });
+
+// HUD
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds} rounds · watch, then recall</small>Sushi Belt Memory`);
+    else if (S.ph === 'watch') hud.big(`<small>${S.seq.length} dishes · remember the order</small>Watch`);
+    else if (S.ph === 'recall') hud.big(clock <= 5 ? `<small>seconds left</small>${clock}` : '');
+    else if (S.ph === 'reveal' && S.res) { const perf = S.P.filter((p) => S.res.pts[p.id] >= S.seq.length + 3).length; hud.big(`<small>${perf ? `${perf} perfect plate${perf > 1 ? 's' : ''}` : 'no perfect plates'}</small>Round ${S.rd}`); }
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} points</small>${esc(w?.nick ?? '')} wins`); }
+    else hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) { ds.textContent = `${clock}s · ${picks.length}/${S.seq.length} placed · ${S.P.filter((p) => !p.lock).length} still remembering`; if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick(); }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Round ${Math.max(1, S.rd)} of ${S.rounds}`, me ? `Score <b style="color:var(--accent)">${me.score}</b>${me.perfect ? ` · ${me.perfect} perfect` : ''}` : 'Watching');
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, right: S.ph === 'recall' ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : S.ph === 'reveal' ? `+${p.last} · ${p.score}` : `${p.score}` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'sushi-belt-memory', title: 'Sushi Belt Memory', emoji: '🍣', accent: '#ff7a59',
+    blurb: 'Memory game for 1-14. Dishes ride past on the conveyor; then everyone rebuilds the order in secret. One point per dish in the right spot, +3 for a perfect plate. The belt grows every round.',
+    defaultBots: 5, minPlayers: 1,
+    note: 'Up to 14 players (humans + bots). Each device plays the belt itself, so lag only shifts when your belt starts.',
+    settings: [
+      { key: 'rounds', label: 'Rounds', options: [[5, '5'], [6, '6'], [8, '8']], value: 6 },
+      { key: 'speed', label: 'Belt', options: [[1.2, 'Relaxed'], [1, 'Normal'], [0.75, 'Fast']], value: 1 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+});
+
+// Run engine > render: dishes slide left to right along the belt
+const clock = new THREE.Clock();
+const BELT_X0 = -12.5, BELT_X1 = 12.5;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  const moving = !!show;
+  beltTex.offset.x -= moving ? dt * ((BELT_X1 - BELT_X0) / RIDE) / 26 * 40 : 0;
+  if (show) {
+    show.t += dt;
+    for (const it of show.items) {
+      const u = (show.t - it.at) / RIDE;
+      if (u < 0 || u > 1) { if (it.m) it.m.visible = false; continue; }
+      if (!it.m) { it.m = makeDish(it.k); scene.add(it.m); }
+      if (!it.played && u > 0.45) { it.played = true; sfx.dish(it.k); }
+      it.m.visible = true;
+      it.m.position.set(BELT_X0 + u * (BELT_X1 - BELT_X0), 1.76, -0.2);
+    }
+  }
+  chef.userData.body.rotation.z = Math.sin(time * 2) * 0.05;
+  pawns.prune(S.P);
+  const n = S.P.length, span = Math.min(22, n * 1.6);
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p);
+    g.position.set(n > 1 ? -span / 2 + (span * i) / (n - 1) : 0, 0, 2.6 + (i % 2) * 0.8);
+    g.rotation.y = Math.PI;
+    g.userData.body.position.y = S.ph === 'reveal' && S.res?.pts[p.id] >= S.seq.length + 3 ? Math.abs(Math.sin(time * 7 + i)) * 0.3 : 0;
+    const want = S.ph === 'recall' ? (p.lock ? tickTex : dotTex) : S.ph === 'reveal' && S.res?.pts[p.id] >= S.seq.length + 3 ? starTex : null;
+    const slot = g.userData.slot;
+    if (slot.userData.t !== want) { slot.clear(); slot.userData.t = want; if (want) slot.add(badge(want, 0.45)); }
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.5 / camera.aspect);
+  camera.position.set(0, 4.5 * fit, 10 * fit);
+  camera.lookAt(0, 1.6, 0);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

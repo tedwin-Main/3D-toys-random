@@ -34,7 +34,7 @@
 <div id="info" class="card"><div class="a" id="clock"></div><div class="m" id="mine"></div></div>
 <div id="board" class="card"></div>
 <div id="big"></div>
-<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> bark (scatters sheep) · sheep run away from dogs: get behind them and drive them into <b>your</b> colored pen · ✨ golden sheep = 3</div>
+<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> bark (scatters sheep) · sheep run away from dogs: get behind them and drive them into <b>your</b> colored pen · golden sheep = 3</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -123,7 +123,7 @@ function penSign(nick, color, n) {
   const g = c.getContext('2d');
   g.fillStyle = color; g.beginPath(); g.roundRect(8, 8, 240, 80, 18); g.fill();
   g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.roundRect(8, 60, 240, 28, [0, 0, 18, 18]); g.fill();
-  g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = 'bold 34px ui-rounded, system-ui, sans-serif'; g.fillText(`🐑 ${n}`, 128, 48);
+  g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = 'bold 34px ui-rounded, system-ui, sans-serif'; g.fillText(`${n} sheep`, 128, 48);
   g.font = 'bold 20px ui-rounded, system-ui, sans-serif'; g.fillText(nick, 128, 81, 220);
   return c;
 }
@@ -475,7 +475,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; world.sheep = []; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startMatch();
   },
   onLobby() {
@@ -553,9 +553,9 @@ function playEvents(evs) {
   for (const e of evs) {
     const p = world.players.get(e[1]);
     if (e[0] === 'b' && p) { barkRing(p.x, p.z, p.color); if (match) sfx.woof(e[1] === me); }
-    else if (e[0] === 'p') { burst(e[2], 0.8, e[3], e[4] ? 26 : 14, 3); if (match) sfx.pen(e[1] === me, e[4]); if (e[1] === me && match) flash(e[4] ? '<small>golden fleece!</small>✨ +3' : '<small>penned</small>🐑 +1', 0.9); }
+    else if (e[0] === 'p') { burst(e[2], 0.8, e[3], e[4] ? 26 : 14, 3); if (match) sfx.pen(e[1] === me, e[4]); if (e[1] === me && match) flash(e[4] ? '<small>golden fleece!</small>+3' : '<small>penned</small>+1', 0.9); }
     else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
-    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'top dog!' : 'top dog'}</small>🏆 ${esc(p.nick)}`, 4); }
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'top dog!' : 'top dog'}</small>${esc(p.nick)}`, 4); }
   }
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -587,15 +587,15 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>herd sheep into your pen</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${esc(top?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.2;
   document.getElementById('clock').innerHTML = `${mmss(world.left)}<small> left</small>`;
-  document.getElementById('mine').textContent = `${me ? `you: ${me.score} sheep · ` : ''}first to ${WIN_N} · ✨ = 3`;
+  document.getElementById('mine').textContent = `${me ? `you: ${me.score} sheep · ` : ''}first to ${WIN_N} · golden = 3`;
   const r = [...world.players.values()].sort((a, b) => b.score - a.score);
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>🐑${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
 }
 
 // Run engine > sim tick (worker)

@@ -369,7 +369,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startMatch();
   },
   onLobby() {
@@ -438,12 +438,12 @@ function playEvents(evs) {
   for (const e of evs) {
     const p = world.players.get(e[1]);
     if (e[0] === 's') { burst(e[3], 0.8, e[4], 14, 4); if (match) sfx.shove(e[1] === me || e[2] === me); if (e[2] === me && match) shake = 0.4; }
-    else if (e[0] === 'f' && p) { if (match && (e[1] === me || rng() < 0.4)) sfx.fall(); if (e[1] === me && match) flash('<small>overboard!</small>🪂 back in a sec', 1.4); }
+    else if (e[0] === 'f' && p) { if (match && (e[1] === me || rng() < 0.4)) sfx.fall(); if (e[1] === me && match) flash('<small>overboard!</small>back in a sec', 1.4); }
     else if (e[0] === 'd' && e[1] === me) sfx.dash();
     else if (e[0] === 'p' && e[1] === me && match) sfx.point();
-    else if (e[0] === 'm' && match) { sfx.move(); flash('<small>the crown moved</small>👑 GO!', 1.1); }
+    else if (e[0] === 'm' && match) { sfx.move(); flash('<small>the crown moved</small>GO!', 1.1); }
     else if (e[0] === 'c' && match) sfx.beep(e[1] === 0);
-    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you rule the hill!' : 'long live the king'}</small>👑 ${esc(p.nick)}`, 4); }
+    else if (e[0] === 'w' && p) { if (match) sfx.win(); flash(`<small>${e[1] === me ? 'you rule the hill!' : 'long live the king'}</small>${esc(p.nick)}`, 4); }
   }
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -475,10 +475,10 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>stand alone in the ring</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>👑 ${esc(top?.nick ?? '')}`); }
+  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${esc(top?.nick ?? '')}`); }
   else if (flashT <= 0) big(me?.fall ? '<small>climbing back up…</small>' : '');
   const holder = world.players.get(world.hold);
-  zoneEl.innerHTML = world.phase !== 'play' ? '👑 get ready' : world.crowd > 1 ? `⚔️ ${world.crowd} knights share the ring · points split` : holder ? `👑 <span style="color:${holder.color}">${esc(holder.nick)}</span>${holder.id === lobby.room?.me ? ' (you!)' : ''} holds the crown` : '👑 crown is free';
+  zoneEl.innerHTML = world.phase !== 'play' ? 'Get ready' : world.crowd > 1 ? `${world.crowd} knights share the ring · points split` : holder ? `<span style="color:${holder.color}">${esc(holder.nick)}</span>${holder.id === lobby.room?.me ? ' (you!)' : ''} holds the crown` : 'Crown is free';
   zoneEl.classList.toggle('hot', world.phase === 'play' && world.hopT < 3);
   hudT -= dt;
   if (hudT > 0) return;
@@ -486,7 +486,7 @@ function hud(dt) {
   document.getElementById('clock').innerHTML = `${mmss(world.left)}<small> left</small>`;
   document.getElementById('mine').textContent = `${me ? `you: ${Math.floor(me.pts)} pts · ` : ''}ring hops in ${Math.max(0, Math.ceil(world.hopT))}s · first to ${WIN_PTS}`;
   const r = [...world.players.values()].sort((a, b) => b.pts - a.pts);
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.hold ? '👑 ' : ''}${esc(p.nick)}</span><em>${Math.floor(p.pts)}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.hold ? '<b style="color:#ffd23f">KING</b> ' : ''}${esc(p.nick)}</span><em>${Math.floor(p.pts)}</em></div>`).join('');
 }
 
 // Run engine > sim tick (worker)

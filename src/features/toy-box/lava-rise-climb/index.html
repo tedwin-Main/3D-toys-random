@@ -30,7 +30,7 @@
 </head>
 <body>
 <div id="status" class="card"></div>
-<div id="meter" class="card"><div class="lava"></div><div class="crown">👑</div></div>
+<div id="meter" class="card"><div class="lava"></div><div class="crown">TOP</div></div>
 <div id="big"></div>
 <div id="hint" class="card"><b>WASD</b> move · <b>Space</b> jump (twice for double jump) · climb the tower, stomp heads to daze rivals, outrun the lava · first to the crown wins</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
@@ -424,7 +424,7 @@ const lobby = createLobby({
     const s = (seed * 1e9) | 0 || 7;
     if (!isHost) { world.seed = s; buildTower(s); world.phase = 'count'; world.t = 3; return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     newMatch(s);
   },
   onLobby() {
@@ -515,7 +515,7 @@ function playEvents(evs) {
       const p = world.players.get(e[1]);
       burst(e[2], e[3] + 0.3, e[4], 50, 0xff7a2e, 7);
       if (match || rng() < 0.4) sfx.burn(vol(p));
-      if (match && p) flash(e[1] === me ? '<small>you fell in</small>🔥 COOKED' : `<small>${esc(p.nick)} got cooked</small>`, e[1] === me ? 2 : 1.2);
+      if (match && p) flash(e[1] === me ? '<small>you fell in</small>COOKED' : `<small>${esc(p.nick)} got cooked</small>`, e[1] === me ? 2 : 1.2);
     } else if (e[0] === 'w') {
       const p = world.players.get(e[1]);
       if (p) burst(p.x, p.y + 1, p.z, 160, 0xffd23f, 9);
@@ -569,14 +569,14 @@ function hud(dt) {
   if (world.phase === 'count') big(`<small>get ready</small>${Math.max(1, Math.ceil(world.t))}`);
   else if (world.phase === 'final') {
     const w = world.players.get(world.winner);
-    big(`<small>back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${w ? `👑 <span style="color:${w.color}">${esc(w.nick)}</span>` : 'Everyone cooked'}`);
+    big(`<small>back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${w ? `<span style="color:${w.color}">${esc(w.nick)}</span>` : 'Everyone cooked'}`);
   } else if (flashT <= 0) big('');
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.1;
   const al = [...world.players.values()].filter((p) => !p.out).length, top = TOP_Y();
   const gap = me && !me.out ? me.y - world.lava : null;
-  document.getElementById('status').textContent = me?.out ? `👻 spectating · ${al} still climbing` : `⬆ ${Math.max(0, me?.y ?? 0).toFixed(0)}m / ${top.toFixed(0)}m · 🔥 lava ${gap === null ? '-' : gap.toFixed(1)}m below · ${al} alive`;
+  document.getElementById('status').textContent = me?.out ? `Spectating · ${al} still climbing` : `${Math.max(0, me?.y ?? 0).toFixed(0)}m / ${top.toFixed(0)}m · lava ${gap === null ? '-' : gap.toFixed(1)}m below · ${al} alive`;
   const H = meterEl.clientHeight, toPx = (y) => clamp(y / (top + 2), 0, 1) * (H - 20);
   meterLava.style.height = `${toPx(world.lava)}px`;
   for (const [id, el] of dots) if (!world.players.has(id)) { el.remove(); dots.delete(id); }

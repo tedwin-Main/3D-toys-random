@@ -347,7 +347,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; resetTiles(); return; }
     for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startRound();
   },
   onLobby() {
@@ -435,7 +435,7 @@ function playEvents(evs) {
     else if (e[0] === 'l' && e[1] === me) sfx.land(1);
     else if (e[0] === 'o') { sfx.out(e[1] === me); if (e[1] === me && world.mode === 'match') flash(`<small>you dropped out</small>${ord(e[2])} place`); }
     else if (e[0] === 'c') { if (world.mode === 'match') { sfx.beep(e[1] === 0); if (e[1] === 0) flash('GO!', 0.8); } }
-    else if (e[0] === 'w' && p) { if (world.mode === 'match') sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last bean standing'}</small>👑 ${esc(p.nick)}`, 4); }
+    else if (e[0] === 'w' && p) { if (world.mode === 'match') sfx.win(); flash(`<small>${e[1] === me ? 'you survived!' : 'last bean standing'}</small>${esc(p.nick)}`, 4); }
   }
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -479,7 +479,7 @@ function hud(dt) {
   if (world.phase === 'count') big(`<small>Round ${world.round} of ${ROUNDS}</small>${Math.max(1, Math.ceil(world.t))}`);
   else if (world.phase === 'final') {
     const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0];
-    big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`);
+    big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${esc(top?.nick ?? '')}`);
   } else if (flashT <= 0) big(world.phase === 'play' && me && !me.alive ? '<small>spectating</small>' : '');
   hudT -= dt;
   if (hudT > 0) return;
@@ -488,7 +488,7 @@ function hud(dt) {
   document.getElementById('alive').innerHTML = `${alive}<small> / ${ps.length} alive</small>`;
   document.getElementById('round').textContent = `Round ${world.round} of ${ROUNDS}${me ? ` · you: ${me.pts} pts` : ''}`;
   const r = ps.sort((a, b) => b.pts - a.pts || b.alive - a.alive);
-  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${'👑'.repeat(p.wins)} ${p.pts}</em></div>`).join('');
+  document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.wins ? `<small>${p.wins}W</small> ` : ''}${p.pts}</em></div>`).join('');
 }
 
 // Run engine > sim tick (worker)

@@ -22,6 +22,7 @@ npm run setup   # first time: installs deps
 npm start       # http://localhost:5066/  studio, /3d-toys/ toys, /3d-toys/rooms multiplayer relay
 npm run toys    # toy box alone on http://localhost:5055/3d-toys/
 npm test        # toy engine tests
+npm run room-test  # every multiplayer game with 14 real browser tabs over a lagged relay (Playwright, local only)
 npm run capture # studio posters + QA (Playwright, local only)
 ```
 

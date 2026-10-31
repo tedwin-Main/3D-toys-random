@@ -37,7 +37,7 @@
 <div id="board" class="card"></div>
 <div id="turn" class="card"></div>
 <div id="big"></div>
-<div id="hint" class="card">On <b>your turn</b> click a grass tile to dig. 💎 gem = +3 and dig again · 💣 bomb = −2 · empty tiles show how many <b style="color:#ff6b6b">bombs</b> and <b style="color:#5fe3ff">gems</b> touch them. Most gems when the last one is found wins.</div>
+<div id="hint" class="card">On <b>your turn</b> click a grass tile to dig. Gem = +3 and dig again · bomb = −2 · empty tiles show how many <b style="color:#ff6b6b">bombs</b> and <b style="color:#5fe3ff">gems</b> touch them. Most gems when the last one is found wins.</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -351,7 +351,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     const P = [];
     for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.35 + rng() * 0.55 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} bot`, color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.35 + rng() * 0.55 });
     S = newMatchState('match', P, settings.clock ?? 15);
     prevS = null; lastSig = '';
   },
@@ -387,8 +387,8 @@ function onChange(prev, cur) {
   if (cur.last && cur.last.mv !== prev?.last?.mv) {
     const t = tiles[cur.last.i], who = cur.P.find((p) => p.id === cur.last.by);
     if (t) {
-      if (cur.last.k === 'g') { sfx.gem(cur.last.by === me); burst(t.x, t.z, 26, 0x5fe3ff); if (match) flash(`<small>${esc(who?.nick ?? '')} digs again</small>💎 +${GEM_PTS}`); }
-      else if (cur.last.k === 'b') { sfx.boom(); burst(t.x, t.z, 40, 0x555555, 7); burst(t.x, t.z, 20, 0xff8c2a, 5); shake = 0.5; if (match) flash(`<small>${esc(who?.nick ?? '')}</small>💣 ${BOMB_PTS}`); }
+      if (cur.last.k === 'g') { sfx.gem(cur.last.by === me); burst(t.x, t.z, 26, 0x5fe3ff); if (match) flash(`<small>${esc(who?.nick ?? '')} digs again</small>Gem +${GEM_PTS}`); }
+      else if (cur.last.k === 'b') { sfx.boom(); burst(t.x, t.z, 40, 0x555555, 7); burst(t.x, t.z, 20, 0xff8c2a, 5); shake = 0.5; if (match) flash(`<small>${esc(who?.nick ?? '')}</small>Bomb ${BOMB_PTS}`); }
       else { sfx.dig(); burst(t.x, t.z, 14, 0x8b6239, 4); }
     }
   }
@@ -423,18 +423,18 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me), up = S.P[S.turn], clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.n}×${S.n} meadow · ${gemsTotal()} gems hidden</small>Gem Diggers`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>richest digger with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>richest digger with ${w?.score ?? 0}</small>${esc(w?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
-  turnEl.innerHTML = S.ph !== 'play' ? (S.ph === 'final' ? '🏁 all gems found' : '⛏️ get ready') : up?.id === me?.id ? `<b>Your dig</b> · ${clock}s` : `${esc(up?.nick ?? '')} is digging${up?.bot ? '' : ` · ${clock}s`}`;
+  turnEl.innerHTML = S.ph !== 'play' ? (S.ph === 'final' ? 'All gems found' : 'Get ready') : up?.id === me?.id ? `<b>Your dig</b> · ${clock}s` : `${esc(up?.nick ?? '')} is digging${up?.bot ? '' : ` · ${clock}s`}`;
   if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
   lastClock = clock;
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.15;
-  document.getElementById('roundName').textContent = `💎 ${gemsLeft()} of ${gemsTotal()} left`;
+  document.getElementById('roundName').textContent = `${gemsLeft()} of ${gemsTotal()} gems left`;
   document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--gem)">${me.score}</b> · ${me.gems} gems` : 'Watching';
   const rows = [...S.P].sort((a, c) => c.score - a.score);
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p === up && S.ph === 'play' ? 'turn' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p === up && S.ph === 'play' ? '⛏️ ' : ''}${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p === up && S.ph === 'play' ? 'turn' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p === up && S.ph === 'play' ? '<b style="color:#ffd23f">DIG</b> ' : ''}${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

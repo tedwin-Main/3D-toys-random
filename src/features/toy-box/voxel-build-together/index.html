@@ -240,7 +240,7 @@ const lobby = createLobby({
 function syncTop() { const h = !!lobby.room?.isHost; ['lobbyBtn', 'clearBtn', 'saveBtn', 'loadBtn'].forEach((id) => (document.getElementById(id).style.display = h ? '' : 'none')); }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 document.getElementById('clearBtn').onclick = () => { if (confirm('Clear the whole build for everyone?')) { cells.clear(); dirty = true; lobby.room.send({ g: 'full', o: [] }); } };
-document.getElementById('saveBtn').onclick = () => { try { localStorage.setItem('block-party-save', JSON.stringify(encode())); big('<small>saved in this browser</small>💾'); setTimeout(() => big(''), 1200); } catch { big('<small>could not save</small>'); } };
+document.getElementById('saveBtn').onclick = () => { try { localStorage.setItem('block-party-save', JSON.stringify(encode())); big('<small>saved in this browser</small>Saved'); setTimeout(() => big(''), 1200); } catch { big('<small>could not save</small>'); } };
 document.getElementById('loadBtn').onclick = () => {
   let arr = null;
   try { arr = JSON.parse(localStorage.getItem('block-party-save') || 'null'); } catch { arr = null; }
@@ -389,9 +389,9 @@ addEventListener('keyup', (e) => (keys[e.code] = false));
 function undo() { const u = undoStack.pop(); if (!u) return; localEdit(u); undoStack.pop(); sfx.erase(0.6); }
 
 // HUD > tool buttons, palette, info line, builders list
-const TOOLS = [['place', '🧱 Build'], ['erase', '🧽 Erase'], ['paint', '🖌️ Paint'], ['pick', '💧 Pick']];
+const TOOLS = [['place', 'Build'], ['erase', 'Erase'], ['paint', 'Paint'], ['pick', 'Pick']];
 const toolsEl = document.getElementById('tools'), palEl = document.getElementById('pal');
-toolsEl.innerHTML = TOOLS.map(([t, l]) => `<button data-t="${t}">${l}</button>`).join('') + '<button data-t="undo" title="Undo (Ctrl+Z)">↩️</button>';
+toolsEl.innerHTML = TOOLS.map(([t, l]) => `<button data-t="${t}">${l}</button>`).join('') + '<button data-t="undo" title="Undo (Ctrl+Z)">Undo</button>';
 toolsEl.querySelectorAll('button').forEach((b) => (b.onclick = () => (b.dataset.t === 'undo' ? undo() : setTool(b.dataset.t))));
 palEl.innerHTML = PALETTE.map((c, i) => `<button data-c="${i}" style="background:${c}" title="${i < 9 ? i + 1 : i === 9 ? '0' : `Shift+${i - 8}`}"></button>`).join('');
 palEl.querySelectorAll('button').forEach((b) => (b.onclick = () => setColor(+b.dataset.c)));
@@ -406,7 +406,7 @@ function hud(dt) {
   hudT = 0.25;
   const room = lobby.room;
   document.getElementById('info').innerHTML = `<b>${cells.size}</b> blocks · tool <b>${TOOLS.find((t) => t[0] === state.tool)[1]}</b> · <span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;background:${PALETTE[state.color]}"></span>`;
-  document.getElementById('builders').innerHTML = `<div style="opacity:.6;margin-bottom:3px">Builders (${room.players.length}/14)</div>` + room.players.map((p) => `<div class="row ${p.id === room.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.id === room.host ? ' ⭐' : ''}</span><em>${state.placed.get(p.id) ?? 0}</em></div>`).join('');
+  document.getElementById('builders').innerHTML = `<div style="opacity:.6;margin-bottom:3px">Builders (${room.players.length}/14)</div>` + room.players.map((p) => `<div class="row ${p.id === room.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.id === room.host ? ' (host)' : ''}</span><em>${state.placed.get(p.id) ?? 0}</em></div>`).join('');
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 

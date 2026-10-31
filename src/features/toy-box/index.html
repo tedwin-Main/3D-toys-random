@@ -106,7 +106,7 @@ const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
 
 // Home > Filter tabs: All / Single player / Multiplayer, plus genre chips under Multiplayer; state lives in home hash (#f=multi&g=battle) so Back restores it
 const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
-const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['creative', '🧱 Creative']];
+const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['deduction', '🕵️ Deduction'], ['coop', '🤝 Co-op'], ['rhythm', '🎵 Rhythm'], ['creative', '🧱 Creative']];
 const isMulti = (t) => t.players === 'multi';
 const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || t.genre === g);
 let filter = 'all', genre = 'all';

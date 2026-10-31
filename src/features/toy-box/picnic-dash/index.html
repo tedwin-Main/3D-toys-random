@@ -44,7 +44,7 @@
   <button data-d="3">◀</button><button data-d="4">●</button><button data-d="1">▶</button>
   <span></span><button data-d="2">▼</button><span></span>
 </div><div class="s" id="padS"></div></div>
-<div id="hint" class="card">Everyone picks a step in secret (<b>WASD / arrows</b>, <b>Space</b> stay), then all critters move at once. Two heading for the same square, or swapping places, both bounce back. 🍎 = 1 · 🍉 = 3.</div>
+<div id="hint" class="card">Everyone picks a step in secret (<b>WASD / arrows</b>, <b>Space</b> stay), then all critters move at once. Two heading for the same square, or swapping places, both bounce back. apple = 1 · watermelon = 3.</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -340,7 +340,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     const P = [];
     for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, skill: 0 });
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.5 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} bot`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.5 });
     newMatchState('match', P, settings.turns ?? 20);
     prevS = null; lastSig = '';
   },
@@ -416,7 +416,7 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.turns} turns · everyone moves at once</small>Picnic Dash`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>fullest belly with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>fullest belly with ${w?.score ?? 0}</small>${esc(w?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
   const planning = me && S.ph === 'plan';
   pad.style.display = planning ? 'block' : 'none';
@@ -433,7 +433,7 @@ function hud(dt) {
   document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final scores' : `Turn ${Math.max(1, S.turn)} of ${S.turns}`;
   document.getElementById('roundMeta').innerHTML = me ? `Fruit <b style="color:var(--leaf)">${me.score}</b>` : 'Watching';
   const rows = [...S.P].sort((a, c) => c.score - a.score);
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${S.ph === 'plan' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${S.ph === 'plan' ? (p.lock ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#7cf0b4;margin-right:4px"></span>' : '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffcf5a;margin-right:4px"></span>') : ''}${p.score}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

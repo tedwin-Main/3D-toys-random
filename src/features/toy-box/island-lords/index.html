@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Island Lords</title>
+</head>
+<body>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, esc, seeded, shuffle } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#7cd8ff', bg: '#0e3a52', hint: 'Each turn everyone gives one secret order: tap your tile, then a neighbor to <b>march</b> (all but one troop), or tap your tile twice to <b>muster</b> +3 there. All orders happen at once; bigger army wins, the gap survives. Gold mines pay extra. Most land when the turns run out wins.' });
+
+// Map > axial hex grid of radius R, seeded so every tab builds the same island; water never cuts a start off
+const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const radiusFor = (n) => (n <= 4 ? 3 : n <= 8 ? 4 : 5);
+function genMap(seed, R, n) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const rng = seeded(seed + attempt * 7919), tiles = [], idx = new Map();
+    for (let q = -R; q <= R; q++) for (let r = Math.max(-R, -q - R); r <= Math.min(R, -q + R); r++) { idx.set(q + ',' + r, tiles.length); tiles.push({ q, r, water: false, mine: false, start: -1, h: 0.4 + rng() * 0.35 }); }
+    const ring = tiles.filter((t) => Math.max(Math.abs(t.q), Math.abs(t.r), Math.abs(-t.q - t.r)) === R - 1).sort((a, b) => Math.atan2(a.r + a.q / 2, a.q * 0.866) - Math.atan2(b.r + b.q / 2, b.q * 0.866));
+    const starts = [];
+    for (let i = 0; i < n; i++) { const t = ring[Math.floor((i * ring.length) / n)]; if (t && t.start < 0) { t.start = i; starts.push(t); } }
+    const near = (t, u) => Math.max(Math.abs(t.q - u.q), Math.abs(t.r - u.r), Math.abs(t.q + t.r - u.q - u.r)) <= 1;
+    for (const t of tiles) if (t.start < 0 && !starts.some((s) => near(s, t)) && rng() < 0.13) t.water = true;
+    const land = tiles.filter((t) => !t.water && t.start < 0 && !starts.some((s) => near(s, t)));
+    shuffle(land, rng).slice(0, Math.max(3, Math.round(n * 0.6))).forEach((t) => (t.mine = true));
+    const nb = (i) => DIRS.map(([dq, dr]) => idx.get(tiles[i].q + dq + ',' + (tiles[i].r + dr))).filter((j) => j != null && !tiles[j].water);
+    // flood from the first start: every start must be reachable, unreachable land sinks
+    const seen = new Set([idx.get(starts[0].q + ',' + starts[0].r)]), queue = [...seen];
+    while (queue.length) for (const j of nb(queue.shift())) if (!seen.has(j)) { seen.add(j); queue.push(j); }
+    if (starts.some((s) => !seen.has(idx.get(s.q + ',' + s.r)))) continue;
+    tiles.forEach((t, i) => { if (!t.water && !seen.has(i)) t.water = true; });
+    tiles.forEach((t, i) => (t.nb = nb(i)));
+    return tiles;
+  }
+  return null;
+}
+
+// Rules > own[i] = player id (0 neutral), troops[i]; one order per player per turn, resolved together
+const T = { intro: 4, resolve: 3.2, final: 12 }, MUSTER = 3;
+const BOT_NAMES = ['Baroness', 'Warden', 'Thane', 'Jarl', 'Marshal', 'Castellan', 'Reeve', 'Sheriff', 'Herald', 'Steward', 'Squire', 'Regent', 'Ranger', 'Admiral'];
+let MAP = null, mapKey = '';
+function mapFor(S) { const k = `${S.seed}:${S.R}:${S.nStart}`; if (k !== mapKey) { mapKey = k; MAP = genMap(S.seed, S.R, S.nStart); buildBoard(); } return MAP; }
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, at: 0, cap: -1, tiles: 0, out: false }; }
+function newMatch(settings, P) {
+  const S = { ph: 'intro', tt: T.intro, turn: 0, turns: settings.turns ?? 16, seed: Math.floor(Math.random() * 1e6), R: radiusFor(P.length), nStart: P.length, own: [], troops: [], res: null, P };
+  setupBoard(S);
+  return S;
+}
+function setupBoard(S) {
+  const map = mapFor(S);
+  S.own = map.map(() => 0);
+  S.troops = map.map((t) => (t.water ? 0 : t.mine ? 2 : 1));
+  shuffle([...S.P]).forEach((p, i) => { const k = map.findIndex((t) => t.start === i); p.cap = k; if (k >= 0) { S.own[k] = p.id; S.troops[k] = 4; } });
+  recount(S);
+}
+function recount(S) {
+  const map = mapFor(S);
+  for (const p of S.P) {
+    let tiles = 0, mines = 0;
+    S.own.forEach((o, i) => { if (o === p.id) { tiles++; if (map[i].mine) mines++; } });
+    p.tiles = tiles; p.score = tiles + mines * 2 + (S.own[p.cap] === p.id ? 3 : 0); p.out = tiles === 0;
+  }
+}
+function startTurn(S) {
+  S.turn++;
+  S._orders = {};
+  for (const p of S.P) { p.lock = p.out; p.at = 1.5 + Math.random() * 8; }
+  Object.assign(S, { ph: 'orders', tt: S.orderT ?? 20, res: null });
+}
+function valid(S, id, o) {
+  const map = mapFor(S);
+  if (!o || !Number.isInteger(o.a) || o.a < 0 || o.a >= map.length || S.own[o.a] !== id) return false;
+  if (o.k === 'muster') return true;
+  return o.k === 'march' && Number.isInteger(o.b) && map[o.a].nb.includes(o.b) && S.troops[o.a] >= 2;
+}
+function order(S, id, o) {
+  const p = S.P.find((q) => q.id === id);
+  if (!p || p.out || S.ph !== 'orders' || !valid(S, id, o)) return;
+  S._orders[id] = { k: o.k, a: o.a, b: o.b }; p.lock = true;
+}
+function resolve(S) {
+  const map = mapFor(S), orders = {};
+  for (const p of S.P) if (!p.out) orders[p.id] = S._orders[p.id] && valid(S, p.id, S._orders[p.id]) ? S._orders[p.id] : { k: 'muster', a: S.own[p.cap] === p.id ? p.cap : S.own.findIndex((o) => o === p.id) };
+  for (const [id, o] of Object.entries(orders)) if (o.k === 'muster' && o.a >= 0 && S.own[o.a] === +id) S.troops[o.a] += MUSTER;
+  // marches leave first, so two armies swapping tiles both arrive
+  const arrive = new Map();
+  for (const [id, o] of Object.entries(orders)) if (o.k === 'march') {
+    const move = S.troops[o.a] - 1;
+    S.troops[o.a] = 1;
+    const f = arrive.get(o.b) ?? new Map();
+    f.set(+id, (f.get(+id) ?? 0) + move);
+    arrive.set(o.b, f);
+  }
+  const fights = [];
+  for (const [tile, f] of arrive) {
+    const owner = S.own[tile];
+    f.set(owner, (f.get(owner) ?? 0) + S.troops[tile]);
+    const sides = [...f].sort((a, b) => b[1] - a[1]);
+    if (sides.length === 1 || sides[1][1] === 0) { S.own[tile] = sides[0][0]; S.troops[tile] = sides[0][1]; continue; }
+    const [top, second] = sides;
+    if (top[1] === second[1]) S.troops[tile] = 0;
+    else { if (top[0] !== owner) fights.push(tile); S.own[tile] = top[0]; S.troops[tile] = top[1] - second[1]; }
+  }
+  // income: 1 per 3 tiles (at least 1) plus 1 per mine, landing on the capital or the biggest garrison
+  for (const p of S.P) {
+    const mine = S.own.map((o, i) => (o === p.id ? i : -1)).filter((i) => i >= 0);
+    if (!mine.length) continue;
+    const inc = Math.max(1, Math.floor(mine.length / 3)) + mine.filter((i) => map[i].mine).length;
+    const at = S.own[p.cap] === p.id ? p.cap : mine.sort((a, b) => S.troops[b] - S.troops[a])[0];
+    S.troops[at] += inc;
+  }
+  recount(S);
+  Object.assign(S, { ph: 'resolve', tt: T.resolve, res: { orders, fights } });
+}
+// bots: attack the juiciest neighbor they can beat, else muster where enemies press hardest
+function botOrder(S, p) {
+  const map = mapFor(S), mine = S.own.map((o, i) => (o === p.id ? i : -1)).filter((i) => i >= 0);
+  let best = null, bv = 0;
+  for (const a of mine) {
+    if (S.troops[a] < 2) continue;
+    for (const b of map[a].nb) {
+      if (S.own[b] === p.id) continue;
+      const move = S.troops[a] - 1, def = S.troops[b] + (S.own[b] ? 1 : 0);
+      if (move <= def) continue;
+      const v = (map[b].mine ? 3 : 1) + (S.P.some((q) => q.cap === b && q.id !== p.id) ? 3 : 0) + (move - def) * 0.15 + Math.random() * 0.8;
+      if (v > bv) { bv = v; best = { k: 'march', a, b }; }
+    }
+  }
+  if (best && Math.random() < 0.85) return best;
+  const threat = (i) => map[i].nb.reduce((s, j) => s + (S.own[j] && S.own[j] !== p.id ? S.troops[j] : 0), 0);
+  const front = mine.sort((x, y) => threat(y) - threat(x))[0];
+  return { k: 'muster', a: front ?? p.cap };
+}
+
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startTurn(S);
+  else if (S.ph === 'orders') {
+    for (const p of S.P) if (p.bot && !p.lock && (S.orderT ?? 20) - S.tt >= p.at) order(S, p.id, botOrder(S, p));
+    if (S.tt <= 0 || S.P.every((p) => p.lock)) resolve(S);
+  } else if (S.ph === 'resolve' && S.tt <= 0) {
+    const alive = S.P.filter((p) => !p.out);
+    if (S.turn >= S.turns || alive.length <= 1) Object.assign(S, { ph: 'final', tt: T.final });
+    else startTurn(S);
+  } else if (S.ph === 'final' && S.tt <= 0) {
+    if (S.mode === 'attract') { S.seed++; S.turn = 0; setupBoard(S); startTurn(S); }
+    else if (game.isHost) game.backToLobby();
+  }
+}
+function action(S, from, a) { if (a.t === 'order') order(S, from, a.o); }
+function promote(S) { S._orders = {}; if (S.ph === 'orders') { for (const p of S.P) p.lock = p.out; S.tt = Math.max(S.tt, 8); S.ask = (S.ask ?? 0) + 1; if (myOrder?.turn === S.turn) order(S, game.me, myOrder.o); } }
+// late joiner: the most remote neutral tile becomes their capital
+function joined(S, p) {
+  const map = mapFor(S);
+  let best = -1, bd = -1;
+  map.forEach((t, i) => {
+    if (t.water || S.own[i]) return;
+    const d = Math.min(99, ...S.own.map((o, j) => (o ? Math.max(Math.abs(t.q - map[j].q), Math.abs(t.r - map[j].r), Math.abs(t.q + t.r - map[j].q - map[j].r)) : 99)));
+    if (d > bd) { bd = d; best = i; }
+  });
+  if (best >= 0) { S.own[best] = p.id; S.troops[best] = 5; p.cap = best; }
+  p.lock = S.ph === 'orders' ? false : true;
+  recount(S);
+}
+function left(S, ids) { S.own = S.own.map((o) => (ids.includes(o) ? 0 : o)); recount(S); }
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ turns: 14 }, P);
+  S.orderT = 4; S.tt = 1;
+  return S;
+}
+
+// Scene > sea, hex prisms colored by owner, castles on capitals, troop counts on every land tile
+const { renderer, scene, camera } = createStage({ bg: 0x0e3a52, fog: [26, 70], shadowBox: 14 });
+const sea = new THREE.Mesh(new THREE.CircleGeometry(60, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x1673a0, roughness: 0.3, metalness: 0.1 }));
+sea.position.y = -0.1;
+scene.add(sea);
+const HEX = 1.05, hexGeo = new THREE.CylinderGeometry(HEX * 0.96, HEX * 0.96, 1, 6);
+const board = new THREE.Group();
+scene.add(board);
+const tileMeshes = [], numSprites = [];
+const pos = (t) => [HEX * Math.sqrt(3) * (t.q + t.r / 2), HEX * 1.5 * t.r];
+const numCache = new Map();
+function numTex(n, light) {
+  const k = n + (light ? 'l' : 'd');
+  if (numCache.has(k)) return numCache.get(k);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = light ? 'rgba(255,255,255,0.9)' : 'rgba(10,20,30,0.75)'; g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2); g.fill();
+  g.fillStyle = light ? '#10202c' : '#fff'; g.font = '900 30px ui-rounded, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n, 32, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  numCache.set(k, t);
+  return t;
+}
+const castles = new Map();
+function buildBoard() {
+  board.clear(); tileMeshes.length = 0; numSprites.length = 0;
+  for (const c of castles.values()) scene.remove(c);
+  castles.clear();
+  MAP?.forEach((t, i) => {
+    const [x, z] = pos(t);
+    const m = new THREE.Mesh(hexGeo, new THREE.MeshStandardMaterial({ color: t.water ? 0x1a6d96 : 0xcfc59a, roughness: 0.8, flatShading: true }));
+    m.scale.y = t.water ? 0.05 : t.h; m.position.set(x, (t.water ? 0.05 : t.h) / 2, z);
+    m.castShadow = m.receiveShadow = !t.water;
+    m.userData.i = i;
+    board.add(m); tileMeshes.push(m);
+    if (t.mine) { const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0x7a5a00, metalness: 0.6, roughness: 0.2 })); gem.position.set(x - 0.45, t.h + 0.3, z - 0.2); gem.userData.spin = true; board.add(gem); }
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ depthWrite: false, transparent: true }));
+    s.scale.setScalar(0.62); s.position.set(x, t.h + 0.55, z + 0.15); s.renderOrder = 4; s.visible = !t.water;
+    board.add(s); numSprites.push(s);
+  });
+}
+function castle(color) {
+  const g = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+  const keep = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.55), mat); keep.position.y = 0.3;
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.9, 10), mat); tower.position.set(0.25, 0.45, -0.25);
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.18), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide })); flag.position.set(0.4, 1.05, -0.25);
+  keep.castShadow = tower.castShadow = true;
+  g.add(keep, tower, flag);
+  return g;
+}
+const arrows = new THREE.Group();
+scene.add(arrows);
+const selRing = new THREE.Mesh(new THREE.TorusGeometry(HEX * 0.8, 0.07, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+selRing.rotation.x = Math.PI / 2; selRing.visible = false;
+scene.add(selRing);
+
+// Audio
+const { tone, noise } = createGameAudio();
+const sfx = {
+  order(me) { if (me) tone(600, 900, 0.08, 0.06, 'triangle'); },
+  march() { for (let i = 0; i < 6; i++) noise(0.05, 0.05, 900, 400, 'lowpass', i * 0.11); },
+  clash() { noise(0.25, 0.1, 2500, 500, 'bandpass'); tone(200, 90, 0.3, 0.06, 'sawtooth'); },
+  horn() { tone(220, 220, 0.5, 0.06, 'sawtooth'); tone(330, 330, 0.5, 0.04, 'sawtooth', 0.1); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// View
+let myOrder = null, sel = -1;
+function change(prev, cur) {
+  mapFor(cur);
+  if (prev?.ph !== cur.ph || prev?.turn !== cur.turn) {
+    if (cur.ph === 'orders') { sel = -1; myOrder = null; dockKey = ''; }
+    if (cur.ph === 'resolve' && cur.res) { sfx.march(); if (cur.res.fights.length) setTimeout(sfx.clash, 350); drawArrows(cur); }
+    if (cur.ph === 'final') sfx.horn();
+  }
+  if (cur.ask && cur.ask !== prev?.ask && !game.isHost && myOrder?.turn === cur.turn) game.act({ t: 'order', o: myOrder.o });
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !p.out && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.order(p.id === game.me);
+  paint(cur);
+}
+function paint(S) {
+  if (!MAP) return;
+  MAP.forEach((t, i) => {
+    if (t.water) return;
+    const o = S.own[i], p = o ? S.P.find((q) => q.id === o) : null;
+    tileMeshes[i].material.color.set(p ? p.color : 0xcfc59a);
+    numSprites[i].material.map = numTex(S.troops[i], !p);
+    numSprites[i].material.needsUpdate = true;
+  });
+  const want = new Set();
+  for (const p of S.P) if (p.cap >= 0 && S.own[p.cap] === p.id) {
+    want.add(p.id);
+    let c = castles.get(p.id);
+    if (!c) { c = castle(p.color); castles.set(p.id, c); scene.add(c); }
+    const [x, z] = pos(MAP[p.cap]);
+    c.position.set(x + 0.35, MAP[p.cap].h, z - 0.35);
+  }
+  for (const [id, c] of castles) if (!want.has(id)) { scene.remove(c); castles.delete(id); }
+}
+function drawArrows(S) {
+  arrows.clear();
+  for (const [id, o] of Object.entries(S.res.orders)) {
+    if (o.k !== 'march') continue;
+    const p = S.P.find((q) => q.id === +id), a = MAP[o.a], b = MAP[o.b];
+    if (!p || !a || !b) continue;
+    const [x1, z1] = pos(a), [x2, z2] = pos(b);
+    const dir = new THREE.Vector3(x2 - x1, 0, z2 - z1);
+    const ar = new THREE.ArrowHelper(dir.clone().normalize(), new THREE.Vector3(x1, 1.4, z1), dir.length() * 0.85, new THREE.Color(p.color), 0.45, 0.35);
+    arrows.add(ar);
+  }
+}
+
+// Input > tap your tile, then a neighbor (march) or the same tile (muster)
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const S = game.S, me = game.mine();
+  if (!me || me.out || S.ph !== 'orders' || !MAP) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(tileMeshes)[0];
+  if (!hit) return;
+  const i = hit.object.userData.i;
+  if (sel >= 0 && i === sel) send({ k: 'muster', a: sel });
+  else if (sel >= 0 && MAP[sel].nb.includes(i) && S.troops[sel] >= 2) send({ k: 'march', a: sel, b: i });
+  else sel = S.own[i] === me.id ? i : -1;
+  dockKey = '';
+});
+function send(o) { myOrder = { turn: game.S.turn, o }; game.act({ t: 'order', o }); sel = -1; dockKey = ''; }
+let dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock, on = me && !me.out && S.ph === 'orders';
+  const key = JSON.stringify([on, sel, myOrder, S.turn]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = on ? 'block' : 'none';
+  if (!on) return;
+  const o = myOrder?.turn === S.turn ? myOrder.o : null;
+  const desc = o ? (o.k === 'muster' ? `Muster +${MUSTER} on your tile` : `March ${S.troops[o.a] - 1} troops`) : sel >= 0 ? (S.troops[sel] >= 2 ? 'Tap a neighbor to march, or this tile again to muster' : 'One troop cannot march: tap again to muster') : 'Tap one of your tiles';
+  dock.innerHTML = `<div class="s" style="margin:0 0 6px;font-weight:800;font-size:14px">${desc}</div><div class="btns"><button data-cap ${me.cap >= 0 && S.own[me.cap] === me.id ? '' : 'disabled'}>Muster at castle</button>${sel >= 0 ? '<button data-cancel>Cancel</button>' : ''}</div><div class="s" id="dockS"></div>`;
+  dock.querySelector('[data-cap]').onclick = () => send({ k: 'muster', a: me.cap });
+  dock.querySelector('[data-cancel]')?.addEventListener('click', () => { sel = -1; dockKey = ''; });
+}
+
+// HUD
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match', clock = Math.ceil(Math.max(0, S.tt));
+  hud.flashing(dt);
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.turns} turns · secret orders</small>Island Lords`);
+    else if (S.ph === 'resolve') hud.big(S.res?.fights.length ? `<small>${S.res.fights.length} tile${S.res.fights.length > 1 ? 's' : ''} changed hands</small>Turn ${S.turn}` : '');
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} points of land</small>${esc(w?.nick ?? '')} rules`); }
+    else hud.big(me?.out ? '<small>no land left</small>Watching' : '');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) { ds.textContent = `${clock}s · ${S.P.filter((p) => !p.lock).length} lords still deciding`; if (clock !== lastClock && clock <= 3 && !me.lock) sfx.tick(); }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Turn ${Math.max(1, S.turn)} of ${S.turns}`, me ? `Land <b style="color:var(--accent)">${me.score}</b> · ${me.tiles} tiles` : 'Watching');
+  hud.board([...S.P].sort((a, c) => c.score - a.score).map((p) => ({ p, out: p.out, right: S.ph === 'orders' && !p.out ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : `${p.score} <small>${p.tiles}t</small>` })), game.me);
+}
+
+const game = createTableGame({
+  lobby: {
+    game: 'island-lords', title: 'Island Lords', emoji: '🏝️', accent: '#7cd8ff',
+    blurb: 'Territory strategy for 2-14 on a seeded hex island. Every turn each lord gives one secret order (march or muster) and all orders happen at once. Bigger army wins a tile, the difference survives. Most land when the turns run out wins.',
+    defaultBots: 5, minPlayers: 2,
+    note: 'Up to 14 lords (humans + bots). Score = tiles + 2 per gold mine + 3 for holding your own castle.',
+    settings: [
+      { key: 'turns', label: 'Turns', options: [[12, '12'], [16, '16'], [20, '20']], value: 16 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, joined, left, change,
+});
+
+// Run engine > render
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  mapFor(S);
+  board.children.forEach((c) => { if (c.userData.spin) c.rotation.y = time * 1.5; });
+  if (S.ph !== 'resolve' && arrows.children.length) arrows.clear();
+  selRing.visible = sel >= 0 && S.ph === 'orders' && !!MAP?.[sel];
+  if (selRing.visible) { const [x, z] = pos(MAP[sel]); selRing.position.set(x, MAP[sel].h + 0.05, z); selRing.scale.setScalar(1 + Math.sin(time * 6) * 0.05); }
+  hudFrame(S, dt);
+  const R = S.R ?? 4, fit = Math.max(1, 1.25 / camera.aspect);
+  camera.position.set(0, (R * 3.4 + 4) * fit, (R * 2.2 + 3) * fit);
+  camera.lookAt(0, 0, 0.8);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

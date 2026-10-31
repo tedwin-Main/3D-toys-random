@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Beat Drop</title>
+<style>
+  #pads { position: fixed; left: 0; right: 0; bottom: 0; height: 26vh; display: none; z-index: 4; }
+  #pads div { position: absolute; bottom: 0; height: 100%; border-top: 2px solid rgba(255,255,255,0.12); }
+  #pads div.hit { background: rgba(255,255,255,0.12); }
+  #judge { position: fixed; top: 44%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(22px, 4.5vw, 40px); font-weight: 900; pointer-events: none; text-shadow: 0 3px 0 rgba(0,0,0,0.5); z-index: 5; }
+  #combo { position: fixed; top: 52%; left: 50%; transform: translateX(-50%); font-size: 15px; font-weight: 800; opacity: 0.85; pointer-events: none; z-index: 5; }
+  @media (pointer: fine) { #pads { display: none !important; } }
+</style>
+</head>
+<body>
+<div id="pads"><div></div><div></div><div></div><div></div></div>
+<div id="judge"></div>
+<div id="combo"></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, esc, seeded } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#ff4fd8', bg: '#090616', hint: 'Everyone plays the same song on their own device. Hit notes as they cross the line: <b>D F J K</b> or arrow keys, or tap the lanes. Your timing is judged right here, so lag never costs a note; only the score travels.' });
+
+// Scene > neon highway with four lanes and a hit line; the crowd of players bounces behind it
+const { renderer, scene, camera, hemi, key } = createStage({ bg: 0x090616, fog: [18, 60] });
+hemi.intensity = 0.4; key.intensity = 0.6;
+const LANE_COL = [0xff4f6d, 0xffd23f, 0x3fd2ff, 0x7cf07c];
+const LW = 1.3, HIT_Z = 3, FAR_Z = -40, SPEED = 16;
+const road = new THREE.Mesh(new THREE.PlaneGeometry(LW * 4 + 0.4, 60).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x15102a, roughness: 0.5, metalness: 0.3 }));
+road.position.z = -14;
+scene.add(road);
+const laneX = (i) => (i - 1.5) * LW;
+for (let i = 0; i <= 4; i++) {
+  const l = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 60), new THREE.MeshBasicMaterial({ color: 0x5a3a8a }));
+  l.position.set((i - 2) * LW, 0.01, -14);
+  scene.add(l);
+}
+const keysGlow = LANE_COL.map((c, i) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(LW * 0.9, 0.08, 0.5), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.35 }));
+  m.position.set(laneX(i), 0.05, HIT_Z);
+  scene.add(m);
+  return m;
+});
+const grid = new THREE.GridHelper(200, 80, 0x3a1a6a, 0x1a0d33);
+grid.position.y = -0.05;
+scene.add(grid);
+const sun = new THREE.Mesh(new THREE.CircleGeometry(9, 40), new THREE.MeshBasicMaterial({ color: 0xff4fd8 }));
+sun.position.set(0, 7, -58);
+scene.add(sun);
+const noteGeo = new THREE.BoxGeometry(LW * 0.8, 0.25, 0.5);
+const noteMats = LANE_COL.map((c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.8 }));
+const notePool = [];
+function noteMesh(i) {
+  let m = notePool.find((n) => !n.visible);
+  if (!m) { m = new THREE.Mesh(noteGeo, noteMats[0]); scene.add(m); notePool.push(m); }
+  m.material = noteMats[i]; m.visible = true;
+  return m;
+}
+const pawns = createPawns(scene, { height: 0.9 });
+
+// Audio > synth band: kick, hat, bass, and a lead voice per lane
+const audio = createGameAudio({ noiseSeconds: 1, noiseFilter: 'highpass' });
+const { tone, noise } = audio;
+const SCALE = [0, 3, 5, 7, 10, 12, 15];
+function playKick(at) { tone(140, 40, 0.18, 0.18, 'sine', at); }
+function playHat(at) { noise(0.04, 0.03, 8000, 6000, 'highpass', at); }
+function playBass(f, at) { tone(f, f, 0.2, 0.06, 'sawtooth', at); }
+function playLead(f, at, v = 0.05) { tone(f, f * 1.002, 0.16, v, 'square', at); }
+
+// Rules > songs come from a published seed so every device builds the same chart; timing is judged locally
+const T = { intro: 3, ready: 4, results: 7, final: 12 }, LEAD_IN = 2.5, GRACE = 3;
+const JUDGE = [[0.05, 'Perfect', 300, '#7cf0b4'], [0.095, 'Great', 200, '#3fd2ff'], [0.14, 'Good', 100, '#ffd23f']];
+const BOT_NAMES = ['Bassline', 'Snare', 'Tempo', 'Groove', 'Reverb', 'Synth', 'Vinyl', 'Echo', 'Treble', 'Cymbal', 'Remix', 'Loop', 'Sample', 'Mixer'];
+const SONG_NAMES = ['Neon Rain', 'Glass Arcade', 'Night Market', 'Moon Taxi', 'Pixel Tide', 'Cherry Static', 'Laser Garden', 'Sugar Circuit'];
+// chart: [{ t (s from song start), lane }]; level 0..2 adds density
+function makeSong(seed, level) {
+  const r = seeded(seed), bpm = 104 + Math.floor(r() * 4) * 10, beat = 60 / bpm, bars = 18 + level * 2;
+  const notes = [], root = 110 * 2 ** (Math.floor(r() * 5) / 12);
+  const density = [0.38, 0.5, 0.62][level];
+  let lane = 1;
+  for (let bar = 0; bar < bars; bar++) {
+    const fill = bar % 4 === 3, quiet = bar < 2;
+    for (let s = 0; s < 8; s++) {
+      const on = s % 2 === 0 ? r() < density + 0.25 : r() < density * (fill ? 0.9 : 0.45);
+      if (!on || (quiet && s % 4)) continue;
+      lane = r() < 0.6 ? (lane + (r() < 0.5 ? 1 : 3)) % 4 : Math.floor(r() * 4);
+      notes.push({ t: (bar * 8 + s) * beat / 2, lane });
+      if (level >= 1 && s % 4 === 0 && r() < 0.12 * level) notes.push({ t: (bar * 8 + s) * beat / 2, lane: (lane + 2) % 4 });
+    }
+  }
+  return { bpm, beat, bars, len: bars * 4 * beat, notes, root, name: SONG_NAMES[seed % SONG_NAMES.length] };
+}
+const songLen = (seed, level) => makeSong(seed, level).len;
+
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, songs: {}, s: 0, c: 0, best: 0, acc: 100, prog: 0, skill: 0.62 + Math.random() * 0.33 }; }
+function newMatch(settings, P) { return { ph: 'intro', tt: T.intro, rd: 0, rounds: settings.rounds ?? 3, level: settings.level ?? 1, seed: Math.floor(Math.random() * 1e6), len: 0, P }; }
+function startReady(S) {
+  S.rd++;
+  for (const p of S.P) Object.assign(p, { s: 0, c: 0, best: 0, acc: 100, prog: 0 });
+  S.len = songLen(S.seed + S.rd, S.level);
+  Object.assign(S, { ph: 'ready', tt: T.ready });
+}
+function total(p) { return Object.values(p.songs).reduce((a, b) => a + b, 0); }
+
+// Bots > simulated players: hit chance from skill, combo breaks on misses
+function botPlay(S, p, dt) {
+  const song = botSongs.get(S.seed + S.rd) ?? botSongs.set(S.seed + S.rd, makeSong(S.seed + S.rd, S.level)).get(S.seed + S.rd);
+  const t = S.len + GRACE - S.tt - LEAD_IN;
+  p._i ??= 0; p._hits ??= 0;
+  while (p._i < song.notes.length && song.notes[p._i].t <= t) {
+    p._i++;
+    const roll = Math.random();
+    if (roll < p.skill) { const j = roll < p.skill * 0.55 ? 0 : roll < p.skill * 0.85 ? 1 : 2; p.c++; p.best = Math.max(p.best, p.c); p.s += Math.round(JUDGE[j][2] * mult(p.c)); p._hits++; }
+    else p.c = 0;
+  }
+  p.prog = Math.round((p._i / song.notes.length) * 100);
+  p.acc = p._i ? Math.round((p._hits / p._i) * 100) : 100;
+  p.songs[S.rd] = p.s;
+  p.score = total(p);
+}
+const botSongs = new Map();
+const mult = (c) => 1 + Math.min(10, Math.floor(c / 10)) * 0.1;
+
+// Run engine > host tick
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'intro' && S.tt <= 0) startReady(S);
+  else if (S.ph === 'ready' && S.tt <= 0) Object.assign(S, { ph: 'play', tt: S.len + LEAD_IN + GRACE });
+  else if (S.ph === 'play') {
+    for (const p of S.P) if (p.bot) botPlay(S, p, dt);
+    if (S.tt <= 0) { for (const p of S.P) { delete p._i; delete p._hits; } Object.assign(S, { ph: 'results', tt: T.results }); }
+  } else if (S.ph === 'results' && S.tt <= 0) {
+    if (S.rd < S.rounds) startReady(S);
+    else if (S.mode === 'attract') { S.rd = 0; S.seed++; for (const p of S.P) { p.songs = {}; p.score = 0; } startReady(S); }
+    else Object.assign(S, { ph: 'final', tt: T.final });
+  } else if (S.ph === 'final' && S.tt <= 0 && game.isHost) game.backToLobby();
+}
+// a device reports its own score for song r; late reports still count toward that song
+function action(S, from, a) {
+  const p = S.P.find((q) => q.id === from);
+  if (!p || a.t !== 'score' || !Number.isInteger(a.r) || a.r < 1 || a.r > S.rd) return;
+  const max = 300 * 2 * 400;
+  p.songs[a.r] = Math.max(0, Math.min(max, Math.round(+a.s || 0)));
+  if (a.r === S.rd) Object.assign(p, { s: p.songs[a.r], c: a.c | 0, best: a.b | 0, acc: Math.max(0, Math.min(100, a.acc | 0)), prog: Math.max(0, Math.min(100, a.pg | 0)) });
+  p.score = total(p);
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 6; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926'][i], true));
+  const S = newMatch({ rounds: 3, level: 1 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// Local play > this device's run of the current song: clock, notes, judging, score reports
+let run = null;
+// demo = attract mode behind the lobby: the chart scrolls and plays itself, silently
+function startRun(S, demo = false) {
+  const song = makeSong(S.seed + S.rd, S.level);
+  const ctx = demo ? null : audio.unlock();
+  const clockNow = () => (ctx && ctx.state === 'running' ? ctx.currentTime : performance.now() / 1000);
+  run = { rd: S.rd, song, clockNow, t0: clockNow() + LEAD_IN, next: 0, judged: 0, hits: 0, s: 0, c: 0, best: 0, notes: song.notes.map((n) => ({ ...n, done: false, m: null })), beatAt: 0, sent: 0, done: false, demo, playing: !demo && !!game.mine() };
+  if (!demo) scheduleMusic(run);
+}
+// music is scheduled ~1.5 s ahead each frame (hundreds of nodes at once would hitch a phone at the drop)
+function scheduleMusic(r) {
+  if (!audio.ctx || audio.ctx.state !== 'running') return;
+  const { song } = r, now = audio.ctx.currentTime, horizon = now + 1.5, bass = [0, 0, 5, 3];
+  r.bi ??= 0; r.ni ??= 0;
+  while (r.bi < song.bars * 4 && r.t0 + r.bi * song.beat < horizon) {
+    const b = r.bi++, at = r.t0 + b * song.beat - now;
+    if (at < 0) continue;
+    playKick(at);
+    playHat(at + song.beat / 2);
+    playBass(song.root * 2 ** (bass[Math.floor(b / 4) % 4] / 12), at);
+  }
+  // the lead plays the chart, so the song is the notes you are hitting
+  while (r.ni < song.notes.length && r.t0 + song.notes[r.ni].t < horizon) {
+    const n = song.notes[r.ni++], at = r.t0 + n.t - now;
+    if (at >= 0) playLead(song.root * 4 * 2 ** (SCALE[(n.lane * 2 + Math.floor(n.t / song.beat)) % SCALE.length] / 12), at, 0.025);
+  }
+}
+function hitLane(lane) {
+  pressFx(lane);
+  if (!run || !run.playing || run.done) return;
+  const t = run.clockNow() - run.t0;
+  let best = null;
+  for (const n of run.notes) {
+    if (n.done || n.lane !== lane) continue;
+    const d = Math.abs(n.t - t);
+    if (d <= JUDGE[2][0] && (!best || d < Math.abs(best.t - t))) best = n;
+    if (n.t - t > 0.3) break;
+  }
+  if (!best) return;
+  const d = Math.abs(best.t - t), j = JUDGE.find((x) => d <= x[0]);
+  best.done = true; run.judged++; run.hits++; run.c++; run.best = Math.max(run.best, run.c);
+  run.s += Math.round(j[2] * mult(run.c));
+  judge(j[1], j[3]);
+}
+function miss() { run.c = 0; run.judged++; judge('Miss', '#ff6b6b'); }
+function report(force) {
+  const now = performance.now();
+  if (!force && now - run.sent < 500) return;
+  run.sent = now;
+  game.act({ t: 'score', r: run.rd, s: run.s, c: run.c, b: run.best, acc: run.judged ? Math.round((run.hits / run.judged) * 100) : 100, pg: Math.round((run.judged / run.notes.length) * 100) });
+}
+const judgeEl = document.getElementById('judge'), comboEl = document.getElementById('combo');
+let judgeT = 0;
+function judge(text, color) { judgeEl.textContent = text; judgeEl.style.color = color; judgeT = 0.5; }
+
+// Input > D F J K, arrows, or tap a lane
+const KEYMAP = { d: 0, f: 1, j: 2, k: 3, ArrowLeft: 0, ArrowDown: 1, ArrowUp: 2, ArrowRight: 3 };
+addEventListener('keydown', (e) => { if (e.repeat) return; const l = KEYMAP[e.key] ?? KEYMAP[e.key.toLowerCase()]; if (l != null) { e.preventDefault(); hitLane(l); } });
+const padEls = [...document.querySelectorAll('#pads div')];
+padEls.forEach((el, i) => el.addEventListener('pointerdown', (e) => { e.preventDefault(); hitLane(i); }));
+function layoutPads() { const w = innerWidth / 4; padEls.forEach((el, i) => { el.style.left = `${i * w}px`; el.style.width = `${w}px`; el.style.background = `linear-gradient(transparent, #${LANE_COL[i].toString(16).padStart(6, '0')}33)`; }); }
+layoutPads(); addEventListener('resize', layoutPads);
+const pressT = [0, 0, 0, 0];
+function pressFx(l) { pressT[l] = 0.12; }
+
+// View > state changes start and stop this device's run
+function change(prev, cur) {
+  if (cur.mode !== 'match') { if (cur.ph === 'play' && (!run || !run.demo || run.rd !== cur.rd)) startRun(cur, true); else if (cur.ph !== 'play' && run?.demo) run = null; if (run && !run.demo) run = null; return; }
+  if (cur.ph === 'play' && (!run || run.demo || run.rd !== cur.rd)) startRun(cur);
+  if (cur.ph !== 'play' && run && !run.done && prev?.ph === 'play') { run.done = true; report(true); }
+}
+
+// HUD
+let hudT = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match';
+  hud.flashing(dt);
+  const song = run?.song;
+  document.getElementById('pads').style.display = match && S.ph === 'play' && me ? 'block' : 'none';
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds} songs · everyone plays at once</small>Beat Drop`);
+    else if (S.ph === 'ready') hud.big(`<small>song ${S.rd} of ${S.rounds} · ${['easy', 'normal', 'hard'][S.level]}</small>${esc(makeSongName(S))}`);
+    else if (S.ph === 'play' && run) { const left = run.t0 - run.clockNow(); hud.big(left > 0 ? `<small>get ready</small>${Math.ceil(left)}` : ''); }
+    else if (S.ph === 'results') { const w = [...S.P].sort((a, c) => (c.songs[S.rd] ?? 0) - (a.songs[S.rd] ?? 0))[0]; hud.big(`<small>top of song ${S.rd}</small>${esc(w?.nick ?? '')}`); }
+    else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; hud.big(`<small>${w?.score ?? 0} points</small>${esc(w?.nick ?? '')} wins`); }
+    else hud.big('');
+  } else hud.big('');
+  judgeT -= dt;
+  judgeEl.style.opacity = judgeT > 0 ? 1 : 0;
+  comboEl.textContent = run && run.c >= 5 && S.ph === 'play' ? `${run.c} combo · ×${mult(run.c).toFixed(1)}` : '';
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  hud.info(S.ph === 'final' ? 'Final' : `Song ${Math.max(1, S.rd)} of ${S.rounds}`, me ? `Total <b style="color:var(--accent)">${me.score}</b>${run && S.ph === 'play' ? ` · this song ${run.s}` : ''}` : 'Watching');
+  const live = S.ph === 'play' || S.ph === 'results';
+  const rows = [...S.P].sort((a, c) => (live ? (c.songs[S.rd] ?? 0) - (a.songs[S.rd] ?? 0) : c.score - a.score));
+  hud.board(rows.map((p) => ({ p, right: live ? `${p.songs[S.rd] ?? 0} <small>${p.acc}%</small>` : `${p.score}` })), game.me);
+}
+const makeSongName = (S) => SONG_NAMES[(S.seed + S.rd) % SONG_NAMES.length];
+
+// Multiplayer > kit (score reports are small and frequent, so the host batches publishes)
+const game = createTableGame({
+  lobby: {
+    game: 'beat-drop', title: 'Beat Drop', emoji: '🎵', accent: '#ff4fd8',
+    blurb: 'Rhythm race for 1-14. Everyone plays the same song chart on their own device, which judges timing locally; only scores travel, so the scoreboard races live and lag never costs a note.',
+    defaultBots: 5, minPlayers: 1,
+    note: 'Up to 14 players (humans + bots). Keys D F J K or arrows; on a phone, tap the four lanes. Sound on for the music.',
+    settings: [
+      { key: 'rounds', label: 'Songs', options: [[2, '2'], [3, '3'], [4, '4']], value: 3 },
+      { key: 'level', label: 'Level', options: [[0, 'Easy'], [1, 'Normal'], [2, 'Hard']], value: 1 },
+    ],
+  },
+  publishGap: 0.25,
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, change,
+});
+
+// Run engine > render: notes scroll to the hit line on this device's own clock
+const clock = new THREE.Clock();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  for (const m of notePool) m.visible = false;
+  if (run) {
+    const t = run.clockNow() - run.t0;
+    for (const n of run.notes) {
+      if (run.demo && !n.done && t >= n.t) { n.done = true; pressFx(n.lane); continue; }
+      if (!n.done && t - n.t > JUDGE[2][0]) { n.done = true; if (run.playing && !run.done) miss(); }
+      if (n.done) continue;
+      const z = HIT_Z - (n.t - t) * SPEED;
+      if (z < FAR_Z) break;
+      const m = noteMesh(n.lane);
+      m.position.set(laneX(n.lane), 0.15, z);
+    }
+    if (!run.demo) scheduleMusic(run);
+    if (run.playing && !run.done) {
+      report(false);
+      if (t > run.song.len + 0.5) { run.done = true; report(true); }
+    }
+  }
+  for (let i = 0; i < 4; i++) { pressT[i] -= dt; keysGlow[i].material.opacity = pressT[i] > 0 ? 0.95 : 0.35; padEls[i].classList.toggle('hit', pressT[i] > 0); }
+  // background beat pulse
+  const beat = run?.song ? ((run.clockNow() - run.t0) / run.song.beat) % 1 : (time * 2) % 1;
+  sun.scale.setScalar(1 + Math.max(0, 0.08 - beat * 0.1));
+  grid.position.z = ((time * SPEED * 0.25) % 2.5);
+  pawns.prune(S.P);
+  const ranked = [...S.P].sort((a, c) => (c.songs?.[S.rd] ?? 0) - (a.songs?.[S.rd] ?? 0));
+  const n = S.P.length;
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), rank = ranked.indexOf(p);
+    const side = i % 2 ? 1 : -1, k = Math.floor(i / 2);
+    g.position.set(side * (4.2 + k * 1.1), 0, -6 - (n > 1 ? rank / (n - 1) : 0) * 2 + k * 0.6);
+    g.rotation.y = side > 0 ? -0.5 : 0.5;
+    g.userData.body.position.y = S.ph === 'play' ? Math.max(0, Math.sin((beat + i * 0.13) * Math.PI)) * (0.15 + (p.c ?? 0) / 120) : 0;
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.2 / camera.aspect);
+  camera.position.set(0, 3.6 * fit, 10 * fit);
+  camera.lookAt(0, 0, -8);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

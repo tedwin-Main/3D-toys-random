@@ -302,7 +302,7 @@ const sfx = {
 // Game > World
 const BOT_NAMES = ['Zoom', 'Turbo Tina', 'Revs', 'Skid', 'Nitro', 'Vroom', 'Piston', 'Drift King', 'Lugnut', 'Sparky', 'Gears', 'Torque', 'Clutch', 'Muffler'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const LAPS = 3, ITEMS = ['boost', 'banana', 'shell'], ITEM_ICON = { boost: '🍄', banana: '🍌', shell: '🐢' };
+const LAPS = 3, ITEMS = ['boost', 'banana', 'shell'], ITEM_ICON = { boost: 'Boost', banana: 'Banana', shell: 'Shell' };
 const world = { mode: 'attract', phase: 'race', t: 0, raceT: 0, karts: new Map(), bananas: [], shells: [], order: [], endT: 0, seed: 3 };
 const karts3d = new Map();
 let events = [];
@@ -508,7 +508,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
     for (const p of lobby.room.players) addKart(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addKart(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addKart(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startRace();
   },
   onLobby() {
@@ -654,11 +654,11 @@ function hud(dt) {
     document.getElementById('pos').innerHTML = `${ord(place)}<small>/${r.length}</small>`;
     document.getElementById('meta').textContent = `Lap ${Math.min(me.lap + 1, LAPS)}/${LAPS} · ${fmt(world.raceT)} · ${Math.round(Math.hypot(me.vx, me.vz) * 3.6)} km/h`;
   }
-  document.getElementById('list').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.finished ? ' 🏁' : ''}</span></div>`).join('');
+  document.getElementById('list').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}${p.finished ? ' (done)' : ''}</span></div>`).join('');
   const res = document.getElementById('results');
   if (world.phase === 'end') {
     res.style.display = 'block';
-    res.innerHTML = `<h2>🏁 Results</h2>` + r.map((p, i) => `<div class="row"><b>${i + 1}.</b><span style="color:${p.color}">${esc(p.nick)}</span><span style="text-align:right">${p.finished ? fmt(p.finishT) : 'DNF'}</span></div>`).join('') + `<div style="opacity:.6;font-size:12px;margin-top:8px">back to lobby in ${Math.ceil(world.t)}s</div>`;
+    res.innerHTML = `<h2>Results</h2>` + r.map((p, i) => `<div class="row"><b>${i + 1}.</b><span style="color:${p.color}">${esc(p.nick)}</span><span style="text-align:right">${p.finished ? fmt(p.finishT) : 'DNF'}</span></div>`).join('') + `<div style="opacity:.6;font-size:12px;margin-top:8px">back to lobby in ${Math.ceil(world.t)}s</div>`;
     big('');
   } else res.style.display = 'none';
 }

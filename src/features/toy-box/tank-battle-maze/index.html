@@ -529,7 +529,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { world.phase = 'count'; world.t = 3; return; }
     for (const p of lobby.room.players) addTank(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addTank(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
+    for (let i = 0; i < bots; i++) addTank(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true);
     startMatch();
   },
   onLobby() {
@@ -612,7 +612,7 @@ function playEvents(evs) {
       const k = world.tanks.get(e[1]), v = world.tanks.get(e[2]);
       if (world.mode === 'match' && v) {
         const div = document.createElement('div');
-        div.innerHTML = k && k !== v ? `<b style="color:${k.color}">${esc(k.nick)}</b> 💥 <b style="color:${v.color}">${esc(v.nick)}</b>` : `<b style="color:${v.color}">${esc(v.nick)}</b> 🙃 own shell`;
+        div.innerHTML = k && k !== v ? `<b style="color:${k.color}">${esc(k.nick)}</b> blasted <b style="color:${v.color}">${esc(v.nick)}</b>` : `<b style="color:${v.color}">${esc(v.nick)}</b> hit by own shell`;
         feedEl.prepend(div); setTimeout(() => div.remove(), 5000);
         while (feedEl.children.length > 6) feedEl.lastChild.remove();
       }
@@ -694,9 +694,9 @@ function hud(dt) {
   const me = world.tanks.get(lobby.room?.me);
   if (world.phase === 'count') big(`${Math.max(1, Math.ceil(world.t))}<small>get ready</small>`);
   else if (world.phase === 'play') big(me && !me.alive ? `<small>respawning in ${Math.max(0, me.respawn).toFixed(1)}s</small>` : world.t > MATCH_TIME - 1 ? 'FIGHT!' : '');
-  else if (world.phase === 'end') { const w = world.tanks.get(world.winner); big(w ? `🏆 ${esc(w.nick)}<small>${w.kills} kills</small>` : 'Match over'); }
+  else if (world.phase === 'end') { const w = world.tanks.get(world.winner); big(w ? `${esc(w.nick)}<small>${w.kills} kills</small>` : 'Match over'); }
   const pw = document.getElementById('pw');
-  const chips = me ? [me.triple > 0 && `🔥 Triple ${Math.ceil(me.triple)}s`, me.speed > 0 && `⚡ Speed ${Math.ceil(me.speed)}s`, me.shield && '🛡 Shield'].filter(Boolean) : [];
+  const chips = me ? [me.triple > 0 && `Triple ${Math.ceil(me.triple)}s`, me.speed > 0 && `Speed ${Math.ceil(me.speed)}s`, me.shield && 'Shield'].filter(Boolean) : [];
   pw.style.display = chips.length ? 'block' : 'none';
   pw.textContent = chips.join('   ');
 }

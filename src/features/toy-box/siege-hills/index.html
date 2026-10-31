@@ -395,7 +395,7 @@ const lobby = createLobby({
     syncTop();
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.35 + rng() * 0.55 });
+    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} bot`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.35 + rng() * 0.55 });
     newState('match', P, settings.rounds ?? 3, settings.clock ?? 20);
     resetView();
     dirty = true;
@@ -441,8 +441,8 @@ function landed() {
   shake = 0.6;
   if (wet) sfx.splash(); else sfx.boom();
   const kmine = sh.kills.includes(me);
-  if (kmine) flash('<small>your catapult is wrecked</small>💥 Knocked out');
-  else if (sh.by === me && sh.kills.length) flash(`<small>knockout</small>💥 ${sh.kills.map((id) => esc(player(id)?.nick ?? '')).join(', ')}`);
+  if (kmine) flash('<small>your catapult is wrecked</small>Knocked out');
+  else if (sh.by === me && sh.kills.length) flash(`<small>knockout</small>${sh.kills.map((id) => esc(player(id)?.nick ?? '')).join(', ')}`);
   else { const h = sh.hits.find(([id]) => id === me); if (h) flash(`<small>you took a hit</small>-${h[1]}`); else if (sh.by === me && sh.hits.length) flash(`<small>direct damage</small>${sh.hits.reduce((s, [, d]) => s + d, 0)}`); }
 }
 // each frame: detect a new shot, replay its arc, land it; chime on my turn
@@ -469,7 +469,7 @@ function syncView(dt) {
   if (key !== lastKey) {
     const was = lastKey; lastKey = key;
     if (S.ph === 'aim' && myTurn()) { sfx.turn(); flash('Your turn!'); aimA = S.P[S.turn].x < S.W / 2 ? Math.PI / 4 : (3 * Math.PI) / 4; aimP = 0.6; }
-    else if (S.ph === 'round' && !was.startsWith('round')) { const w = player(S.winner); sfx.win(); flash(`<small>round ${S.rd} · +3</small>${w ? `🏰 ${esc(w.nick)}` : 'Nobody survived!'}`); flashT = 3; }
+    else if (S.ph === 'round' && !was.startsWith('round')) { const w = player(S.winner); sfx.win(); flash(`<small>round ${S.rd} · +3</small>${w ? `${esc(w.nick)}` : 'Nobody survived!'}`); flashT = 3; }
   }
 }
 
@@ -517,14 +517,14 @@ function hud(dt) {
   flashT -= dt;
   const up = S.P[S.turn], me = lobby.room?.me, clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>round ${S.rd} of ${S.rounds} · ${S.P.length} catapults</small>Siege Hills`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>${w?.score ?? 0} points</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>${w?.score ?? 0} points</small>${esc(w?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
   if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
   lastClock = clock;
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.15;
-  const tide = S.water > 0 ? ` · 🌊 tide ${S.water.toFixed(1)}` : '';
+  const tide = S.water > 0 ? ` · tide ${S.water.toFixed(1)}` : '';
   document.getElementById('turnName').innerHTML = S.ph === 'aim' ? (up?.id === me ? '<span style="color:var(--gold)">Your turn</span>' : `${esc(up?.nick ?? '')} aims`) : S.ph === 'fly' ? 'Incoming!' : `Round ${S.rd} of ${S.rounds}`;
   document.getElementById('turnMeta').innerHTML = (S.ph === 'aim' ? (up?.bot ? 'thinking…' : `<b>${clock}s</b> left`) : `${alive().length} standing`) + tide;
   const w = S.wind, wa = Math.abs(w);

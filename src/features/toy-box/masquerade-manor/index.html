@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Masquerade Manor</title>
+<style>
+  #role { top: 14px; left: 50%; transform: translateX(-50%); padding: 8px 14px; display: none; text-align: center; font-size: 13px; }
+  #role b { font-size: 17px; }
+  #chat { left: 14px; bottom: 14px; width: min(330px, calc(100% - 28px)); padding: 8px; display: none; font-size: 12.5px; z-index: 7; }
+  #log { max-height: 150px; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+  #log div { line-height: 1.3; }
+  #log i { font-style: normal; font-weight: 800; }
+  #log .sys { opacity: 0.7; font-style: italic; }
+  #say { display: flex; gap: 6px; }
+  #say input { flex: 1; min-width: 0; font: inherit; font-size: 14px; padding: 7px 9px; border-radius: 9px; border: 1px solid #3a3550; background: #120f1c; color: inherit; outline: none; }
+  #say button { font: inherit; font-weight: 800; border: 0; border-radius: 9px; padding: 6px 10px; background: var(--accent); color: #1a0f14; cursor: pointer; }
+  #dock .who button { font-size: 13px; padding: 7px 9px; display: flex; gap: 5px; align-items: center; }
+  #dock .who button i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  #dock .claims { margin-top: 8px; }
+  #dock .claims button { font-size: 12.5px; padding: 6px 9px; background: #2b2540; color: #fff; box-shadow: 0 3px 0 #120f1c; }
+  @media (max-width: 700px) { #chat { bottom: auto; top: 70px; width: 210px; } #log { max-height: 90px; } #dock { width: calc(100% - 12px); bottom: 6px; } }
+</style>
+</head>
+<body>
+<div id="role" class="card"></div>
+<div id="chat" class="card"><div id="log"></div><div id="say"><input id="sayIn" maxlength="80" placeholder="Say something…" autocomplete="off" /><button id="sayBtn">Say</button></div></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createTableGame } from '../common/table-game.js';
+import { hudShell, createStage, createPawns, ringSpots, esc, badgeTex, badge, shuffle, pickOne } from '../common/table-stage.js';
+import { createGameAudio } from '../common/game-audio.js';
+
+const hud = hudShell({ accent: '#e94f6f', bg: '#170f1c', hint: 'Phantoms hide among the guests. Each <b>night</b> they unmask one guest, the Butler inspects someone, the Maid protects someone. Each <b>day</b> talk, accuse, then vote someone out in secret. Guests win when every Phantom is gone.' });
+
+// Scene > candle-lit parlor: round table, rug, chandelier, wall of portraits
+const { renderer, scene, camera, hemi, key } = createStage({ bg: 0x170f1c, fog: [18, 46] });
+const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x3b2418, roughness: 0.8 }));
+floor.receiveShadow = true;
+const rug = new THREE.Mesh(new THREE.CircleGeometry(8.6, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x6b1630, roughness: 0.9 }));
+rug.position.y = 0.01; rug.receiveShadow = true;
+const table = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.18, 40), new THREE.MeshStandardMaterial({ color: 0x5a3320, roughness: 0.45 }));
+table.position.y = 0.95; table.castShadow = table.receiveShadow = true;
+const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.6, 0.9, 16), table.material);
+leg.position.y = 0.45;
+scene.add(floor, rug, table, leg);
+const candles = [];
+for (let i = 0; i < 5; i++) {
+  const a = (i / 5) * Math.PI * 2, c = new THREE.Group();
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.4, 10), new THREE.MeshStandardMaterial({ color: 0xf2e6c8 }));
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffc35a }));
+  stick.position.y = 0.2; flame.position.y = 0.46; flame.scale.y = 1.8;
+  c.add(stick, flame);
+  c.position.set(Math.cos(a) * 1.6, 1.04, Math.sin(a) * 1.6);
+  scene.add(c);
+  candles.push(flame);
+}
+const candleLight = new THREE.PointLight(0xffb060, 18, 14, 1.6);
+candleLight.position.set(0, 2.2, 0);
+scene.add(candleLight);
+// back wall with framed portraits
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(40, 12), new THREE.MeshStandardMaterial({ color: 0x2c1a2e, roughness: 0.9 }));
+wall.position.set(0, 6, -12);
+scene.add(wall);
+for (let i = 0; i < 5; i++) {
+  const f = new THREE.Mesh(new THREE.BoxGeometry(2, 2.6, 0.15), new THREE.MeshStandardMaterial({ color: 0xc9a14a, metalness: 0.6, roughness: 0.35 }));
+  const pic = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.2), new THREE.MeshStandardMaterial({ color: [0x3a4d6b, 0x5b3a5e, 0x2f5a4a, 0x6b4a2f, 0x41365e][i] }));
+  f.position.set(-10 + i * 5, 5.5, -11.9); pic.position.set(-10 + i * 5, 5.5, -11.8);
+  scene.add(f, pic);
+}
+const moon = new THREE.Mesh(new THREE.CircleGeometry(1.4, 32), new THREE.MeshBasicMaterial({ color: 0xdfe8ff }));
+moon.position.set(12, 9, -11.9);
+scene.add(moon);
+
+// Players > masked pawns around the table; the dead turn into floating ghosts
+const maskCols = [0xffd23f, 0xffffff, 0x2de2e6, 0xff6ec7, 0xa3e635, 0xc77dff];
+const pawns = createPawns(scene, {
+  onMake(g, p) {
+    const mask = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.14, 0.08), new THREE.MeshStandardMaterial({ color: maskCols[Math.abs(p.id) % maskCols.length], metalness: 0.5, roughness: 0.3 }));
+    mask.position.set(0, 1.08, 0.24);
+    g.userData.body.add(mask);
+    g.userData.bubble = null;
+  },
+});
+const checkTex = badgeTex('tick'), skullTex = badgeTex('ring', '#c8c2e8', '#4a4560'), voteTex = badgeTex('tick', '#ffd23f');
+function setBadge(g, tex) {
+  if (g.userData.badgeTex === tex) return;
+  g.userData.badgeTex = tex;
+  g.userData.slot.clear();
+  if (tex) g.userData.slot.add(badge(tex, 0.45));
+}
+// one speech bubble per pawn, redrawn in place (a new texture per chat line would stall a busy host)
+function bubble(g, text) {
+  let b = g.userData.bubble;
+  if (!b) {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 80;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthWrite: false, transparent: true }));
+    s.scale.set(0.42 * 512 / 80, 0.42, 1); s.position.y = 2.75; s.renderOrder = 7;
+    g.add(s);
+    b = g.userData.bubble = { s, c, t };
+  }
+  const x = b.c.getContext('2d'), line = text.length > 26 ? text.slice(0, 25) + '…' : text;
+  x.clearRect(0, 0, 512, 80);
+  x.fillStyle = 'rgba(255,255,255,0.92)'; x.beginPath(); x.roundRect(4, 4, 504, 72, 24); x.fill();
+  x.fillStyle = '#1a1020'; x.font = 'bold 34px ui-rounded, system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(line, 256, 44, 490);
+  b.t.needsUpdate = true;
+  b.s.visible = true;
+  g.userData.bubbleT = 5;
+}
+
+// Audio > night bell, scream, gavel, chimes
+const { tone, noise } = createGameAudio();
+const sfx = {
+  night() { [392, 311, 262].forEach((f, i) => tone(f, f * 0.98, 0.5, 0.06, 'sine', i * 0.25)); },
+  day() { [523, 659, 784].forEach((f, i) => tone(f, f, 0.3, 0.06, 'triangle', i * 0.12)); },
+  gone() { tone(700, 120, 0.7, 0.07, 'sawtooth'); noise(0.4, 0.05, 2000, 300); },
+  gavel() { noise(0.08, 0.15, 900, 200); noise(0.08, 0.12, 900, 200, 'lowpass', 0.18); },
+  lock(me) { if (me) tone(760, 1140, 0.08, 0.07, 'triangle'); },
+  chat() { tone(1200, 1300, 0.04, 0.03, 'sine'); },
+  win(good) { (good ? [523, 659, 784, 1047] : [440, 415, 392, 330]).forEach((f, i) => tone(f, f, 0.22, 0.07, 'square', i * 0.12)); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Rules > roles, phases, nights and votes
+const T = { intro: 3, role: 7, night: 22, dawn: 6, vote: 20, verdict: 6, final: 12 };
+const ROLE = {
+  phantom: { name: 'Phantom', col: '#e94f6f', team: 'phantoms', job: 'Pick a guest to unmask tonight. Blend in by day.' },
+  butler: { name: 'Butler', col: '#5fb4ff', team: 'guests', job: 'Each night inspect one person: you learn if they are a Phantom.' },
+  maid: { name: 'Maid', col: '#7cf0b4', team: 'guests', job: 'Each night protect one person (not the same twice in a row).' },
+  guest: { name: 'Guest', col: '#e8d9b0', team: 'guests', job: 'Find the Phantoms. At night, mark who you suspect.' },
+};
+const phantomsFor = (n) => (n <= 5 ? 1 : n <= 9 ? 2 : 3);
+const BOT_NAMES = ['Countess', 'Baron', 'Duchess', 'Colonel', 'Vicar', 'Madame', 'Earl', 'Lady Ash', 'Major', 'Sir Reed', 'Contessa', 'Abbot', 'Marquis', 'Viscount'];
+const live = (S) => S.P.filter((p) => p.alive);
+const roleOf = (S, id) => S._roles?.[id];
+
+function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, alive: true, role: null, lock: false, at: 0 }; }
+function newMatch(settings, P) {
+  return { ph: 'intro', tt: T.intro, rd: 1, rounds: settings.rounds ?? 2, talk: settings.talk ?? 60, day: 0, nPh: 1, P, chat: [], cn: 0, res: null, ask: 0, win: null, goneIds: [] };
+}
+function say(S, id, k, about, text) {
+  S.chat.push({ n: ++S.cn, id, k, about, text });
+  if (S.chat.length > 40) S.chat.shift();
+}
+function sendViews(S) {
+  for (const p of S.P) {
+    const r = roleOf(S, p.id);
+    if (!r) continue;
+    const view = { rd: S.rd, role: r, mates: r === 'phantom' ? S.P.filter((q) => roleOf(S, q.id) === 'phantom').map((q) => q.id) : [], checks: S._checks?.[p.id] ?? [], lastProt: r === 'maid' ? S._lastProtect ?? null : null };
+    game.tell(p.id, view);
+  }
+}
+function deal(S) {
+  for (const p of S.P) Object.assign(p, { alive: true, role: null, lock: false });
+  const n = S.P.length, ids = shuffle(S.P.map((p) => p.id));
+  S.nPh = phantomsFor(n);
+  S._roles = {}; S._checks = {}; S._lastProtect = null; S._sus = {}; S.goneIds = [];
+  ids.forEach((id, i) => (S._roles[id] = i < S.nPh ? 'phantom' : i === S.nPh && n >= 4 ? 'butler' : i === S.nPh + 1 && n >= 6 ? 'maid' : 'guest'));
+  for (const p of S.P) S._sus[p.id] = {};
+  Object.assign(S, { ph: 'role', tt: T.role, day: 0, chat: [], res: null, win: null });
+  say(S, 0, 'sys', 0, `${S.nPh} Phantom${S.nPh > 1 ? 's' : ''} hide among ${n} guests.`);
+  sendViews(S);
+}
+function startNight(S) {
+  S.day++;
+  S._picks = {};
+  for (const p of S.P) { p.lock = false; p.at = 2 + Math.random() * 10; }
+  Object.assign(S, { ph: 'night', tt: T.night, res: null });
+}
+function resolveNight(S) {
+  const al = live(S);
+  const tally = new Map();
+  for (const p of al) if (roleOf(S, p.id) === 'phantom' && S._picks[p.id]) tally.set(S._picks[p.id], (tally.get(S._picks[p.id]) ?? 0) + 1);
+  let victim = null;
+  if (tally.size) { const top = Math.max(...tally.values()); victim = pickOne([...tally].filter(([, v]) => v === top).map(([k]) => k)); }
+  else { const pool = al.filter((p) => roleOf(S, p.id) !== 'phantom'); victim = pool.length ? pickOne(pool).id : null; }
+  const maid = al.find((p) => roleOf(S, p.id) === 'maid'), butler = al.find((p) => roleOf(S, p.id) === 'butler');
+  const prot = maid ? S._picks[maid.id] ?? null : null;
+  S._lastProtect = prot;
+  if (butler && S._picks[butler.id]) {
+    const t = S._picks[butler.id];
+    (S._checks[butler.id] ??= []).push({ id: t, ph: roleOf(S, t) === 'phantom' });
+  }
+  let saved = false;
+  if (victim != null && victim === prot) { saved = true; victim = null; }
+  const v = victim != null ? S.P.find((p) => p.id === victim) : null;
+  if (v) { v.alive = false; v.role = roleOf(S, v.id); }
+  Object.assign(S, { ph: 'dawn', tt: T.dawn, res: { night: { victim: v?.id ?? null, saved } } });
+  say(S, 0, 'sys', 0, v ? `Night ${S.day}: ${v.nick} was unmasked. They were a ${ROLE[v.role].name}.` : saved ? `Night ${S.day}: the Maid saved someone.` : `Night ${S.day}: a quiet night.`);
+  sendViews(S);
+}
+function startDay(S) {
+  for (const p of S.P) { p.lock = false; p.at = 0; }
+  S._said = {};
+  Object.assign(S, { ph: 'day', tt: S.talk, res: null });
+}
+function startVote(S) {
+  S._votes = {};
+  for (const p of S.P) { p.lock = false; p.at = 2 + Math.random() * 12; }
+  Object.assign(S, { ph: 'vote', tt: T.vote });
+}
+function resolveVote(S) {
+  const votes = {}, tally = new Map();
+  for (const p of live(S)) { const v = S._votes[p.id] ?? 0; votes[p.id] = v; tally.set(v, (tally.get(v) ?? 0) + 1); }
+  const top = Math.max(0, ...[...tally].filter(([k]) => k).map(([, n]) => n));
+  const tops = [...tally].filter(([k, n]) => k && n === top);
+  const skip = tally.get(0) ?? 0;
+  let out = null;
+  if (top > 0 && tops.length === 1 && top > skip) out = tops[0][0];
+  const o = out ? S.P.find((p) => p.id === out) : null;
+  if (o) { o.alive = false; o.role = roleOf(S, o.id); }
+  Object.assign(S, { ph: 'verdict', tt: T.verdict, res: { vote: { votes, out: o?.id ?? null } } });
+  say(S, 0, 'sys', 0, o ? `The manor voted out ${o.nick}: a ${ROLE[o.role].name}.` : 'No majority. Nobody leaves.');
+  // bots learn from the reveal: whoever pushed a guest out looks shady, whoever pushed a phantom looks honest
+  if (o) for (const p of live(S)) for (const [voter, t] of Object.entries(votes)) if (t === o.id) S._sus[p.id][voter] = (S._sus[p.id][voter] ?? 0) + (o.role === 'phantom' ? -1.5 : 1.2);
+}
+function checkWin(S) {
+  const al = live(S), ph = al.filter((p) => roleOf(S, p.id) === 'phantom').length;
+  if (ph === 0) return 'guests';
+  if (ph >= al.length - ph) return 'phantoms';
+  return null;
+}
+function finish(S, win) {
+  for (const p of S.P) {
+    p.role = roleOf(S, p.id) ?? p.role;
+    const mine = ROLE[p.role]?.team === win;
+    if (mine) p.score += (win === 'phantoms' ? 5 : 3) + (p.alive ? 1 : 0);
+  }
+  Object.assign(S, { ph: 'final', tt: T.final, win });
+  say(S, 0, 'sys', 0, win === 'guests' ? 'Every Phantom is unmasked. The guests win!' : 'The Phantoms rule the manor!');
+}
+
+// Bots > suspicion map per bot; phantoms bluff, the butler shares what it learned
+function botTarget(S, b, pool) {
+  const sus = S._sus[b.id] ?? {};
+  return pool.map((p) => [p, (sus[p.id] ?? 0) + Math.random() * 1.5]).sort((x, y) => y[1] - x[1])[0]?.[0];
+}
+function botNight(S, b) {
+  const r = roleOf(S, b.id), al = live(S).filter((p) => p.id !== b.id);
+  if (r === 'phantom') {
+    const prey = al.filter((p) => roleOf(S, p.id) !== 'phantom');
+    // unmask whoever claimed to be the Butler or accused a Phantom, else anyone
+    const loud = prey.filter((p) => S.chat.some((c) => c.id === p.id && (c.k === 'claimB' || (c.k === 'phantom' && roleOf(S, c.about) === 'phantom'))));
+    const mates = al.filter((p) => roleOf(S, p.id) === 'phantom' && S._picks[p.id]);
+    return mates.length && Math.random() < 0.8 ? S._picks[mates[0].id] : pickOne(loud.length ? loud : prey)?.id;
+  }
+  if (r === 'butler') { const seen = new Set((S._checks[b.id] ?? []).map((c) => c.id)); return botTarget(S, b, al.filter((p) => !seen.has(p.id)))?.id ?? pickOne(al)?.id; }
+  if (r === 'maid') { const opts = live(S).filter((p) => p.id !== S._lastProtect); const loud = opts.filter((p) => S.chat.some((c) => c.id === p.id && c.k === 'claimB')); return pickOne(loud.length ? loud : opts)?.id; }
+  return botTarget(S, b, al)?.id;
+}
+function botTalk(S, b) {
+  const r = roleOf(S, b.id), al = live(S).filter((p) => p.id !== b.id);
+  if (!al.length) return;
+  if (r === 'butler') {
+    const found = (S._checks[b.id] ?? []).find((c) => c.ph && S.P.find((p) => p.id === c.id)?.alive);
+    if (found) return claim(S, b.id, 'phantom', found.id, true);
+    const clean = (S._checks[b.id] ?? []).filter((c) => !c.ph).at(-1);
+    if (clean && Math.random() < 0.5) return claim(S, b.id, 'clean', clean.id, true);
+  }
+  if (r === 'phantom') {
+    const guests = al.filter((p) => roleOf(S, p.id) !== 'phantom');
+    if (Math.random() < 0.25) return claim(S, b.id, 'phantom', pickOne(guests).id, Math.random() < 0.5);
+    return claim(S, b.id, Math.random() < 0.7 ? 'sus' : 'trust', Math.random() < 0.7 ? pickOne(guests).id : pickOne(al).id);
+  }
+  const t = botTarget(S, b, al);
+  if (t) claim(S, b.id, (S._sus[b.id]?.[t.id] ?? 0) > 2 ? 'phantom' : 'sus', t.id);
+}
+const CLAIM = {
+  sus: (a) => `I suspect ${a}.`, trust: (a) => `I trust ${a}.`, phantom: (a) => `${a} is a Phantom!`, clean: (a) => `I checked ${a}: not a Phantom.`,
+};
+function claim(S, id, k, about, asButler = false) {
+  const a = S.P.find((p) => p.id === about);
+  if (!a) return;
+  say(S, id, asButler ? (k === 'phantom' ? 'claimB' : 'cleanB') : k, about, (asButler ? 'I am the Butler. ' : '') + CLAIM[k](a.nick));
+  // every bot weighs the claim; a claimed Butler counts double
+  const w = { sus: 1, trust: -1, phantom: 2, clean: -2 }[k] * (asButler ? 1.6 : 1);
+  for (const p of S.P) if (p.bot && p.id !== id) {
+    const sus = S._sus[p.id] ??= {};
+    const trust = 1 - Math.max(-1, Math.min(1, (sus[id] ?? 0) / 4));
+    sus[about] = (sus[about] ?? 0) + w * trust;
+    // a guest accused of being a phantom who knows better grows suspicious of the accuser
+    if (about === p.id && k === 'phantom' && roleOf(S, p.id) !== 'phantom') sus[id] = (sus[id] ?? 0) + 3;
+    if (roleOf(S, p.id) === 'butler') for (const c of S._checks[p.id] ?? []) sus[c.id] = c.ph ? 9 : -9;
+  }
+}
+function botVote(S, b) {
+  const r = roleOf(S, b.id), al = live(S).filter((p) => p.id !== b.id);
+  if (r === 'phantom') {
+    // pile onto a guest the room already suspects, never a fellow phantom
+    const guests = al.filter((p) => roleOf(S, p.id) !== 'phantom');
+    const counts = new Map(); for (const v of Object.values(S._votes)) if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+    const hot = guests.sort((x, y) => (counts.get(y.id) ?? 0) - (counts.get(x.id) ?? 0))[0];
+    return hot ? hot.id : 0;
+  }
+  const t = botTarget(S, b, al);
+  return t && (S._sus[b.id]?.[t.id] ?? 0) > 0.6 ? t.id : Math.random() < 0.3 ? 0 : t?.id ?? 0;
+}
+
+// Run engine > host tick
+function tick(S, dt) {
+  S.tt -= dt;
+  if (S.ph === 'recover') { if (S.tt <= 0) recover(S); return; }
+  const al = live(S);
+  if (S.ph === 'intro' && S.tt <= 0) deal(S);
+  else if (S.ph === 'role' && S.tt <= 0) startNight(S);
+  else if (S.ph === 'night') {
+    for (const b of al) if (b.bot && !b.lock && T.night - S.tt >= b.at) { const t = botNight(S, b); if (t) { S._picks[b.id] = t; b.lock = true; } }
+    if (S.tt <= 0 || al.every((p) => p.lock)) resolveNight(S);
+  } else if (S.ph === 'dawn' && S.tt <= 0) { const w = checkWin(S); if (w) finish(S, w); else startDay(S); }
+  else if (S.ph === 'day') {
+    for (const b of al) if (b.bot) {
+      S._said[b.id] ??= { n: 0, at: 3 + Math.random() * Math.min(20, S.talk * 0.4) };
+      const sd = S._said[b.id];
+      if (sd.n < 2 && S.talk - S.tt >= sd.at) { botTalk(S, b); sd.n++; sd.at += 8 + Math.random() * 18; }
+      if (!b.lock && S.talk - S.tt >= Math.min(S.talk - 3, 15 + Math.random() * 400)) b.lock = true;
+    }
+    if (S.tt <= 0 || al.every((p) => p.lock)) startVote(S);
+  } else if (S.ph === 'vote') {
+    for (const b of al) if (b.bot && !b.lock && T.vote - S.tt >= b.at) { S._votes[b.id] = botVote(S, b); b.lock = true; }
+    if (S.tt <= 0 || al.every((p) => p.lock)) resolveVote(S);
+  } else if (S.ph === 'verdict' && S.tt <= 0) { const w = checkWin(S); if (w) finish(S, w); else startNight(S); }
+  else if (S.ph === 'final' && S.tt <= 0) {
+    if (S.mode === 'attract') { deal(S); return; }
+    if (S.rd < S.rounds) { S.rd++; deal(S); } else if (game.isHost) game.backToLobby();
+  }
+}
+function action(S, from, a) {
+  const p = S.P.find((q) => q.id === from);
+  if (a.t === 'mine') { if (S.ph === 'recover' && a.rd === S.rd && ROLE[a.role]) S._roles[from] = a.role; return; }
+  if (!p) return;
+  const target = S.P.find((q) => q.id === a.id);
+  if (a.t === 'pick' && S.ph === 'night' && p.alive && target?.alive) {
+    const r = roleOf(S, from);
+    if (r === 'phantom' && roleOf(S, a.id) === 'phantom') return;
+    if (r === 'maid' && a.id === S._lastProtect) return;
+    if (r !== 'maid' && a.id === from) return;
+    S._picks[from] = a.id; p.lock = true;
+  } else if (a.t === 'vote' && S.ph === 'vote' && p.alive && (a.id === 0 || (target?.alive && a.id !== from))) { S._votes[from] = a.id; p.lock = true; }
+  else if (a.t === 'ready' && S.ph === 'day' && p.alive) p.lock = !p.lock;
+  else if ((a.t === 'claim' || a.t === 'text') && p.alive && ['day', 'vote', 'verdict', 'dawn'].includes(S.ph)) {
+    const now = performance.now();
+    S._lastSay ??= {};
+    if (now - (S._lastSay[from] ?? 0) < 1200) return;
+    S._lastSay[from] = now;
+    if (a.t === 'claim' && CLAIM[a.k] && target) claim(S, from, a.k, a.id, !!a.butler);
+    if (a.t === 'text') { const text = String(a.text ?? '').trim().slice(0, 80); if (text) say(S, from, 'text', 0, text); }
+  }
+}
+// promoted host: roles left with the old host; ask every human again, then deal the missing roles to bots
+function promote(S) {
+  S._roles = {}; S._checks = {}; S._sus = {}; S._picks = {}; S._votes = {}; S._said = {};
+  for (const p of S.P) S._sus[p.id] = {};
+  if (myView?.rd === S.rd) { S._roles[game.me] = myView.role; if (myView.role === 'butler') S._checks[game.me] = myView.checks; }
+  S.back = S.ph === 'final' ? 'final' : S.ph;
+  Object.assign(S, { ph: 'recover', tt: 2.5, ask: (S.ask ?? 0) + 1 });
+}
+function recover(S) {
+  for (const p of S.P) if (!p.alive && p.role) S._roles[p.id] = p.role;
+  const need = { phantom: S.nPh, butler: S.P.length >= 4 ? 1 : 0, maid: S.P.length >= 6 ? 1 : 0 };
+  for (const r of Object.values(S._roles)) if (need[r] != null) need[r]--;
+  const open = shuffle(S.P.filter((p) => !S._roles[p.id] && p.bot));
+  for (const p of open) S._roles[p.id] = need.phantom-- > 0 ? 'phantom' : need.butler-- > 0 ? 'butler' : need.maid-- > 0 ? 'maid' : 'guest';
+  for (const p of S.P) S._roles[p.id] ??= 'guest';
+  sendViews(S);
+  const back = S.back;
+  delete S.back;
+  if (back === 'night' || back === 'role' || back === 'intro') startNight(S);
+  else if (back === 'vote') startVote(S);
+  else if (back === 'final') Object.assign(S, { ph: 'final', tt: 4 });
+  else startDay(S);
+  const w = checkWin(S);
+  if (w) finish(S, w);
+}
+function attract() {
+  const P = [];
+  for (let i = 0; i < 8; i++) P.push(newPlayer(-1 - i, BOT_NAMES[i], ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#e76f51'][i], true));
+  const S = newMatch({ rounds: 99, talk: 20 }, P);
+  S.tt = 1;
+  return S;
+}
+
+// View > state changes: phase sounds, night lighting, chat log, bubbles
+let myView = null;
+function change(prev, cur) {
+  const me = game.me;
+  if (prev?.ph !== cur.ph) {
+    if (cur.ph === 'night') { sfx.night(); picked = null; }
+    if (cur.ph === 'day') sfx.day();
+    if (cur.ph === 'vote') { sfx.gavel(); picked = null; }
+    if (cur.ph === 'dawn' && cur.res?.night?.victim) sfx.gone();
+    if (cur.ph === 'verdict' && cur.res?.vote?.out) sfx.gone();
+    if (cur.ph === 'final' && cur.win) sfx.win(cur.win === 'guests');
+    if (cur.ph === 'role') { picked = null; claimFor = null; }
+  }
+  if (cur.ask && cur.ask !== prev?.ask && !game.isHost && myView?.rd === cur.rd) game.act({ t: 'mine', role: myView.role, rd: cur.rd });
+  if (cur.mode === 'match') for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);
+  const lastN = prev?.chat?.at(-1)?.n ?? 0;
+  for (const c of cur.chat ?? []) if (c.n > lastN && c.id) { const g = pawns.map.get(c.id); if (g) bubble(g, c.text); if (cur.mode === 'match') sfx.chat(); }
+  renderLog(cur);
+  dockKey = '';
+}
+function renderLog(S) {
+  const log = document.getElementById('log');
+  log.innerHTML = (S.chat ?? []).slice(-14).map((c) => {
+    if (!c.id) return `<div class="sys">${esc(c.text)}</div>`;
+    const p = S.P.find((q) => q.id === c.id);
+    return `<div><i style="color:${p?.color ?? '#fff'}">${esc(p?.nick ?? '?')}</i> ${esc(c.text)}</div>`;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+
+// Input > dock: night pick, day claims, vote; chat box
+let picked = null, claimFor = null, dockKey = '';
+function renderDock(S) {
+  const me = game.mine(), dock = hud.dock;
+  const show = me && me.alive && ['night', 'day', 'vote'].includes(S.ph);
+  const key = JSON.stringify([show, S.ph, picked, claimFor, S.P.map((p) => [p.id, p.alive, p.lock]), myView?.role]);
+  if (key === dockKey) return;
+  dockKey = key;
+  dock.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  const role = myView?.rd === S.rd ? myView.role : 'guest';
+  const others = S.P.filter((p) => p.alive && p.id !== me.id);
+  let title = '', pool = others;
+  if (S.ph === 'night') {
+    if (role === 'phantom') { title = 'Unmask who tonight?'; pool = others.filter((p) => !myView.mates.includes(p.id)); }
+    else if (role === 'butler') title = 'Inspect who tonight?';
+    else if (role === 'maid') { title = 'Protect who tonight?'; pool = S.P.filter((p) => p.alive && p.id !== myView?.lastProt); }
+    else title = 'Who do you suspect?';
+  } else if (S.ph === 'vote') title = 'Vote someone out (secret)';
+  else title = claimFor ? `Say about ${esc(S.P.find((p) => p.id === claimFor)?.nick ?? '')}:` : 'Tap a guest to accuse, trust or claim';
+  const btn = (p) => `<button data-id="${p.id}" class="${picked === p.id || claimFor === p.id ? 'on' : ''}"><i style="background:${p.color}"></i>${esc(p.nick)}${p.id === me.id ? ' (you)' : ''}</button>`;
+  let html = `<div class="s" style="margin:0 0 6px;font-weight:800;font-size:14px">${title}</div><div class="btns who">${pool.map(btn).join('')}${S.ph === 'vote' ? `<button data-id="0" class="${picked === 0 ? 'on' : ''}">Skip</button>` : ''}</div>`;
+  if (S.ph === 'day') {
+    html += claimFor ? `<div class="btns claims"><button data-k="sus">Suspect</button><button data-k="trust">Trust</button><button data-k="phantom">Phantom!</button>${role === 'butler' || role === 'phantom' ? '<button data-k="phantom" data-b="1">As Butler: Phantom</button><button data-k="clean" data-b="1">As Butler: clean</button>' : ''}</div>` : '';
+    html += `<div class="btns claims"><button data-ready="1" class="${me.lock ? 'on' : ''}">${me.lock ? 'Ready to vote ✓' : 'Ready to vote'}</button></div>`;
+  }
+  html += '<div class="s" id="dockS"></div>';
+  dock.innerHTML = html;
+  dock.querySelectorAll('[data-id]').forEach((b) => (b.onclick = () => {
+    const id = +b.dataset.id;
+    if (S.ph === 'day') { claimFor = claimFor === id ? null : id; dockKey = ''; return; }
+    picked = id; dockKey = '';
+    game.act({ t: S.ph === 'vote' ? 'vote' : 'pick', id });
+  }));
+  dock.querySelectorAll('[data-k]').forEach((b) => (b.onclick = () => { game.act({ t: 'claim', k: b.dataset.k, id: claimFor, butler: !!b.dataset.b }); claimFor = null; dockKey = ''; }));
+  dock.querySelector('[data-ready]')?.addEventListener('click', () => game.act({ t: 'ready' }));
+}
+const sayIn = document.getElementById('sayIn');
+function sendText() { const t = sayIn.value.trim(); if (t) { game.act({ t: 'text', text: t }); sayIn.value = ''; } }
+document.getElementById('sayBtn').onclick = sendText;
+sayIn.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') sendText(); });
+
+// HUD > role card, phase line, board
+let hudT = 0, lastClock = 0;
+function hudFrame(S, dt) {
+  const me = game.mine(), match = S.mode === 'match';
+  const flashing = hud.flashing(dt);
+  const clock = Math.ceil(Math.max(0, S.tt));
+  document.getElementById('chat').style.display = match ? 'block' : 'none';
+  const roleEl = document.getElementById('role');
+  const r = match && myView?.rd === S.rd ? ROLE[myView.role] : null;
+  roleEl.style.display = r && S.ph !== 'intro' ? 'block' : 'none';
+  if (r) {
+    const mates = myView.role === 'phantom' && myView.mates.length > 1 ? ` · fellow Phantoms: ${myView.mates.filter((id) => id !== game.me).map((id) => esc(S.P.find((p) => p.id === id)?.nick ?? '?')).join(', ')}` : '';
+    const checks = myView.checks?.length ? ` · checked: ${myView.checks.map((c) => `${esc(S.P.find((p) => p.id === c.id)?.nick ?? '?')} <b style="color:${c.ph ? '#e94f6f' : '#7cf0b4'}">${c.ph ? 'Phantom' : 'clean'}</b>`).join(', ')}` : '';
+    roleEl.innerHTML = `You are the <b style="color:${r.col}">${r.name}</b>${me && !me.alive ? ' (ghost)' : ''}<br><span style="opacity:.85">${r.job}${mates}${checks}</span>`;
+  }
+  if (match) {
+    if (S.ph === 'intro') hud.big(`<small>${S.rounds > 1 ? `game ${S.rd} of ${S.rounds}` : 'one game'}</small>Masquerade Manor`);
+    else if (S.ph === 'role') hud.big(r ? `<small>your secret role</small><span style="color:${r.col}">${r.name}</span>` : '<small>roles are dealt</small>Masks on');
+    else if (S.ph === 'night') hud.big(`<small>${clock}s · eyes closed</small>Night ${S.day}`);
+    else if (S.ph === 'dawn') { const v = S.P.find((p) => p.id === S.res?.night?.victim); hud.big(v ? `<small>unmasked in the night · was a ${ROLE[v.role].name}</small>${esc(v.nick)}` : `<small>${S.res?.night?.saved ? 'the Maid saved someone' : 'a quiet night'}</small>Nobody`); }
+    else if (S.ph === 'day') hud.big(clock <= 10 ? `<small>vote in</small>${clock}` : '');
+    else if (S.ph === 'vote') hud.big(`<small>secret vote · ${clock}s</small>Vote`);
+    else if (S.ph === 'verdict') { const o = S.P.find((p) => p.id === S.res?.vote?.out); hud.big(o ? `<small>voted out · was a ${ROLE[o.role].name}</small>${esc(o.nick)}` : '<small>no majority</small>Nobody leaves'); }
+    else if (S.ph === 'final') hud.big(`<small>${S.win === 'guests' ? 'every Phantom unmasked' : 'the Phantoms took the manor'}</small>${S.win === 'guests' ? 'Guests win' : 'Phantoms win'}`);
+    else if (S.ph === 'recover') hud.big('<small>host left · new host is reading the guest list</small>One moment');
+    else if (!flashing) hud.big('');
+  } else hud.big('');
+  renderDock(S);
+  const ds = document.getElementById('dockS');
+  if (ds && me) {
+    const waiting = live(S).filter((p) => !p.lock).length;
+    ds.textContent = S.ph === 'day' ? `${clock}s of talk left · ${live(S).length - waiting}/${live(S).length} ready` : `${clock}s · ${me.lock ? 'locked in (tap another to change)' : 'pick one'} · ${waiting ? `${waiting} still deciding` : 'all in'}`;
+    if (clock !== lastClock && clock <= 3 && !me.lock && S.ph !== 'day') sfx.tick();
+  }
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0 || !match) return;
+  hudT = 0.2;
+  const phLabel = { intro: 'Arriving', role: 'Roles', night: `Night ${S.day}`, dawn: `Dawn ${S.day}`, day: `Day ${S.day}`, vote: `Vote ${S.day}`, verdict: `Verdict ${S.day}`, final: 'Game over', recover: 'Reconnecting' }[S.ph] ?? '';
+  const phLeft = S.nPh - S.P.filter((p) => !p.alive && p.role === 'phantom').length;
+  hud.info(`${phLabel}${S.rounds > 1 ? ` · game ${S.rd}/${S.rounds}` : ''}`, `${live(S).length} alive · ${S.ph === 'final' ? S.nPh : phLeft} Phantom${S.nPh > 1 ? 's' : ''} ${S.ph === 'final' ? 'in total' : 'left'}${me ? ` · score <b style="color:var(--accent)">${me.score}</b>` : ''}`);
+  const rows = [...S.P].sort((a, c) => c.score - a.score || (c.alive - a.alive));
+  const votes = S.ph === 'verdict' ? S.res?.vote?.votes : null;
+  hud.board(rows.map((p) => ({ p, out: !p.alive, tag: (p.role ? `<span class="chip" style="color:${ROLE[p.role].col}">${ROLE[p.role].name}</span>` : '') + (p.alive ? '' : '<span class="mk out"></span>'), right: votes && votes[p.id] != null ? `→ ${votes[p.id] ? esc(S.P.find((q) => q.id === votes[p.id])?.nick ?? '?').slice(0, 8) : 'skip'}` : ['night', 'vote'].includes(S.ph) && p.alive ? `<span class="mk ${p.lock ? 'tick' : 'dot'}"></span>${p.score}` : S.ph === 'day' && p.lock ? `<span class="mk tick"></span>${p.score}` : `${p.score}` })), game.me);
+}
+
+// Multiplayer > table game kit wires lobby, sync, roster, bots, attract
+const game = createTableGame({
+  lobby: {
+    game: 'masquerade-manor', title: 'Masquerade Manor', emoji: '🎭', accent: '#e94f6f',
+    blurb: 'Social deduction for 4-14. Secret Phantoms unmask a guest each night; the Butler inspects, the Maid protects. By day everyone talks, accuses and votes someone out in secret.',
+    defaultBots: 7, minPlayers: 4,
+    note: 'Best with 6-14 (humans + bots). 1 Phantom up to 5 players, 2 up to 9, 3 above. Bots bluff, accuse and remember who voted for whom.',
+    settings: [
+      { key: 'rounds', label: 'Games', options: [[1, '1'], [2, '2'], [3, '3']], value: 2 },
+      { key: 'talk', label: 'Day talk', options: [[45, '45 s'], [60, '60 s'], [90, '90 s']], value: 60 },
+    ],
+  },
+  botNames: BOT_NAMES, newPlayer, newMatch, attract, tick, action, promote, change,
+  private(v) { myView = v; dockKey = ''; },
+  left(S, ids) { if (S._roles) for (const id of ids) { const r = S._roles[id]; if (r) S.goneIds.push({ id, role: r }); } },
+});
+
+// Run engine > render: seats around the table, ghosts float, night dims the room
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 9, 12), look = new THREE.Vector3(0, 1, 0), _c = new THREE.Color();
+const nightSky = new THREE.Color(0x0a0a1e), daySky = new THREE.Color(0x170f1c);
+let dark = 0;
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime, S = game.S;
+  const night = S.ph === 'night' || S.ph === 'role';
+  dark += ((night ? 1 : 0) - dark) * Math.min(1, dt * 2);
+  hemi.intensity = 0.9 - dark * 0.6;
+  key.intensity = 1.7 - dark * 1.4;
+  key.color.copy(_c.set(0xffffff).lerp(new THREE.Color(0x6070ff), dark));
+  scene.background.copy(daySky).lerp(nightSky, dark);
+  scene.fog.color.copy(scene.background);
+  candleLight.intensity = 14 + Math.sin(time * 13) * 2 + Math.sin(time * 7.3) * 1.5;
+  candles.forEach((f, i) => (f.scale.x = 1 + Math.sin(time * 17 + i) * 0.15));
+  pawns.prune(S.P);
+  const spots = ringSpots(S.P.length, { r: S.P.length > 9 ? 5.4 : 4.6 });
+  S.P.forEach((p, i) => {
+    const g = pawns.get(p), sp = spots[i], u = g.userData;
+    g.position.set(sp.x, p.alive ? 0 : 1.2 + Math.sin(time * 2 + i) * 0.15, sp.z);
+    g.rotation.y = sp.face;
+    u.mat.transparent = !p.alive; u.mat.opacity = p.alive ? 1 : 0.35;
+    u.body.position.y = S.ph === 'final' && ROLE[p.role]?.team === S.win ? Math.abs(Math.sin(time * 6 + i)) * 0.3 : 0;
+    const voting = (S.ph === 'night' || S.ph === 'vote') && p.alive;
+    setBadge(g, !p.alive ? skullTex : voting && p.lock ? checkTex : S.ph === 'day' && p.lock ? voteTex : null);
+    if (u.bubble?.s.visible) { u.bubbleT -= dt; u.bubble.s.material.opacity = Math.min(1, u.bubbleT); if (u.bubbleT <= 0) u.bubble.s.visible = false; }
+  });
+  hudFrame(S, dt);
+  const fit = Math.max(1, 1.45 / camera.aspect);
+  camPos.lerp(new THREE.Vector3(0, 9.5 * fit, 11 * fit), 1 - Math.exp(-dt * 3));
+  camera.position.copy(camPos);
+  camera.lookAt(look);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+game.start();
+loop();
+</script>
+</body>
+</html>

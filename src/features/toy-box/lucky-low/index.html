@@ -278,7 +278,7 @@ const lobby = createLobby({
     if (!isHost) { if (sync.state) applyState(sync.state); return; }
     S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 10, K: 8, res: null, P: [] };
     for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
+    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} bot`, BOT_COLORS[i], true));
     S.K = rangeFor(S.P.length);
     prevS = null; lastSig = '';
   },
@@ -314,7 +314,7 @@ function onChange(prev, cur) {
       dropTokens(cur.res, cur.P);
       const w = cur.P.find((p) => p.id === cur.res.win);
       setTimeout(() => {
-        if (w) { sfx.win(w.id === me); flash(`<small>lowest lonely number · +${cur.res.v}</small>🍀 ${esc(w.nick)}`); }
+        if (w) { sfx.win(w.id === me); flash(`<small>lowest lonely number · +${cur.res.v}</small>${esc(w.nick)}`); }
         else { sfx.none(); flash('<small>every number was shared</small>Nobody'); }
       }, Math.min(cur.K, (cur.res.v ?? cur.K)) * 280 + 400);
     }
@@ -352,7 +352,7 @@ function hud(dt) {
   flashT -= dt;
   const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt));
   if (S.ph === 'intro') big(`<small>${S.rounds} rounds · numbers 1 to ${S.K}</small>Lucky Low`);
-  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>luckiest with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>luckiest with ${w?.score ?? 0}</small>${esc(w?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
   const picking = me && S.ph === 'pick';
   pickbox.style.display = picking ? 'block' : 'none';
@@ -370,7 +370,7 @@ function hud(dt) {
   document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--lucky)">${me.score}</b> · numbers 1–${S.K}` : 'Watching';
   const rows = [...S.P].sort((a, c) => c.score - a.score);
   const rev = S.ph === 'reveal' && S.res;
-  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${rev && p.id === S.res.win ? '🍀 ' : ''}${esc(p.nick)}</span><em>${rev ? `picked ${S.res.picks[p.id] ?? '—'} · ` : S.ph === 'pick' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
+  document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${rev && p.id === S.res.win ? '<b style="color:#7cf0b4">WIN</b> ' : ''}${esc(p.nick)}</span><em>${rev ? `picked ${S.res.picks[p.id] ?? '—'} · ` : S.ph === 'pick' ? (p.lock ? '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#7cf0b4;margin-right:4px"></span>' : '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffcf5a;margin-right:4px"></span>') : ''}${p.score}</em></div>`).join('');
 }
 
 // Run engine > host / attract sim tick (worker keeps a background host tab ticking)

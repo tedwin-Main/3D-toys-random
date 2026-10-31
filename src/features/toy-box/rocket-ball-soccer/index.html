@@ -465,7 +465,7 @@ const lobby = createLobby({
     if (!isHost) { world.phase = 'count'; world.t = 3; return; }
     const count = [0, 0];
     for (const p of lobby.room.players) { const t = count[0] <= count[1] ? 0 : 1; count[t]++; addPlayer(p.id, p.nick, p.color, false, t); }
-    for (let i = 0; i < bots; i++) { const t = count[0] <= count[1] ? 0 : 1; count[t]++; addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, TEAM[t], true, t); }
+    for (let i = 0; i < bots; i++) { const t = count[0] <= count[1] ? 0 : 1; count[t]++; addPlayer(-1 - i, `${BOT_NAMES[i]} bot`, TEAM[t], true, t); }
     kickoff();
   },
   onLobby() {
@@ -614,7 +614,7 @@ function hud(dt) {
   document.getElementById('so').textContent = world.score[1];
   const c = Math.max(0, world.clock);
   document.getElementById('clock').textContent = world.over ? 'OT' : `${Math.floor(c / 60)}:${String(Math.floor(c % 60)).padStart(2, '0')}`;
-  document.getElementById('teams').innerHTML = [0, 1].map((t) => `<h4 style="color:${TEAM[t]}">${t === 0 ? 'BLUE' : 'ORANGE'}</h4>` + [...world.players.values()].filter((p) => p.team === t).sort((a, b) => b.goals - a.goals).map((p) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.goals ? '⚽'.repeat(Math.min(p.goals, 4)) : ''}</em></div>`).join('')).join('');
+  document.getElementById('teams').innerHTML = [0, 1].map((t) => `<h4 style="color:${TEAM[t]}">${t === 0 ? 'BLUE' : 'ORANGE'}</h4>` + [...world.players.values()].filter((p) => p.team === t).sort((a, b) => b.goals - a.goals).map((p) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.goals ? `${p.goals} goal${p.goals > 1 ? 's' : ''}` : ''}</em></div>`).join('')).join('');
 }
 
 // Run engine > sim tick (worker)
