@@ -42,16 +42,21 @@ const INIT = (tab) => `(() => {
       let tIn = 0, tOut = 0;
       this.__tOut = () => (tOut = Math.max(performance.now() + delay(), tOut));
       super.addEventListener('message', (e) => {
+        // all tabs share this machine's clock, so a probe's real send stamp shows how long its event waited to be dispatched here
+        const recv = performance.timeOrigin + performance.now();
         const at = (tIn = Math.max(performance.now() + delay(), tIn));
         setTimeout(() => {
+          // how late this tab got to the message after its simulated network delay = main-thread stall (machine load, not network)
+          const late = Math.max(0, performance.now() - at);
+          const waited = (d) => late + (d && d.sa ? Math.max(0, recv - d.sa - 1) : 0);
           rt.bytesIn += e.data.length;
           let m = null; try { m = JSON.parse(e.data); } catch {}
           if (m?.t === 'joined') { rt.me = m.id; rt.host = m.host; window.__ws = this; }
           if (m?.t === 'roster') rt.host = m.host;
           if (m?.t === 'data') {
             const d = m.data;
-            if (d?._lobby === 'probe' && rt.me !== rt.host) this.send(JSON.stringify({ t: 'send', to: m.from, data: { _lobby: 'pack', ts: d.ts } }));
-            else if (d?._lobby === 'pack' && rt.me === rt.host) rt.rtts.push([performance.now() - d.ts, d.ts - rt.started]);
+            if (d?._lobby === 'probe' && rt.me !== rt.host) this.send(JSON.stringify({ t: 'send', to: m.from, data: { _lobby: 'pack', ts: d.ts, gs: waited(d) + (d.sl || 0) } }));
+            else if (d?._lobby === 'pack' && rt.me === rt.host) rt.rtts.push([performance.now() - d.ts, d.ts - rt.started, performance.now() - d.ts - waited(d) - (d.gs || 0) - (d.sl || 0)]);
             else if (d?._lobby === 'start') rt.started = performance.now();
             else if (!d?._lobby && m.from === rt.host && rt.started) rt.hostData.push(performance.now());
           }
@@ -64,7 +69,13 @@ const INIT = (tab) => `(() => {
     send(d) {
       const at = this.__tOut();
       if (!rt.started && String(d).includes('"_lobby":"start"')) rt.started = performance.now();
-      setTimeout(() => { if (this.readyState === 1) { rt.sent++; N.prototype.send.call(this, d); } }, at - performance.now());
+      setTimeout(() => {
+        if (this.readyState !== 1) return;
+        let out = d;
+        // probes carry their real send moment and how late this tab sent them (sl), so stalls can be taken out of the network figure
+        if (/"_lobby":"(probe|pack)"/.test(out)) out = out.replace(/"_lobby":"(probe|pack)"/, '"_lobby":"$1","sa":' + (performance.timeOrigin + performance.now()) + ',"sl":' + Math.max(0, performance.now() - at));
+        rt.sent++; N.prototype.send.call(this, out);
+      }, at - performance.now());
     }
   };
   setInterval(() => { if (window.__ws && rt.me && rt.me === rt.host && rt.started) window.__ws.send(JSON.stringify({ t: 'send', data: { _lobby: 'probe', ts: performance.now() } })); }, 500);
@@ -204,8 +215,9 @@ async function runGame(browser, dir) {
       hostMsgsPerSec: +med(rates).toFixed(1),
       hostGapMs: { p50: r1(pct(gaps, 0.5)), p95: r1(pct(gaps, 0.95)), max: r1(gaps.length ? Math.max(...gaps) : NaN) },
       // steady state = probes sent 8 s or more after the start (the first frames compile every shader, seconds on a software GPU)
-      rttMs: (() => { const all = host.rtts.map(([v]) => v), st = host.rtts.filter(([, t]) => t >= WARMUP_MS).map(([v]) => v), warm = host.rtts.filter(([, t]) => t < WARMUP_MS).map(([v]) => v);
-        return { n: st.length, p50: r1(pct(st, 0.5)), p95: r1(pct(st, 0.95)), max: r1(st.length ? Math.max(...st) : NaN), warmupMax: r1(warm.length ? Math.max(...warm) : NaN), allP95: r1(pct(all, 0.95)) }; })(),
+      // raw = what the probe saw; net = raw minus the time the probe sat waiting on a busy main thread in the guest and host tabs
+      rttMs: (() => { const st = host.rtts.filter(([, t]) => t >= WARMUP_MS), raw = st.map(([v]) => v), net = st.map(([, , n]) => n), warm = host.rtts.filter(([, t]) => t < WARMUP_MS).map(([v]) => v);
+        return { n: st.length, p50: r1(pct(net, 0.5)), p95: r1(pct(net, 0.95)), max: r1(net.length ? Math.max(...net) : NaN), rawP50: r1(pct(raw, 0.5)), rawP95: r1(pct(raw, 0.95)), rawMax: r1(raw.length ? Math.max(...raw) : NaN), warmupMax: r1(warm.length ? Math.max(...warm) : NaN) }; })(),
       kbInPerGuest: +(med(guests.map((g) => g.bytesIn)) / 1024 / SECONDS).toFixed(1),
       fpsMedian: +med(fps).toFixed(1),
       loopLagMs: { p95: r1(pct(lags, 0.95)), max: r1(lags.length ? Math.max(...lags) : NaN), host95: r1(pct(host.lag, 0.95)) },
@@ -232,7 +244,7 @@ const results = [];
 for (const dir of GAMES) {
   const r = await runGame(browser, dir);
   results.push(r);
-  const rtt = r.rttMs ? `rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max} (warm-up max ${r.rttMs.warmupMax})` : '';
+  const rtt = r.rttMs ? `net rtt p50 ${r.rttMs.p50} p95 ${r.rttMs.p95} max ${r.rttMs.max} · raw p95 ${r.rttMs.rawP95} max ${r.rttMs.rawMax} (warm-up raw max ${r.rttMs.warmupMax})` : '';
   console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${dir.padEnd(24)} joined ${r.joined ?? '-'}/${PLAYERS} started ${r.started ?? '-'} in-match ${r.stillInMatch ?? '-'}${r.matchEnded ? ' (match over, all back in lobby)' : ''}  ${rtt}  host ${r.hostMsgsPerSec ?? '-'}/s gap p95 ${r.hostGapMs?.p95 ?? '-'}  ${r.kbInPerGuest ?? '-'} KB/s  fps ${r.fpsMedian ?? '-'}  loop-lag p95 ${r.loopLagMs?.p95 ?? '-'} max ${r.loopLagMs?.max ?? '-'} (host p95 ${r.loopLagMs?.host95 ?? '-'})  errors ${r.errorCount}${r.fatal ? `  FATAL ${r.fatal}` : ''}`);
   for (const e of r.errors) console.log(`      ${e}`);
   for (const l of r.profile ?? []) console.log(`      profile ${l}`);
