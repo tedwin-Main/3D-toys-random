@@ -42,9 +42,9 @@
   .body { padding: 14px 16px 18px; }
   .body h2 { margin: 0 0 4px; font-size: 18px; }
   .body p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
-  /* Home > Popular view: why each pick is popular, shown only under the Popular chip */
+  /* Home > Recommended view: why each pick is recommended, shown only under the Recommended chip */
   .body p.why { display: none; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
-  #grid.popular .body p.why { display: block; }
+  #grid.recommended .body p.why { display: block; }
   .tags { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
   .tags span { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #232736; color: #b9c0d3; }
 
@@ -102,18 +102,18 @@
 </section>
 
 <script type="module">
-import { TOYS, POPULAR } from './common/toy-list.js';
+import { TOYS, RECOMMENDED } from './common/toy-list.js';
 
 const $ = (id) => document.getElementById(id);
 const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
 
 // Home > Filter tabs: All / Single player / Multiplayer, plus genre chips under Multiplayer; state lives in home hash (#f=multi&g=battle) so Back restores it
 const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
-// popular = hand-picked ranking (POPULAR in toy-list.js), shown in rank order
-const GENRES = [['all', 'All genres'], ['popular', '🔥 Popular'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['deduction', '🕵️ Deduction'], ['coop', '🤝 Co-op'], ['rhythm', '🎵 Rhythm'], ['creative', '🧱 Creative']];
+// recommended = hand-picked ranking (RECOMMENDED in toy-list.js), shown in rank order
+const GENRES = [['all', 'All genres'], ['recommended', '⭐ Recommended'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['deduction', '🕵️ Deduction'], ['coop', '🤝 Co-op'], ['rhythm', '🎵 Rhythm'], ['creative', '🧱 Creative']];
 const isMulti = (t) => t.players === 'multi';
-const POP_RANK = new Map(POPULAR.map(([dir, why], i) => [dir, { rank: i + 1, why }]));
-const inGenre = (t, g) => (g === 'popular' ? POP_RANK.has(t.dir) : t.genre === g);
+const REC_RANK = new Map(RECOMMENDED.map(([dir, why], i) => [dir, { rank: i + 1, why }]));
+const inGenre = (t, g) => (g === 'recommended' ? REC_RANK.has(t.dir) : t.genre === g);
 const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || inGenre(t, g));
 let filter = 'all', genre = 'all';
 let list = TOYS;
@@ -138,9 +138,9 @@ function setFilter(arg = '') {
   filter = FILTERS.some(([k]) => k === f) ? f : 'all';
   genre = filter === 'multi' && GENRES.some(([k]) => k === g) ? g : 'all';
   list = TOYS.filter((t) => match(t, filter, genre));
-  const popular = genre === 'popular';
-  if (popular) list.sort((a, b) => POP_RANK.get(a.dir).rank - POP_RANK.get(b.dir).rank);
-  $('grid').classList.toggle('popular', popular);
+  const recommended = genre === 'recommended';
+  if (recommended) list.sort((a, b) => REC_RANK.get(a.dir).rank - REC_RANK.get(b.dir).rank);
+  $('grid').classList.toggle('recommended', recommended);
   $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
   $('genres').hidden = filter !== 'multi';
   $('genres').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.g === genre));
@@ -148,11 +148,11 @@ function setFilter(arg = '') {
   $('grid').querySelectorAll('a.card').forEach((a) => {
     const show = match(TOYS.find((t) => t.dir === a.dataset.dir), filter, genre);
     a.hidden = !show;
-    // grid order follows the ranking in the Popular view, the list order everywhere else
-    a.style.order = popular && show ? POP_RANK.get(a.dataset.dir).rank : '';
-    if (show) a.querySelector('.num').textContent = popular ? `#${POP_RANK.get(a.dataset.dir).rank}` : ++n;
+    // grid order follows the ranking in the Recommended view, the list order everywhere else
+    a.style.order = recommended && show ? REC_RANK.get(a.dataset.dir).rank : '';
+    if (show) a.querySelector('.num').textContent = recommended ? `#${REC_RANK.get(a.dataset.dir).rank}` : ++n;
   });
-  menu.querySelectorAll('button').forEach((b) => { b.hidden = !list.some((t) => t.dir === b.dataset.dir); b.style.order = popular && !b.hidden ? POP_RANK.get(b.dataset.dir).rank : ''; });
+  menu.querySelectorAll('button').forEach((b) => { b.hidden = !list.some((t) => t.dir === b.dataset.dir); b.style.order = recommended && !b.hidden ? REC_RANK.get(b.dataset.dir).rank : ''; });
 }
 
 // Home > Grid: cards; iframe preview only on hover to keep GPU idle
@@ -163,7 +163,7 @@ TOYS.forEach((t, i) => {
   a.href = `#${t.dir}`;
   a.dataset.dir = t.dir;
   a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 14</span>' : ''}${t.emoji}</div>
-    <div class="body"><h2>${t.title}</h2>${POP_RANK.has(t.dir) ? `<p class="why">${POP_RANK.get(t.dir).why}</p>` : ''}<p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
+    <div class="body"><h2>${t.title}</h2>${REC_RANK.has(t.dir) ? `<p class="why">${REC_RANK.get(t.dir).why}</p>` : ''}<p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
   const prev = a.querySelector('.preview');
   let timer;
   a.addEventListener('mouseenter', () => {

@@ -30,7 +30,7 @@ Notes:
 
 ## 3D toys
 
-- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: popular, turn-based, last one standing, bluff & bid, battle, racing & sports, party, deduction, co-op, rhythm, creative, from each toy's `genre` in `common/toy-list.js`; Popular is a hand-picked ranking in `POPULAR` there, shown in rank order with a one-line reason per pick, and prev / next in the viewer follows it) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
+- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: recommended, turn-based, last one standing, bluff & bid, battle, racing & sports, party, deduction, co-op, rhythm, creative, from each toy's `genre` in `common/toy-list.js`; Recommended is a hand-picked ranking in `RECOMMENDED` there, shown in rank order with a one-line reason per pick, and prev / next in the viewer follows it) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
 - `pelican-on-bicycle/`: pelican rides a bike over hills; WASD, bell, fish pickups.
 - `horse-race-track/`: 2-lap horse derby with betting, cheering, multi-camera.
 - `tiny-planet-world/`: walkable mini planet with day/night, villages, boats, tree planting.

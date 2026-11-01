@@ -66,8 +66,8 @@ export const TOYS = [
   {"dir":  "spice-bazaar", "emoji":  "💰", "title":  "Spice Bazaar", "desc":  "Trading for 1-14: everyone places secret buy and sell orders each round and the crowd moves the price. Ride the rumors, dodge the crashes, be richest at the closing bell.", "tags":  ["multiplayer", "economy", "secret orders"], "bg":  "linear-gradient(160deg,#ffb02e,#3a2414)", "players":  "multi", "genre":  "bluff"},
 ];
 
-// Toy Box > Popular: hand-picked multiplayer games of the kinds groups play most, best first; [dir, why it is popular]
-export const POPULAR = [
+// Toy Box > Recommended: hand-picked multiplayer games of the kinds groups play most, best first; [dir, why it is recommended]
+export const RECOMMENDED = [
   ['kart-race-online', 'Kart racing is the go-to party game for mixed groups'],
   ['doodle-relay', 'Draw and guess: anyone can play, no skill needed'],
   ['masquerade-manor', 'Social deduction is the classic big-group game night'],
