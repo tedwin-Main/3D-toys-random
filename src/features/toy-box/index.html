@@ -42,6 +42,9 @@
   .body { padding: 14px 16px 18px; }
   .body h2 { margin: 0 0 4px; font-size: 18px; }
   .body p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+  /* Home > Popular view: why each pick is popular, shown only under the Popular chip */
+  .body p.why { display: none; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+  #grid.popular .body p.why { display: block; }
   .tags { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
   .tags span { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: #232736; color: #b9c0d3; }
 
@@ -64,7 +67,7 @@
   #tab { position: absolute; top: 0; left: 50%; transform: translate(-50%, -100%); padding: 2px 14px 5px; border: 0; border-radius: 0 0 10px 10px; background: var(--pill); cursor: pointer; font-size: 12px; transition: transform 0.3s; z-index: 5; }
   #tab.show { transform: translate(-50%, 0); }
   #menu { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: min(340px, calc(100% - 32px)); max-height: min(70vh, 560px); overflow: auto; padding: 6px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(14px); border: 1px solid rgba(255, 255, 255, 0.08); display: none; z-index: 6; }
-  #menu.open { display: block; }
+  #menu.open { display: flex; flex-direction: column; }
   #menu button { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 9px; cursor: pointer; font-size: 14px; }
   #menu button:hover { background: rgba(255, 255, 255, 0.08); }
   #menu button.on { background: var(--accent); color: #1a1408; font-weight: 700; }
@@ -99,16 +102,19 @@
 </section>
 
 <script type="module">
-import { TOYS } from './common/toy-list.js';
+import { TOYS, POPULAR } from './common/toy-list.js';
 
 const $ = (id) => document.getElementById(id);
 const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
 
 // Home > Filter tabs: All / Single player / Multiplayer, plus genre chips under Multiplayer; state lives in home hash (#f=multi&g=battle) so Back restores it
 const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
-const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['deduction', '🕵️ Deduction'], ['coop', '🤝 Co-op'], ['rhythm', '🎵 Rhythm'], ['creative', '🧱 Creative']];
+// popular = hand-picked ranking (POPULAR in toy-list.js), shown in rank order
+const GENRES = [['all', 'All genres'], ['popular', '🔥 Popular'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['deduction', '🕵️ Deduction'], ['coop', '🤝 Co-op'], ['rhythm', '🎵 Rhythm'], ['creative', '🧱 Creative']];
 const isMulti = (t) => t.players === 'multi';
-const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || t.genre === g);
+const POP_RANK = new Map(POPULAR.map(([dir, why], i) => [dir, { rank: i + 1, why }]));
+const inGenre = (t, g) => (g === 'popular' ? POP_RANK.has(t.dir) : t.genre === g);
+const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || inGenre(t, g));
 let filter = 'all', genre = 'all';
 let list = TOYS;
 const filterHash = (f, g) => (f === 'all' ? '' : `f=${f}${f === 'multi' && g !== 'all' ? `&g=${g}` : ''}`);
@@ -132,6 +138,9 @@ function setFilter(arg = '') {
   filter = FILTERS.some(([k]) => k === f) ? f : 'all';
   genre = filter === 'multi' && GENRES.some(([k]) => k === g) ? g : 'all';
   list = TOYS.filter((t) => match(t, filter, genre));
+  const popular = genre === 'popular';
+  if (popular) list.sort((a, b) => POP_RANK.get(a.dir).rank - POP_RANK.get(b.dir).rank);
+  $('grid').classList.toggle('popular', popular);
   $('filters').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filter));
   $('genres').hidden = filter !== 'multi';
   $('genres').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.g === genre));
@@ -139,9 +148,11 @@ function setFilter(arg = '') {
   $('grid').querySelectorAll('a.card').forEach((a) => {
     const show = match(TOYS.find((t) => t.dir === a.dataset.dir), filter, genre);
     a.hidden = !show;
-    if (show) a.querySelector('.num').textContent = ++n;
+    // grid order follows the ranking in the Popular view, the list order everywhere else
+    a.style.order = popular && show ? POP_RANK.get(a.dataset.dir).rank : '';
+    if (show) a.querySelector('.num').textContent = popular ? `#${POP_RANK.get(a.dataset.dir).rank}` : ++n;
   });
-  menu.querySelectorAll('button').forEach((b) => (b.hidden = !list.some((t) => t.dir === b.dataset.dir)));
+  menu.querySelectorAll('button').forEach((b) => { b.hidden = !list.some((t) => t.dir === b.dataset.dir); b.style.order = popular && !b.hidden ? POP_RANK.get(b.dataset.dir).rank : ''; });
 }
 
 // Home > Grid: cards; iframe preview only on hover to keep GPU idle
@@ -152,7 +163,7 @@ TOYS.forEach((t, i) => {
   a.href = `#${t.dir}`;
   a.dataset.dir = t.dir;
   a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 14</span>' : ''}${t.emoji}</div>
-    <div class="body"><h2>${t.title}</h2><p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
+    <div class="body"><h2>${t.title}</h2>${POP_RANK.has(t.dir) ? `<p class="why">${POP_RANK.get(t.dir).why}</p>` : ''}<p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
   const prev = a.querySelector('.preview');
   let timer;
   a.addEventListener('mouseenter', () => {
