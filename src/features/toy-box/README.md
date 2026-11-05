@@ -107,16 +107,28 @@ Obstacle-show genre (gallery chip 🫘 Party royale): bean races, survival, logi
 - Latency (`netplay-latency.test.js`, confirm loop = press > host applies > ack back): at the live Render SG relay's 56 ms round trip, p50 83 ms (old pipeline 117); over a direct link at 8 ms one-way with 2% loss, p50 50 ms. Live on Render SG (2026-11-05, from KL): relay round trip p50 51 ms at 14 players, 64 ms at 32 (old relay: 56 ms at 14); in-game confirm loop on the relay p50 68-78 / p95 99 ms; direct links opened through public STUN with no errors. `?debug` exposes `__party.game.guest.stats.confirmMs`; `?nop2p` forces the relay.
 - Verified: `round-rules.test.js` runs every round at 14 and 32 bots (ends, quotas, single final winner, no NaN) plus whole shows to one winner; `netplay-latency.test.js` puts 5 guests at 125 ms one-way + 40 ms jitter: on Sweep Bar lag costs ~0.9 of 14 survival places (no prediction: ~3.7), on Spinner Gauntlet guests finish within 20% of host bots, own-bean corrections p50 < 0.01 units.
 
-Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test` with real party snapshots, worst case (every guest human and on the relay, no direct links), relay on a laptop core:
+Latency floor, per stage (press on a guest > host applies it > ack back):
+
+| stage | relay path | direct link |
+|---|---|---|
+| network | 2 × (ping + Render proxy ~7 ms per hop) | peer ping |
+| relay processing | ~2.5 ms round trip at 32 players | none |
+| guest input send | every tick (every 2 ticks above 8 relay guests) | every tick |
+| host jitter queue | drains to 0 standing ticks; grows only while a link runs dry | same |
+| host tick phase | avg 8 ms (60 Hz fixed-step sim) | same |
+| snapshot wait (remote beans only; own bean is predicted) | avg 17 / 25 / 33 ms at 30 / 20 / 15 Hz | same |
+
+Everything except the network and the 60 Hz tick is at its floor. Left out on purpose: 60 Hz snapshots (2x relay egress against the 100 GB/month free quota, for ≤ 8 ms on remote beans only) and binary rows (10-15% fewer bytes, but relay CPU follows frame count, not bytes).
+
+Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test` with real party snapshots, worst case (every guest human and on the relay, no direct links), relay on a laptop core. Relay CPU is mostly one `writev` per frame, so `room-relay.js` corks each socket for one event-loop turn (a burst of inputs to the host leaves in one write, no added delay): -12-15% CPU.
 
 | players | snapshot | relay CPU | relay egress | per guest in | host in |
 |---|---|---|---|---|---|
-| 14 | 0.9 KB @ 30 Hz | 30 ms/s | 0.35 MB/s | 24 KB/s | 397 msg/s |
-| 24 | 1.4 KB @ 15 Hz | 45 ms/s | 0.54 MB/s | 21 KB/s | 709 msg/s |
-| 32 | 1.9 KB @ 15 Hz | 54 ms/s | 0.94 MB/s | 28 KB/s | 956 msg/s |
-| 50 | 3.0 KB @ 15 Hz | 84 ms/s | 2.3 MB/s | 44 KB/s | 1511 msg/s |
+| 14 | 0.9 KB @ 30 Hz | 36 ms/s | 0.35 MB/s | 25 KB/s | 406 msg/s |
+| 32 | 1.9 KB @ 15 Hz | 55 ms/s | 0.95 MB/s | 28 KB/s | 977 msg/s |
+| 50 | 3.0 KB @ 15 Hz | 72 ms/s | 2.3 MB/s | 44 KB/s | 1537 msg/s |
 
-Relay CPU follows message count, not bytes, so direct links take most of it away. Render free instance limit reads 0.15 CPU; the live 32-player load test peaked at 0.032. Egress quota: 100 GB/month. 32 fits one room with headroom; 50 is CPU-borderline when everyone is on the relay. Raise `MAX_SEATS` to 50 only on a paid instance.
+Direct links take most relay traffic away. Render free instance limit reads 0.15 CPU; the live 32-player load test peaked at 0.032. Egress quota: 100 GB/month. Raise `MAX_SEATS` to 50 only on a paid instance.
 
 ## How these were made
 

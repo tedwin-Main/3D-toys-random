@@ -3,13 +3,30 @@
 import { WebSocketServer } from 'ws';
 import { createRelayCore } from './room-relay-core.js';
 
+// Relay CPU is mostly one writev syscall per frame: cork a socket on its first frame this event-loop turn,
+// uncork all at the end of the turn, so a burst (31 guests' inputs to the host) leaves in one write. No added delay.
+function createTurnBatcher() {
+  const corked = new Set();
+  const flush = () => { for (const sock of corked) sock.uncork(); corked.clear(); };
+  return (ws, frame) => {
+    const sock = ws._socket;
+    if (sock && !corked.has(sock)) {
+      if (!corked.size) setImmediate(flush);
+      sock.cork();
+      corked.add(sock);
+    }
+    ws.send(frame, { binary: false });
+  };
+}
+
 export function createRoomRelay(opts) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
   const core = createRelayCore(opts);
+  const sendBatched = createTurnBatcher();
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;
-    const conn = core.connect({ send: (frame) => ws.send(frame, { binary: false }), close: () => ws.terminate(), isOpen: () => ws.readyState === ws.OPEN });
+    const conn = core.connect({ send: (frame) => sendBatched(ws, frame), close: () => ws.terminate(), isOpen: () => ws.readyState === ws.OPEN });
     ws.on('pong', () => (ws.isAlive = true));
     ws.on('message', (raw) => core.message(conn, raw));
     ws.on('close', () => core.close(conn));
