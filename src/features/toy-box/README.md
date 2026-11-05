@@ -109,6 +109,7 @@ Obstacle-show genre (gallery chip 🫘 Party royale): bean races, survival, logi
   - Browser host over the relay (before 2026-11-06): p50 97-107 ms, two hops.
   - Server-run rounds (2026-11-06, ping 26-28 ms): p50 56-64 / p95 76-93 ms at 14 and 32 beans; relay echo 34-38 ms.
   - Same build on a noisier link (ping avg 36-44 ms): echo 43-52, confirm p50 65-90 ms. Confirm tracks echo + 22-30 ms.
+  - Input timing (2026-11-06, ping 14 ms, `e76cbbb`): browser and server tick on an exact 1/60 s grid (setTimeout chain, not setInterval). Twice a second the server tells each guest how early its inputs land before the next tick (`{ g: 'lead' }`), and the guest shifts its tick phase so the latest 5% land ~3 ms early (`leadShiftMs`). The jitter queue drains standing extra inputs in 0.2 s windows. Live, Node guests on a 60 Hz grid: 3 guests confirm p50 24-31 ms (lead off 24-50, depending on random phase); 14 guests p50 30 / p95 69 ms vs 35 / 87, server queue wait p50 7 vs 14 ms. Headless browsers here use software GL, so their tick clock is too jittery to show it (confirm 40-44 ms at echo 16-19, unchanged).
 - Verified: `round-rules.test.js` runs every round at 14 and 32 bots (ends, quotas, single final winner, no NaN) plus whole shows to one winner; `hosted-games.test.js` drives server-run matches through the relay core (lobby-host control, late join, acks, drops, full show); `netplay-latency.test.js` asserts the confirm loop stays within 2 ticks of the one-hop round trip, and with 5 guests at 125 ms one-way + 40 ms jitter, lag costs ~0.9 of 14 Sweep Bar places (no prediction: ~3.7) and own-bean corrections stay p50 < 0.01 units.
 
 Latency floor, per stage (press on a guest > server applies it > ack back):
@@ -118,11 +119,11 @@ Latency floor, per stage (press on a guest > server applies it > ack back):
 | network | 1 hop × (ping + Render edge-to-instance proxy) | relay echo 34-38 ms (ping 26-28 ms) |
 | relay processing | 0 | handler 5-6 ms/s, handler max ≤ 0.42 ms |
 | guest input send | every tick (every 2 ticks above 14 guests) | every tick up to 14 humans: confirm p50 64 > 51 ms, p95 117 > 74 ms live at 14 humans |
-| server jitter queue | 1 tick of arrival phase; extra depth only from jitter | depth p10 1 / p50 2 / mean 1.9-2.2, starved 1.3-1.9% of ticks |
+| server jitter queue | arrival lead (~3 ms with the lead loop; avg 8 ms at random phase); extra depth only from jitter | wait p50 7 ms with lead (14 without), starved 0.9-1.6% of ticks |
 | server tick phase | avg 8 ms (60 Hz fixed step, same clock as guests) | same |
 | sum | 36 + 8 + 8-17 ≈ 52-61 ms | confirm loop p50 56-64 ms |
 
-- **Floor:** the network term is now one Render hop; the rest is the 60 Hz tick and one tick of queue. A shorter path needs a server nearer the players, not code.
+- **Floor:** the network term is now one Render hop; the rest is the 60 Hz tick phase and a few ms of input lead. A shorter path needs a server nearer the players, not code.
 - **Jitter queue:** its wait is the cost of exact prediction (one input per tick). Skipping same-movement inputs (tried 2026-11-05) cut no confirm time and raised corrections p95 0.16 > 0.26, so it was reverted.
 - **2 > 32 player rise:** the server host sends one snapshot per human; the per-room cost on the relay is CPU, measured below.
 
