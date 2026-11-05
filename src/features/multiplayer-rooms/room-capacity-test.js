@@ -5,7 +5,7 @@ import { fork } from 'node:child_process';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { encodeSend, decodeFrame } from '../toy-box/common/relay-wire.js';
+import { encodeSend, encodeSendBytes, decodeFrame } from '../toy-box/common/relay-wire.js';
 import { inputEvery } from '../toy-box/common/party-royale/input-sync.js';
 import { createRoomRelay } from './room-relay.js';
 
@@ -49,7 +49,7 @@ function measure(url, n, seconds) {
 // Client side > 1 host sending real snapshots + n-1 guests sending input bundles and pings
 async function runClients(url, n, seconds) {
   const { snap, every } = await partySnapshot(n);
-  const snapHz = 60 / every, snapBytes = Buffer.byteLength(JSON.stringify(snap));
+  const snapHz = 60 / every, snapBytes = snap.length;
   const stats = { bytes: 0, guestBytes: 0, hostMsgs: 0, rtts: [] };
   const host = await joinPlayer(url, '', n, stats, true);
   const guests = [];
@@ -61,7 +61,7 @@ async function runClients(url, n, seconds) {
   Object.assign(stats, { bytes: 0, guestBytes: 0, hostMsgs: 0, rtts: [] });
   const t0 = performance.now();
   const timers = [
-    setInterval(() => send(host, snap), 1000 / snapHz),
+    setInterval(() => host.ws.send(encodeSendBytes(snap)), 1000 / snapHz),
     setInterval(() => guests.forEach((g) => send(g, bundle, g.host)), (1000 / 60) * inputTicks),
     setInterval(() => guests.forEach((g) => send(g, { g: 'ping', ts: performance.now() }, g.host)), 500),
   ];
@@ -79,10 +79,11 @@ function joinPlayer(url, room, cap, stats, isHost) {
     const ws = new WebSocket(url), me = { ws, id: null, host: null, code: null };
     ws.on('open', () => ws.send(JSON.stringify({ t: 'join', game: 'capacity-test', nick: 'bot', room, cap })));
     ws.on('error', reject);
-    ws.on('message', (raw) => {
+    ws.on('message', (raw, binary) => {
       const len = raw.length ?? Buffer.byteLength(String(raw));
       stats.bytes += len;
       if (!isHost) stats.guestBytes += len; else stats.hostMsgs++;
+      if (binary) return; // snapshot bytes: counted, not parsed
       const m = decodeFrame(String(raw));
       if (m.t === 'joined') { Object.assign(me, { id: m.id, host: m.host, code: m.room }); resolve(me); }
       else if (m.t === 'roster') me.host = m.host;
@@ -98,11 +99,12 @@ function send(p, data, to) { p.ws.send(encodeSend(JSON.stringify(data), { to }))
 // mid-race Spinner Gauntlet snapshot with n beans (real row sizes, events included)
 async function partySnapshot(n) {
   const { createRoundSim } = await import('../toy-box/common/party-royale/round-sim.js');
-  const { packSnapshot, snapEvery } = await import('../toy-box/common/party-royale/round-snapshot.js');
+  const { packSnapshot, encodeSnapshot, snapEvery } = await import('../toy-box/common/party-royale/round-snapshot.js');
   const { default: round } = await import('../toy-box/common/party-royale/rounds/spinner-gauntlet.js');
   const roster = Array.from({ length: n }, (_, i) => ({ id: i + 1, nick: `p${i + 1}`, color: '#fff', bot: i > 0 }));
   const sim = createRoundSim({ round, seed: 7, roster, keep: Math.ceil(n * 0.7) });
-  const every = snapEvery(n, n - 1);
-  for (let i = 0; i < 60 * 8; i++) { sim.step(); if (i % every === 0) sim.events.length = 0; }
-  return { snap: packSnapshot(sim, () => 1234, 'spinner-gauntlet'), every };
+  for (let i = 0; i < 60 * 8; i++) { sim.step(); if (i % 4 === 0) sim.events.length = 0; }
+  const snap = encodeSnapshot(packSnapshot(sim, () => 1234, '3-1234567890'));
+  // worst case: every guest on the relay
+  return { snap, every: snapEvery({ bytes: snap.length, relayGuests: n - 1, directGuests: 0 }) };
 }

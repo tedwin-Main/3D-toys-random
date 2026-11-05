@@ -39,6 +39,7 @@ async function sendFile(res, file) {
 const http = createServer(async (req, res) => {
   const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
   if (path === '/health') return res.writeHead(200).end('ok');
+  if (path === BASE + 'relay-stats') return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(relay.stats()));
   if (path === '/' || path === '/3d-toys') return res.writeHead(302, { location: BASE }).end();
   if (!path.startsWith(BASE)) return res.writeHead(404).end('not found');
   // Multiplayer > Lobby > invite link: LAN address so friends on other devices can join

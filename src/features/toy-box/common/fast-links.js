@@ -19,10 +19,13 @@ export function createFastLinks(room, deliver) {
   function open(peer) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     const link = { pc, ch: pc.createDataChannel('fast', CHANNEL), early: [] };
+    link.ch.binaryType = 'arraybuffer';
     links.set(peer, link);
     pc.onicecandidate = (e) => { if (e.candidate) signal(peer, { ice: e.candidate.toJSON() }); };
     pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') fail(peer); };
+    // binary messages arrive as Uint8Array, text as parsed JSON
     link.ch.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) return deliver(new Uint8Array(e.data), peer);
       let data;
       try { data = JSON.parse(e.data); } catch { return; }
       deliver(data, peer);
@@ -83,11 +86,11 @@ export function createFastLinks(room, deliver) {
       offer(host).catch(() => fail(host));
     },
     isOpen: (peer) => links.get(peer)?.ch.readyState === 'open',
-    /** true when sent directly; false = caller sends it by relay */
-    trySend(peer, json) {
+    /** payload: JSON string or Uint8Array; true when sent directly, false = caller sends it by relay */
+    trySend(peer, payload) {
       const ch = links.get(peer)?.ch;
       if (ch?.readyState !== 'open' || ch.bufferedAmount > BUFFER_LIMIT) return false;
-      try { ch.send(json); return true; } catch { return false; }
+      try { ch.send(payload); return true; } catch { return false; }
     },
     get openCount() { return [...links.keys()].filter((p) => links.get(p).ch.readyState === 'open').length; },
     closeAll() { for (const peer of [...links.keys()]) close(peer); },

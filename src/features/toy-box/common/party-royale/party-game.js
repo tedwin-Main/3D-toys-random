@@ -6,6 +6,7 @@ import { INTRO, ACTIVE, QUALIFIED } from './round-sim.js';
 import { ROUNDS } from './show-director.js';
 import { createMatchFlow } from './match-flow.js';
 import { createHostNet, createGuestRound } from './party-netplay.js';
+import { decodeSnapshot } from './round-snapshot.js';
 import { createPartyView } from './party-view.js';
 import { createPartyHud, esc } from './party-hud.js';
 import { createPartyInput } from './party-input.js';
@@ -121,7 +122,8 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
   }
 
   // Net > guest side: round message, snapshots, results, champion; host side: input bundles
-  function onData(d, from) {
+  function onData(raw, from) {
+    const d = raw instanceof Uint8Array ? decodeSnapshot(raw) : raw; // binary frames = snapshots
     if (!d || d._lobby) return;
     if (game.mode !== 'match') { if (d.g === 'r') game.lastMsg = d; return; }
     if (isHost()) { if (d.g === 'i') game.net?.onInput(from, d); return; }

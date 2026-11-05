@@ -78,6 +78,7 @@ function resolve(path) {
 const http = createServer(async (req, res) => {
   const path = decodeURIComponent((req.url ?? '/').split('?')[0]);
   if (path === '/health') return res.writeHead(200).end('ok');
+  if (path === TOYS_BASE + 'relay-stats') return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(relay.stats()));
   // no favicon file; 204 keeps console clean
   if (path === '/favicon.ico') return res.writeHead(204).end();
   if (path === '/3d-toys') return res.writeHead(301, { location: TOYS_BASE }).end();

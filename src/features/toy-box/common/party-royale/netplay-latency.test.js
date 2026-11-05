@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mulberry32 } from './course-colliders.js';
 import { createRoundSim, ACTIVE } from './round-sim.js';
-import { packSnapshot, createMirror, applySnapshot, snapEvery } from './round-snapshot.js';
+import { packSnapshot, encodeSnapshot, decodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
 import { createInputLog, createInputQueue, createPredictor, inputEvery, RESEND_UNACKED } from './input-sync.js';
 import { botInput } from './bean-bots.js';
 import sweepBar from './rounds/sweep-bar.js';
@@ -78,7 +78,7 @@ function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict 
     g: createGuest(r.id, round, seed, keep, roster, { predict, rng, every, resend }),
     up: createLink(rng, oneWayMs, jitterMs, { lossy: direct, loss }), down: createLink(rng, oneWayMs, jitterMs, { lossy: direct, loss }), q: createInputQueue(),
   }));
-  const snapGap = snapEvery(players, guests);
+  const snapGap = snapEvery({ bytes: snapBytesEstimate(players), relayGuests: direct ? 0 : guests, directGuests: direct ? guests : 0 });
   for (let t = 1; sim.phase !== 'end' && t < 60 * 240; t++) {
     const now = t * TICK_MS;
     for (const x of gs) {
@@ -88,7 +88,7 @@ function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict 
     }
     sim.step();
     if (sim.tick % snapGap === 0) {
-      const s = packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k');
+      const s = decodeSnapshot(encodeSnapshot(packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k'))); // wire codec in the loop
       sim.events = [];
       for (const x of gs) x.down.send(now, s);
     }
@@ -145,7 +145,7 @@ test('spinner gauntlet: lagged guests finish like host-local bots', () => {
 
 
 // input confirm loop (press > host applies > ack back on guest). Relay = live Render SG numbers (28 ms one-way, 5 ms jitter).
-// Old pipeline (3-tick bundles, 20 Hz snapshots, fixed 2-deep queue) measured p50 117 / p95 133 ms here.
+// Old pipeline (3-tick bundles, 20 Hz snapshots, fixed 2-deep queue) measured p50 117 / p95 133 ms here; floor = network + 1 tick.
 function confirmLoop(opts) {
   const confirms = [];
   for (const seed of SEEDS.slice(0, 8)) {
@@ -159,8 +159,9 @@ test('input confirm loop: relay at Render SG latency, and a direct link', () => 
   const relay = confirmLoop({ oneWayMs: 28, jitterMs: 5 });
   const direct = confirmLoop({ oneWayMs: 8, jitterMs: 4, direct: true, loss: 0.02 });
   console.log(`  confirm loop relay p50 ${relay.p50.toFixed(0)} / p95 ${relay.p95.toFixed(0)} ms (network 56-66); direct link 8 ms one-way, 2% loss: p50 ${direct.p50.toFixed(0)} / p95 ${direct.p95.toFixed(0)} ms`);
-  assert.ok(relay.p50 <= 85 && relay.p95 <= 100, 'relay pipeline adds at most ~2 ticks over the network');
-  assert.ok(direct.p50 <= relay.p50 - 25, 'direct link skips both Render hops');
+  const tick = 1000 / 60;
+  assert.ok(relay.p50 <= 56 + tick && relay.p95 <= 66 + tick, 'relay: network round trip + at most 1 tick');
+  assert.ok(direct.p50 <= 24 + tick, 'direct: peer round trip + at most 1 tick, even with 2% loss');
 });
 
 test('lossy direct link (5% loss, reordering): guests still survive like bots', () => {

@@ -34,6 +34,13 @@ function joinPlayer(room) {
     });
   });
 }
+// ws(s)://host/3d-toys/rooms > http(s)://host/3d-toys/relay-stats
+function statsUrl(wsUrl) {
+  const u = new URL(wsUrl);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:';
+  u.pathname = u.pathname.replace(/rooms$/, 'relay-stats');
+  return u.href;
+}
 const send = (p, data, to) => p.ws.send(encodeSend(JSON.stringify(data), { to }));
 
 function percentile(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] : NaN; }
@@ -52,6 +59,7 @@ const timers = [
 ];
 const t0 = performance.now();
 await new Promise((r) => setTimeout(r, SECONDS * 1000));
+const relaySide = await fetch(statsUrl(URL_ARG)).then((r) => r.json()).catch(() => null); // last full 10 s window, taken under load
 timers.forEach(clearInterval);
 [host, ...guests].forEach((p) => p.ws.close());
 
@@ -63,3 +71,8 @@ function report(label, list) {
 report('echo client>server>client (1 hop)', echoes);
 report('rtt guest>host>guest     (2 hops)', rtts);
 console.log(`messages received/s: ${(received / ((performance.now() - t0) / 1000)).toFixed(0)}`);
+// relay-side share of each hop: event-loop wait + handler; whatever is left of a hop is network + Render proxy
+if (relaySide?.loopDelayMs) {
+  const { loopDelayMs: d, handlerMaxMs, cpuMsPerS, framesInPerS, framesOutPerS } = relaySide;
+  console.log(`relay side (server, last 10 s): event-loop delay p50 ${d.p50} / p99 ${d.p99} / max ${d.max} ms, handler max ${handlerMaxMs} ms, CPU ${cpuMsPerS} ms/s, frames in ${framesInPerS}/s out ${framesOutPerS}/s`);
+}

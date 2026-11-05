@@ -3,21 +3,28 @@
 import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 import { ACTIVE } from './round-sim.js';
-import { packSnapshot, createMirror, applySnapshot, snapEvery } from './round-snapshot.js';
+import { packSnapshot, encodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
 import { createInputLog, createInputQueue, createPredictor, inputEvery, RESEND_UNACKED } from './input-sync.js';
 
 const guestsIn = (room) => Math.max(1, room.players.length - 1);
 
+// guests split by path: direct link or relay
+function guestLinks(room) {
+  const others = room.players.filter((p) => p.id !== room.me);
+  const directGuests = others.filter((p) => room.isDirect(p.id)).length;
+  return { directGuests, relayGuests: others.length - directGuests };
+}
+
 /**
  * Host > per round: guest inputs land in jitter queues (tagged by round key so stale bundles are dropped),
- * one snapshot every snapEvery ticks carries acks so each guest can reconcile.
+ * snapshots (binary, rate from the free-tier budgets in snapEvery) carry acks so each guest can reconcile.
  * Snapshots go fast (direct link where open, lossy): each repeats the previous one's events so a dropped packet loses no banner or sound.
  */
 export function createHostNet(room) {
   const queues = new Map();
-  let roundKey = null, prev = null;
+  let roundKey = null, prev = null, lastBytes = 0;
   return {
-    begin(key) { roundKey = key; queues.clear(); prev = null; },
+    begin(key) { roundKey = key; queues.clear(); prev = null; lastBytes = 0; },
     onInput(from, msg) {
       if (msg.rk !== roundKey) return;
       if (!queues.has(from)) queues.set(from, createInputQueue());
@@ -32,11 +39,13 @@ export function createHostNet(room) {
     },
     // returns true when a snapshot went out (caller then plays + clears sim.events)
     sendSnapshot(sim) {
-      if (sim.tick % snapEvery(sim.list.length, guestsIn(room)) !== 0 && sim.phase !== 'end') return false;
+      const every = snapEvery({ bytes: lastBytes || snapBytesEstimate(sim.list.length), ...guestLinks(room) });
+      if (sim.tick % every !== 0 && sim.phase !== 'end') return false;
       const snap = packSnapshot(sim, (id) => queues.get(id)?.ack ?? 0, roundKey);
       if (prev?.ev.length) Object.assign(snap, { pk: prev.k, pev: prev.ev });
-      room.send(snap, { fast: true });
-      prev = snap;
+      const bytes = encodeSnapshot(snap);
+      room.send(bytes, { fast: true });
+      prev = snap; lastBytes = bytes.length;
       return true;
     },
   };

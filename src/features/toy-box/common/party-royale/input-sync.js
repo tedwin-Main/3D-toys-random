@@ -13,7 +13,7 @@ const RELAY_EVERY_TICK_GUESTS = 8;
  */
 export const inputEvery = ({ fast, guests }) => (fast || guests <= RELAY_EVERY_TICK_GUESTS ? 1 : 2);
 const HISTORY = 300;
-const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30;
+const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30, STANDING_PCT = 0.1;
 
 const packInput = (b) => [Math.round(b.mx * 100) / 100, Math.round(b.mz * 100) / 100, b.jumpSeq, b.diveSeq, b.grab ? 1 : 0];
 const unpackInput = ([mx, mz, j, d, g]) => ({ mx, mz, jumpSeq: j, diveSeq: d, grab: !!g });
@@ -51,13 +51,15 @@ export function createInputLog({ now = () => performance.now() } = {}) {
 
 /**
  * Host > per-guest jitter buffer, one input per tick (ack = last applied seq).
- * Primes 2 deep; if the queue never dipped below 2 over a 0.5 s window, that standing depth is pure lag,
- * so the next window drains it by skipping to the newer input (press counters are cumulative: no jump or dive lost).
+ * Primes 2 deep. Each 0.5 s window records the depth before every take; the depth it almost never drops below
+ * (10th percentile, so one lost packet on a direct link does not count) is pure lag, and the next window drains it
+ * by skipping to newer inputs (press counters are cumulative: no jump or dive lost).
  */
 export function createInputQueue() {
   const q = [];
   let lastQueued = 0, ack = 0, primed = false, cur = unpackInput([0, 0, 0, 0, 0]);
-  let low = Infinity, takes = 0, drain = 0;
+  const depths = [];
+  let drain = 0;
   return {
     get ack() { return ack; },
     get depth() { return q.length; },
@@ -76,10 +78,11 @@ export function createInputQueue() {
     },
   };
   function trackStanding() {
-    low = Math.min(low, q.length);
-    if (++takes < DRAIN_WINDOW) return;
-    drain = Math.max(0, low - 1);
-    low = Infinity; takes = 0;
+    depths.push(q.length);
+    if (depths.length < DRAIN_WINDOW) return;
+    depths.sort((a, b) => a - b);
+    drain = Math.max(0, depths[Math.floor(DRAIN_WINDOW * STANDING_PCT)] - 1);
+    depths.length = 0;
   }
 }
 

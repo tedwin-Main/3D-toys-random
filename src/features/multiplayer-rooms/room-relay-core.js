@@ -10,7 +10,7 @@ const SEND_BYTE = SEND_MARK.charCodeAt(0), BAR_BYTE = '|'.charCodeAt(0);
 // first 14 = classic palette; slots 15-32 only appear in party royale rooms
 const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6', '#ffb4a2', '#4361ee',
   '#e63946', '#06d6a0', '#ffd6a5', '#9b5de5', '#f15bb5', '#00bbf9', '#fee440', '#8ac926', '#ff7b00', '#b5838d', '#56cfe1', '#d9ed92', '#ef476f', '#118ab2', '#ffafcc', '#7f5539', '#cdb4db', '#2ec4b6'];
-// sock adapter: { send(str | Buffer as text frame), close(), isOpen() }; maxSeats override only for capacity measurements
+// sock adapter: { send(str | Buffer, binary = false), close(), isOpen() }; maxSeats override only for capacity measurements
 export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
   // creator picks seat cap for room; clamp to 2..maxSeats
   const seatCap = (cap) => Math.max(2, Math.min(maxSeats, Math.floor(Number(cap)) || DEFAULT_SEATS));
@@ -18,7 +18,7 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
   const conns = new Set();
   let nextId = 1;
 
-  const sendRaw = (conn, frame) => { if (conn.sock.isOpen()) conn.sock.send(frame); };
+  const sendRaw = (conn, frame, binary = false) => { if (conn.sock.isOpen()) conn.sock.send(frame, binary); };
   const deliverFrame = (from, payload) => Buffer.concat([Buffer.from(deliverPrefix(from)), payload]);
   const send = (conn, msg) => sendRaw(conn, JSON.stringify(msg));
   function makeCode(game) {
@@ -68,16 +68,16 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     roster(room);
   }
 
-  // Cloud Sync > relay: read the short header only, forward payload bytes untouched; one frame buffer shared by every receiver
-  // host may pin a sticky payload for late joiners
-  function relay(conn, buf) {
+  // Cloud Sync > relay: read the short header only, forward payload bytes untouched (text or binary); one frame buffer shared by every receiver
+  // host may pin a sticky (text) payload for late joiners
+  function relay(conn, buf, binary) {
     const head = readSendHeader(buf);
     if (!head) return;
     const room = conn.room, me = conn.player, payload = buf.subarray(head.end + 1);
     const out = deliverFrame(me.id, payload);
     const targets = head.to ? [...new Set(head.to)].map((id) => room.players.get(id)) : room.players.values();
-    for (const p of targets) if (p && p !== me) sendRaw(p.conn, out);
-    if (head.sticky && me.id === room.host) room.state = Buffer.from(payload);
+    for (const p of targets) if (p && p !== me) sendRaw(p.conn, out, binary);
+    if (head.sticky && !binary && me.id === room.host) room.state = Buffer.from(payload);
   }
 
   return {
@@ -87,10 +87,11 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
       conns.add(conn);
       return conn;
     },
-    message(conn, raw) {
+    message(conn, raw, binary = false) {
       conn.lastSeen = Date.now();
       const buf = typeof raw === 'string' ? Buffer.from(raw) : raw;
-      if (buf[0] === SEND_BYTE) { if (conn.room) relay(conn, buf); return; }
+      if (buf[0] === SEND_BYTE) { if (conn.room) relay(conn, buf, binary); return; }
+      if (binary) return;
       let msg;
       try { msg = JSON.parse(buf.toString()); } catch { return; }
       // latency probe: bounce straight back, no room work (load test splits network vs relay time)

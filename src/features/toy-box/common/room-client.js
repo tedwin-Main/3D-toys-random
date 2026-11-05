@@ -1,6 +1,6 @@
 // Manages browser client connection to room relay.
 
-import { encodeSend, decodeFrame } from './relay-wire.js';
+import { encodeSend, encodeSendBytes, decodeFrame } from './relay-wire.js';
 import { createFastLinks } from './fast-links.js';
 
 const CONNECT_TIMEOUT_MS = 4000;
@@ -27,6 +27,7 @@ const directLinksAllowed = () => typeof RTCPeerConnection !== 'undefined' && !/[
 function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
     // hung socket (blocked host, dead edge): give up so next relay gets a turn
     const giveUp = setTimeout(() => { if (!joined) { reject(unreachable()); ws.close(); } }, CONNECT_TIMEOUT_MS);
     const handlers = { data: new Set(), roster: new Set(), host: new Set(), close: new Set() };
@@ -37,12 +38,15 @@ function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
       me: null, code: null, color: null, slot: 0, host: null, players: [],
       get isHost() { return this.me === this.host; },
       player(id) { return this.players.find((p) => p.id === id); },
-      // opts.to = one peer id; opts.sticky = host state replayed to late joiners; opts.fast = direct link first (lossy, unordered)
+      // data = JSON-able value, or Uint8Array sent as a binary frame (peers get a Uint8Array back)
+      // opts.to = one peer id; opts.sticky = host state replayed to late joiners (JSON only); opts.fast = direct link first (lossy, unordered)
       send(data, opts = {}) {
-        const json = JSON.stringify(data);
-        const to = opts.fast && links ? sendDirect(json, opts.to) : opts.to;
+        const payload = data instanceof Uint8Array ? data : JSON.stringify(data);
+        const to = opts.fast && links ? sendDirect(payload, opts.to) : opts.to;
         if (Array.isArray(to) && !to.length) return;
-        if (ws.readyState === WebSocket.OPEN) ws.send(encodeSend(json, { to, sticky: opts.sticky }));
+        if (ws.readyState !== WebSocket.OPEN) return;
+        const wire = { to, sticky: opts.sticky };
+        ws.send(typeof payload === 'string' ? encodeSend(payload, wire) : encodeSendBytes(payload, wire));
       },
       // guest input: host only, other guests never read it
       toHost(data, opts = {}) { this.send(data, { ...opts, to: this.host }); },
@@ -81,9 +85,9 @@ function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
       }
     };
     // fast send: direct where a link is open; returns peers still needing the relay (unchanged `to` if none went direct)
-    function sendDirect(json, to) {
+    function sendDirect(payload, to) {
       const peers = to != null ? [to] : r.players.map((p) => p.id).filter((id) => id !== r.me);
-      const rest = peers.filter((id) => !links.trySend(id, json));
+      const rest = peers.filter((id) => !links.trySend(id, payload));
       return rest.length === peers.length ? to : rest;
     }
     ws.onerror = () => { if (!joined) reject(unreachable()); };
