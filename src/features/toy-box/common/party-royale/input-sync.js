@@ -53,7 +53,7 @@ export function createInputLog({ now = () => performance.now() } = {}) {
 /**
  * Host > per-guest jitter buffer, one input per tick (ack = last applied seq).
  * Primes 2 deep. Each 0.5 s window records the depth before every take; the depth it almost never drops below
- * (10th percentile, so one lost packet on a direct link does not count) is pure lag, and the next window drains it
+ * (10th percentile, so one late burst does not count) is pure lag, and the next window drains it
  * by skipping to newer inputs (press counters are cumulative: no jump or dive lost).
  */
 export function createInputQueue() {

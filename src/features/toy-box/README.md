@@ -103,49 +103,44 @@ Obstacle-show genre (gallery chip 🫘 Party royale): bean races, survival, logi
 - `bean-royale-show/`: full show. `common/party-royale/show-director.js` opens with a race (70% go through), then survival / logic / hunt / team rounds (55%), then a final once 6 or fewer remain (or at round 5). A final with several survivors replays a final until one bean is crowned.
 - Rounds, each also its own page: `gate-gamble/` (doors), `spinner-gauntlet/` (sweepers, hammers, discs, rams), `ghost-tiles/` (hidden safe path), `tilt-bridges/` (crowd-weighted seesaws), `boulder-hill/` (boulders + rising goo), `sweep-bar/` (jump the low bar, dive the high one), `wall-rush/` (sliding walls with gaps), `cannon-rain/` (rim cannons), `pattern-panic/` (memorise symbols), `tail-snatch/` (steal tails), `egg-haul/` (2-4 teams, nests), `crown-summit/` (final, grab the crown). `hex-drop-survival/` sits in the same chip.
 - Engine (`common/party-royale/`, pure JS, node-testable): `course-colliders.js` (boxes with yaw + tilt, cylinders, balls; obstacles move as pure functions of the round clock), `bean-physics.js` (run, jump with coyote + buffer, dive under high bars, stumble, platform carry, slopes, knock tags), `round-sim.js` (60 Hz rounds, qualify / eliminate, grabs, checkpoints), `bean-bots.js` + per-round bot hooks, `rounds/*.js`.
-- Netcode: host runs the round; guests send tick-numbered inputs, the host plays them through a jitter queue (drains standing lag after bursts; a lone lost packet does not block the drain) and acks the last one in each snapshot. Snapshots are binary (26 B per bean, ~50% under JSON, same rounding; rows follow the shared roster order so ids are implied, acks ride as 16 bits) at the fastest of 60 / 30 / 20 / 15 Hz that fits three free-tier budgets (`snapEvery` in `round-snapshot.js`): relay egress 400 KB/s, relay frames 960/s, host upload 500 KB/s. Snapshots and inputs go over direct WebRTC links when the network allows (up to 16 guests; every tick, last 8 unacked inputs repeated, snapshots repeat the previous events, stale ones skipped), else over the relay (inputs every tick up to 8 guests, every 2 ticks above). Guests rebuild their own bean from the host copy and replay unacked inputs against obstacles at the matching ticks, so a jump timed on screen lands on the host too. Round state that is not a pure function of time (gates, tiles, plank tilt, tails, eggs, crown) rides in the snapshot. Host migration promotes a guest's mirror.
-- Latency (`netplay-latency.test.js`, confirm loop = press > host applies > ack back): at the live Render SG relay's 56 ms round trip, p50 83 ms (old pipeline 117); over a direct link at 8 ms one-way with 2% loss, p50 50 ms. Live on Render SG (2026-11-05, from KL): relay round trip p50 51 ms at 14 players, 64 ms at 32 (old relay: 56 ms at 14); in-game confirm loop on the relay p50 68-78 / p95 99 ms; direct links opened through public STUN with no errors. Same day, busier network (ping ~30 ms), batched relay: round trip p50 68-80 ms at 2 players, 90 at 14, 95 at 32 (Render CPU peak 0.035 of 0.15, so the rise is network / proxy, not the relay); in-game confirm loop 100 ms on the relay, about round trip + the 8 ms tick floor, vs 16-18 ms on direct links (same machine). Binary snapshots + budget rates, measured inside Render via `/3d-toys/relay-stats` (ping ~33-41 ms): relay event-loop delay p50 0.1 ms, p99 1.6 / 1.1 / 3.3 ms at 2 / 14 / 32 players, handler max 4.9 ms, relay CPU 17 / 45 / 66 ms/s (Render peak 0.033 of 0.15); client round trip 73 / 91 / 98 ms, so the 2 > 32 rise (~25 ms) is outside the relay process (Render proxy / network). In-game confirm loop at 14 beans: relay p50 110-115 / p95 132 ms, direct links p50 10-16 / p95 18-42 ms. `?debug` exposes `__party.game.guest.stats.confirmMs`; `?nop2p` forces the relay.
-- Verified: `round-rules.test.js` runs every round at 14 and 32 bots (ends, quotas, single final winner, no NaN) plus whole shows to one winner; `netplay-latency.test.js` puts 5 guests at 125 ms one-way + 40 ms jitter: on Sweep Bar lag costs ~0.9 of 14 survival places (no prediction: ~3.7), on Spinner Gauntlet guests finish within 20% of host bots, own-bean corrections p50 < 0.01 units.
+- Netcode: the relay runs every party round (`party-server-host.js`, same match flow and 60 Hz fixed-step sim as the old browser host); every browser, lobby host included, is a predicted guest one hop away. The lobby host sends `run` / `stop`; a late joiner gets the sticky round frame; a player who leaves is knocked out and the match keeps running. Guests send tick-numbered inputs (every tick up to 8 guests, every 2 ticks above); the server plays them through a jitter queue (drains standing lag after bursts) and acks the last one in each snapshot. Guests rebuild their own bean from the server copy and replay unacked inputs against obstacles at the matching ticks, so a jump timed on screen lands on the server too. Round state that is not a pure function of time (gates, tiles, plank tilt, tails, eggs, crown) rides in the snapshot.
+- Snapshots: binary codec v3 (`round-snapshot.js`), same rounding as the JSON rows. Rows follow the shared roster order (ids implied), ack rides as 16 bits, ground index / mode timer / slow / round extra take one byte each (22 B per bean worst case), and a column at its base value in every row is skipped for that snapshot. Rate: fastest of 60 / 30 / 20 / 15 Hz inside two free-tier budgets (`snapEvery`): relay egress 400 KB/s, relay frames 960/s.
+- Latency, live on Render SG from KL (`?debug` exposes `__party.game.guest.stats.confirmMs`; confirm loop = press > server applies > ack back):
+  - Browser host over the relay (before 2026-11-06): p50 97-107 ms, two hops.
+  - Server-run rounds (2026-11-06, ping 26-28 ms): p50 56-64 / p95 76-93 ms at 14 and 32 beans; relay echo 34-38 ms.
+  - Same build on a noisier link (ping avg 36-44 ms): echo 43-52, confirm p50 65-90 ms. Confirm tracks echo + 22-30 ms.
+- Verified: `round-rules.test.js` runs every round at 14 and 32 bots (ends, quotas, single final winner, no NaN) plus whole shows to one winner; `hosted-games.test.js` drives server-run matches through the relay core (lobby-host control, late join, acks, drops, full show); `netplay-latency.test.js` asserts the confirm loop stays within 2 ticks of the one-hop round trip, and with 5 guests at 125 ms one-way + 40 ms jitter, lag costs ~0.9 of 14 Sweep Bar places (no prediction: ~3.7) and own-bean corrections stay p50 < 0.01 units.
 
-Latency floor, per stage (press on a guest > host applies it > ack back):
+Latency floor, per stage (press on a guest > server applies it > ack back):
 
-| stage | floor | live, 14 beans, relay (2026-11-05) |
+| stage | floor | live, 14-32 beans (2026-11-06) |
 |---|---|---|
-| network, relay path | 2 hops × (ping + Render edge-to-instance proxy) | ping 26-28 ms, relay echo 39-41 ms per hop: proxy ~8-13 ms per hop |
-| relay processing | 0 | event-loop delay p50 0.1 ms, p99 1.2-1.9 ms, handler max ≤ 4 ms at 2 / 14 / 32 players |
-| guest input send | every tick (every 2 ticks above 8 relay guests) | every tick |
-| host jitter queue | 1 tick of arrival phase; extra depth only from jitter | depth before take p10 1 / p50 2 / mean 1.8-2.05, starved 0.7-1.7% of ticks: ~14-17 ms of jitter wait |
-| host tick phase | avg 8 ms (60 Hz fixed-step sim) | same |
-| snapshot wait (remote beans only; own bean predicted) | avg 8 / 17 / 25 / 33 ms at 60 / 30 / 20 / 15 Hz, rate from the free-tier budgets | 60 Hz |
-| sum | 2 × 40 + 17 + 8 ≈ 105 ms | confirm loop p50 97-107 / p95 111-137 ms; direct links p50 6-18 ms |
+| network | 1 hop × (ping + Render edge-to-instance proxy) | relay echo 34-38 ms (ping 26-28 ms) |
+| relay processing | 0 | handler 5-6 ms/s, handler max ≤ 0.42 ms |
+| guest input send | every tick (every 2 ticks above 8 guests) | every tick at 3 humans |
+| server jitter queue | 1 tick of arrival phase; extra depth only from jitter | depth p10 1 / p50 2 / mean 1.9-2.2, starved 1.3-1.9% of ticks |
+| server tick phase | avg 8 ms (60 Hz fixed step, same clock as guests) | same |
+| sum | 36 + 8 + 8-17 ≈ 52-61 ms | confirm loop p50 56-64 ms |
 
-- **Relay floor:** every stage except the network, the 60 Hz tick and the jitter queue is at its floor. The network term is two Render hops, and only direct links remove it.
-- **Jitter queue:** its wait is the cost of exact prediction, because the guest replays inputs one per tick.
-  - Skipping queued inputs with the same movement (tried 2026-11-05) cut no confirm time in `netplay-latency.test.js`.
-  - It raised own-bean corrections p95 from 0.16 to 0.26, and the spinner-gauntlet fairness test failed, so it was reverted.
-- **2 > 32 player rise:** measured with an idle probe socket outside the room, concurrent ICMP, load-generator loop delay and `/3d-toys/relay-stats` (2 runs, `room-load-test.js`).
-  - Relay process: +0 (loop p50 0.1 ms flat).
-  - Load generator: +0 (loop p50 0.5-0.8 ms flat).
-  - Local access link: +3 ms (ICMP 25.6 > 28.5 ms).
-  - Render edge-to-instance: +7 ms (idle probe 32 > 42 ms while ICMP and the relay stay flat).
-  - In-room sockets: +5 ms of queueing behind their own fan-out frames on the one test downlink.
-  - Real players each have their own link, so only the ~7 ms Render-side part applies, and it scales with frames out (1424/s at 32).
-- **Test check:** `netplay-latency.test.js` asserts the confirm loop stays within 1 tick of the network round trip on both paths.
+- **Floor:** the network term is now one Render hop; the rest is the 60 Hz tick and one tick of queue. A shorter path needs a server nearer the players, not code.
+- **Jitter queue:** its wait is the cost of exact prediction (one input per tick). Skipping same-movement inputs (tried 2026-11-05) cut no confirm time and raised corrections p95 0.16 > 0.26, so it was reverted.
+- **2 > 32 player rise:** the server host sends one snapshot per human; the per-room cost on the relay is CPU, measured below.
 
-Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test` with real party snapshots, worst case (every guest human and on the relay, no direct links), relay on a laptop core. Relay CPU is mostly one `writev` per frame, so `room-relay.js` corks each socket for one event-loop turn (a burst of inputs to the host leaves in one write, no added delay): -12-15% CPU.
+Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test -- 20 14,24,32` (humans only) and `-- 20 1,14,32 fill` (bots fill to 32), server-run rounds, relay on a laptop core. `room-relay.js` corks each socket for one event-loop turn (a burst leaves in one write).
 
-| players | snapshot | relay CPU | relay egress | per guest in | host in |
-|---|---|---|---|---|---|
-| 14 | 438 B @ 60 Hz | 53 ms/s | 0.36 MB/s | 26 KB/s | 407 msg/s |
-| 24 | 699 B @ 20 Hz | 46 ms/s | 0.37 MB/s | 14 KB/s | 718 msg/s |
-| 32 | 916 B @ 15 Hz | 54 ms/s | 0.50 MB/s | 14 KB/s | 976 msg/s |
-| 50 | 1.4 KB @ 15 Hz | 57 ms/s | 1.2 MB/s | 21 KB/s | 1543 msg/s |
+| humans | beans | snapshot | relay CPU incl. sim | relay egress | per guest in | inputs in |
+|---|---|---|---|---|---|---|
+| 14 | 14 | 328 B @ 60 Hz | 70 ms/s | 271 KB/s | 19 KB/s | 418/s |
+| 24 | 24 | 524 B @ 30 Hz | 45 ms/s | 371 KB/s | 15 KB/s | 713/s |
+| 32 | 32 | 682 B @ 15 Hz | 48 ms/s | 331 KB/s | 10 KB/s | 942/s |
+| 1 | 32 | 712 B @ 60 Hz | 56 ms/s | 39 KB/s | 39 KB/s | 58/s |
+| 14 | 32 | 715 B @ 30 Hz | 28-73 ms/s | 296 KB/s | 21 KB/s | 407/s |
 
-- **Snapshot rate:** 26 B rows moved 14 all-relay humans from 30 to 60 Hz.
+- **Egress:** every row fits the 400 KB/s budget (about 69 h of play a month on the 100 GB quota); worst round (Egg Haul, 32 humans) 771 B, 370 KB/s.
+- **CPU:** the sim dominates (course update, collisions, bots). Live per room: 44-60 ms/s on Render (`/3d-toys/relay-stats`), against a 0.15 CPU (150 ms/s) free instance, so 2-3 full rooms at once.
 - **15 Hz floor:** below it, the snapshot wait would cost more latency than the egress saves.
-- **32 all-relay humans:** snapshots alone take 0.43 MB/s, just over the 400 KB/s budget (about 64 h of play a month on the 100 GB quota). Direct links bring it back under.
 
-Direct links take most relay traffic away. Render free instance limit reads 0.15 CPU; the live 32-player load test peaked at 0.033 (per-minute Render metric); `/3d-toys/relay-stats` reads 77 ms/s (0.077) over its busiest 10 s. Egress quota: 100 GB/month. Raise `MAX_SEATS` to 50 only on a paid instance.
+Raise `MAX_SEATS` or run more rooms only on a paid instance.
 
 ## How these were made
 
