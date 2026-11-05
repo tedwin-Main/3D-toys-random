@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createRelayCore } from './room-relay-core.js';
 import { hostedGames } from './hosted-games.js';
 import { encodeSend, decodeFrame, SERVER_PEER } from '../toy-box/common/relay-wire.js';
-import { decodeSnapshot } from '../toy-box/common/party-royale/round-snapshot.js';
+import { createSnapshotReader } from '../toy-box/common/party-royale/round-snapshot.js';
 
 const TICK_MS = 1000 / 60;
 const OUT_FLAG = 4;
@@ -41,10 +41,12 @@ function room(game) {
   return { core, host, guests, run };
 }
 
-// my row in the newest snapshot, decoded against the round message's roster order
+// my row in the newest snapshot: every frame since the round message read in order (deltas chain on key frames)
 function myRow(p) {
   const r = p.data('r').at(-1).data;
-  const snap = decodeSnapshot(p.snaps().at(-1).bytes, r.R.map(([id]) => id));
+  const reader = createSnapshotReader(r.R.map(([id]) => id));
+  let snap = null;
+  for (const m of p.inbox.slice(p.inbox.lastIndexOf(p.data('r').at(-1)) + 1)) if (m.t === 'snap') snap = reader.read(m.bytes);
   return snap && { snap, row: snap.P.find((row) => row[0] === p.id) };
 }
 

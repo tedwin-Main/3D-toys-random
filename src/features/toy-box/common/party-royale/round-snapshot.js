@@ -36,12 +36,16 @@ export function packSnapshot(sim, ackOf, roundKey) {
   };
 }
 
-// Binary snapshot: same rounded values as the JSON rows, ~50% fewer bytes (32 beans fit one ~0.7 KB packet)
-// [u8 version][u32 tick][u16 meta length][u16 skipped-column mask][meta JSON: ph rk keep D ev][rows: present columns only]
-// Rows follow sim.list order, which the guest mirror shares (built from the same roster), so ids are not sent.
-// A column at its base value in every row (no extra data this round, nobody slowed, ...) is skipped for the whole snapshot.
-// ack goes as its low 16 bits (18 min of ticks); the guest unwraps it against its own input seq (unwrapAck).
-const VERSION = 3, HEAD_BYTES = 9;
+// Binary snapshot: same rounded values as the JSON rows. Key frames ~50% under JSON; delta frames ~45% of a key frame.
+// Header: [u8 version][u8 kind][u32 tick][u16 meta length][meta JSON: ph rk keep D ev], then
+//   key:   [u16 skipped-column mask][rows: present columns only]; a column at its base value in every row is skipped
+//   delta: [u32 base tick][per row: u16 changed-column mask + zigzag varint change per changed column] against the previous frame;
+//          meta fields equal to the previous frame's (round data D, phase, ...) are left out
+// The relay delivers every frame to every guest in order, so deltas chain on the frame before; a key frame every
+// KEY_TICKS lets late joiners (and any reader that lost the chain) start. Rows follow sim.list order, which the guest
+// mirror shares (built from the same roster), so ids are not sent. ack goes as its low 16 bits (unwrapAck).
+const VERSION = 4, HEAD_BYTES = 8, KEY = 0, DELTA = 1;
+const KEY_TICKS = 30; // 0.5 s
 const utf8 = new TextEncoder(), unutf8 = new TextDecoder();
 const ACK = 12;
 // DataView accessors per wire type, looked up once instead of by name per field per row
@@ -58,6 +62,7 @@ const FIELDS = [
   col(7, 'Int16', 100), col(8, 'Uint8', 1), col(9, 'Uint8', 100), col(10, 'Uint8', 1, -1), col(11, 'Uint8', 1), col(ACK, 'Uint16', 1),
   col(13, 'Int8', 100, 1), col(14, 'Uint8', 1),
 ];
+const COLS = FIELDS.length;
 const ROW_BYTES = FIELDS.reduce((sum, f) => sum + f.size, 0);
 // gnd rides as collider index + 1 in one byte (-1 = airborne); mt (0 up to 2.55 s; longest stumble 1.2 s) in one byte
 export const MAX_COURSE_COLLIDERS = 255;
@@ -65,59 +70,155 @@ const wireValue = (f, v) => (f.index === ACK ? v & 0xffff : Math.max(f.min, Math
 // integer math first so 1 - 0.45 reads back as exactly 0.55
 const readValue = (f, wire) => (wire + f.base * f.scale) / f.scale;
 const isPresent = (mask, c) => (mask & (1 << c)) !== 0;
-let wireScratch = new Int32Array(32 * FIELDS.length);
 
-/** Host > packSnapshot result as bytes for the wire */
-export function encodeSnapshot(snap) {
-  const meta = utf8.encode(JSON.stringify({ ph: snap.ph, rk: snap.rk, keep: snap.keep, D: snap.D, ev: snap.ev }));
-  const rows = snap.P, cols = FIELDS.length;
-  if (wireScratch.length < rows.length * cols) wireScratch = new Int32Array(rows.length * cols);
-  const wire = wireScratch;
-  let present = 0, stride = 0;
-  for (let r = 0; r < rows.length; r++) {
-    for (let c = 0; c < cols; c++) {
-      const v = (wire[r * cols + c] = wireValue(FIELDS[c], rows[r][FIELDS[c].index]));
-      if (v !== 0) present |= 1 << c;
-    }
-  }
-  for (let c = 0; c < cols; c++) if (isPresent(present, c)) stride += FIELDS[c].size;
-  const out = new Uint8Array(HEAD_BYTES + meta.length + rows.length * stride);
+function toWire(rows) {
+  const wire = new Int32Array(rows.length * COLS);
+  for (let r = 0; r < rows.length; r++) for (let c = 0; c < COLS; c++) wire[r * COLS + c] = wireValue(FIELDS[c], rows[r][FIELDS[c].index]);
+  return wire;
+}
+
+/** Host > snapshot frames for one round: a key frame first and every KEY_TICKS, deltas between. reset() at each new round. */
+export function createSnapshotWriter() {
+  let prev = null, prevK = 0, prevMeta = {}, keyK = -Infinity;
+  return {
+    reset() { prev = null; keyK = -Infinity; },
+    write(snap) {
+      const wire = toWire(snap.P), meta = metaJson(snap);
+      const key = !prev || prev.length !== wire.length || snap.k - keyK >= KEY_TICKS;
+      const changed = key ? meta : Object.fromEntries(Object.entries(meta).filter(([name, json]) => json !== prevMeta[name]));
+      const bytes = key ? keyFrame(snap, wire, changed) : deltaFrame(snap, wire, prev, prevK, changed);
+      if (key) keyK = snap.k;
+      prev = wire; prevK = snap.k; prevMeta = meta;
+      return bytes;
+    },
+  };
+}
+
+/** Guest > reads one round's frames; ids = mirror bean ids in list order. null until a key frame, or for a frame from another round. */
+export function createSnapshotReader(ids) {
+  let prev = null, prevK = -1, prevMeta = null;
+  return {
+    read(bytes) {
+      const frame = readFrame(bytes, ids, prev, prevK);
+      if (frame) frame.snap = { ...prevMeta, ...frame.snap };
+      prev = frame?.wire ?? null; prevK = frame ? frame.snap.k : -1;
+      prevMeta = frame && Object.fromEntries(META_FIELDS.map((name) => [name, frame.snap[name]]));
+      return frame?.snap ?? null;
+    },
+  };
+}
+
+/** Host > one self-contained key frame (tests, tools) */
+export const encodeSnapshot = (snap) => keyFrame(snap, toWire(snap.P), metaJson(snap));
+
+/** Guest > a key frame back to the packSnapshot shape; null for a delta, another version or a row count unlike the mirror's */
+export const decodeSnapshot = (bytes, ids) => readFrame(bytes, ids, null, -1)?.snap ?? null;
+
+const META_FIELDS = ['ph', 'rk', 'keep', 'D', 'ev'];
+// meta field > its JSON text (compared between frames, then joined into the frame's meta object)
+const metaJson = (snap) => Object.fromEntries(META_FIELDS.map((name) => [name, JSON.stringify(snap[name] ?? null)]));
+
+function header(snap, kind, bodyBytes, fields) {
+  const meta = utf8.encode(`{${Object.entries(fields).map(([name, json]) => `"${name}":${json}`).join(',')}}`);
+  const out = new Uint8Array(HEAD_BYTES + meta.length + bodyBytes);
   const view = new DataView(out.buffer);
-  view.setUint8(0, VERSION); view.setUint32(1, snap.k); view.setUint16(5, meta.length);
-  view.setUint16(7, ~present & ((1 << cols) - 1));
+  view.setUint8(0, VERSION); view.setUint8(1, kind); view.setUint32(2, snap.k); view.setUint16(6, meta.length);
   out.set(meta, HEAD_BYTES);
-  let at = HEAD_BYTES + meta.length;
-  for (let r = 0; r < rows.length; r++) {
-    for (let c = 0; c < cols; c++) {
+  return { out, view, at: HEAD_BYTES + meta.length };
+}
+
+function keyFrame(snap, wire, fields) {
+  const rows = wire.length / COLS;
+  let present = 0, stride = 0;
+  for (let i = 0; i < wire.length; i++) if (wire[i] !== 0) present |= 1 << i % COLS;
+  for (let c = 0; c < COLS; c++) if (isPresent(present, c)) stride += FIELDS[c].size;
+  const { out, view, at: start } = header(snap, KEY, 2 + rows * stride, fields);
+  view.setUint16(start, ~present & ((1 << COLS) - 1));
+  let at = start + 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < COLS; c++) {
       if (!isPresent(present, c)) continue;
-      FIELDS[c].set.call(view, at, wire[r * cols + c]);
+      FIELDS[c].set.call(view, at, wire[r * COLS + c]);
       at += FIELDS[c].size;
     }
   }
   return out;
 }
 
-/**
- * Guest > bytes back to the packSnapshot shape ({ g: 's', k, P rows, ... }); ids = mirror bean ids in list order.
- * null for another wire version or a row count that does not match the mirror (snapshot from another round).
- */
-export function decodeSnapshot(bytes, ids) {
+let deltaScratch = new Uint8Array(4096);
+function deltaFrame(snap, wire, prev, prevK, fields) {
+  if (deltaScratch.length < wire.length * 4 + 4) deltaScratch = new Uint8Array(wire.length * 4 + 4);
+  const body = deltaScratch;
+  let at = 4; // base tick written last
+  for (let r = 0; r < wire.length / COLS; r++) {
+    const maskAt = at;
+    let mask = 0;
+    at += 2;
+    for (let c = 0; c < COLS; c++) {
+      const d = wire[r * COLS + c] - prev[r * COLS + c];
+      if (d === 0) continue;
+      mask |= 1 << c;
+      at = writeVarint(body, at, d >= 0 ? d * 2 : -d * 2 - 1);
+    }
+    body[maskAt] = mask >> 8; body[maskAt + 1] = mask & 0xff;
+  }
+  const { out, view, at: start } = header(snap, DELTA, at, fields);
+  out.set(body.subarray(0, at), start);
+  view.setUint32(start, prevK);
+  return out;
+}
+
+function readFrame(bytes, ids, prev, prevK) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (view.getUint8(0) !== VERSION) return null;
-  const metaLen = view.getUint16(5), present = ~view.getUint16(7), rowsAt = HEAD_BYTES + metaLen;
-  const columns = FIELDS.filter((_, c) => isPresent(present, c));
-  const stride = columns.reduce((sum, f) => sum + f.size, 0);
-  if (bytes.length - rowsAt !== ids.length * stride) return null;
-  const snap = { g: 's', k: view.getUint32(1), ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, rowsAt))), P: new Array(ids.length) };
-  let at = rowsAt;
+  if (bytes.length < HEAD_BYTES || view.getUint8(0) !== VERSION) return null;
+  const kind = view.getUint8(1), k = view.getUint32(2), metaEnd = HEAD_BYTES + view.getUint16(6);
+  const wire = kind === KEY ? readKeyRows(view, metaEnd, ids.length) : kind === DELTA && prev ? readDeltaRows(bytes, view, metaEnd, prev, prevK) : null;
+  if (!wire || wire.length !== ids.length * COLS) return null;
+  const snap = { g: 's', k, ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, metaEnd))), P: new Array(ids.length) };
   for (let r = 0; r < ids.length; r++) {
-    const row = new Array(FIELDS.length + 1);
+    const row = new Array(COLS + 1);
     row[0] = ids[r];
-    for (const f of FIELDS) row[f.index] = f.base;
-    for (const f of columns) { row[f.index] = readValue(f, f.get.call(view, at)); at += f.size; }
+    for (let c = 0; c < COLS; c++) row[FIELDS[c].index] = readValue(FIELDS[c], wire[r * COLS + c]);
     snap.P[r] = row;
   }
-  return snap;
+  return { snap, wire };
+}
+
+function readKeyRows(view, at, rows) {
+  const present = ~view.getUint16(at);
+  const columns = FIELDS.map((f, c) => c).filter((c) => isPresent(present, c));
+  const stride = columns.reduce((sum, c) => sum + FIELDS[c].size, 0);
+  if (view.byteLength - at - 2 !== rows * stride) return null;
+  const wire = new Int32Array(rows * COLS);
+  at += 2;
+  for (let r = 0; r < rows; r++) {
+    for (const c of columns) { wire[r * COLS + c] = FIELDS[c].get.call(view, at); at += FIELDS[c].size; }
+  }
+  return wire;
+}
+
+function readDeltaRows(bytes, view, at, prev, prevK) {
+  if (view.getUint32(at) !== prevK) return null; // missed a frame: wait for the next key frame
+  const wire = prev.slice();
+  at += 4;
+  for (let r = 0; r < prev.length / COLS; r++) {
+    if (at + 2 > bytes.length) return null;
+    const mask = (bytes[at] << 8) | bytes[at + 1];
+    at += 2;
+    for (let c = 0; c < COLS; c++) {
+      if (!isPresent(mask, c)) continue;
+      let z = 0, shift = 1, b;
+      do { if (at >= bytes.length) return null; b = bytes[at++]; z += (b & 0x7f) * shift; shift *= 128; } while (b & 0x80);
+      wire[r * COLS + c] += z % 2 ? -(z + 1) / 2 : z / 2;
+    }
+  }
+  return at === bytes.length ? wire : null;
+}
+
+function writeVarint(buf, at, z) {
+  while (z >= 0x80) { buf[at++] = (z & 0x7f) | 0x80; z = Math.floor(z / 128); }
+  buf[at++] = z;
+  return at;
 }
 
 const statusOf = (flags) => (flags & 4 ? OUT : flags & 2 ? QUALIFIED : ACTIVE);

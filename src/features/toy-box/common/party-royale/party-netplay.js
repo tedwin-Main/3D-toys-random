@@ -3,7 +3,7 @@
 import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 import { ACTIVE } from './round-sim.js';
-import { packSnapshot, encodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
+import { packSnapshot, createSnapshotWriter, createSnapshotReader, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
 import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck, leadShiftMs } from './input-sync.js';
 import { SERVER_PEER } from '../relay-wire.js';
 
@@ -16,10 +16,11 @@ export function createHostNet(room) {
   const queues = new Map();
   // queue depth (ticks) before each guest take, ms the taken input waited, takes that found the queue empty (relay-stats reads + resets these)
   const stats = { depths: [], waits: [], starves: 0 };
-  let roundKey = null, lastBytes = 0;
+  const writer = createSnapshotWriter();
+  let roundKey = null, avgBytes = 0;
   return {
     stats,
-    begin(key) { roundKey = key; queues.clear(); lastBytes = 0; },
+    begin(key) { roundKey = key; queues.clear(); writer.reset(); avgBytes = 0; },
     onInput(from, msg) {
       if (msg.rk !== roundKey) return;
       if (!queues.has(from)) queues.set(from, createInputQueue());
@@ -39,17 +40,19 @@ export function createHostNet(room) {
     },
     // returns true when a snapshot went out (caller then plays + clears sim.events)
     sendSnapshot(sim) {
-      const every = snapEvery({ bytes: lastBytes || snapBytesEstimate(sim.list.length), guests: room.players.length });
+      const every = snapEvery({ bytes: avgBytes || snapBytesEstimate(sim.list.length), guests: room.players.length });
       if (sim.tick % every !== 0 && sim.phase !== 'end') return false;
-      const bytes = encodeSnapshot(packSnapshot(sim, (id) => queues.get(id)?.ack ?? 0, roundKey));
+      const bytes = writer.write(packSnapshot(sim, (id) => queues.get(id)?.ack ?? 0, roundKey));
       room.send(bytes);
-      lastBytes = bytes.length;
+      // key frames every 0.5 s between small deltas: rate follows the running average size
+      avgBytes = avgBytes ? avgBytes * (1 - BYTES_EMA) + bytes.length * BYTES_EMA : bytes.length;
       return true;
     },
   };
 }
 
 const STATS_CAP = 20000;
+const BYTES_EMA = 0.1;
 function recordDepth(stats, depth) {
   if (stats.depths.length < STATS_CAP) stats.depths.push(depth);
   if (depth === 0) stats.starves++;
@@ -62,6 +65,7 @@ function recordDepth(stats, depth) {
  */
 export function createGuestRound(room, msg, round) {
   const mirror = createMirror(round, msg.seed, msg.keep, msg.R);
+  const reader = createSnapshotReader(mirror.list.map((b) => b.id));
   const log = createInputLog();
   const pred = createPredictor({ step: (b, course) => { stepBean(b, course); round.predict?.(course, b); } });
   const stats = { snapshots: 0, corrections: [], confirmMs: [] };
@@ -70,6 +74,8 @@ export function createGuestRound(room, msg, round) {
     mirror, pred, stats, key: msg.rk,
     get me() { return mine?.bean ?? null; },
     get predicting() { return !!pred.bean; },
+    // binary frame from the server > snapshot, or null until this round's first key frame
+    read: (bytes) => reader.read(bytes),
     // render clock: predicted tick while my bean runs ahead, else last host tick
     get clock() { return pred.bean ? pred.predictedTick * DT : mirror.clock; },
     // returns this snapshot's events to play, or null if skipped

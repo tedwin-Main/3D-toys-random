@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mulberry32 } from './course-colliders.js';
 import { createRoundSim, ACTIVE } from './round-sim.js';
-import { packSnapshot, encodeSnapshot, decodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
+import { packSnapshot, createSnapshotWriter, createSnapshotReader, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
 import { createInputLog, createInputQueue, createPredictor, inputEvery } from './input-sync.js';
 import { botInput } from './bean-bots.js';
 import sweepBar from './rounds/sweep-bar.js';
@@ -75,6 +75,7 @@ function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict 
     up: createLink(rng, oneWayMs, jitterMs), down: createLink(rng, oneWayMs, jitterMs), q: createInputQueue(),
   }));
   const snapGap = snapEvery({ bytes: snapBytesEstimate(players), guests });
+  const writer = createSnapshotWriter(), reader = createSnapshotReader(sim.list.map((b) => b.id));
   for (let t = 1; sim.phase !== 'end' && t < 60 * 240; t++) {
     const now = t * TICK_MS;
     for (const x of gs) {
@@ -84,7 +85,7 @@ function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict 
     }
     sim.step();
     if (sim.tick % snapGap === 0) {
-      const s = decodeSnapshot(encodeSnapshot(packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k')), sim.list.map((b) => b.id)); // wire codec in the loop
+      const s = reader.read(writer.write(packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k'))); // wire codec (key + delta frames) in the loop
       sim.events = [];
       for (const x of gs) x.down.send(now, s);
     }

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { encodeSend, decodeFrame, SERVER_PEER } from '../toy-box/common/relay-wire.js';
 import { inputEvery } from '../toy-box/common/party-royale/input-sync.js';
-import { decodeSnapshot } from '../toy-box/common/party-royale/round-snapshot.js';
+import { createSnapshotReader } from '../toy-box/common/party-royale/round-snapshot.js';
 import { createRoomRelay } from './room-relay.js';
 
 const SELF = fileURLToPath(import.meta.url);
@@ -92,7 +92,7 @@ function joinPlayer(url, room, cap, stats, watched) {
       const m = decodeFrame(String(raw));
       if (m.t === 'joined') { Object.assign(me, { id: m.id, code: m.room }); resolve(me); }
       else if (m.t === 'error') reject(new Error(m.message));
-      else if (m.t === 'data' && m.data.g === 'r') me.round = m.data;
+      else if (m.t === 'data' && m.data.g === 'r') { me.round = m.data; me.reader = createSnapshotReader(m.data.R.map(([id]) => id)); }
     });
   });
 }
@@ -100,7 +100,7 @@ function joinPlayer(url, room, cap, stats, watched) {
 function readSnapshot(me, raw, stats) {
   const bar = raw.indexOf('|'.charCodeAt(0)), bytes = new Uint8Array(raw.subarray(bar + 1));
   stats.snaps++; stats.snapBytes += bytes.length;
-  const snap = me.round && decodeSnapshot(bytes, me.round.R.map(([id]) => id));
+  const snap = me.reader?.read(bytes);
   const mine = snap?.P.find((row) => row[0] === me.id);
   if (mine?.[12]) me.onAck?.(mine[12]);
 }

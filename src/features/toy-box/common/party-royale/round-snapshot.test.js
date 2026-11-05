@@ -1,9 +1,9 @@
-// Tests binary snapshot codec (exact round trip, clamping) and the free-tier snapshot rate budgets.
+// Tests binary snapshot codec (exact round trip, key + delta frames, clamping) and the free-tier snapshot rate budgets.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRoundSim } from './round-sim.js';
-import { packSnapshot, encodeSnapshot, decodeSnapshot, snapEvery, snapBytesEstimate, BUDGET, MAX_COURSE_COLLIDERS } from './round-snapshot.js';
+import { packSnapshot, encodeSnapshot, decodeSnapshot, createSnapshotWriter, createSnapshotReader, snapEvery, snapBytesEstimate, BUDGET, MAX_COURSE_COLLIDERS } from './round-snapshot.js';
 import { ROUNDS } from './show-director.js';
 import { unwrapAck } from './input-sync.js';
 import spinnerGauntlet from './rounds/spinner-gauntlet.js';
@@ -74,11 +74,52 @@ test('every course fits its ground collider index in one byte', () => {
   }
 });
 
-test('32 humans at the floor rate stay inside the relay egress budget', () => {
+// every snapshot of `seconds` of play through one writer: [bytes, JSON snapshot] per tick
+function stream(round, n, seconds, every = 1) {
+  const sim = midRound(round, n), writer = createSnapshotWriter(), out = [];
+  for (let i = 0; i < 60 * seconds; i++) {
+    sim.step();
+    if (i % every) continue;
+    const snap = packSnapshot(sim, (id) => sim.tick + id, '2-99');
+    out.push([writer.write(snap), viaJson(snap)]);
+    sim.events = [];
+  }
+  return { sim, out };
+}
+
+test('key + delta frames decode to exactly the JSON snapshots; deltas well under half a key frame', () => {
   for (const round of [spinnerGauntlet, tailSnatch, eggHaul]) {
-    const sim = midRound(round, 32);
-    const bytes = encodeSnapshot(packSnapshot(sim, () => 65535, '2-99')).length;
+    const { sim, out } = stream(round, 32, 3);
+    const reader = createSnapshotReader(idsOf(sim));
+    for (const [bytes, snap] of out) assert.deepEqual(viaJson(reader.read(bytes)), snap);
+    const keys = out.filter(([b]) => b[1] === 0), deltas = out.filter(([b]) => b[1] === 1);
+    assert.equal(keys.length, 6, 'key frame every 0.5 s');
+    const avg = (list) => list.reduce((a, [b]) => a + b.length, 0) / list.length;
+    assert.ok(avg(deltas) < avg(keys) * 0.7, `${round.id}: delta ${avg(deltas)} vs key ${avg(keys)}`);
+  }
+});
+
+test('a late or broken reader waits for the next key frame, then reads exactly', () => {
+  const { sim, out } = stream(spinnerGauntlet, 14, 2);
+  const late = createSnapshotReader(idsOf(sim));
+  const firstKey = out.findIndex(([b], i) => i > 0 && b[1] === 0);
+  for (const [bytes, snap] of out.slice(5)) {
+    const got = late.read(bytes);
+    if (out.indexOf(out.find(([b]) => b === bytes)) < firstKey) assert.equal(got, null, 'no base yet');
+    else assert.deepEqual(viaJson(got), snap);
+  }
+  const gappy = createSnapshotReader(idsOf(sim));
+  gappy.read(out[0][0]);
+  assert.equal(gappy.read(out[2][0]), null, 'missed a delta');
+  assert.equal(decodeSnapshot(out[1][0], idsOf(sim)), null, 'delta alone');
+});
+
+test('32 humans stay inside the relay egress budget at the rate their average frame allows', () => {
+  for (const round of [spinnerGauntlet, tailSnatch, eggHaul]) {
+    const { out } = stream(round, 32, 3, 2);
+    const bytes = out.reduce((a, [b]) => a + b.length, 0) / out.length;
     const hz = 60 / snapEvery({ bytes, guests: 32 });
+    assert.ok(hz >= 30, `${round.id}: ${bytes} B allows ${hz} Hz`);
     assert.ok(bytes * 32 * hz <= BUDGET.relayBytes, `${round.id}: ${bytes} B x 32 x ${hz} Hz`);
   }
 });

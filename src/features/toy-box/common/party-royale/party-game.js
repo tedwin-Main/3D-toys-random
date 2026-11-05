@@ -10,7 +10,6 @@ import { createFixedSteps } from './fixed-steps.js';
 import { DT } from './course-colliders.js';
 import { MAX_BEANS, botRoster } from './bot-roster.js';
 import { SERVER_PEER } from '../relay-wire.js';
-import { decodeSnapshot } from './round-snapshot.js';
 import { createPartyView } from './party-view.js';
 import { createPartyHud, esc } from './party-hud.js';
 import { createPartyInput } from './party-input.js';
@@ -122,8 +121,7 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
 
   // Net > binary snapshot rows map onto my mirror's beans; none without a guest round
   function decodeGuestSnapshot(bytes) {
-    const mirror = game.guest?.mirror;
-    return mirror ? decodeSnapshot(bytes, mirror.list.map((b) => b.id)) : null;
+    return game.guest?.read(bytes) ?? null;
   }
 
   // Events > sounds + banners about me; guests already played their own jump / dive locally
