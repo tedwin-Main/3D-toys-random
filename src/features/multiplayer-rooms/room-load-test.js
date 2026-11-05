@@ -1,6 +1,7 @@
 // Load-tests room relay with simulated players and reports round-trip latency.
 
 import WebSocket from 'ws';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { encodeSend, decodeFrame } from '../toy-box/common/relay-wire.js';
 
 const URL_ARG = process.argv[2] ?? 'ws://localhost:5055/3d-toys/rooms';
@@ -12,7 +13,7 @@ const HZ = 20;
 const fakeSnap = () => ({ g: 's', ph: 'fight', t: 12.34, ring: 14.2, rd: 2, win: null, ev: [],
   P: Array.from({ length: PLAYERS }, (_, i) => [i + 1, 3.21, -4.56, 1.23, -2.34, 1.57, 0.5, 5, 0, 1, 0.42, 0]) });
 
-const rtts = [], echoes = [];
+const rtts = [], echoes = [], probeEchoes = [];
 let received = 0;
 
 // Load test > one fake player: resolves with { ws, id, host } once seated
@@ -34,6 +35,15 @@ function joinPlayer(room) {
     });
   });
 }
+// Load test > idle probe outside the room: echo only, so its rise under load is link / proxy / generator, never room fan-out
+function openProbe() {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(URL_ARG);
+    ws.on('open', () => resolve(ws));
+    ws.on('error', reject);
+    ws.on('message', (raw) => { const m = JSON.parse(String(raw)); if (m.t === 'echo') probeEchoes.push(performance.now() - m.ts); });
+  });
+}
 // ws(s)://host/3d-toys/rooms > http(s)://host/3d-toys/relay-stats
 function statsUrl(wsUrl) {
   const u = new URL(wsUrl);
@@ -46,6 +56,8 @@ const send = (p, data, to) => p.ws.send(encodeSend(JSON.stringify(data), { to })
 function percentile(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] : NaN; }
 
 // Load test > run: host first, guests join its code, traffic for SECONDS, then report
+const generatorLoop = monitorEventLoopDelay({ resolution: 10 });
+const probe = await openProbe();
 const host = await joinPlayer('');
 const guests = [];
 for (let i = 1; i < PLAYERS; i++) guests.push(await joinPlayer(host.code));
@@ -57,11 +69,15 @@ const timers = [
   setInterval(() => guests.forEach((g) => send(g, { g: 'ping', ts: performance.now() }, g.host)), 500),
   setInterval(() => guests.forEach((g) => g.ws.send(JSON.stringify({ t: 'echo', ts: performance.now() }))), 500),
 ];
+const probeTimer = setInterval(() => probe.send(JSON.stringify({ t: 'echo', ts: performance.now() })), 250);
+generatorLoop.enable();
 const t0 = performance.now();
 await new Promise((r) => setTimeout(r, SECONDS * 1000));
 const relaySide = await fetch(statsUrl(URL_ARG)).then((r) => r.json()).catch(() => null); // last full 10 s window, taken under load
-timers.forEach(clearInterval);
+[...timers, probeTimer].forEach(clearInterval);
+generatorLoop.disable();
 [host, ...guests].forEach((p) => p.ws.close());
+probe.close();
 
 const fmt = (v) => `${v.toFixed(1)} ms`;
 function report(label, list) {
@@ -70,6 +86,9 @@ function report(label, list) {
 }
 report('echo client>server>client (1 hop)', echoes);
 report('rtt guest>host>guest     (2 hops)', rtts);
+report('probe echo, idle socket  (1 hop)', probeEchoes);
+const lateMs = (ns) => Math.max(0, ns / 1e6 - 10).toFixed(1);
+console.log(`load generator event-loop delay: p50 ${lateMs(generatorLoop.percentile(50))} / p99 ${lateMs(generatorLoop.percentile(99))} / max ${lateMs(generatorLoop.max)} ms`);
 console.log(`messages received/s: ${(received / ((performance.now() - t0) / 1000)).toFixed(0)}`);
 // relay-side share of each hop: event-loop wait + handler; whatever is left of a hop is network + Render proxy
 if (relaySide?.loopDelayMs) {

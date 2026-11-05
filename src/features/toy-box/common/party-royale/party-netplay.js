@@ -22,8 +22,11 @@ function guestLinks(room) {
  */
 export function createHostNet(room) {
   const queues = new Map();
+  // debug: queue depth (ticks) before each guest take, and takes that found the queue empty
+  const stats = { depths: [], starves: 0 };
   let roundKey = null, prev = null, lastBytes = 0;
   return {
+    stats,
     begin(key) { roundKey = key; queues.clear(); prev = null; lastBytes = 0; },
     onInput(from, msg) {
       if (msg.rk !== roundKey) return;
@@ -34,7 +37,9 @@ export function createHostNet(room) {
     applyInputs(sim) {
       for (const [id, q] of queues) {
         const b = sim.beans.get(id);
-        if (b?.status === ACTIVE && !b.bot) Object.assign(b, q.take());
+        if (b?.status !== ACTIVE || b.bot) continue;
+        recordDepth(stats, q.depth);
+        Object.assign(b, q.take());
       }
     },
     // returns true when a snapshot went out (caller then plays + clears sim.events)
@@ -49,6 +54,12 @@ export function createHostNet(room) {
       return true;
     },
   };
+}
+
+const STATS_CAP = 20000;
+function recordDepth(stats, depth) {
+  if (stats.depths.length < STATS_CAP) stats.depths.push(depth);
+  if (depth === 0) stats.starves++;
 }
 
 /**
