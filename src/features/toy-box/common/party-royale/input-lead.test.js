@@ -1,4 +1,4 @@
-// Tests server-guided input timing: queue wait reports, the guest phase shift they ask for, and shifted fixed steps.
+// Tests server-guided input timing: arrival lead reports, the guest phase shift they ask for, and shifted fixed steps.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,21 +24,26 @@ function run(leadMs, ticks, { dropEvery = 0 } = {}) {
   return reports;
 }
 
-test('queue reports how long inputs waited, once per half second', () => {
-  const reports = run(9, 121);
-  assert.equal(reports.length, 4, '30 takes each');
-  // primed 2 deep, then the standing-depth drain removes the extra tick: inputs wait just their lead
-  assert.ok(reports.at(-1).lowMs === 9 && reports.every((r) => r.starvePct === 0), JSON.stringify(reports));
+test('queue reports how early inputs land before the next tick, once a second', () => {
+  const reports = run(9, 241);
+  assert.equal(reports.length, 4, '60 takes each');
+  assert.ok(reports.every((r) => r.lowMs === 9 && r.starvePct === 0), JSON.stringify(reports));
+});
+
+test('inputs landing just after the tick count as late', () => {
+  const reports = run(-2, 241);
+  assert.ok(reports.every((r) => r.lowMs === -2), JSON.stringify(reports));
+  assert.ok(leadShiftMs(reports[0]) < 0, 'shift earlier');
 });
 
 test('starved takes are reported', () => {
-  const reports = run(9, 121, { dropEvery: 5 });
+  const reports = run(9, 241, { dropEvery: 5 });
   assert.ok(reports.some((r) => r.starvePct > 0), JSON.stringify(reports));
 });
 
 test('guest shifts later while inputs wait, earlier when they starve, capped per report', () => {
-  assert.equal(leadShiftMs({ lowMs: 2, starvePct: 0 }), 0);
-  assert.equal(leadShiftMs({ lowMs: 6, starvePct: 0 }), 2);
+  assert.equal(leadShiftMs({ lowMs: 1.5, starvePct: 0 }), 0);
+  assert.equal(leadShiftMs({ lowMs: 5.5, starvePct: 0 }), 2);
   assert.equal(leadShiftMs({ lowMs: 30, starvePct: 0 }), 4);
   assert.equal(leadShiftMs({ lowMs: 30, starvePct: 10 }), -2);
 });
