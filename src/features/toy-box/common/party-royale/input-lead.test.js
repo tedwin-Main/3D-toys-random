@@ -42,8 +42,8 @@ test('starved takes are reported', () => {
 });
 
 test('guest shifts later while inputs wait, earlier when they starve, capped per report', () => {
-  assert.equal(leadShiftMs({ lowMs: 1.5, starvePct: 0 }), 0);
-  assert.equal(leadShiftMs({ lowMs: 5.5, starvePct: 0 }), 2);
+  assert.equal(leadShiftMs({ lowMs: 3, starvePct: 0 }), 0);
+  assert.equal(leadShiftMs({ lowMs: 7, starvePct: 0 }), 2);
   assert.equal(leadShiftMs({ lowMs: 30, starvePct: 0 }), 4);
   assert.equal(leadShiftMs({ lowMs: 30, starvePct: 10 }), -2);
 });

@@ -12,11 +12,12 @@ const EVERY_TICK_GUESTS = 14;
  */
 export const inputEvery = (guests) => (guests <= EVERY_TICK_GUESTS ? 1 : 2);
 const HISTORY = 300;
-const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30, STANDING_PCT = 0.1;
-// input arrival phase: aim for the earliest 5% of inputs to land ~1.5 ms before the next server tick. Late ones stay rare,
+// drain window 0.2 s: a jitter spike's backlog leaves within ~0.4 s (0.5 s windows held it ~1 s; simulated Render-like link: mean wait 12.8 > 8.8 ms)
+const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 12, STANDING_PCT = 0.1;
+// input arrival phase: aim for the earliest 5% of inputs to land ~3 ms before the next server tick. Late ones stay rare,
 // so a standing extra input shows in the depth percentile and gets drained: inputs then wait about their lead, not a whole tick more.
 const STEP_MS = DT * 1000;
-const LEAD_WINDOW = 60, LEAD_LOW_PCT = 0.05, LEAD_TARGET_MS = 1.5, LEAD_GAIN = 0.5, LEAD_STEP_MAX_MS = 4, LEAD_STARVE_PCT = 3, LEAD_BACK_MS = 2;
+const LEAD_WINDOW = 60, LEAD_LOW_PCT = 0.05, LEAD_TARGET_MS = 3, LEAD_GAIN = 0.5, LEAD_STEP_MAX_MS = 4, LEAD_STARVE_PCT = 3, LEAD_BACK_MS = 2;
 // ms an arrival lands before the next tick; arrivals in the last quarter tick count as late (negative) ones
 const arrivalLead = (nextTickAt, at) => {
   const ahead = (((nextTickAt - at) % STEP_MS) + STEP_MS) % STEP_MS;
@@ -62,7 +63,7 @@ export function createInputLog({ now = () => performance.now() } = {}) {
 
 /**
  * Host > per-guest jitter buffer, one input per tick (ack = last applied seq).
- * Primes 2 deep. Each 0.5 s window records the depth before every take; the depth it almost never drops below
+ * Primes 2 deep. Each 0.2 s window records the depth before every take; the depth it almost never drops below
  * (10th percentile, so one late burst does not count) is pure lag, and the next window drains it
  * by skipping to newer inputs (press counters are cumulative: no jump or dive lost).
  */
