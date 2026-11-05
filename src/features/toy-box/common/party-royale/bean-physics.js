@@ -60,7 +60,7 @@ function startDive(b, wasGround, emit) {
 
 // Run engine > horizontal control: run steers, dive + stumble slide out with friction; slopes pull downhill
 function steer(b, course, wasGround) {
-  b.mt -= DT;
+  b.mt = Math.max(0, b.mt - DT); // floor 0: only compared against 0 and stumble lengths; keeps the snapshot byte small
   if (b.mode !== RUN && b.mt <= 0 && wasGround) b.mode = RUN;
   if (b.mode === RUN) {
     let mx = b.mx, mz = b.mz;

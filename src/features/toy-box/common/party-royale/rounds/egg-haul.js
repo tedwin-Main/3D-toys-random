@@ -53,10 +53,11 @@ export default {
     sim.data.scores = scores; sim.data.loser = loser;
     for (const b of sim.active) (b.team === loser ? sim.eliminate : sim.qualify)(b);
   },
-  pack: (sim) => sim.data.eggs.flatMap((e) => [Math.round(e.x * 10) / 10, Math.round(e.z * 10) / 10, e.carrier, e.nest]),
+  // eggs as [x dm, z dm, carrier, nest]; a carried egg is drawn on its carrier, so its spot goes as 0, 0
+  pack: (sim) => sim.data.eggs.flatMap((e) => (e.carrier ? [0, 0, e.carrier, e.nest] : [Math.round(e.x * 10), Math.round(e.z * 10), 0, e.nest])),
   unpack(sim, d) {
     sim.data.eggs = [];
-    for (let k = 0; k < d.length; k += 4) sim.data.eggs.push({ x: d[k], z: d[k + 1], carrier: d[k + 2], nest: d[k + 3] });
+    for (let k = 0; k < d.length; k += 4) sim.data.eggs.push({ x: d[k] / 10, z: d[k + 1] / 10, carrier: d[k + 2], nest: d[k + 3] });
   },
   packBean: (b) => b.team ?? 0,
   unpackBean(b, v) { b.team = v; },

@@ -36,32 +36,44 @@ export function packSnapshot(sim, ackOf, roundKey) {
   };
 }
 
-// Binary snapshot: same rounded values as the JSON rows, ~50% fewer bytes (32 beans fit one ~0.9 KB packet)
-// [u8 version][u32 tick][u16 meta length][meta JSON: ph rk keep D ev][rows: ROW_BYTES each]
+// Binary snapshot: same rounded values as the JSON rows, ~50% fewer bytes (32 beans fit one ~0.7 KB packet)
+// [u8 version][u32 tick][u16 meta length][u16 skipped-column mask][meta JSON: ph rk keep D ev][rows: present columns only]
 // Rows follow sim.list order, which the guest mirror shares (built from the same roster), so ids are not sent.
+// A column at its base value in every row (no extra data this round, nobody slowed, ...) is skipped for the whole snapshot.
 // ack goes as its low 16 bits (18 min of ticks); the guest unwraps it against its own input seq (unwrapAck).
-const VERSION = 2, HEAD_BYTES = 7, ROW_BYTES = 26;
+const VERSION = 3, HEAD_BYTES = 9;
 const utf8 = new TextEncoder(), unutf8 = new TextDecoder();
-// row field > [packSnapshot row index, DataView type, bytes, scale]. Row index 0 (id) is implied by order.
 const ACK = 12;
+// row column > packSnapshot row index, DataView type, bytes, scale, base (wire value = (v - base) * scale). Index 0 (id) is implied.
+const col = (index, type, size, scale, base = 0) => ({ index, type, size, scale, base });
 const FIELDS = [
-  [1, 'Int16', 2, 100], [2, 'Int16', 2, 100], [3, 'Int16', 2, 100], [4, 'Int16', 2, 10], [5, 'Int16', 2, 10], [6, 'Int16', 2, 10],
-  [7, 'Int16', 2, 100], [8, 'Uint8', 1, 1], [9, 'Int16', 2, 100], [10, 'Int16', 2, 1], [11, 'Uint8', 1, 1], [ACK, 'Uint16', 2, 1], [13, 'Int16', 2, 100], [14, 'Int16', 2, 1],
+  col(1, 'Int16', 2, 100), col(2, 'Int16', 2, 100), col(3, 'Int16', 2, 100), col(4, 'Int16', 2, 10), col(5, 'Int16', 2, 10), col(6, 'Int16', 2, 10),
+  col(7, 'Int16', 2, 100), col(8, 'Uint8', 1, 1), col(9, 'Uint8', 1, 100), col(10, 'Uint8', 1, 1, -1), col(11, 'Uint8', 1, 1), col(ACK, 'Uint16', 2, 1),
+  col(13, 'Int8', 1, 100, 1), col(14, 'Uint8', 1, 1),
 ];
-const RANGE = { Int16: [-32768, 32767], Uint8: [0, 255], Uint16: [0, 65535] };
+const ROW_BYTES = FIELDS.reduce((sum, f) => sum + f.size, 0);
+// gnd rides as collider index + 1 in one byte (-1 = airborne); mt (0 up to 2.55 s; longest stumble 1.2 s) in one byte
+export const MAX_COURSE_COLLIDERS = 255;
+const RANGE = { Int8: [-128, 127], Int16: [-32768, 32767], Uint8: [0, 255], Uint16: [0, 65535] };
 const clampTo = (type, v) => Math.max(RANGE[type][0], Math.min(RANGE[type][1], Math.round(v)));
-const wireValue = (index, type, scale, v) => (index === ACK ? v & 0xffff : clampTo(type, v * scale));
+const wireValue = (f, v) => (f.index === ACK ? v & 0xffff : clampTo(f.type, (v - f.base) * f.scale));
+// integer math first so 1 - 0.45 reads back as exactly 0.55
+const readValue = (f, wire) => (wire + f.base * f.scale) / f.scale;
 
 /** Host > packSnapshot result as bytes for the wire */
 export function encodeSnapshot(snap) {
   const meta = utf8.encode(JSON.stringify({ ph: snap.ph, rk: snap.rk, keep: snap.keep, D: snap.D, ev: snap.ev }));
-  const out = new Uint8Array(HEAD_BYTES + meta.length + snap.P.length * ROW_BYTES);
+  const wire = snap.P.map((row) => FIELDS.map((f) => wireValue(f, row[f.index])));
+  const present = FIELDS.map((_, c) => wire.some((w) => w[c] !== 0));
+  const stride = FIELDS.reduce((sum, f, c) => sum + (present[c] ? f.size : 0), 0);
+  const out = new Uint8Array(HEAD_BYTES + meta.length + wire.length * stride);
   const view = new DataView(out.buffer);
   view.setUint8(0, VERSION); view.setUint32(1, snap.k); view.setUint16(5, meta.length);
+  view.setUint16(7, present.reduce((mask, on, c) => (on ? mask : mask | (1 << c)), 0));
   out.set(meta, HEAD_BYTES);
   let at = HEAD_BYTES + meta.length;
-  for (const row of snap.P) {
-    for (const [index, type, size, scale] of FIELDS) { view[`set${type}`](at, wireValue(index, type, scale, row[index])); at += size; }
+  for (const w of wire) {
+    FIELDS.forEach((f, c) => { if (present[c]) { view[`set${f.type}`](at, w[c]); at += f.size; } });
   }
   return out;
 }
@@ -72,13 +84,17 @@ export function encodeSnapshot(snap) {
  */
 export function decodeSnapshot(bytes, ids) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const metaLen = view.getUint16(5), rowsAt = HEAD_BYTES + metaLen;
-  if (view.getUint8(0) !== VERSION || bytes.length - rowsAt !== ids.length * ROW_BYTES) return null;
+  if (view.getUint8(0) !== VERSION) return null;
+  const metaLen = view.getUint16(5), skipped = view.getUint16(7), rowsAt = HEAD_BYTES + metaLen;
+  const columns = FIELDS.filter((_, c) => !(skipped & (1 << c)));
+  const stride = columns.reduce((sum, f) => sum + f.size, 0);
+  if (bytes.length - rowsAt !== ids.length * stride) return null;
   const snap = { g: 's', k: view.getUint32(1), ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, rowsAt))), P: [] };
   let at = rowsAt;
   for (const id of ids) {
     const row = [id];
-    for (const [index, type, size, scale] of FIELDS) { row[index] = view[`get${type}`](at) / scale; at += size; }
+    for (const f of FIELDS) row[f.index] = f.base;
+    for (const f of columns) { row[f.index] = readValue(f, view[`get${f.type}`](at)); at += f.size; }
     snap.P.push(row);
   }
   return snap;

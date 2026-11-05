@@ -3,7 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRoundSim } from './round-sim.js';
-import { packSnapshot, encodeSnapshot, decodeSnapshot, snapEvery, snapBytesEstimate, BUDGET } from './round-snapshot.js';
+import { packSnapshot, encodeSnapshot, decodeSnapshot, snapEvery, snapBytesEstimate, BUDGET, MAX_COURSE_COLLIDERS } from './round-snapshot.js';
+import { ROUNDS } from './show-director.js';
 import { unwrapAck } from './input-sync.js';
 import spinnerGauntlet from './rounds/spinner-gauntlet.js';
 import tailSnatch from './rounds/tail-snatch.js';
@@ -51,6 +52,35 @@ test('out-of-range values clamp instead of wrapping', () => {
   snap.P[0][2] = -9999; // OUT bean far below the course
   const row = decodeSnapshot(encodeSnapshot(snap), idsOf(sim)).P[0];
   assert.equal(row[2], -327.68);
+});
+
+test('columns at their base value in every row are skipped and read back as that base', () => {
+  const sim = midRound(spinnerGauntlet, 32);
+  const snap = packSnapshot(sim, () => 0, 'k');
+  for (const row of snap.P) { row[13] = 1; row[14] = 0; } // nobody slowed, no round extra
+  const lean = encodeSnapshot(snap);
+  snap.P[0][13] = 0.5; snap.P[0][14] = 3;
+  const full = encodeSnapshot(snap);
+  assert.ok(full.length - lean.length >= 2 * snap.P.length, `${lean.length} vs ${full.length}`);
+  const rows = decodeSnapshot(lean, idsOf(sim)).P;
+  assert.ok(rows.every((row) => row[13] === 1 && row[14] === 0));
+  assert.deepEqual(viaJson(decodeSnapshot(full, idsOf(sim))), viaJson(snap));
+});
+
+test('every course fits its ground collider index in one byte', () => {
+  for (const round of Object.values(ROUNDS)) {
+    const { cols } = round.build(7, 32);
+    assert.ok(cols.length < MAX_COURSE_COLLIDERS, `${round.id}: ${cols.length} colliders`);
+  }
+});
+
+test('32 humans at the floor rate stay inside the relay egress budget', () => {
+  for (const round of [spinnerGauntlet, tailSnatch, eggHaul]) {
+    const sim = midRound(round, 32);
+    const bytes = encodeSnapshot(packSnapshot(sim, () => 65535, '2-99')).length;
+    const hz = 60 / snapEvery({ bytes, guests: 32 });
+    assert.ok(bytes * 32 * hz <= BUDGET.relayBytes, `${round.id}: ${bytes} B x 32 x ${hz} Hz`);
+  }
 });
 
 test('snapshot rate: fastest rate inside both free-tier budgets', () => {
