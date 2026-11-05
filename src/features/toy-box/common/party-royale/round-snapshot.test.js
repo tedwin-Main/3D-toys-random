@@ -23,7 +23,6 @@ test('binary snapshot decodes to exactly the JSON snapshot, ~50% smaller', () =>
   for (const round of [spinnerGauntlet, tailSnatch, eggHaul]) {
     const sim = midRound(round, 32);
     const snap = packSnapshot(sim, () => 4321, '2-99');
-    Object.assign(snap, { pk: snap.k - 2, pev: [['j', 3]] });
     const bytes = encodeSnapshot(snap);
     assert.deepEqual(viaJson(decodeSnapshot(bytes, idsOf(sim))), viaJson(snap));
     assert.ok(bytes.length < JSON.stringify(snap).length * 0.6, `${round.id}: ${bytes.length} vs ${JSON.stringify(snap).length}`);
@@ -54,16 +53,15 @@ test('out-of-range values clamp instead of wrapping', () => {
   assert.equal(row[2], -327.68);
 });
 
-test('snapshot rate: fastest rate inside every free-tier budget', () => {
-  const hz = (o) => 60 / snapEvery(o);
+test('snapshot rate: fastest rate inside both free-tier budgets', () => {
+  const hz = (bytes, guests) => 60 / snapEvery({ bytes, guests });
   const bytes14 = snapBytesEstimate(14), bytes32 = snapBytesEstimate(32);
-  assert.equal(hz({ bytes: bytes14, relayGuests: 0, directGuests: 13 }), 60, '14 humans all direct');
-  assert.equal(hz({ bytes: bytes14, relayGuests: 13, directGuests: 0 }), 60, '14 humans on relay');
-  assert.equal(hz({ bytes: bytes32, relayGuests: 31, directGuests: 0 }), 15, '32 humans on relay');
-  assert.equal(hz({ bytes: bytes32, relayGuests: 2, directGuests: 0 }), 60, '3 humans + 29 bots');
-  for (const relayGuests of [0, 5, 13, 31]) for (const directGuests of [0, 4, 16]) {
-    const rate = hz({ bytes: bytes32, relayGuests, directGuests });
+  assert.equal(hz(bytes14, 14), 60, '14 humans');
+  assert.equal(hz(bytes32, 32), 15, '32 humans');
+  assert.equal(hz(bytes32, 3), 60, '3 humans + 29 bots');
+  for (const guests of [1, 5, 14, 20, 32]) {
+    const rate = hz(bytes32, guests);
     if (rate === 15) continue; // floor rate may exceed a budget by design
-    assert.ok(bytes32 * relayGuests * rate <= BUDGET.relayBytes && relayGuests * rate <= BUDGET.relayFrames);
+    assert.ok(bytes32 * guests * rate <= BUDGET.relayBytes && guests * rate <= BUDGET.relayFrames);
   }
 });

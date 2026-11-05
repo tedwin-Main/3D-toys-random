@@ -5,31 +5,28 @@ import assert from 'node:assert/strict';
 import { mulberry32 } from './course-colliders.js';
 import { createRoundSim, ACTIVE } from './round-sim.js';
 import { packSnapshot, encodeSnapshot, decodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
-import { createInputLog, createInputQueue, createPredictor, inputEvery, RESEND_UNACKED } from './input-sync.js';
+import { createInputLog, createInputQueue, createPredictor, inputEvery } from './input-sync.js';
 import { botInput } from './bean-bots.js';
 import sweepBar from './rounds/sweep-bar.js';
 import spinnerGauntlet from './rounds/spinner-gauntlet.js';
 
 const TICK_MS = 1000 / 60;
 
-// Net > link with one-way delay + jitter: ordered = relay socket (TCP); lossy = direct data channel (unordered, drops `loss` share)
-function createLink(rng, oneWayMs, jitterMs, { lossy = false, loss = 0 } = {}) {
+// Net > relay socket between a guest and the server host: one-way delay + jitter, delivered in order (TCP)
+function createLink(rng, oneWayMs, jitterMs) {
   const q = [];
   let lastAt = 0;
   return {
     send(now, msg) {
-      if (lossy && rng() < loss) return;
-      const at = now + oneWayMs + rng() * jitterMs;
-      lastAt = lossy ? at : Math.max(lastAt, at);
+      lastAt = Math.max(lastAt, now + oneWayMs + rng() * jitterMs);
       q.push([lastAt, JSON.stringify(msg)]);
-      if (lossy) q.sort((a, b) => a[0] - b[0]);
     },
     *due(now) { while (q.length && q[0][0] <= now) yield JSON.parse(q.shift()[1]); },
   };
 }
 
 // Guest > mirror + prediction; "player" = bot brain reading only what this guest can see
-function createGuest(id, round, seed, keep, roster, { predict, rng, every, resend }) {
+function createGuest(id, round, seed, keep, roster, { predict, rng, every }) {
   const mirror = createMirror(round, seed, keep, roster.map((r) => [r.id, r.nick, r.color, r.bot]));
   const log = createInputLog(), pred = createPredictor();
   const local = { mx: 0, mz: 0, jumpSeq: 0, diveSeq: 0, grab: false };
@@ -62,23 +59,22 @@ function createGuest(id, round, seed, keep, roster, { predict, rng, every, resen
       } else Object.assign(local, { mx: 0, mz: 0, grab: false });
       log.record(local);
       if (predict) pred.stepLocal(local, mirror.course);
-      return tickNo % every === 0 ? log.flush({ resend }) : null;
+      return tickNo % every === 0 ? log.flush() : null;
     },
   };
 }
 
 // Run a full round: host sim + lagged guests through links; returns host sim + guests
-// direct = lossy data channel cadence (every tick + unacked resend); else relay cadence for the room size
-function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict = true, keep, direct = false, loss = 0 }) {
-  const every = inputEvery({ fast: direct, guests }), resend = direct ? RESEND_UNACKED : 0;
+function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict = true, keep }) {
+  const every = inputEvery(guests);
   const rng = mulberry32(seed * 7 + 1);
   const roster = Array.from({ length: players }, (_, i) => ({ id: i + 1, nick: `p${i + 1}`, color: '#fff', bot: i >= guests }));
   const sim = createRoundSim({ round, seed, roster, keep });
   const gs = roster.slice(0, guests).map((r) => ({
-    g: createGuest(r.id, round, seed, keep, roster, { predict, rng, every, resend }),
-    up: createLink(rng, oneWayMs, jitterMs, { lossy: direct, loss }), down: createLink(rng, oneWayMs, jitterMs, { lossy: direct, loss }), q: createInputQueue(),
+    g: createGuest(r.id, round, seed, keep, roster, { predict, rng, every }),
+    up: createLink(rng, oneWayMs, jitterMs), down: createLink(rng, oneWayMs, jitterMs), q: createInputQueue(),
   }));
-  const snapGap = snapEvery({ bytes: snapBytesEstimate(players), relayGuests: direct ? 0 : guests, directGuests: direct ? guests : 0 });
+  const snapGap = snapEvery({ bytes: snapBytesEstimate(players), guests });
   for (let t = 1; sim.phase !== 'end' && t < 60 * 240; t++) {
     const now = t * TICK_MS;
     for (const x of gs) {
@@ -105,10 +101,10 @@ const mean = (a) => a.reduce((s, v) => s + v, 0) / Math.max(1, a.length);
 const pct = (a, q) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * q))] ?? 0; };
 
 // survival rank of the first `guests` roster slots (1 = first out, n = winner); guests = 0 gives the all-bot baseline for the same slots
-function sweepRanks({ predict = true, guests = 5, seeds, oneWayMs = 125, jitterMs = 40, direct = false, loss = 0 }) {
+function sweepRanks({ predict = true, guests = 5, seeds, oneWayMs = 125, jitterMs = 40 }) {
   const ranks = [], corr = [];
   for (const seed of seeds) {
-    const { sim, guests: gs } = playLagged(sweepBar, { seed, players: 14, guests, oneWayMs, jitterMs, predict, keep: 1, direct, loss });
+    const { sim, guests: gs } = playLagged(sweepBar, { seed, players: 14, guests, oneWayMs, jitterMs, predict, keep: 1 });
     const order = new Map(sim.out.map((id, i) => [id, i + 1]));
     for (const b of sim.list) if (b.id <= 5) ranks.push(order.get(b.id) ?? sim.list.length);
     for (const g of gs) corr.push(...g.corrections);
@@ -144,8 +140,8 @@ test('spinner gauntlet: lagged guests finish like host-local bots', () => {
 });
 
 
-// input confirm loop (press > host applies > ack back on guest). Relay = live Render SG numbers (28 ms one-way, 5 ms jitter).
-// Old pipeline (3-tick bundles, 20 Hz snapshots, fixed 2-deep queue) measured p50 117 / p95 133 ms here; floor = network + 1 tick.
+// input confirm loop (press > server host applies > ack back on guest). One relay hop: live Render SG echo p50 ~40 ms (20 ms one-way, 5 ms jitter).
+// Browser host (two hops) measured p50 97-107 ms live; old pipeline (3-tick bundles, 20 Hz snapshots, fixed 2-deep queue) p50 117 ms here at two hops.
 function confirmLoop(opts) {
   const confirms = [];
   for (const seed of SEEDS.slice(0, 8)) {
@@ -155,22 +151,12 @@ function confirmLoop(opts) {
   return { p50: pct(confirms, 0.5), p95: pct(confirms, 0.95) };
 }
 
-test('input confirm loop: relay at Render SG latency, and a direct link', () => {
-  const relay = confirmLoop({ oneWayMs: 28, jitterMs: 5 });
-  const direct = confirmLoop({ oneWayMs: 8, jitterMs: 4, direct: true, loss: 0.02 });
-  console.log(`  confirm loop relay p50 ${relay.p50.toFixed(0)} / p95 ${relay.p95.toFixed(0)} ms (network 56-66); direct link 8 ms one-way, 2% loss: p50 ${direct.p50.toFixed(0)} / p95 ${direct.p95.toFixed(0)} ms`);
+test('input confirm loop: one relay hop to the server host', () => {
+  const { p50, p95 } = confirmLoop({ oneWayMs: 20, jitterMs: 5 });
+  console.log(`  confirm loop p50 ${p50.toFixed(0)} / p95 ${p95.toFixed(0)} ms (network round trip 40-50)`);
+  // here both legs land on the receiver's next tick (the live guest timestamps on arrival, so it reads up to 1 tick less)
   const tick = 1000 / 60;
-  assert.ok(relay.p50 <= 56 + tick && relay.p95 <= 66 + tick, 'relay: network round trip + at most 1 tick');
-  assert.ok(direct.p50 <= 24 + tick, 'direct: peer round trip + at most 1 tick, even with 2% loss');
-});
-
-test('lossy direct link (5% loss, reordering): guests still survive like bots', () => {
-  const seeds = SEEDS.slice(0, 24);
-  const baseline = sweepRanks({ guests: 0, seeds });
-  const lossy = sweepRanks({ seeds, oneWayMs: 40, jitterMs: 30, direct: true, loss: 0.05 });
-  console.log(`  mean survival rank slots 1-5: bots ${baseline.rank.toFixed(2)}, guests on lossy direct link ${lossy.rank.toFixed(2)}; corrections p95 ${pct(lossy.corr, 0.95).toFixed(3)}`);
-  assert.ok(lossy.rank >= baseline.rank - 1.5);
-  assert.ok(pct(lossy.corr, 0.5) < 0.05);
+  assert.ok(p50 <= 40 + 2 * tick && p95 <= 50 + 2 * tick, 'network round trip + tick quantization only, no standing queue');
 });
 
 test('jitter queue drains standing lag after a burst, without losing a press', () => {

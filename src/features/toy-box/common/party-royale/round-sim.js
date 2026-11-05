@@ -15,15 +15,21 @@ const GRAB_RANGE = 1.3, GRAB_BREAK = 2.4, GRAB_MAX = 3;
 export function createRoundSim({ round, seed, roster, keep }) {
   const rng = mulberry32(seed ^ 0x9e3779b9);
   const course = round.build(seed, roster.length);
+  // active list rebuilt once per tick (or after a status change): bots and round rules read it many times a tick
+  let activeCache = null, activeTick = -1;
   const sim = {
     round, seed, course, rng, keep: Math.max(1, Math.min(keep, roster.length)),
     clock: 0, tick: 0, phase: 'intro', beans: new Map(), list: [], events: [],
     qualified: [], out: [], result: null, data: {},
     get playTime() { return Math.max(0, sim.clock - INTRO); },
-    get active() { return sim.list.filter((b) => b.status === ACTIVE); },
+    get active() {
+      if (activeCache && activeTick === sim.tick) return activeCache;
+      activeTick = sim.tick;
+      return (activeCache = sim.list.filter((b) => b.status === ACTIVE));
+    },
     emit(...e) { sim.events.push(e); },
-    qualify(b) { if (b.status !== ACTIVE) return; b.status = QUALIFIED; sim.qualified.push(b.id); sim.emit('q', b.id, sim.qualified.length); },
-    eliminate(b) { if (b.status !== ACTIVE) return; b.status = OUT; b.outTick = sim.tick; sim.out.push(b.id); sim.emit('o', b.id); },
+    qualify(b) { if (b.status !== ACTIVE) return; b.status = QUALIFIED; activeCache = null; sim.qualified.push(b.id); sim.emit('q', b.id, sim.qualified.length); },
+    eliminate(b) { if (b.status !== ACTIVE) return; b.status = OUT; activeCache = null; b.outTick = sim.tick; sim.out.push(b.id); sim.emit('o', b.id); },
     step: () => stepRound(sim),
   };
   roster.forEach((r, i) => {

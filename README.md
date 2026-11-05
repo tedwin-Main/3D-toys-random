@@ -22,7 +22,7 @@ npm run setup   # first time: installs deps
 npm start       # http://localhost:5066/  studio, /3d-toys/ toys, /3d-toys/rooms multiplayer relay
 npm run toys    # toy box alone on http://localhost:5055/3d-toys/
 npm test        # toy engine, party royale and relay tests
-npm run capacity-test  # relay CPU / bandwidth / RTT at 14-50 players (party royale seat cap)
+npm run capacity-test  # relay CPU (incl. server-run rounds) / bandwidth / confirm time at 14-32 humans; add `-- 10 1,14,32 fill` for bot-filled rooms
 npm run capture # studio posters + QA (Playwright, local only)
 ```
 

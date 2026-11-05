@@ -5,6 +5,8 @@
 // relay > client: "<" + from + "|" + json
 // binary frames carry the same ASCII header before raw payload bytes (party royale snapshots)
 export const SEND_MARK = '>';
+// peer id of a host the relay itself runs (party royale rounds); seated players get ids from 1
+export const SERVER_PEER = 0;
 export const DELIVER_MARK = '<';
 const TO_LIST = /^(?:\d{1,9}(?:,\d{1,9})*)?$/;
 const BAR = '|'.charCodeAt(0);

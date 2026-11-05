@@ -3,15 +3,13 @@
 import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 
-// lossy P2P channel: every bundle repeats the last unacked ticks, so one dropped packet costs nothing
-export const RESEND_UNACKED = 8;
-const RELAY_EVERY_TICK_GUESTS = 8;
+const EVERY_TICK_GUESTS = 8;
 
 /**
- * Ticks per guest input bundle. Direct link: every tick. Relay: relay CPU grows with message count
+ * Ticks per guest input bundle. Relay CPU grows with message count
  * (capacity-test, 32 players: every tick 75% of Render free CPU, every 2 ticks 64%), so small rooms send every tick, big ones every 2.
  */
-export const inputEvery = ({ fast, guests }) => (fast || guests <= RELAY_EVERY_TICK_GUESTS ? 1 : 2);
+export const inputEvery = (guests) => (guests <= EVERY_TICK_GUESTS ? 1 : 2);
 const HISTORY = 300;
 const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30, STANDING_PCT = 0.1;
 
@@ -21,7 +19,7 @@ export const unwrapAck = (ack, seq) => seq - ((seq - ack) & 0xffff);
 const packInput = (b) => [Math.round(b.mx * 100) / 100, Math.round(b.mz * 100) / 100, b.jumpSeq, b.diveSeq, b.grab ? 1 : 0];
 const unpackInput = ([mx, mz, j, d, g]) => ({ mx, mz, jumpSeq: j, diveSeq: d, grab: !!g });
 
-// Guest > numbered input log: one input per tick; flush = unsent ones (+ unacked tail when resending); confirm = press-to-ack time
+// Guest > numbered input log: one input per tick; flush = unsent ones; confirm = press-to-ack time
 export function createInputLog({ now = () => performance.now() } = {}) {
   const hist = new Map(), sentAt = new Map();
   let seq = 0, firstUnsent = 1, acked = 0;
@@ -34,8 +32,8 @@ export function createInputLog({ now = () => performance.now() } = {}) {
       return seq;
     },
     at(s) { const p = hist.get(s); return p && unpackInput(p); },
-    flush({ resend = 0 } = {}) {
-      const from = Math.min(firstUnsent, Math.max(acked + 1, seq - resend + 1));
+    flush() {
+      const from = firstUnsent;
       if (from > seq) return null;
       const I = [];
       for (let s = from; s <= seq; s++) I.push(hist.get(s));

@@ -1,6 +1,6 @@
 // Implements transport-free room relay logic for rooms, roster, and message fan-out.
 
-import { SEND_MARK, parseSendHeader, deliverPrefix } from '../toy-box/common/relay-wire.js';
+import { SEND_MARK, SERVER_PEER, parseSendHeader, deliverPrefix } from '../toy-box/common/relay-wire.js';
 
 const DEFAULT_SEATS = 14; // classic party games
 export const MAX_SEATS = 32; // party royale shows; see room-capacity-test.js for the CPU + bandwidth numbers behind it
@@ -11,7 +11,8 @@ const SEND_BYTE = SEND_MARK.charCodeAt(0), BAR_BYTE = '|'.charCodeAt(0);
 const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6', '#ffb4a2', '#4361ee',
   '#e63946', '#06d6a0', '#ffd6a5', '#9b5de5', '#f15bb5', '#00bbf9', '#fee440', '#8ac926', '#ff7b00', '#b5838d', '#56cfe1', '#d9ed92', '#ef476f', '#118ab2', '#ffafcc', '#7f5539', '#cdb4db', '#2ec4b6'];
 // sock adapter: { send(str | Buffer, binary = false), close(), isOpen() }; maxSeats override only for capacity measurements
-export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
+// hostedGames: { [game]: (serverRoom) => host } for games whose host runs here (see hosted-games.js); host = { onData(data, from), onRoster(), tick(nowMs), close() }
+export function createRelayCore({ maxSeats = MAX_SEATS, hostedGames = {} } = {}) {
   // creator picks seat cap for room; clamp to 2..maxSeats
   const seatCap = (cap) => Math.max(2, Math.min(maxSeats, Math.floor(Number(cap)) || DEFAULT_SEATS));
   const rooms = new Map();
@@ -27,10 +28,28 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     while (rooms.has(`${game}:${code}`));
     return code;
   }
+  const publicPlayers = (room) => [...room.players.values()].map((p) => ({ id: p.id, nick: p.nick, color: p.color, slot: p.slot }));
   function roster(room) {
-    const players = [...room.players.values()].map((p) => ({ id: p.id, nick: p.nick, color: p.color, slot: p.slot }));
-    const str = JSON.stringify({ t: 'roster', host: room.host, players });
+    const str = JSON.stringify({ t: 'roster', host: room.host, players: publicPlayers(room) });
     for (const p of room.players.values()) sendRaw(p.conn, str);
+    room.server?.onRoster();
+  }
+
+  // Hosted game > the room as its server host sees it: humans only, frames go out from SERVER_PEER
+  function serverRoom(room) {
+    return {
+      me: SERVER_PEER,
+      get lobbyHost() { return room.host; },
+      get players() { return publicPlayers(room); },
+      // data = JSON-able value, or Uint8Array sent as a binary frame; to = peer id / id list (default everyone); sticky = replayed to late joiners
+      send(data, { to = null, sticky = false } = {}) {
+        const binary = data instanceof Uint8Array;
+        const out = deliverFrame(SERVER_PEER, binary ? data : Buffer.from(JSON.stringify(data)));
+        const targets = to == null ? room.players.values() : [].concat(to).map((id) => room.players.get(id));
+        for (const p of targets) if (p) sendRaw(p.conn, out, binary);
+        if (sticky && !binary) room.state = out;
+      },
+    };
   }
 
   // Cloud Sync > room join: create or join, pick free color slot, first player hosts
@@ -41,7 +60,7 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     if (!code) code = makeCode(game);
     const key = `${game}:${code}`;
     let room = rooms.get(key);
-    if (!room) { room = { key, code, game, host: null, players: new Map(), state: null, cap: seatCap(msg.cap) }; rooms.set(key, room); }
+    if (!room) room = openRoom(key, code, game, msg.cap);
     if (room.players.size >= room.cap) return send(conn, { t: 'error', message: 'Room is full.' });
     const used = new Set([...room.players.values()].map((p) => p.slot));
     let slot = 0;
@@ -52,9 +71,17 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     if (!room.host) room.host = p.id;
     conn.room = room; conn.player = p;
     send(conn, { t: 'joined', id: p.id, room: code, host: room.host, color: p.color, slot });
-    // host-pushed snapshot (e.g. lobby phase) so late joiners render right away
-    if (room.state) sendRaw(conn, deliverFrame(room.host, room.state));
+    // host-pushed snapshot (e.g. lobby phase, current round) so late joiners render right away
+    if (room.state) sendRaw(conn, room.state);
     roster(room);
+  }
+
+  function openRoom(key, code, game, cap) {
+    const room = { key, code, game, host: null, players: new Map(), state: null, cap: seatCap(cap), server: null };
+    const hostGame = hostedGames[game];
+    if (hostGame) room.server = hostGame(serverRoom(room));
+    rooms.set(key, room);
+    return room;
   }
 
   // Cloud Sync > leave: drop player, migrate host to oldest remaining, delete empty room
@@ -63,7 +90,7 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     if (!room) return;
     room.players.delete(conn.player.id);
     conn.room = null;
-    if (!room.players.size) return rooms.delete(room.key);
+    if (!room.players.size) { room.server?.close(); return rooms.delete(room.key); }
     if (room.host === conn.player.id) room.host = room.players.keys().next().value;
     roster(room);
   }
@@ -75,9 +102,19 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
     if (!head) return;
     const room = conn.room, me = conn.player, payload = buf.subarray(head.end + 1);
     const out = deliverFrame(me.id, payload);
-    const targets = head.to ? [...new Set(head.to)].map((id) => room.players.get(id)) : room.players.values();
+    const ids = head.to && new Set(head.to);
+    if (ids?.has(SERVER_PEER)) toServer(room, payload, binary, me.id);
+    const targets = ids ? [...ids].map((id) => room.players.get(id)) : room.players.values();
     for (const p of targets) if (p && p !== me) sendRaw(p.conn, out, binary);
-    if (head.sticky && !binary && me.id === room.host) room.state = Buffer.from(payload);
+    if (head.sticky && !binary && me.id === room.host) room.state = out;
+  }
+
+  // Hosted game > JSON payload addressed to SERVER_PEER; never forwarded to players
+  function toServer(room, payload, binary, from) {
+    if (!room.server || binary) return;
+    let data;
+    try { data = JSON.parse(payload.toString()); } catch { return; }
+    room.server.onData(data, from);
   }
 
   return {
@@ -100,6 +137,10 @@ export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
       if (msg.t === 'leave') leave(conn);
     },
     close(conn) { leave(conn); conns.delete(conn); },
+    // Hosted game > advance every room host the relay runs (60 Hz from room-relay.js)
+    tickHosted(nowMs) { for (const room of rooms.values()) room.server?.tick(nowMs); },
+    // relay-stats: jitter queue summary per running hosted match (no player data)
+    hostedQueues() { return [...rooms.values()].filter((r) => r.server?.running).map((r) => r.server.takeQueueStats()); },
     // drop silent conns so ghosts don't hold host
     sweep(now = Date.now()) {
       for (const conn of conns) if (now - conn.lastSeen > SILENT_MS) { conn.sock.close(); this.close(conn); }

@@ -1,7 +1,6 @@
 // Runs the authoritative match on the host (or locally for attract mode): rounds, results, show progression, champion.
 
 import { createRoundSim, ACTIVE } from './round-sim.js';
-import { adoptMirror } from './round-snapshot.js';
 import { ROUNDS, nextRound, keepFor } from './show-director.js';
 
 const RESULTS_SECONDS = 5, CHAMPION_SECONDS = 8;
@@ -65,13 +64,6 @@ export function createMatchFlow({ show, roundId, rosterNow, send, onRound, onRes
       const b = flow.sim?.beans.get(id);
       if (b?.status === ACTIVE && flow.stage === 'round') flow.sim.eliminate(b);
       flow.roster = flow.roster.filter((r) => r.id !== id);
-    },
-    // host migration: promoted guest's mirror becomes the live round, show state from the last round message
-    adopt(mirror, msg) {
-      flow.sim = adoptMirror(mirror); flow.msg = msg;
-      flow.no = msg.no; flow.played = [...msg.played];
-      flow.roster = msg.R.map(([id, nick, color, bot]) => ({ id, nick, color, bot }));
-      flow.stage = mirror.phase === 'end' ? 'results' : 'round'; flow.t = 2;
     },
   });
   return flow;

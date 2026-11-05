@@ -1,33 +1,25 @@
-// Connects a party royale round to the room: host input queues + snapshots, guest mirror + own-bean prediction.
+// Connects a party royale round to the room: server host input queues + snapshots, guest mirror + own-bean prediction.
 
 import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 import { ACTIVE } from './round-sim.js';
 import { packSnapshot, encodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
-import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck, RESEND_UNACKED } from './input-sync.js';
-
-const guestsIn = (room) => Math.max(1, room.players.length - 1);
-
-// guests split by path: direct link or relay
-function guestLinks(room) {
-  const others = room.players.filter((p) => p.id !== room.me);
-  const directGuests = others.filter((p) => room.isDirect(p.id)).length;
-  return { directGuests, relayGuests: others.length - directGuests };
-}
+import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck } from './input-sync.js';
+import { SERVER_PEER } from '../relay-wire.js';
 
 /**
- * Host > per round: guest inputs land in jitter queues (tagged by round key so stale bundles are dropped),
+ * Host (relay server) > per round: guest inputs land in jitter queues (tagged by round key so stale bundles are dropped),
  * snapshots (binary, rate from the free-tier budgets in snapEvery) carry acks so each guest can reconcile.
- * Snapshots go fast (direct link where open, lossy): each repeats the previous one's events so a dropped packet loses no banner or sound.
+ * room.players = humans only (every one a guest); the relay delivers in order, so no snapshot is ever lost.
  */
 export function createHostNet(room) {
   const queues = new Map();
-  // debug: queue depth (ticks) before each guest take, and takes that found the queue empty
+  // queue depth (ticks) before each guest take, and takes that found the queue empty (relay-stats reads + resets these)
   const stats = { depths: [], starves: 0 };
-  let roundKey = null, prev = null, lastBytes = 0;
+  let roundKey = null, lastBytes = 0;
   return {
     stats,
-    begin(key) { roundKey = key; queues.clear(); prev = null; lastBytes = 0; },
+    begin(key) { roundKey = key; queues.clear(); lastBytes = 0; },
     onInput(from, msg) {
       if (msg.rk !== roundKey) return;
       if (!queues.has(from)) queues.set(from, createInputQueue());
@@ -44,13 +36,11 @@ export function createHostNet(room) {
     },
     // returns true when a snapshot went out (caller then plays + clears sim.events)
     sendSnapshot(sim) {
-      const every = snapEvery({ bytes: lastBytes || snapBytesEstimate(sim.list.length), ...guestLinks(room) });
+      const every = snapEvery({ bytes: lastBytes || snapBytesEstimate(sim.list.length), guests: room.players.length });
       if (sim.tick % every !== 0 && sim.phase !== 'end') return false;
-      const snap = packSnapshot(sim, (id) => queues.get(id)?.ack ?? 0, roundKey);
-      if (prev?.ev.length) Object.assign(snap, { pk: prev.k, pev: prev.ev });
-      const bytes = encodeSnapshot(snap);
-      room.send(bytes, { fast: true });
-      prev = snap; lastBytes = bytes.length;
+      const bytes = encodeSnapshot(packSnapshot(sim, (id) => queues.get(id)?.ack ?? 0, roundKey));
+      room.send(bytes);
+      lastBytes = bytes.length;
       return true;
     },
   };
@@ -63,9 +53,9 @@ function recordDepth(stats, depth) {
 }
 
 /**
- * Guest > per round: mirror sim built from the round message, snapshots applied onto it (stale or reordered ones skipped),
+ * Guest > per round: mirror sim built from the round message, snapshots applied onto it (stale ones skipped),
  * own bean predicted from local input (round.predict runs too, e.g. gates burst locally).
- * Inputs go fast: every tick with the unacked tail repeated on a direct link, relay cadence by room size otherwise.
+ * Input bundles go to the server host at the inputEvery cadence for the room size.
  */
 export function createGuestRound(room, msg, round) {
   const mirror = createMirror(round, msg.seed, msg.keep, msg.R);
@@ -79,10 +69,10 @@ export function createGuestRound(room, msg, round) {
     get predicting() { return !!pred.bean; },
     // render clock: predicted tick while my bean runs ahead, else last host tick
     get clock() { return pred.bean ? pred.predictedTick * DT : mirror.clock; },
-    // returns events to play (this snapshot's, plus the previous one's if that packet never came), or null if skipped
+    // returns this snapshot's events to play, or null if skipped
     onSnapshot(s) {
       if (s.rk !== msg.rk || s.k <= lastK) return null;
-      const events = s.pk > lastK ? [...s.pev, ...s.ev] : s.ev;
+      const events = s.ev;
       lastK = s.k;
       stats.snapshots++;
       mine = applySnapshot(mirror, s, room.me);
@@ -99,10 +89,9 @@ export function createGuestRound(room, msg, round) {
     tick(input) {
       log.record(input);
       pred.stepLocal(input, mirror.course);
-      const fast = room.isDirect(room.host);
-      if (++tickNo % inputEvery({ fast, guests: guestsIn(room) })) return;
-      const bundle = log.flush({ resend: fast ? RESEND_UNACKED : 0 });
-      if (bundle) room.toHost({ ...bundle, rk: msg.rk }, { fast: true });
+      if (++tickNo % inputEvery(room.players.length)) return;
+      const bundle = log.flush();
+      if (bundle) room.send({ ...bundle, rk: msg.rk }, { to: SERVER_PEER });
     },
   };
 }

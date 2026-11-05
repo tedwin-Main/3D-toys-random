@@ -1,7 +1,6 @@
 // Manages browser client connection to room relay.
 
 import { encodeSend, encodeSendBytes, decodeFrame } from './relay-wire.js';
-import { createFastLinks } from './fast-links.js';
 
 const CONNECT_TIMEOUT_MS = 4000;
 
@@ -18,13 +17,9 @@ export function connectRoom(opts) {
   return openRoom(sameOriginRelay(), opts);
 }
 
-// direct links need WebRTC; ?nop2p forces relay only (A/B latency checks)
-const directLinksAllowed = () => typeof RTCPeerConnection !== 'undefined' && !/[?&]nop2p\b/.test(location.search);
-
 // Cloud Sync > one relay: resolves with live room handle once server confirms seat
 // cap = seat cap asked by room creator (relay clamps; default 14)
-// fastLinks: open WebRTC links host <> guests; send(data, { fast: true }) then goes direct where a link is open
-function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
+function openRoom(url, { game, nick, room, cap }) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
@@ -32,26 +27,21 @@ function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
     const giveUp = setTimeout(() => { if (!joined) { reject(unreachable()); ws.close(); } }, CONNECT_TIMEOUT_MS);
     const handlers = { data: new Set(), roster: new Set(), host: new Set(), close: new Set() };
     const emit = (type, ...args) => handlers[type].forEach((fn) => fn(...args));
-    let joined = false, links = null;
+    let joined = false;
 
     const r = {
       me: null, code: null, color: null, slot: 0, host: null, players: [],
       get isHost() { return this.me === this.host; },
       player(id) { return this.players.find((p) => p.id === id); },
       // data = JSON-able value, or Uint8Array sent as a binary frame (peers get a Uint8Array back)
-      // opts.to = one peer id; opts.sticky = host state replayed to late joiners (JSON only); opts.fast = direct link first (lossy, unordered)
+      // opts.to = peer id (SERVER_PEER = host the relay runs); opts.sticky = host state replayed to late joiners (JSON only)
       send(data, opts = {}) {
-        const payload = data instanceof Uint8Array ? data : JSON.stringify(data);
-        const to = opts.fast && links ? sendDirect(payload, opts.to) : opts.to;
-        if (Array.isArray(to) && !to.length) return;
         if (ws.readyState !== WebSocket.OPEN) return;
-        const wire = { to, sticky: opts.sticky };
-        ws.send(typeof payload === 'string' ? encodeSend(payload, wire) : encodeSendBytes(payload, wire));
+        const wire = { to: opts.to, sticky: opts.sticky };
+        ws.send(data instanceof Uint8Array ? encodeSendBytes(data, wire) : encodeSend(JSON.stringify(data), wire));
       },
       // guest input: host only, other guests never read it
       toHost(data, opts = {}) { this.send(data, { ...opts, to: this.host }); },
-      isDirect(peer) { return !!links?.isOpen(peer); },
-      get directCount() { return links?.openCount ?? 0; },
       on(type, fn) { handlers[type].add(fn); return () => handlers[type].delete(fn); },
       leave() { ws.close(); },
     };
@@ -68,7 +58,6 @@ function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
         joined = true;
         clearTimeout(giveUp);
         Object.assign(r, { me: m.id, code: m.room, host: m.host, color: m.color, slot: m.slot });
-        if (fastLinks && directLinksAllowed()) links = createFastLinks(r, (data, from) => emit('data', data, from));
         resolve(r);
       } else if (m.t === 'error') {
         if (!joined) { reject(new Error(m.message)); ws.close(); }
@@ -76,22 +65,12 @@ function openRoom(url, { game, nick, room, cap, fastLinks = false }) {
         const was = r.isHost;
         r.host = m.host;
         r.players = m.players;
-        links?.sync();
         emit('roster', r.players);
         if (was !== r.isHost) emit('host', r.isHost);
-      } else if (m.t === 'data') {
-        if (m.data?._rtc) links?.signal(m.from, m.data._rtc);
-        else emit('data', m.data, m.from);
-      }
+      } else if (m.t === 'data') emit('data', m.data, m.from);
     };
-    // fast send: direct where a link is open; returns peers still needing the relay (unchanged `to` if none went direct)
-    function sendDirect(payload, to) {
-      const peers = to != null ? [to] : r.players.map((p) => p.id).filter((id) => id !== r.me);
-      const rest = peers.filter((id) => !links.trySend(id, payload));
-      return rest.length === peers.length ? to : rest;
-    }
     ws.onerror = () => { if (!joined) reject(unreachable()); };
-    ws.onclose = () => { hb(); clearTimeout(giveUp); links?.closeAll(); if (joined) emit('close'); else reject(unreachable()); };
+    ws.onclose = () => { hb(); clearTimeout(giveUp); if (joined) emit('close'); else reject(unreachable()); };
   });
 }
 

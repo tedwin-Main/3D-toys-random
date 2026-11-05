@@ -7,22 +7,22 @@ const f2 = (v) => Math.round(v * 100) / 100;
 const f1 = (v) => Math.round(v * 10) / 10;
 
 // Free-tier budgets per room. Relay egress: 400 KB/s ≈ 69 h of play a month on Render's 100 GB quota.
-// Relay frames: 960/s (32-player worst case, Render CPU peak 0.035 of 0.15). Host upload: 500 KB/s (4 Mbit/s).
-export const BUDGET = { relayBytes: 400e3, relayFrames: 960, hostBytes: 500e3 };
+// Relay frames: 960/s (32-player worst case, Render CPU peak 0.035 of 0.15).
+export const BUDGET = { relayBytes: 400e3, relayFrames: 960 };
 const SNAP_TICKS = [1, 2, 3, 4]; // 60 / 30 / 20 / 15 Hz
 
-/** ticks between snapshots: the fastest rate that keeps every budget (15 Hz floor) */
-export function snapEvery({ bytes, relayGuests, directGuests }) {
-  const hostCopies = directGuests + (relayGuests > 0 ? 1 : 0);
+/** ticks between snapshots to `guests` humans: the fastest rate inside both budgets (15 Hz floor) */
+export function snapEvery({ bytes, guests }) {
   const fits = (ticks) => {
     const hz = 60 / ticks;
-    return bytes * relayGuests * hz <= BUDGET.relayBytes && relayGuests * hz <= BUDGET.relayFrames && bytes * hostCopies * hz <= BUDGET.hostBytes;
+    return bytes * guests * hz <= BUDGET.relayBytes && guests * hz <= BUDGET.relayFrames;
   };
   return SNAP_TICKS.find(fits) ?? SNAP_TICKS.at(-1);
 }
 
 /** byte estimate before the first snapshot of a round */
-export const snapBytesEstimate = (beanCount) => 120 + beanCount * ROW_BYTES;
+// header + meta measured 70-80 B mid-round (capacity-test)
+export const snapBytesEstimate = (beanCount) => 80 + beanCount * ROW_BYTES;
 
 // Host > snapshot: row per bean [id, x, y, z, vx, vy, vz, face, mode, mt, gnd, flags, ack, slow, extra]
 export function packSnapshot(sim, ackOf, roundKey) {
@@ -37,7 +37,7 @@ export function packSnapshot(sim, ackOf, roundKey) {
 }
 
 // Binary snapshot: same rounded values as the JSON rows, ~50% fewer bytes (32 beans fit one ~0.9 KB packet)
-// [u8 version][u32 tick][u16 meta length][meta JSON: ph rk keep D ev pk pev][rows: ROW_BYTES each]
+// [u8 version][u32 tick][u16 meta length][meta JSON: ph rk keep D ev][rows: ROW_BYTES each]
 // Rows follow sim.list order, which the guest mirror shares (built from the same roster), so ids are not sent.
 // ack goes as its low 16 bits (18 min of ticks); the guest unwraps it against its own input seq (unwrapAck).
 const VERSION = 2, HEAD_BYTES = 7, ROW_BYTES = 26;
@@ -54,7 +54,7 @@ const wireValue = (index, type, scale, v) => (index === ACK ? v & 0xffff : clamp
 
 /** Host > packSnapshot result as bytes for the wire */
 export function encodeSnapshot(snap) {
-  const meta = utf8.encode(JSON.stringify({ ph: snap.ph, rk: snap.rk, keep: snap.keep, D: snap.D, ev: snap.ev, pk: snap.pk, pev: snap.pev }));
+  const meta = utf8.encode(JSON.stringify({ ph: snap.ph, rk: snap.rk, keep: snap.keep, D: snap.D, ev: snap.ev }));
   const out = new Uint8Array(HEAD_BYTES + meta.length + snap.P.length * ROW_BYTES);
   const view = new DataView(out.buffer);
   view.setUint8(0, VERSION); view.setUint32(1, snap.k); view.setUint16(5, meta.length);
@@ -109,12 +109,4 @@ export function applySnapshot(mirror, s, me) {
 
 function readRow(b, [, x, y, z, vx, vy, vz, face, mode, mt, gnd, flags, , slow]) {
   Object.assign(b, { x, y, z, vx, vy, vz, face, mode, mt, gnd, slow, status: statusOf(flags), grabbing: !!(flags & 8) });
-}
-
-// host migration: promoted guest turns its mirror into the live sim (bots keep running, inputs restart)
-export function adoptMirror(mirror) {
-  mirror.qualified = mirror.list.filter((b) => b.status === QUALIFIED).map((b) => b.id);
-  mirror.out = mirror.list.filter((b) => b.status === OUT).map((b) => b.id);
-  mirror.events.length = 0;
-  return mirror;
 }

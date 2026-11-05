@@ -1,39 +1,42 @@
-// Measures relay CPU, bandwidth and latency per party size with real party royale snapshots, to pick the seat cap.
-// Run: npm run capacity-test [seconds per size] [sizes, e.g. 14,24,32,40,50]
+// Measures relay CPU, bandwidth and input confirm time per party size with the relay running real party royale rounds, to pick the seat cap.
+// Run: npm run capacity-test [seconds per size] [human counts, e.g. 14,24,32] [bots filling the rest of 32 seats: 0 / fill]
 
 import { fork } from 'node:child_process';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { encodeSend, encodeSendBytes, decodeFrame } from '../toy-box/common/relay-wire.js';
+import { encodeSend, decodeFrame, SERVER_PEER } from '../toy-box/common/relay-wire.js';
 import { inputEvery } from '../toy-box/common/party-royale/input-sync.js';
+import { decodeSnapshot } from '../toy-box/common/party-royale/round-snapshot.js';
 import { createRoomRelay } from './room-relay.js';
 
 const SELF = fileURLToPath(import.meta.url);
-const RENDER_FREE_CPU_MS = 100; // Render free plan = 0.1 CPU = 100 ms of CPU per second
+const RENDER_FREE_CPU_MS = 150; // Render free instance cpu_limit reads 0.15 = 150 ms of CPU per second
+const ROUND = 'spinner-gauntlet'; // single-round page: replays the round with everyone, no eliminations between rounds
 
-if (process.argv[2] === '--clients') await runClients(process.argv[3], Number(process.argv[4]), Number(process.argv[5]));
-else await runRelay(Number(process.argv[2] ?? 10), (process.argv[3] ?? '14,24,32,40,50').split(',').map(Number));
+if (process.argv[2] === '--clients') await runClients(process.argv[3], Number(process.argv[4]), Number(process.argv[5]), Number(process.argv[6]));
+else await runRelay(Number(process.argv[2] ?? 10), (process.argv[3] ?? '14,24,32').split(',').map(Number), process.argv[4] === 'fill');
 
-// Relay side > in-process relay (seat ceiling lifted to measure past 32); load clients run in a child so their CPU is not counted
-async function runRelay(seconds, sizes) {
-  const relay = createRoomRelay({ maxSeats: 64 });
+// Relay side > in-process relay running the rounds; load clients run in a child so their CPU is not counted
+async function runRelay(seconds, sizes, fillBots) {
+  const relay = createRoomRelay();
   const server = http.createServer();
   server.on('upgrade', (req, socket, head) => relay.handleUpgrade(req, socket, head));
   await new Promise((r) => server.listen(0, r));
   const url = `ws://127.0.0.1:${server.address().port}`;
-  console.log(`players | snapshot B @ Hz | relay CPU ms/s (free plan budget ${RENDER_FREE_CPU_MS}) | relay out KB/s | guest in KB/s | host in msg/s | RTT p50 / p95 ms`);
+  console.log(fillBots ? 'bots fill every room to 32 beans' : 'humans only');
+  console.log(`players | snapshot B @ Hz | relay CPU ms/s incl. sim (free limit ${RENDER_FREE_CPU_MS}) | relay out KB/s | guest in KB/s | inputs in /s | confirm p50 / p95 ms`);
   for (const n of sizes) {
-    const r = await measure(url, n, seconds);
-    console.log(`${String(n).padStart(7)} | ${String(r.snapBytes).padStart(6)} @ ${r.snapHz} | ${r.cpuMs.toFixed(1).padStart(6)} (${Math.round((r.cpuMs / RENDER_FREE_CPU_MS) * 100)}% of free) | ${r.relayOutKB.toFixed(0).padStart(6)} | ${r.guestInKB.toFixed(1).padStart(6)} | ${r.hostInMsgs.toFixed(0).padStart(5)} | ${r.rtt50.toFixed(1)} / ${r.rtt95.toFixed(1)}`);
+    const r = await measure(url, n, seconds, fillBots ? 32 - n : 0);
+    console.log(`${String(n).padStart(7)} | ${String(r.snapBytes).padStart(6)} @ ${r.snapHz} | ${r.cpuMs.toFixed(1).padStart(6)} (${Math.round((r.cpuMs / RENDER_FREE_CPU_MS) * 100)}% of free) | ${r.relayOutKB.toFixed(0).padStart(6)} | ${r.guestInKB.toFixed(1).padStart(6)} | ${r.inputsIn.toFixed(0).padStart(5)} | ${r.confirm50.toFixed(1)} / ${r.confirm95.toFixed(1)}`);
   }
   server.close();
   process.exit(0);
 }
 
-function measure(url, n, seconds) {
+function measure(url, n, seconds, bots) {
   return new Promise((resolve, reject) => {
-    const child = fork(SELF, ['--clients', url, String(n), String(seconds)]);
+    const child = fork(SELF, ['--clients', url, String(n), String(seconds), String(bots)]);
     let cpu0, t0;
     child.on('message', (m) => {
       if (m.ready) { cpu0 = process.cpuUsage(); t0 = performance.now(); }
@@ -46,65 +49,60 @@ function measure(url, n, seconds) {
   });
 }
 
-// Client side > 1 host sending real snapshots + n-1 guests sending input bundles and pings
-async function runClients(url, n, seconds) {
-  const { snap, every } = await partySnapshot(n);
-  const snapHz = 60 / every, snapBytes = snap.length;
-  const stats = { bytes: 0, guestBytes: 0, hostMsgs: 0, rtts: [] };
-  const host = await joinPlayer(url, '', n, stats, true);
-  const guests = [];
-  for (let i = 1; i < n; i++) guests.push(await joinPlayer(url, host.code, n, stats, false));
-  // worst case: every guest on the relay (no direct links)
-  const inputTicks = inputEvery({ fast: false, guests: n - 1 });
-  const bundle = { g: 'i', s: 1, rk: '3-1234567890', I: Array(inputTicks).fill([0.71, -0.71, 3, 1, 0]) };
+// Client side > n humans: the lobby host starts the round on the relay, everyone sends input bundles like a browser guest
+async function runClients(url, n, seconds, bots) {
+  const stats = { bytes: 0, guestBytes: 0, snaps: 0, snapBytes: 0, inputs: 0, confirms: [] };
+  const players = [];
+  for (let i = 0; i < n; i++) players.push(await joinPlayer(url, players[0]?.code ?? '', n, stats, i === n - 1));
+  send(players[0], { g: 'run', bots });
+  await new Promise((r) => setTimeout(r, 4000)); // round intro
+  const every = inputEvery(n), sentAt = new Map();
+  let seq = 0;
   process.send({ ready: true });
-  Object.assign(stats, { bytes: 0, guestBytes: 0, hostMsgs: 0, rtts: [] });
+  Object.assign(stats, { bytes: 0, guestBytes: 0, snaps: 0, snapBytes: 0, inputs: 0, confirms: [] });
   const t0 = performance.now();
-  const timers = [
-    setInterval(() => host.ws.send(encodeSendBytes(snap)), 1000 / snapHz),
-    setInterval(() => guests.forEach((g) => send(g, bundle, g.host)), (1000 / 60) * inputTicks),
-    setInterval(() => guests.forEach((g) => send(g, { g: 'ping', ts: performance.now() }, g.host)), 500),
-  ];
+  const timer = setInterval(() => {
+    const s = seq + 1;
+    seq += every;
+    sentAt.set(seq, performance.now());
+    for (const p of players) if (p.round) send(p, { g: 'i', s, rk: p.round.rk, I: Array(every).fill([0.71, -0.71, 3, 1, 0]) });
+    stats.inputs += players.length;
+  }, (1000 / 60) * every);
+  players.at(-1).onAck = (ack) => { const t = sentAt.get(ack); if (t != null) { stats.confirms.push(performance.now() - t); sentAt.delete(ack); } };
   await new Promise((r) => setTimeout(r, seconds * 1000));
-  timers.forEach(clearInterval);
-  const wall = (performance.now() - t0) / 1000, sorted = stats.rtts.sort((a, b) => a - b);
+  clearInterval(timer);
+  const wall = (performance.now() - t0) / 1000, sorted = stats.confirms.sort((a, b) => a - b);
   const pct = (q) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] ?? NaN;
-  process.send({ done: { snapBytes, snapHz, relayOutKB: stats.bytes / wall / 1024, guestInKB: stats.guestBytes / (n - 1) / wall / 1024, hostInMsgs: stats.hostMsgs / wall, rtt50: pct(0.5), rtt95: pct(0.95) } });
-  [host, ...guests].forEach((p) => p.ws.close());
+  const rate = stats.snaps / wall, snapHz = [60, 30, 20, 15].reduce((a, b) => (Math.abs(b - rate) < Math.abs(a - rate) ? b : a));
+  process.send({ done: { snapBytes: Math.round(stats.snapBytes / Math.max(1, stats.snaps)), snapHz, relayOutKB: stats.bytes / wall / 1024, guestInKB: stats.guestBytes / wall / 1024, inputsIn: stats.inputs / wall, confirm50: pct(0.5), confirm95: pct(0.95) } });
+  players.forEach((p) => p.ws.close());
   setTimeout(() => process.exit(0), 200);
 }
 
-function joinPlayer(url, room, cap, stats, isHost) {
+// one human; `watched` also counts its snapshots and reads its own ack from them
+function joinPlayer(url, room, cap, stats, watched) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url), me = { ws, id: null, host: null, code: null };
-    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', game: 'capacity-test', nick: 'bot', room, cap })));
+    const ws = new WebSocket(url), me = { ws, id: null, code: null, round: null, onAck: null };
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', game: ROUND, nick: 'bot', room, cap })));
     ws.on('error', reject);
     ws.on('message', (raw, binary) => {
-      const len = raw.length ?? Buffer.byteLength(String(raw));
-      stats.bytes += len;
-      if (!isHost) stats.guestBytes += len; else stats.hostMsgs++;
-      if (binary) return; // snapshot bytes: counted, not parsed
+      stats.bytes += raw.length;
+      if (watched) stats.guestBytes += raw.length;
+      if (binary) return watched && readSnapshot(me, raw, stats);
       const m = decodeFrame(String(raw));
-      if (m.t === 'joined') { Object.assign(me, { id: m.id, host: m.host, code: m.room }); resolve(me); }
-      else if (m.t === 'roster') me.host = m.host;
+      if (m.t === 'joined') { Object.assign(me, { id: m.id, code: m.room }); resolve(me); }
       else if (m.t === 'error') reject(new Error(m.message));
-      else if (m.t === 'data' && m.data.g === 'ping' && isHost) send(me, { g: 'pong', ts: m.data.ts }, m.from);
-      else if (m.t === 'data' && m.data.g === 'pong') stats.rtts.push(performance.now() - m.data.ts);
+      else if (m.t === 'data' && m.data.g === 'r') me.round = m.data;
     });
   });
 }
 
-function send(p, data, to) { p.ws.send(encodeSend(JSON.stringify(data), { to })); }
-
-// mid-race Spinner Gauntlet snapshot with n beans (real row sizes, events included)
-async function partySnapshot(n) {
-  const { createRoundSim } = await import('../toy-box/common/party-royale/round-sim.js');
-  const { packSnapshot, encodeSnapshot, snapEvery } = await import('../toy-box/common/party-royale/round-snapshot.js');
-  const { default: round } = await import('../toy-box/common/party-royale/rounds/spinner-gauntlet.js');
-  const roster = Array.from({ length: n }, (_, i) => ({ id: i + 1, nick: `p${i + 1}`, color: '#fff', bot: i > 0 }));
-  const sim = createRoundSim({ round, seed: 7, roster, keep: Math.ceil(n * 0.7) });
-  for (let i = 0; i < 60 * 8; i++) { sim.step(); if (i % 4 === 0) sim.events.length = 0; }
-  const snap = encodeSnapshot(packSnapshot(sim, () => 1234, '3-1234567890'));
-  // worst case: every guest on the relay
-  return { snap, every: snapEvery({ bytes: snap.length, relayGuests: n - 1, directGuests: 0 }) };
+function readSnapshot(me, raw, stats) {
+  const bar = raw.indexOf('|'.charCodeAt(0)), bytes = new Uint8Array(raw.subarray(bar + 1));
+  stats.snaps++; stats.snapBytes += bytes.length;
+  const snap = me.round && decodeSnapshot(bytes, me.round.R.map(([id]) => id));
+  const mine = snap?.P.find((row) => row[0] === me.id);
+  if (mine?.[12]) me.onAck?.(mine[12]);
 }
+
+function send(p, data) { p.ws.send(encodeSend(JSON.stringify(data), { to: SERVER_PEER })); }

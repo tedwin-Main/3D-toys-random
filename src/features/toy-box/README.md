@@ -63,7 +63,7 @@ Notes:
 
 ## Multiplayer
 
-Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test. Game data rides short text frames (`common/relay-wire.js`: `>to|sticky|json` up, `<from|json` down): the relay reads only the header and forwards the payload bytes untouched, one shared buffer per fan-out, so a peer cannot spoof `from`. Games can opt into direct WebRTC links (`common/fast-links.js`, `connectRoom({ fastLinks: true })`): `send(data, { fast: true })` goes host <> guest peer-to-peer where a link is open (unordered, no retransmits), the relay otherwise.
+Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test. Game data rides short text frames (`common/relay-wire.js`: `>to|sticky|json` up, `<from|json` down): the relay reads only the header and forwards the payload bytes untouched, one shared buffer per fan-out, so a peer cannot spoof `from`. Party royale rounds run on the relay itself (`multiplayer-rooms/hosted-games.js` > `party-royale/party-server-host.js`): the relay is peer `SERVER_PEER` (0), so every player is one hop from the host.
 
 - `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
 - `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick
