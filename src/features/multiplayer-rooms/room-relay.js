@@ -49,7 +49,7 @@ export function createRoomRelay(opts) {
   }, 5000);
   beat.unref();
   // server-run hosts (party royale) count fixed 60 Hz steps from wall time; idle rooms return at once
-  setInterval(() => core.tickHosted(performance.now()), HOSTED_TICK_MS).unref();
+  setInterval(() => stats.hosted(() => core.tickHosted(performance.now())), HOSTED_TICK_MS).unref();
 
   return {
     handleUpgrade(req, socket, head) { wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req)); },

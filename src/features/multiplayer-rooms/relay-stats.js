@@ -1,4 +1,4 @@
-// Measures relay-side latency and load on the live server: event-loop delay, handler time, CPU and frame rates per window.
+// Measures relay-side latency and load on the live server: event-loop delay, handler time, hosted-round time, CPU and frame rates per window.
 
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 
@@ -9,7 +9,7 @@ const lateMs = (ns) => Math.max(0, Math.round(ns / 1e4) / 100 - LOOP_RESOLUTION_
 const round2 = (v) => Math.round(v * 100) / 100;
 
 /**
- * Relay > stats: wrap message handling with timed(), count frames out with sent();
+ * Relay > stats: wrap message handling with timed(), server-run round ticks with hosted(), count frames out with sent();
  * latest() = last full window (what a load test reads while it runs).
  */
 export function createRelayStats() {
@@ -19,7 +19,7 @@ export function createRelayStats() {
   setInterval(close, WINDOW_MS).unref();
 
   function fresh() {
-    return { t0: performance.now(), cpu0: process.cpuUsage(), framesIn: 0, framesOut: 0, handlerMs: 0, handlerMax: 0 };
+    return { t0: performance.now(), cpu0: process.cpuUsage(), framesIn: 0, framesOut: 0, handlerMs: 0, handlerMax: 0, hostedMs: 0 };
   }
 
   function close() {
@@ -28,6 +28,7 @@ export function createRelayStats() {
       windowS: round2(secs),
       loopDelayMs: { p50: round2(lateMs(loop.percentile(50))), p99: round2(lateMs(loop.percentile(99))), max: round2(lateMs(loop.max)) },
       handlerMsPerS: round2(win.handlerMs / secs), handlerMaxMs: round2(win.handlerMax),
+      hostedMsPerS: round2(win.hostedMs / secs), // wall time in server-run rounds: sim + snapshots + their fan-out
       cpuMsPerS: round2((cpu.user + cpu.system) / 1000 / secs),
       framesInPerS: Math.round(win.framesIn / secs), framesOutPerS: Math.round(win.framesOut / secs),
     };
@@ -42,6 +43,11 @@ export function createRelayStats() {
       const took = performance.now() - t;
       win.framesIn++; win.handlerMs += took;
       if (took > win.handlerMax) win.handlerMax = took;
+    },
+    hosted(fn) {
+      const t = performance.now();
+      fn();
+      win.hostedMs += performance.now() - t;
     },
     sent() { win.framesOut++; },
     latest: () => latest,

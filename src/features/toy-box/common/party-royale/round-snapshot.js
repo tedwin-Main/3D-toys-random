@@ -44,36 +44,55 @@ export function packSnapshot(sim, ackOf, roundKey) {
 const VERSION = 3, HEAD_BYTES = 9;
 const utf8 = new TextEncoder(), unutf8 = new TextDecoder();
 const ACK = 12;
-// row column > packSnapshot row index, DataView type, bytes, scale, base (wire value = (v - base) * scale). Index 0 (id) is implied.
-const col = (index, type, size, scale, base = 0) => ({ index, type, size, scale, base });
+// DataView accessors per wire type, looked up once instead of by name per field per row
+const WIRE_TYPES = {
+  Int8: { size: 1, min: -128, max: 127, set: DataView.prototype.setInt8, get: DataView.prototype.getInt8 },
+  Uint8: { size: 1, min: 0, max: 255, set: DataView.prototype.setUint8, get: DataView.prototype.getUint8 },
+  Int16: { size: 2, min: -32768, max: 32767, set: DataView.prototype.setInt16, get: DataView.prototype.getInt16 },
+  Uint16: { size: 2, min: 0, max: 65535, set: DataView.prototype.setUint16, get: DataView.prototype.getUint16 },
+};
+// row column > packSnapshot row index, wire type, scale, base (wire value = (v - base) * scale). Index 0 (id) is implied.
+const col = (index, type, scale, base = 0) => ({ index, scale, base, ...WIRE_TYPES[type] });
 const FIELDS = [
-  col(1, 'Int16', 2, 100), col(2, 'Int16', 2, 100), col(3, 'Int16', 2, 100), col(4, 'Int16', 2, 10), col(5, 'Int16', 2, 10), col(6, 'Int16', 2, 10),
-  col(7, 'Int16', 2, 100), col(8, 'Uint8', 1, 1), col(9, 'Uint8', 1, 100), col(10, 'Uint8', 1, 1, -1), col(11, 'Uint8', 1, 1), col(ACK, 'Uint16', 2, 1),
-  col(13, 'Int8', 1, 100, 1), col(14, 'Uint8', 1, 1),
+  col(1, 'Int16', 100), col(2, 'Int16', 100), col(3, 'Int16', 100), col(4, 'Int16', 10), col(5, 'Int16', 10), col(6, 'Int16', 10),
+  col(7, 'Int16', 100), col(8, 'Uint8', 1), col(9, 'Uint8', 100), col(10, 'Uint8', 1, -1), col(11, 'Uint8', 1), col(ACK, 'Uint16', 1),
+  col(13, 'Int8', 100, 1), col(14, 'Uint8', 1),
 ];
 const ROW_BYTES = FIELDS.reduce((sum, f) => sum + f.size, 0);
 // gnd rides as collider index + 1 in one byte (-1 = airborne); mt (0 up to 2.55 s; longest stumble 1.2 s) in one byte
 export const MAX_COURSE_COLLIDERS = 255;
-const RANGE = { Int8: [-128, 127], Int16: [-32768, 32767], Uint8: [0, 255], Uint16: [0, 65535] };
-const clampTo = (type, v) => Math.max(RANGE[type][0], Math.min(RANGE[type][1], Math.round(v)));
-const wireValue = (f, v) => (f.index === ACK ? v & 0xffff : clampTo(f.type, (v - f.base) * f.scale));
+const wireValue = (f, v) => (f.index === ACK ? v & 0xffff : Math.max(f.min, Math.min(f.max, Math.round((v - f.base) * f.scale))));
 // integer math first so 1 - 0.45 reads back as exactly 0.55
 const readValue = (f, wire) => (wire + f.base * f.scale) / f.scale;
+const isPresent = (mask, c) => (mask & (1 << c)) !== 0;
+let wireScratch = new Int32Array(32 * FIELDS.length);
 
 /** Host > packSnapshot result as bytes for the wire */
 export function encodeSnapshot(snap) {
   const meta = utf8.encode(JSON.stringify({ ph: snap.ph, rk: snap.rk, keep: snap.keep, D: snap.D, ev: snap.ev }));
-  const wire = snap.P.map((row) => FIELDS.map((f) => wireValue(f, row[f.index])));
-  const present = FIELDS.map((_, c) => wire.some((w) => w[c] !== 0));
-  const stride = FIELDS.reduce((sum, f, c) => sum + (present[c] ? f.size : 0), 0);
-  const out = new Uint8Array(HEAD_BYTES + meta.length + wire.length * stride);
+  const rows = snap.P, cols = FIELDS.length;
+  if (wireScratch.length < rows.length * cols) wireScratch = new Int32Array(rows.length * cols);
+  const wire = wireScratch;
+  let present = 0, stride = 0;
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      const v = (wire[r * cols + c] = wireValue(FIELDS[c], rows[r][FIELDS[c].index]));
+      if (v !== 0) present |= 1 << c;
+    }
+  }
+  for (let c = 0; c < cols; c++) if (isPresent(present, c)) stride += FIELDS[c].size;
+  const out = new Uint8Array(HEAD_BYTES + meta.length + rows.length * stride);
   const view = new DataView(out.buffer);
   view.setUint8(0, VERSION); view.setUint32(1, snap.k); view.setUint16(5, meta.length);
-  view.setUint16(7, present.reduce((mask, on, c) => (on ? mask : mask | (1 << c)), 0));
+  view.setUint16(7, ~present & ((1 << cols) - 1));
   out.set(meta, HEAD_BYTES);
   let at = HEAD_BYTES + meta.length;
-  for (const w of wire) {
-    FIELDS.forEach((f, c) => { if (present[c]) { view[`set${f.type}`](at, w[c]); at += f.size; } });
+  for (let r = 0; r < rows.length; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!isPresent(present, c)) continue;
+      FIELDS[c].set.call(view, at, wire[r * cols + c]);
+      at += FIELDS[c].size;
+    }
   }
   return out;
 }
@@ -85,17 +104,18 @@ export function encodeSnapshot(snap) {
 export function decodeSnapshot(bytes, ids) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint8(0) !== VERSION) return null;
-  const metaLen = view.getUint16(5), skipped = view.getUint16(7), rowsAt = HEAD_BYTES + metaLen;
-  const columns = FIELDS.filter((_, c) => !(skipped & (1 << c)));
+  const metaLen = view.getUint16(5), present = ~view.getUint16(7), rowsAt = HEAD_BYTES + metaLen;
+  const columns = FIELDS.filter((_, c) => isPresent(present, c));
   const stride = columns.reduce((sum, f) => sum + f.size, 0);
   if (bytes.length - rowsAt !== ids.length * stride) return null;
-  const snap = { g: 's', k: view.getUint32(1), ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, rowsAt))), P: [] };
+  const snap = { g: 's', k: view.getUint32(1), ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, rowsAt))), P: new Array(ids.length) };
   let at = rowsAt;
-  for (const id of ids) {
-    const row = [id];
+  for (let r = 0; r < ids.length; r++) {
+    const row = new Array(FIELDS.length + 1);
+    row[0] = ids[r];
     for (const f of FIELDS) row[f.index] = f.base;
-    for (const f of columns) { row[f.index] = readValue(f, view[`get${f.type}`](at)); at += f.size; }
-    snap.P.push(row);
+    for (const f of columns) { row[f.index] = readValue(f, f.get.call(view, at)); at += f.size; }
+    snap.P[r] = row;
   }
   return snap;
 }
