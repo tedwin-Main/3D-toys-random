@@ -1,9 +1,10 @@
 // Load-tests room relay with simulated players and reports round-trip latency.
 
 import WebSocket from 'ws';
+import { encodeSend, decodeFrame } from '../toy-box/common/relay-wire.js';
 
 const URL_ARG = process.argv[2] ?? 'ws://localhost:5055/3d-toys/rooms';
-const PLAYERS = Number(process.argv[3] ?? 14);
+const PLAYERS = Number(process.argv[3] ?? 14); // party royale rooms take up to 32
 const SECONDS = Number(process.argv[4] ?? 30);
 const HZ = 20;
 
@@ -19,11 +20,11 @@ function joinPlayer(room) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(URL_ARG);
     const me = { ws, id: null, host: null };
-    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', game: 'load-test', nick: 'bot', room })));
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'join', game: 'load-test', nick: 'bot', room, cap: PLAYERS })));
     ws.on('error', reject);
     ws.on('message', (raw) => {
       received++;
-      const m = JSON.parse(String(raw));
+      const m = decodeFrame(String(raw));
       if (m.t === 'joined') { me.id = m.id; me.host = m.host; me.code = m.room; resolve(me); }
       else if (m.t === 'roster') me.host = m.host;
       else if (m.t === 'error') reject(new Error(m.message));
@@ -33,7 +34,7 @@ function joinPlayer(room) {
     });
   });
 }
-const send = (p, data, to) => p.ws.send(JSON.stringify({ t: 'send', data, to }));
+const send = (p, data, to) => p.ws.send(encodeSend(JSON.stringify(data), { to }));
 
 function percentile(sorted, q) { return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] : NaN; }
 

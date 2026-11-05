@@ -1,17 +1,25 @@
 // Implements transport-free room relay logic for rooms, roster, and message fan-out.
 
-const MAX_PLAYERS = 14;
+import { SEND_MARK, parseSendHeader, deliverPrefix } from '../toy-box/common/relay-wire.js';
+
+const DEFAULT_SEATS = 14; // classic party games
+export const MAX_SEATS = 32; // party royale shows; see room-capacity-test.js for the CPU + bandwidth numbers behind it
 const SILENT_MS = 20000; // clients send hb every 5 s; frozen/bfcached pages go quiet
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6', '#ffb4a2', '#4361ee'];
-
-// sock adapter: { send(str), close(), isOpen() }
-export function createRelayCore() {
+const SEND_BYTE = SEND_MARK.charCodeAt(0), BAR_BYTE = '|'.charCodeAt(0);
+// first 14 = classic palette; slots 15-32 only appear in party royale rooms
+const COLORS = ['#ff5a5f', '#3fa7ff', '#ffd23f', '#5ee07a', '#c77dff', '#ff9f43', '#2de2e6', '#ff6ec7', '#a3e635', '#f8fafc', '#8b5cf6', '#14b8a6', '#ffb4a2', '#4361ee',
+  '#e63946', '#06d6a0', '#ffd6a5', '#9b5de5', '#f15bb5', '#00bbf9', '#fee440', '#8ac926', '#ff7b00', '#b5838d', '#56cfe1', '#d9ed92', '#ef476f', '#118ab2', '#ffafcc', '#7f5539', '#cdb4db', '#2ec4b6'];
+// sock adapter: { send(str | Buffer as text frame), close(), isOpen() }; maxSeats override only for capacity measurements
+export function createRelayCore({ maxSeats = MAX_SEATS } = {}) {
+  // creator picks seat cap for room; clamp to 2..maxSeats
+  const seatCap = (cap) => Math.max(2, Math.min(maxSeats, Math.floor(Number(cap)) || DEFAULT_SEATS));
   const rooms = new Map();
   const conns = new Set();
   let nextId = 1;
 
-  const sendRaw = (conn, str) => { if (conn.sock.isOpen()) conn.sock.send(str); };
+  const sendRaw = (conn, frame) => { if (conn.sock.isOpen()) conn.sock.send(frame); };
+  const deliverFrame = (from, payload) => Buffer.concat([Buffer.from(deliverPrefix(from)), payload]);
   const send = (conn, msg) => sendRaw(conn, JSON.stringify(msg));
   function makeCode(game) {
     let code;
@@ -33,8 +41,8 @@ export function createRelayCore() {
     if (!code) code = makeCode(game);
     const key = `${game}:${code}`;
     let room = rooms.get(key);
-    if (!room) { room = { key, code, game, host: null, players: new Map(), state: null }; rooms.set(key, room); }
-    if (room.players.size >= MAX_PLAYERS) return send(conn, { t: 'error', message: 'Room is full.' });
+    if (!room) { room = { key, code, game, host: null, players: new Map(), state: null, cap: seatCap(msg.cap) }; rooms.set(key, room); }
+    if (room.players.size >= room.cap) return send(conn, { t: 'error', message: 'Room is full.' });
     const used = new Set([...room.players.values()].map((p) => p.slot));
     let slot = 0;
     while (used.has(slot)) slot++;
@@ -45,7 +53,7 @@ export function createRelayCore() {
     conn.room = room; conn.player = p;
     send(conn, { t: 'joined', id: p.id, room: code, host: room.host, color: p.color, slot });
     // host-pushed snapshot (e.g. lobby phase) so late joiners render right away
-    if (room.state != null) send(conn, { t: 'data', from: room.host, data: room.state });
+    if (room.state) sendRaw(conn, deliverFrame(room.host, room.state));
     roster(room);
   }
 
@@ -60,13 +68,16 @@ export function createRelayCore() {
     roster(room);
   }
 
-  // Cloud Sync > relay: to one peer, or everyone else; stringify once per message, not per peer; host may pin a sticky state for joiners
-  function relay(conn, msg) {
-    const room = conn.room;
-    const out = JSON.stringify({ t: 'data', from: conn.player.id, data: msg.data });
-    if (msg.to != null) { const p = room.players.get(msg.to); if (p) sendRaw(p.conn, out); }
-    else for (const p of room.players.values()) if (p.id !== conn.player.id) sendRaw(p.conn, out);
-    if (msg.sticky && conn.player.id === room.host) room.state = msg.data;
+  // Cloud Sync > relay: read the short header only, forward payload bytes untouched; one frame buffer shared by every receiver
+  // host may pin a sticky payload for late joiners
+  function relay(conn, buf) {
+    const head = readSendHeader(buf);
+    if (!head) return;
+    const room = conn.room, me = conn.player, payload = buf.subarray(head.end + 1);
+    const out = deliverFrame(me.id, payload);
+    const targets = head.to ? [...new Set(head.to)].map((id) => room.players.get(id)) : room.players.values();
+    for (const p of targets) if (p && p !== me) sendRaw(p.conn, out);
+    if (head.sticky && me.id === room.host) room.state = Buffer.from(payload);
   }
 
   return {
@@ -78,15 +89,14 @@ export function createRelayCore() {
     },
     message(conn, raw) {
       conn.lastSeen = Date.now();
-      const str = String(raw);
+      const buf = typeof raw === 'string' ? Buffer.from(raw) : raw;
+      if (buf[0] === SEND_BYTE) { if (conn.room) relay(conn, buf); return; }
       let msg;
-      try { msg = JSON.parse(str); } catch { return; }
+      try { msg = JSON.parse(buf.toString()); } catch { return; }
       // latency probe: bounce straight back, no room work (load test splits network vs relay time)
-      if (msg.t === 'echo') return sendRaw(conn, str);
+      if (msg.t === 'echo') return sendRaw(conn, buf);
       if (msg.t === 'join') { if (!conn.room) join(conn, msg); return; }
-      if (!conn.room) return;
-      if (msg.t === 'send') relay(conn, msg);
-      else if (msg.t === 'leave') leave(conn);
+      if (msg.t === 'leave') leave(conn);
     },
     close(conn) { leave(conn); conns.delete(conn); },
     // drop silent conns so ghosts don't hold host
@@ -95,4 +105,11 @@ export function createRelayCore() {
     },
     get size() { return conns.size; },
   };
+}
+
+// ">to|sticky|payload": header ends at the second bar; null when malformed
+function readSendHeader(buf) {
+  const first = buf.indexOf(BAR_BYTE, 1), end = first < 0 ? -1 : buf.indexOf(BAR_BYTE, first + 1);
+  const head = end < 0 ? null : parseSendHeader(buf.toString('latin1', 1, end));
+  return head && { ...head, end };
 }

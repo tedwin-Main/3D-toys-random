@@ -106,7 +106,7 @@ const frame = $('frame'), nav = $('nav'), menu = $('menu'), tab = $('tab');
 
 // Home > Filter tabs: All / Single player / Multiplayer, plus genre chips under Multiplayer; state lives in home hash (#f=multi&g=battle) so Back restores it
 const FILTERS = [['all', 'All'], ['single', 'Single player'], ['multi', 'Multiplayer']];
-const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['creative', '🧱 Creative']];
+const GENRES = [['all', 'All genres'], ['turn', '🎲 Turn-based'], ['royale', '🫘 Party royale'], ['survival', '💥 Last one standing'], ['bluff', '🃏 Bluff & bid'], ['battle', '⚔️ Battle'], ['race', '🏁 Racing & sports'], ['party', '🎉 Party'], ['creative', '🧱 Creative']];
 const isMulti = (t) => t.players === 'multi';
 const match = (t, f, g = 'all') => (f === 'all' || (f === 'multi') === isMulti(t)) && (f !== 'multi' || g === 'all' || t.genre === g);
 let filter = 'all', genre = 'all';
@@ -151,7 +151,7 @@ TOYS.forEach((t, i) => {
   a.className = 'card';
   a.href = `#${t.dir}`;
   a.dataset.dir = t.dir;
-  a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? '<span class="mp">👥 up to 14</span>' : ''}${t.emoji}</div>
+  a.innerHTML = `<div class="preview" style="background:${t.bg}"><span class="num">${i + 1}</span>${isMulti(t) ? `<span class="mp">👥 up to ${t.max ?? 14}</span>` : ''}${t.emoji}</div>
     <div class="body"><h2>${t.title}</h2><p>${t.desc}</p><div class="tags">${t.tags.map((x) => `<span>${x}</span>`).join('')}</div></div>`;
   const prev = a.querySelector('.preview');
   let timer;

@@ -3,13 +3,13 @@
 import { WebSocketServer } from 'ws';
 import { createRelayCore } from './room-relay-core.js';
 
-export function createRoomRelay() {
+export function createRoomRelay(opts) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
-  const core = createRelayCore();
+  const core = createRelayCore(opts);
 
   wss.on('connection', (ws) => {
     ws.isAlive = true;
-    const conn = core.connect({ send: (str) => ws.send(str), close: () => ws.terminate(), isOpen: () => ws.readyState === ws.OPEN });
+    const conn = core.connect({ send: (frame) => ws.send(frame, { binary: false }), close: () => ws.terminate(), isOpen: () => ws.readyState === ws.OPEN });
     ws.on('pong', () => (ws.isAlive = true));
     ws.on('message', (raw) => core.message(conn, raw));
     ws.on('close', () => core.close(conn));

@@ -4,7 +4,7 @@ One repo, one server, two galleries.
 
 ```
 src/features/toy-box/            Three.js toys + party games (gallery at /3d-toys/); common/ shared browser modules
-src/features/multiplayer-rooms/  room relay websocket, toy-only server, load test
+src/features/multiplayer-rooms/  room relay websocket, toy-only server, load + capacity tests
 src/features/studio-server/      one-port server + gallery asset list (gallery at /)
 src/features/demo-gallery/       one-prompt frontier-model demos
 src/features/demo-capture/       Playwright posters, clips, Instagram reels
@@ -21,7 +21,8 @@ src/media/                       rendered media served at /media/
 npm run setup   # first time: installs deps
 npm start       # http://localhost:5066/  studio, /3d-toys/ toys, /3d-toys/rooms multiplayer relay
 npm run toys    # toy box alone on http://localhost:5055/3d-toys/
-npm test        # toy engine tests
+npm test        # toy engine, party royale and relay tests
+npm run capacity-test  # relay CPU / bandwidth / RTT at 14-50 players (party royale seat cap)
 npm run capture # studio posters + QA (Playwright, local only)
 ```
 

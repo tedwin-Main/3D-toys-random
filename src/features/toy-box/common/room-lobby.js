@@ -108,12 +108,12 @@ function renderSettings(container, settings, values, room) {
 
 /**
  * opts: { game, title, emoji, blurb, accent, maxBots, defaultBots, minPlayers, note,
- *         maxTotal (seat cap, default 14), settings ([{ key, label, options: [[value, label]], value }], host picks),
+ *         maxTotal (seat cap, default 14; relay allows up to 32), fastLinks (WebRTC host <> guest links, see fast-links.js), settings ([{ key, label, options: [[value, label]], value }], host picks),
  *         onJoin(room), onStart({ seed, bots, isHost, late, settings }), onLobby() }
  * Lobby control messages carry `_lobby`; games must ignore data with that key.
  */
 export function createLobby(opts) {
-  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 14, note = '', settings = [] } = opts;
+  const { game, title, emoji = '🎮', blurb = '', accent = '#ffbf2f', maxBots = 0, defaultBots = 0, minPlayers = 1, maxTotal = 14, fastLinks = false, note = '', settings = [] } = opts;
   injectStyle('lb-style', CSS);
   const wrap = document.createElement('div');
   wrap.className = 'lb-wrap';
@@ -191,7 +191,7 @@ export function createLobby(opts) {
   }
 
   async function join(nick, code) {
-    const r = await connectRoom({ game, nick, room: code });
+    const r = await connectRoom({ game, nick, room: code, cap: maxTotal, fastLinks });
     state.room = r;
     api.room = r;
     // keep ?room= in the toy URL so a refresh rejoins the same room

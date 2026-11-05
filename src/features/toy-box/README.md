@@ -1,6 +1,6 @@
 # 3D Toy Box
 
-Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 14 players. One Node server hosts everything: static toys, and the websocket room relay.
+Interactive Three.js toys (CDN import map, no build, all procedural) plus online multiplayer party games for up to 14 players (party royale rounds: up to 32). One Node server hosts everything: static toys, and the websocket room relay.
 
 ## Run locally
 
@@ -9,7 +9,8 @@ From the repo root (one server for Render Studio + toys + rooms):
 ```sh
 npm run setup   # first time: installs both folders
 npm start       # http://localhost:5066/ (studio) and http://localhost:5066/3d-toys/ (toys)
-npm test        # pool + Break Builder engine tests (node --test)
+npm test        # pool, Break Builder, party royale and relay tests (node --test)
+npm run capacity-test  # relay load at 14 / 24 / 32 / 40 / 50 players
 ```
 
 Toys alone: `npm run toys` from the root serves only the toy box on http://localhost:5055/3d-toys/.
@@ -30,7 +31,7 @@ Notes:
 
 ## 3D toys
 
-- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: turn-based, last one standing, bluff & bid, battle, racing & sports, party, creative, from each toy's `genre` in `common/toy-list.js`) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
+- `src/features/toy-box/`: one project. `index.html` = gallery (All / Single player / Multiplayer filter; Multiplayer adds genre chips: turn-based, party royale, last one standing, bluff & bid, battle, racing & sports, party, creative, from each toy's `genre` in `common/toy-list.js`) + full-screen viewer with prev/next/dropdown nav (`#toy-name` deep links, `[` / `]` keys). Toy metadata in `common/toy-list.js`. Each toy folder below lives inside it and still opens standalone.
 - `pelican-on-bicycle/`: pelican rides a bike over hills; WASD, bell, fish pickups.
 - `horse-race-track/`: 2-lap horse derby with betting, cheering, multi-camera.
 - `tiny-planet-world/`: walkable mini planet with day/night, villages, boats, tree planting.
@@ -62,7 +63,7 @@ Notes:
 
 ## Multiplayer
 
-Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test.
+Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test. Game data rides short text frames (`common/relay-wire.js`: `>to|sticky|json` up, `<from|json` down): the relay reads only the header and forwards the payload bytes untouched, one shared buffer per fan-out, so a peer cannot spoof `from`. Games can opt into direct WebRTC links (`common/fast-links.js`, `connectRoom({ fastLinks: true })`): `send(data, { fast: true })` goes host <> guest peer-to-peer where a link is open (unordered, no retransmits), the relay otherwise.
 
 - `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
 - `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick
@@ -94,6 +95,28 @@ Turn-based and secret-pick games below sync through `common/turn-sync.js` (secre
 - `lucky-low/`: Lucky Low, bluffing numbers up to 14 with bots; secret picks from 1 to players+3 (6-16), the lowest number nobody else picked wins and scores its own value, tokens drop on numbered pillars in order on the reveal.
 - `picnic-dash/`: Picnic Dash, simultaneous-turn grid race up to 14 with bots; each turn everyone picks a step in secret and all critters hop at once, same square or swapping = both bounce, walking into a stander bounces, apples 1 / watermelons 3, trees never cut the meadow apart, 15/20/30 turns.
 - `siege-hills/`: Siege Hills, turn-based catapult artillery up to 14 with bots; side-on heightmap strip, drag-back slingshot aim with arc preview (no wind) or arrow keys, random wind per turn, host simulates each shot and guests replay its arc, craters carve the ground, blast falloff + direct-hit bonus + fall damage, tide rises each lap late in a round, survive +3 / knockout +1 over 1-5 rounds.
+
+## Party royale
+
+Obstacle-show genre (gallery chip 🫘 Party royale): bean races, survival, logic, hunt and team rounds with eliminations, up to 32 beans per room. Original rounds and art; only the generic mechanics (fake doors, sweeping bars, memory tiles, tail tag) follow the genre.
+
+- `bean-royale-show/`: full show. `common/party-royale/show-director.js` opens with a race (70% go through), then survival / logic / hunt / team rounds (55%), then a final once 6 or fewer remain (or at round 5). A final with several survivors replays a final until one bean is crowned.
+- Rounds, each also its own page: `gate-gamble/` (doors), `spinner-gauntlet/` (sweepers, hammers, discs, rams), `ghost-tiles/` (hidden safe path), `tilt-bridges/` (crowd-weighted seesaws), `boulder-hill/` (boulders + rising goo), `sweep-bar/` (jump the low bar, dive the high one), `wall-rush/` (sliding walls with gaps), `cannon-rain/` (rim cannons), `pattern-panic/` (memorise symbols), `tail-snatch/` (steal tails), `egg-haul/` (2-4 teams, nests), `crown-summit/` (final, grab the crown). `hex-drop-survival/` sits in the same chip.
+- Engine (`common/party-royale/`, pure JS, node-testable): `course-colliders.js` (boxes with yaw + tilt, cylinders, balls; obstacles move as pure functions of the round clock), `bean-physics.js` (run, jump with coyote + buffer, dive under high bars, stumble, platform carry, slopes, knock tags), `round-sim.js` (60 Hz rounds, qualify / eliminate, grabs, checkpoints), `bean-bots.js` + per-round bot hooks, `rounds/*.js`.
+- Netcode: host runs the round; guests send tick-numbered inputs, the host plays them through a jitter queue (drains standing lag after bursts) and acks the last one in each snapshot (30 / 20 / 15 Hz by beans × guests). Snapshots and inputs go over direct WebRTC links when the network allows (up to 16 guests; every tick, last 8 unacked inputs repeated, snapshots repeat the previous events, stale ones skipped), else over the relay (inputs every tick up to 8 guests, every 2 ticks above). Guests rebuild their own bean from the host copy and replay unacked inputs against obstacles at the matching ticks, so a jump timed on screen lands on the host too. Round state that is not a pure function of time (gates, tiles, plank tilt, tails, eggs, crown) rides in the snapshot. Host migration promotes a guest's mirror.
+- Latency (`netplay-latency.test.js`, confirm loop = press > host applies > ack back): at the live Render SG relay's 56 ms round trip, p50 83 ms (old pipeline 117); over a direct link at 8 ms one-way with 2% loss, p50 50 ms. `?debug` exposes `__party.game.guest.stats.confirmMs`; `?nop2p` forces the relay.
+- Verified: `round-rules.test.js` runs every round at 14 and 32 bots (ends, quotas, single final winner, no NaN) plus whole shows to one winner; `netplay-latency.test.js` puts 5 guests at 125 ms one-way + 40 ms jitter: on Sweep Bar lag costs ~0.9 of 14 survival places (no prediction: ~3.7), on Spinner Gauntlet guests finish within 20% of host bots, own-bean corrections p50 < 0.01 units.
+
+Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test` with real party snapshots, worst case (every guest human and on the relay, no direct links), relay on a laptop core:
+
+| players | snapshot | relay CPU | relay egress | per guest in | host in |
+|---|---|---|---|---|---|
+| 14 | 0.9 KB @ 30 Hz | 30 ms/s | 0.35 MB/s | 24 KB/s | 397 msg/s |
+| 24 | 1.4 KB @ 15 Hz | 45 ms/s | 0.54 MB/s | 21 KB/s | 709 msg/s |
+| 32 | 1.9 KB @ 15 Hz | 54 ms/s | 0.94 MB/s | 28 KB/s | 956 msg/s |
+| 50 | 3.0 KB @ 15 Hz | 84 ms/s | 2.3 MB/s | 44 KB/s | 1511 msg/s |
+
+Relay CPU follows message count, not bytes, so direct links take most of it away. Render free = 0.1 CPU (100 ms/s) and 100 GB/month egress. 32 fits one room with headroom; 50 is CPU-borderline when everyone is on the relay. Raise `MAX_SEATS` to 50 only on a paid instance.
 
 ## How these were made
 
