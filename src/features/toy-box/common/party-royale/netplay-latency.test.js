@@ -88,7 +88,7 @@ function playLagged(round, { seed, players, guests, oneWayMs, jitterMs, predict 
     }
     sim.step();
     if (sim.tick % snapGap === 0) {
-      const s = decodeSnapshot(encodeSnapshot(packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k'))); // wire codec in the loop
+      const s = decodeSnapshot(encodeSnapshot(packSnapshot(sim, (id) => gs.find((x) => x.g.id === id)?.q.ack ?? 0, 'k')), sim.list.map((b) => b.id)); // wire codec in the loop
       sim.events = [];
       for (const x of gs) x.down.send(now, s);
     }

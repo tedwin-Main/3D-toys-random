@@ -15,6 +15,9 @@ export const inputEvery = ({ fast, guests }) => (fast || guests <= RELAY_EVERY_T
 const HISTORY = 300;
 const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30, STANDING_PCT = 0.1;
 
+/** Guest > full input seq from a snapshot ack sent as its low 16 bits: newest seq <= own seq with those bits */
+export const unwrapAck = (ack, seq) => seq - ((seq - ack) & 0xffff);
+
 const packInput = (b) => [Math.round(b.mx * 100) / 100, Math.round(b.mz * 100) / 100, b.jumpSeq, b.diveSeq, b.grab ? 1 : 0];
 const unpackInput = ([mx, mz, j, d, g]) => ({ mx, mz, jumpSeq: j, diveSeq: d, grab: !!g });
 

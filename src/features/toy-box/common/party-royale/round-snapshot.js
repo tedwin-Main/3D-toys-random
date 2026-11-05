@@ -36,17 +36,21 @@ export function packSnapshot(sim, ackOf, roundKey) {
   };
 }
 
-// Binary snapshot: same rounded values as the JSON rows, ~40% fewer bytes (32 beans fit one ~1.2 KB packet)
+// Binary snapshot: same rounded values as the JSON rows, ~50% fewer bytes (32 beans fit one ~0.9 KB packet)
 // [u8 version][u32 tick][u16 meta length][meta JSON: ph rk keep D ev pk pev][rows: ROW_BYTES each]
-const VERSION = 1, HEAD_BYTES = 7, ROW_BYTES = 32;
+// Rows follow sim.list order, which the guest mirror shares (built from the same roster), so ids are not sent.
+// ack goes as its low 16 bits (18 min of ticks); the guest unwraps it against its own input seq (unwrapAck).
+const VERSION = 2, HEAD_BYTES = 7, ROW_BYTES = 26;
 const utf8 = new TextEncoder(), unutf8 = new TextDecoder();
-// row field > [DataView type, bytes, scale]. Order matches packSnapshot rows.
+// row field > [packSnapshot row index, DataView type, bytes, scale]. Row index 0 (id) is implied by order.
+const ACK = 12;
 const FIELDS = [
-  ['Int32', 4, 1], ['Int16', 2, 100], ['Int16', 2, 100], ['Int16', 2, 100], ['Int16', 2, 10], ['Int16', 2, 10], ['Int16', 2, 10],
-  ['Int16', 2, 100], ['Uint8', 1, 1], ['Int16', 2, 100], ['Int16', 2, 1], ['Uint8', 1, 1], ['Uint32', 4, 1], ['Int16', 2, 100], ['Int16', 2, 1],
+  [1, 'Int16', 2, 100], [2, 'Int16', 2, 100], [3, 'Int16', 2, 100], [4, 'Int16', 2, 10], [5, 'Int16', 2, 10], [6, 'Int16', 2, 10],
+  [7, 'Int16', 2, 100], [8, 'Uint8', 1, 1], [9, 'Int16', 2, 100], [10, 'Int16', 2, 1], [11, 'Uint8', 1, 1], [ACK, 'Uint16', 2, 1], [13, 'Int16', 2, 100], [14, 'Int16', 2, 1],
 ];
-const RANGE = { Int32: [-(2 ** 31), 2 ** 31 - 1], Int16: [-32768, 32767], Uint8: [0, 255], Uint32: [0, 2 ** 32 - 1] };
+const RANGE = { Int16: [-32768, 32767], Uint8: [0, 255], Uint16: [0, 65535] };
 const clampTo = (type, v) => Math.max(RANGE[type][0], Math.min(RANGE[type][1], Math.round(v)));
+const wireValue = (index, type, scale, v) => (index === ACK ? v & 0xffff : clampTo(type, v * scale));
 
 /** Host > packSnapshot result as bytes for the wire */
 export function encodeSnapshot(snap) {
@@ -57,18 +61,25 @@ export function encodeSnapshot(snap) {
   out.set(meta, HEAD_BYTES);
   let at = HEAD_BYTES + meta.length;
   for (const row of snap.P) {
-    FIELDS.forEach(([type, size, scale], i) => { view[`set${type}`](at, clampTo(type, row[i] * scale)); at += size; });
+    for (const [index, type, size, scale] of FIELDS) { view[`set${type}`](at, wireValue(index, type, scale, row[index])); at += size; }
   }
   return out;
 }
 
-/** Guest > bytes back to the packSnapshot shape ({ g: 's', k, P rows, ... }) */
-export function decodeSnapshot(bytes) {
+/**
+ * Guest > bytes back to the packSnapshot shape ({ g: 's', k, P rows, ... }); ids = mirror bean ids in list order.
+ * null for another wire version or a row count that does not match the mirror (snapshot from another round).
+ */
+export function decodeSnapshot(bytes, ids) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const metaLen = view.getUint16(5), rowsAt = HEAD_BYTES + metaLen;
+  if (view.getUint8(0) !== VERSION || bytes.length - rowsAt !== ids.length * ROW_BYTES) return null;
   const snap = { g: 's', k: view.getUint32(1), ...JSON.parse(unutf8.decode(bytes.subarray(HEAD_BYTES, rowsAt))), P: [] };
-  for (let at = rowsAt; at + ROW_BYTES <= bytes.length;) {
-    snap.P.push(FIELDS.map(([type, size, scale]) => { const v = view[`get${type}`](at) / scale; at += size; return v; }));
+  let at = rowsAt;
+  for (const id of ids) {
+    const row = [id];
+    for (const [index, type, size, scale] of FIELDS) { row[index] = view[`get${type}`](at) / scale; at += size; }
+    snap.P.push(row);
   }
   return snap;
 }

@@ -123,7 +123,7 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
 
   // Net > guest side: round message, snapshots, results, champion; host side: input bundles
   function onData(raw, from) {
-    const d = raw instanceof Uint8Array ? decodeSnapshot(raw) : raw; // binary frames = snapshots
+    const d = raw instanceof Uint8Array ? decodeGuestSnapshot(raw) : raw; // binary frames = snapshots
     if (!d || d._lobby) return;
     if (game.mode !== 'match') { if (d.g === 'r') game.lastMsg = d; return; }
     if (isHost()) { if (d.g === 'i') game.net?.onInput(from, d); return; }
@@ -134,6 +134,12 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
     }
     else if (d.g === 'res' && game.guest?.key === d.rk) showResults(game.guest.mirror, d.q);
     else if (d.g === 'champ' && game.guest) crown(game.guest.mirror.beans.get(d.id));
+  }
+
+  // Net > binary snapshot rows map onto my mirror's beans; none without a guest round
+  function decodeGuestSnapshot(bytes) {
+    const mirror = game.guest?.mirror;
+    return mirror ? decodeSnapshot(bytes, mirror.list.map((b) => b.id)) : null;
   }
 
   // Events > sounds + banners about me; guests already played their own jump / dive locally

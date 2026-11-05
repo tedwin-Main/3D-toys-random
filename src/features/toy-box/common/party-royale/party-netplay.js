@@ -4,7 +4,7 @@ import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 import { ACTIVE } from './round-sim.js';
 import { packSnapshot, encodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
-import { createInputLog, createInputQueue, createPredictor, inputEvery, RESEND_UNACKED } from './input-sync.js';
+import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck, RESEND_UNACKED } from './input-sync.js';
 
 const guestsIn = (room) => Math.max(1, room.players.length - 1);
 
@@ -88,8 +88,9 @@ export function createGuestRound(room, msg, round) {
       mine = applySnapshot(mirror, s, room.me);
       const live = mine && mirror.phase === 'play' && mine.bean.status === ACTIVE;
       if (!live) { pred.reset(); return events; }
-      const err = pred.reconcile(mine.bean, mine.ack, s.k, mirror.course, log);
-      const confirm = log.confirm(mine.ack);
+      const ack = unwrapAck(mine.ack, log.seq);
+      const err = pred.reconcile(mine.bean, ack, s.k, mirror.course, log);
+      const confirm = log.confirm(ack);
       if (stats.corrections.length < 2000) stats.corrections.push(err);
       if (confirm != null && stats.confirmMs.length < 2000) stats.confirmMs.push(confirm);
       return events;
