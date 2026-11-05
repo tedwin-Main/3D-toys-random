@@ -115,6 +115,7 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
       const events = game.guest?.onSnapshot(d);
       if (events) { view.snapshotArrived(); handleEvents(events, true); }
     }
+    else if (d.g === 'lead' && game.guest) shiftTicks(game.guest.leadShift(d));
     else if (d.g === 'res' && game.guest?.key === d.rk) showResults(game.guest.mirror, d.q);
     else if (d.g === 'champ' && game.guest) crown(game.guest.mirror.beans.get(d.id));
   }
@@ -144,9 +145,14 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
   // Run engine > fixed 60 Hz steps on wall time (worker timers drift off 60 Hz; the server host must see one input per its tick)
   let lastCount = 0;
   const stepsDue = createFixedSteps();
-  startTicker(60, () => {
+  const ticker = startTicker(60, () => {
     for (let n = stepsDue(performance.now()); n > 0; n--) step();
   });
+  // Net > land my inputs just before the server tick takes them (server measures their wait)
+  function shiftTicks(ms) {
+    if (!ms) return;
+    ticker.shift(ms); stepsDue.shift(ms);
+  }
 
   // one tick: attract steps its local round; a guest logs + predicts own input
   function step() {

@@ -49,7 +49,7 @@ export function createRoomRelay(opts) {
   }, 5000);
   beat.unref();
   // server-run hosts (party royale) count fixed 60 Hz steps from wall time; idle rooms return at once
-  setInterval(() => stats.hosted(() => core.tickHosted(performance.now())), HOSTED_TICK_MS).unref();
+  startGridTimer(HOSTED_TICK_MS, () => stats.hosted(() => core.tickHosted(performance.now())));
 
   return {
     handleUpgrade(req, socket, head) { wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req)); },
@@ -57,4 +57,18 @@ export function createRoomRelay(opts) {
     // GET /3d-toys/relay-stats: last 10 s window plus live counts (no player data)
     stats: () => ({ ...stats.latest(), rooms: core.rooms.size, conns: core.size, hostedQueues: core.hostedQueues() }),
   };
+}
+
+// Calls fn on an exact period grid (setInterval rounds 16.67 ms to whole ms and drifts, so some calls ran 2 steps at once
+// and guests could not line their inputs up with the tick); after a stall the grid restarts instead of bursting.
+function startGridTimer(periodMs, fn) {
+  let next = performance.now() + periodMs;
+  const beat = () => {
+    fn();
+    next += periodMs;
+    const now = performance.now();
+    if (now - next > 5 * periodMs) next = now;
+    setTimeout(beat, Math.max(0, next - now)).unref();
+  };
+  setTimeout(beat, periodMs).unref();
 }

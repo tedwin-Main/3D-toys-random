@@ -13,6 +13,8 @@ const EVERY_TICK_GUESTS = 14;
 export const inputEvery = (guests) => (guests <= EVERY_TICK_GUESTS ? 1 : 2);
 const HISTORY = 300;
 const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 30, STANDING_PCT = 0.1;
+// input arrival phase: aim for the earliest tenth of inputs to wait ~2 ms before the server tick takes them
+const LEAD_WINDOW = 30, LEAD_LOW_PCT = 0.1, LEAD_TARGET_MS = 2, LEAD_GAIN = 0.5, LEAD_STEP_MAX_MS = 4, LEAD_STARVE_PCT = 5, LEAD_BACK_MS = 2;
 
 /** Guest > full input seq from a snapshot ack sent as its low 16 bits: newest seq <= own seq with those bits */
 export const unwrapAck = (ack, seq) => seq - ((seq - ack) & 0xffff);
@@ -57,16 +59,21 @@ export function createInputLog({ now = () => performance.now() } = {}) {
  * (10th percentile, so one late burst does not count) is pure lag, and the next window drains it
  * by skipping to newer inputs (press counters are cumulative: no jump or dive lost).
  */
-export function createInputQueue() {
+export function createInputQueue({ now = () => performance.now() } = {}) {
   const q = [];
-  let lastQueued = 0, ack = 0, primed = false, cur = unpackInput([0, 0, 0, 0, 0]);
-  const depths = [];
-  let drain = 0;
+  let lastQueued = 0, ack = 0, primed = false, cur = unpackInput([0, 0, 0, 0, 0]), lastWaitMs = null;
+  const depths = [], waits = [];
+  let drain = 0, starves = 0, lead = null;
   return {
     get ack() { return ack; },
     get depth() { return q.length; },
+    // ms the input taken last sat in the queue (null when the take found it empty)
+    get lastWaitMs() { return lastWaitMs; },
+    // once per window: { lowMs, starvePct } of this guest's queue wait, for the guest to shift its tick phase (then cleared)
+    takeLead() { const out = lead; lead = null; return out; },
     push({ s, I }) {
-      I.forEach((p, k) => { const seq = s + k; if (seq > lastQueued) { q.push([seq, p]); lastQueued = seq; } });
+      const at = now();
+      I.forEach((p, k) => { const seq = s + k; if (seq > lastQueued) { q.push([seq, p, at]); lastQueued = seq; } });
     },
     take() {
       if (!primed && q.length < QUEUE_PRIME) return cur;
@@ -75,10 +82,20 @@ export function createInputQueue() {
       if (q.length > QUEUE_MAX) q.splice(0, q.length - QUEUE_PRIME);
       if (drain > 0 && q.length > 1) { q.shift(); drain--; }
       const next = q.shift();
+      lastWaitMs = next ? now() - next[2] : null;
+      trackLead();
       if (next) { ack = next[0]; cur = unpackInput(next[1]); }
       return cur;
     },
   };
+  function trackLead() {
+    if (lastWaitMs == null) starves++;
+    else waits.push(lastWaitMs);
+    if (waits.length + starves < LEAD_WINDOW) return;
+    waits.sort((a, b) => a - b);
+    lead = { lowMs: Math.round((waits[Math.floor(waits.length * LEAD_LOW_PCT)] ?? 0) * 10) / 10, starvePct: Math.round((100 * starves) / LEAD_WINDOW) };
+    waits.length = 0; starves = 0;
+  }
   function trackStanding() {
     depths.push(q.length);
     if (depths.length < DRAIN_WINDOW) return;
@@ -86,6 +103,15 @@ export function createInputQueue() {
     drain = Math.max(0, depths[Math.floor(DRAIN_WINDOW * STANDING_PCT)] - 1);
     depths.length = 0;
   }
+}
+
+/**
+ * Guest > ms to move its tick phase after a server lead report: later while inputs sit waiting, earlier when they starve.
+ * Damped and capped per report so network jitter does not swing the phase.
+ */
+export function leadShiftMs({ lowMs, starvePct }) {
+  if (starvePct > LEAD_STARVE_PCT) return -LEAD_BACK_MS;
+  return Math.max(-LEAD_STEP_MAX_MS, Math.min(LEAD_STEP_MAX_MS, (lowMs - LEAD_TARGET_MS) * LEAD_GAIN));
 }
 
 /**

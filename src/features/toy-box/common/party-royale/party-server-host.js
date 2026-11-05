@@ -44,12 +44,16 @@ export function createPartyServerHost(room, { show, roundId }) {
 
   return {
     get running() { return !!flow; },
-    // jitter queue since the last call: depth before take p10 / p50 / mean (ticks), share of takes that starved
+    // jitter queue since the last call: depth before take p10 / p50 / mean (ticks), wait of taken inputs p50 / p90 (ms), share of takes that starved
     takeQueueStats() {
-      const { depths, starves } = net.stats, sorted = [...depths].sort((a, b) => a - b);
-      const at = (q) => sorted[Math.floor(sorted.length * q)] ?? null;
-      const summary = { takes: sorted.length, p10: at(0.1), p50: at(0.5), mean: sorted.length ? +(sorted.reduce((a, b) => a + b, 0) / sorted.length).toFixed(2) : null, starvePct: sorted.length ? +((100 * starves) / sorted.length).toFixed(1) : null };
-      depths.length = 0; net.stats.starves = 0;
+      const { depths, waits, starves } = net.stats, sorted = [...depths].sort((a, b) => a - b), waited = [...waits].sort((a, b) => a - b);
+      const at = (list, q) => list[Math.floor(list.length * q)] ?? null;
+      const ms = (v) => (v == null ? null : +v.toFixed(1));
+      const summary = {
+        takes: sorted.length, p10: at(sorted, 0.1), p50: at(sorted, 0.5), mean: sorted.length ? +(sorted.reduce((a, b) => a + b, 0) / sorted.length).toFixed(2) : null,
+        waitP50Ms: ms(at(waited, 0.5)), waitP90Ms: ms(at(waited, 0.9)), starvePct: sorted.length ? +((100 * starves) / sorted.length).toFixed(1) : null,
+      };
+      depths.length = 0; waits.length = 0; net.stats.starves = 0;
       return summary;
     },
     onData(data, from) {

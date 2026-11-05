@@ -4,7 +4,7 @@ import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 import { ACTIVE } from './round-sim.js';
 import { packSnapshot, encodeSnapshot, createMirror, applySnapshot, snapEvery, snapBytesEstimate } from './round-snapshot.js';
-import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck } from './input-sync.js';
+import { createInputLog, createInputQueue, createPredictor, inputEvery, unwrapAck, leadShiftMs } from './input-sync.js';
 import { SERVER_PEER } from '../relay-wire.js';
 
 /**
@@ -14,8 +14,8 @@ import { SERVER_PEER } from '../relay-wire.js';
  */
 export function createHostNet(room) {
   const queues = new Map();
-  // queue depth (ticks) before each guest take, and takes that found the queue empty (relay-stats reads + resets these)
-  const stats = { depths: [], starves: 0 };
+  // queue depth (ticks) before each guest take, ms the taken input waited, takes that found the queue empty (relay-stats reads + resets these)
+  const stats = { depths: [], waits: [], starves: 0 };
   let roundKey = null, lastBytes = 0;
   return {
     stats,
@@ -32,6 +32,9 @@ export function createHostNet(room) {
         if (b?.status !== ACTIVE || b.bot) continue;
         recordDepth(stats, q.depth);
         Object.assign(b, q.take());
+        if (q.lastWaitMs != null && stats.waits.length < STATS_CAP) stats.waits.push(q.lastWaitMs);
+        const lead = q.takeLead();
+        if (lead) room.send({ g: 'lead', rk: roundKey, ...lead }, { to: id });
       }
     },
     // returns true when a snapshot went out (caller then plays + clears sim.events)
@@ -85,6 +88,8 @@ export function createGuestRound(room, msg, round) {
       if (confirm != null && stats.confirmMs.length < 2000) stats.confirmMs.push(confirm);
       return events;
     },
+    // server lead report > ms to shift this guest's tick phase (0 for another round)
+    leadShift(d) { return d.rk === msg.rk ? leadShiftMs(d) : 0; },
     // one 60 Hz tick of local input: log, predict, bundle to host every inputEvery ticks
     tick(input) {
       log.record(input);

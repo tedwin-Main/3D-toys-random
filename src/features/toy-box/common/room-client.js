@@ -74,9 +74,20 @@ function openRoom(url, { game, nick, room, cap }) {
   });
 }
 
-// Run engine: steady sim tick from a worker; rAF + main-thread timers stall in background tabs, which would freeze a hosting tab for everyone
+// Run engine: steady sim tick from a worker; rAF + main-thread timers stall in background tabs, which would freeze a hosting tab for everyone.
+// Ticks lock to an exact 1/hz grid (setInterval rounds 16.67 ms to 16, so ticks wandered up to a whole tick off the grid
+// and the server's input queue held an extra tick to absorb it); after a stall the grid restarts instead of bursting.
 export function startTicker(hz, fn) {
-  const src = `setInterval(() => postMessage(0), ${1000 / hz});`;
+  const src = `const P = ${1000 / hz}; let next = performance.now();
+    const beat = () => {
+      postMessage(0);
+      next += P;
+      const now = performance.now();
+      if (now - next > 5 * P) next = now;
+      setTimeout(beat, Math.max(0, next - now));
+    };
+    onmessage = (e) => { next += e.data; };
+    setTimeout(beat, P);`;
   const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
   let last = performance.now();
   w.onmessage = () => {
@@ -84,5 +95,8 @@ export function startTicker(hz, fn) {
     fn(Math.min((now - last) / 1000, 0.1));
     last = now;
   };
-  return () => w.terminate();
+  const stop = () => w.terminate();
+  // move every later tick by ms (positive = later); the server host uses this to land guest inputs just before its tick
+  stop.shift = (ms) => w.postMessage(ms);
+  return stop;
 }
