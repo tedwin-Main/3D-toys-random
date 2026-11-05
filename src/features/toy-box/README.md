@@ -104,7 +104,7 @@ Obstacle-show genre (gallery chip 🫘 Party royale): bean races, survival, logi
 - Rounds, each also its own page: `gate-gamble/` (doors), `spinner-gauntlet/` (sweepers, hammers, discs, rams), `ghost-tiles/` (hidden safe path), `tilt-bridges/` (crowd-weighted seesaws), `boulder-hill/` (boulders + rising goo), `sweep-bar/` (jump the low bar, dive the high one), `wall-rush/` (sliding walls with gaps), `cannon-rain/` (rim cannons), `pattern-panic/` (memorise symbols), `tail-snatch/` (steal tails), `egg-haul/` (2-4 teams, nests), `crown-summit/` (final, grab the crown). `hex-drop-survival/` sits in the same chip.
 - Engine (`common/party-royale/`, pure JS, node-testable): `course-colliders.js` (boxes with yaw + tilt, cylinders, balls; obstacles move as pure functions of the round clock), `bean-physics.js` (run, jump with coyote + buffer, dive under high bars, stumble, platform carry, slopes, knock tags), `round-sim.js` (60 Hz rounds, qualify / eliminate, grabs, checkpoints), `bean-bots.js` + per-round bot hooks, `rounds/*.js`.
 - Netcode: the relay runs every party round (`party-server-host.js`, same match flow and 60 Hz fixed-step sim as the old browser host); every browser, lobby host included, is a predicted guest one hop away. The lobby host sends `run` / `stop`; a late joiner gets the sticky round frame; a player who leaves is knocked out and the match keeps running. Guests send tick-numbered inputs (every tick up to 14 guests, every 2 ticks above); the server plays them through a jitter queue (drains standing lag after bursts) and acks the last one in each snapshot. Guests rebuild their own bean from the server copy and replay unacked inputs against obstacles at the matching ticks, so a jump timed on screen lands on the server too. Round state that is not a pure function of time (gates, tiles, plank tilt, tails, eggs, crown) rides in the snapshot.
-- Snapshots: binary codec v3 (`round-snapshot.js`), same rounding as the JSON rows. Rows follow the shared roster order (ids implied), ack rides as 16 bits, ground index / mode timer / slow / round extra take one byte each (22 B per bean worst case), and a column at its base value in every row is skipped for that snapshot. Rate: fastest of 60 / 30 / 20 / 15 Hz inside two free-tier budgets (`snapEvery`): relay egress 400 KB/s, relay frames 960/s.
+- Snapshots: binary codec v4 (`round-snapshot.js`), same rounding as the JSON rows. Key frames (every 0.5 s and at round start): rows in the shared roster order (ids implied), ack as 16 bits, one byte each for ground index / mode timer / slow / round extra (22 B per bean worst case), columns at their base value skipped. Between them, delta frames: per row a changed-column mask plus zigzag varints against the previous frame, and only the meta fields that changed. The relay delivers every frame to every guest in order, so deltas chain; a reader that joins late or loses its base waits for the next key frame. A 32-bean frame averages 150-260 B (key frames ~700). Rate: fastest of 60 / 30 / 20 / 15 Hz inside two free-tier budgets (`snapEvery`, running average frame size): relay egress 400 KB/s, relay frames 960/s.
 - Latency, live on Render SG from KL (`?debug` exposes `__party.game.guest.stats.confirmMs`; confirm loop = press > server applies > ack back):
   - Browser host over the relay (before 2026-11-06): p50 97-107 ms, two hops.
   - Server-run rounds (2026-11-06, ping 26-28 ms): p50 56-64 / p95 76-93 ms at 14 and 32 beans; relay echo 34-38 ms.
@@ -131,14 +131,14 @@ Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic gam
 
 | humans | beans | snapshot | relay CPU incl. sim | relay egress | per guest in | inputs in |
 |---|---|---|---|---|---|---|
-| 14 | 14 | 328 B @ 60 Hz | 70 ms/s | 271 KB/s | 19 KB/s | 418/s |
-| 24 | 24 | 524 B @ 30 Hz | 45 ms/s | 371 KB/s | 15 KB/s | 713/s |
-| 32 | 32 | 682 B @ 15 Hz | 48 ms/s | 331 KB/s | 10 KB/s | 942/s |
-| 1 | 32 | 712 B @ 60 Hz | 56 ms/s | 39 KB/s | 39 KB/s | 58/s |
-| 14 | 32 | 715 B @ 30 Hz | 28-73 ms/s | 296 KB/s | 21 KB/s | 407/s |
+| 14 | 14 | 107 B @ 60 Hz | 83 ms/s | 91 KB/s | 7 KB/s | 817/s |
+| 24 | 24 | 195 B @ 30 Hz | 74 ms/s | 141 KB/s | 6 KB/s | 697/s |
+| 32 | 32 | 257 B @ 30 Hz | 75 ms/s | 246 KB/s | 8 KB/s | 947/s |
+| 14 | 32 | 217 B @ 60 Hz | 103 ms/s | 182 KB/s | 13 KB/s | 817/s |
 
-- **Egress:** every row fits the 400 KB/s budget (about 69 h of play a month on the 100 GB quota); worst round (Egg Haul, 32 humans) 771 B, 370 KB/s.
-- **CPU:** live on Render (`/3d-toys/relay-stats`, free limit 150 ms/s): 3 humans + 29 bots 49 ms/s (rounds `hostedMsPerS` 14, the rest is socket I/O); 14 humans + 18 bots, every-tick input 72-83 ms/s. Socket frames dominate, not the sim or codec (snapshot encode 4 µs, input handler 1.5 µs), so one full 14-player room per free instance, or two of ~7.
+- **Codec v4 (2026-11-06):** 32 humans went from 682 B @ 15 Hz to 257 B @ 30 Hz, and 14 humans + bots from 715 B @ 30 Hz to 217 B @ 60 Hz. Snapshot wait drops by half or more; egress is about a third. The frame budget (960/s) now sets the 24-32 player rate.
+- **CPU:** live on Render (`/3d-toys/relay-stats`, free limit 150 ms/s): 14 humans + 18 bots at 60 Hz 79-103 ms/s; 32 humans at 30 Hz 79-82 ms/s. Socket frames dominate, not the sim or codec (frame write 7 µs, read 5.5 µs, input handler 1.5 µs), so one full room per free instance.
+- **Live latency, v4 (Node guests with the lead loop, ping 14 ms):** 14 guests confirm p50 27.5 / p95 47 ms (v3: 30 / 69); 3 guests p50 26 ms.
 - **15 Hz floor:** below it, the snapshot wait would cost more latency than the egress saves.
 
 Raise `MAX_SEATS` or run more rooms only on a paid instance.
