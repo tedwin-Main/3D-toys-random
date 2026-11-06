@@ -160,7 +160,7 @@ TOYS.forEach((t, i) => {
   let timer;
   a.addEventListener('mouseenter', () => {
     if (t.preview === false) return;
-    timer = setTimeout(() => { if (!prev.querySelector('iframe')) prev.insertAdjacentHTML('beforeend', `<iframe src="${t.dir}/" tabindex="-1"></iframe>`); }, 250);
+    timer = setTimeout(() => { if (!prev.querySelector('iframe')) prev.insertAdjacentHTML('beforeend', `<iframe src="${t.dir}/?preview" tabindex="-1"></iframe>`); }, 250);
   });
   a.addEventListener('mouseleave', () => { clearTimeout(timer); prev.querySelector('iframe')?.remove(); });
   $('grid').append(a);

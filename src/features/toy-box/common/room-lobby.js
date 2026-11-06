@@ -245,6 +245,8 @@ export function createLobby(opts) {
     },
     restart() { if (state.room?.isHost) startMatch(); },
   };
-  renderJoin();
+  // ?preview: gallery hover; no lobby card, no room, attract bots play behind
+  if (new URLSearchParams(location.search).has('preview')) wrap.hidden = true;
+  else renderJoin();
   return api;
 }

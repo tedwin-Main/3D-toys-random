@@ -18,7 +18,8 @@ import { SYMBOL_EMOJI } from './course-meshes.js';
 import { SYMBOLS } from './rounds/pattern-panic.js';
 import { TEAM_COLORS, teamScores } from './rounds/egg-haul.js';
 
-const ATTRACT_BOTS = 12;
+// gallery hover / poster (?preview) gets a fuller crowd; behind the lobby card 12 keeps CPU low
+const ATTRACT_BOTS = new URLSearchParams(location.search).has('preview') ? 24 : 12;
 const SHOW_META = { title: 'Bean Royale Show', emoji: '🫘', blurb: 'A full show for up to 32 beans: a race opener, survival, logic, hunt and team rounds knock the field down, then a final crowns one winner.' };
 
 /** opts: { round: id } for a single-round page, or { show: true } for the full show */

@@ -9,6 +9,8 @@ import { ACTIVE, QUALIFIED, OUT } from './round-sim.js';
 
 const COAST_CAP = 0.25, SPECTATE_SECONDS = 5, TURN_SPEED = 2;
 const ARENA_KINDS = new Set(['survival', 'logic', 'hunt', 'team']);
+// forward courses (crown final climbs one too): spectator camera follows the race
+const COURSE_KINDS = new Set(['race', 'final']);
 
 export function createPartyView() {
   const stage = createPartyScene();
@@ -58,13 +60,19 @@ export function createPartyView() {
     if (!f) {
       const live = sim.list.filter((b) => b.status === ACTIVE);
       if ((specT -= dt) <= 0) { specT = SPECTATE_SECONDS; specIdx++; }
-      const pick = sim.round.kind === 'race' ? live.reduce((a, b) => (!a || b.z < a.z ? b : a), null) : live[specIdx % Math.max(1, live.length)];
+      const pick = COURSE_KINDS.has(sim.round.kind) ? raceFocus(live, me) : live[specIdx % Math.max(1, live.length)];
       f = pick ? beans.pos(pick.id) : null;
     }
     Object.assign(focus, f ? { x: f.x, y: f.y, z: f.z } : { x: 0, y: 0, z: 0 });
     stage.follow(focus, camYaw, dt, { dist: arena ? 13 : 11, height: arena ? 10 : 7, snap: snapCam });
     snapCam = false;
   }
+}
+
+// race spectator chases leader (lowest z); attract (me 0) sits near pack's back so no beans block camera
+function raceFocus(live, me) {
+  const byZ = live.toSorted((a, b) => a.z - b.z);
+  return byZ[me ? 0 : Math.floor(byZ.length * 0.8)] ?? null;
 }
 
 // own bean: predicted state plus fading correction offset
