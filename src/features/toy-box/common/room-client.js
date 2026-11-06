@@ -1,6 +1,7 @@
 // Manages browser client connection to room relay.
 
 import { encodeSend, encodeSendBytes, decodeFrame } from './relay-wire.js';
+import { IS_PREVIEW, warmUp, markReady } from './preview-mode.js';
 
 const CONNECT_TIMEOUT_MS = 4000;
 
@@ -50,7 +51,7 @@ function openRoom(url, { game, nick, room, cap }) {
     // bfcache keeps a frozen page (and its socket) alive; a frozen host would stall the room
     addEventListener('pagehide', () => ws.close(), { once: true });
     // app-level heartbeat from a worker: frozen pages stop sending, so server drops them (protocol pongs come from the browser even when frozen)
-    const hb = startTicker(0.2, () => { if (ws.readyState === WebSocket.OPEN) ws.send('{"t":"hb"}'); });
+    const hb = startTicker(0.2, () => { if (ws.readyState === WebSocket.OPEN) ws.send('{"t":"hb"}'); }, { warm: false });
     ws.onmessage = (e) => {
       let m;
       try { m = decodeFrame(e.data); } catch { return; } // relay passes peer payloads through unchecked: drop bad ones
@@ -77,7 +78,19 @@ function openRoom(url, { game, nick, room, cap }) {
 // Run engine: steady sim tick from a worker; rAF + main-thread timers stall in background tabs, which would freeze a hosting tab for everyone.
 // Ticks lock to an exact 1/hz grid (setInterval rounds 16.67 ms to 16, so ticks wandered up to a whole tick off the grid
 // and the server's input queue held an extra tick to absorb it); after a stall the grid restarts instead of bursting.
-export function startTicker(hz, fn) {
+// ?preview: fast-forward to mid-game before the first tick; opts = { warm: false } opts out, or { warmStep, isMid, warmSeconds } (see warmUp)
+export function startTicker(hz, fn, { warm = true, warmStep = fn, isMid, warmSeconds } = {}) {
+  let worker = null, stopped = false;
+  const begin = () => { if (!stopped) worker = spawnTickWorker(hz, fn); };
+  if (IS_PREVIEW && warm) warmUp(hz, warmStep, { isMid, seconds: warmSeconds }).then(() => { begin(); markReady(); });
+  else begin();
+  const stop = () => { stopped = true; worker?.terminate(); };
+  // move every later tick by ms (positive = later); the server host uses this to land guest inputs just before its tick
+  stop.shift = (ms) => worker?.postMessage(ms);
+  return stop;
+}
+
+function spawnTickWorker(hz, fn) {
   const src = `const P = ${1000 / hz}; let next = performance.now();
     const beat = () => {
       postMessage(0);
@@ -95,8 +108,5 @@ export function startTicker(hz, fn) {
     fn(Math.min((now - last) / 1000, 0.1));
     last = now;
   };
-  const stop = () => w.terminate();
-  // move every later tick by ms (positive = later); the server host uses this to land guest inputs just before its tick
-  stop.shift = (ms) => w.postMessage(ms);
-  return stop;
+  return w;
 }

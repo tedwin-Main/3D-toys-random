@@ -67,25 +67,9 @@ async function recordClip(ctx, page, d, ms) {
   await bar.close();
 }
 
-// Toys: multiplayer pages open on a lobby card, so host a room with max bots and press Start for a real poster
-async function startLobbyMatch(page) {
-  const create = page.locator('.lb-create');
-  if (!(await create.isVisible({ timeout: 1500 }).catch(() => false))) return;
-  await page.locator('.lb-nick').fill('Studio').catch(() => {});
-  await create.click().catch(() => {});
-  await page.locator('.lb-start').waitFor({ timeout: 3000 }).catch(() => {});
-  await page.evaluate(() => { const r = document.querySelector('.lb-bot-in'); if (r) { r.value = r.max; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); } });
-  await page.locator('.lb-start').click().catch(() => {});
-}
-
-// Toys: match posters drop the room-code card (keep round clock where it shares the card)
-const HIDE_ROOM_CARD = '#top:has(#code):not(:has(.clock)), #top:has(#code) > :not(.clock) { display: none !important; }';
-
-// Toys: party poster 5 s into play, past countdown + GO! banner
-const partyMidRound = (page) => page.waitForFunction(() => {
-  const sim = globalThis.__party?.sim;
-  return sim?.phase === 'play' && sim.playTime > 5;
-}, null, { timeout: 30000 });
+// Toys: multiplayer posters = hover preview frame; ?preview hides the lobby and warms attract bots to mid-game
+const previewReady = (page) => page.waitForFunction(() => globalThis.__previewReady, null, { timeout: 40000 });
+const PREVIEW_SETTLE_MS = 1000;
 
 const server = await ensureServer();
 await mkdir(TMP, { recursive: true });
@@ -93,15 +77,10 @@ await mkdir(TMP, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 // --toys swaps the demo list for 3d-toys pages (games + sims); posters land in media/toy-posters/<dir>.png
 const TOY_POSTERS = join(ROOT, 'media', 'toy-posters');
-// party royale pages + "poster": "attract" toys shoot the local bot demo (?preview hides lobby); other multiplayer toys shoot a bot match
-const TOY_PAGES = join(ROOT, 'features', 'toy-box');
-const isPartyPage = async (dir) => (await readFile(join(TOY_PAGES, dir, 'index.html'), 'utf8').catch(() => '')).includes('bootPartyRoyale');
-const toyCapture = async (t) => {
-  const party = await isPartyPage(t.dir);
-  return { name: t.dir, url: `3d-toys/${t.dir}/`, capture: 4500, toy: true, multi: t.players === 'multi', party, attract: party || t.poster === 'attract' };
-};
+const toyCapture = (t) => ({ name: t.dir, url: `3d-toys/${t.dir}/`, capture: 4500, toy: true, multi: t.players === 'multi', previewAt: t.previewAt });
+const pageQuery = (d) => (d.multi ? `?capture=1&preview${d.previewAt ? `=${d.previewAt}` : ''}&debug` : '?capture=1');
 const demos = flags.has('--toys')
-  ? await Promise.all([...TOYS, ...SIMS].filter((t) => !only.length || only.includes(t.dir)).map(toyCapture))
+  ? [...TOYS, ...SIMS].filter((t) => !only.length || only.includes(t.dir)).map(toyCapture)
   : (await listDemos(DEMOS)).filter((d) => !only.length || only.includes(d.name));
 if (flags.has('--toys')) await mkdir(TOY_POSTERS, { recursive: true });
 const report = [];
@@ -113,12 +92,12 @@ for (const d of demos) {
   page.on('console', (m) => { if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) errors.push(m.text().slice(0, 200)); });
   page.on('response', (r) => { if (r.status() >= 400) errors.push(`${r.status()} ${r.url()}`); });
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)));
-  await page.goto(`${BASE}/${d.url}${d.attract ? '?capture=1&preview&debug' : '?capture=1'}`, { waitUntil: 'load' }).catch((e) => errors.push(String(e)));
-  if (d.toy && !d.attract) await startLobbyMatch(page);
-  if (d.multi && !d.attract) await page.addStyleTag({ content: HIDE_ROOM_CARD });
+  await page.goto(`${BASE}/${d.url}${pageQuery(d)}`, { waitUntil: 'load' }).catch((e) => errors.push(String(e)));
   // demo can pick poster moment via <meta name="capture" content="ms">
-  if (d.party && !flags.has('--clips')) await partyMidRound(page).catch(() => errors.push('party round never reached play'));
-  else await page.waitForTimeout(flags.has('--clips') ? 1500 : d.capture || 3500);
+  if (d.multi && !flags.has('--clips')) {
+    await previewReady(page).catch(() => errors.push('preview never signalled ready'));
+    await page.waitForTimeout(PREVIEW_SETTLE_MS);
+  } else await page.waitForTimeout(flags.has('--clips') ? 1500 : d.capture || 3500);
   if (flags.has('--clips')) await recordClip(ctx, page, d, 5500);
   // clip runs wait longer than the tuned poster moment, so keep existing posters
   if (!flags.has('--clips')) await page.screenshot({ path: join(d.toy ? TOY_POSTERS : DEMOS, `${d.name}.png`) });

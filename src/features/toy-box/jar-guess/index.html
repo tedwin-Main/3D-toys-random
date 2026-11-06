@@ -356,7 +356,8 @@ function onChange(prev, cur) {
     if (cur.ph === 'reveal' && cur.res) {
       sfx.drum();
       const top = cur.P.filter((p) => (cur.res.pts[p.id] ?? 0) >= 5).map((p) => p.nick);
-      setTimeout(() => { sfx.reveal(top.length && cur.res.pts[me] >= 5); }, 700);
+      const won = top.length && cur.res.pts[me] >= 5; // read now: sim may clear res before the timer
+      setTimeout(() => { sfx.reveal(won); }, 700);
       flash(`<small>there were</small>${cur.jar.n} 🍬<small>${top.length ? `closest: ${esc(top.join(', '))}` : 'nobody guessed'}</small>`);
     }
   }

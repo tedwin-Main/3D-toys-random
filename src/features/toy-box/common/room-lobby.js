@@ -1,6 +1,7 @@
 // Renders drop-in multiplayer lobby overlay for room creation and player roster.
 
 import { connectRoom } from './room-client.js';
+import { IS_PREVIEW, readyUnlessWarming } from './preview-mode.js';
 
 const CSS = `
 .lb-wrap { position: fixed; inset: 0; display: grid; place-items: center; z-index: 50; background: rgba(8, 10, 18, 0.55); backdrop-filter: blur(6px); font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: #f2f4fa; padding: 16px; }
@@ -246,7 +247,7 @@ export function createLobby(opts) {
     restart() { if (state.room?.isHost) startMatch(); },
   };
   // ?preview: gallery hover; no lobby card, no room, attract bots play behind
-  if (new URLSearchParams(location.search).has('preview')) wrap.hidden = true;
+  if (IS_PREVIEW) { wrap.hidden = true; readyUnlessWarming(); }
   else renderJoin();
   return api;
 }

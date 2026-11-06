@@ -40,7 +40,8 @@
   /* Home > card snapshot from media/toy-posters; emoji behind it is fallback */
   .preview .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .preview .num, .preview .mp { z-index: 1; }
-  .preview iframe { position: absolute; inset: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; border: 0; pointer-events: none; z-index: 2; }
+  .preview iframe { position: absolute; inset: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; border: 0; pointer-events: none; z-index: 2; transition: opacity 0.25s; }
+  .preview iframe.warming { opacity: 0; }
   .preview .num { position: absolute; left: 12px; top: 10px; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.35); color: #fff; }
   .body { padding: 14px 16px 18px; }
   .body h2 { margin: 0 0 4px; font-size: 18px; }
@@ -148,6 +149,23 @@ function setFilter(arg = '') {
 }
 
 // Home > Grid: cards; iframe preview only on hover to keep GPU idle
+// multiplayer previews warm their sim to mid-game hidden (poster shows), fade in on 'ready' or after 6 s
+const PREVIEW_FALLBACK_MS = 6000;
+function openPreview(t, prev) {
+  if (prev.querySelector('iframe')) return;
+  const frame = document.createElement('iframe');
+  frame.src = `${t.dir}/?preview${t.previewAt ? `=${t.previewAt}` : ''}`;
+  frame.tabIndex = -1;
+  if (isMulti(t)) {
+    frame.classList.add('warming');
+    setTimeout(() => frame.classList.remove('warming'), PREVIEW_FALLBACK_MS);
+  }
+  prev.append(frame);
+}
+addEventListener('message', (e) => {
+  if (e.origin !== location.origin || e.data?.toyPreview !== 'ready') return;
+  for (const f of document.querySelectorAll('.preview iframe.warming')) if (f.contentWindow === e.source) f.classList.remove('warming');
+});
 $('count').textContent = `${TOYS.length} toys`;
 TOYS.forEach((t, i) => {
   const a = document.createElement('a');
@@ -160,7 +178,7 @@ TOYS.forEach((t, i) => {
   let timer;
   a.addEventListener('mouseenter', () => {
     if (t.preview === false) return;
-    timer = setTimeout(() => { if (!prev.querySelector('iframe')) prev.insertAdjacentHTML('beforeend', `<iframe src="${t.dir}/?preview" tabindex="-1"></iframe>`); }, 250);
+    timer = setTimeout(() => openPreview(t, prev), 250);
   });
   a.addEventListener('mouseleave', () => { clearTimeout(timer); prev.querySelector('iframe')?.remove(); });
   $('grid').append(a);

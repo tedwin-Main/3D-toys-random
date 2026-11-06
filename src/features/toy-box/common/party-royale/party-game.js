@@ -2,6 +2,7 @@
 
 import { createLobby } from '../room-lobby.js';
 import { startTicker } from '../room-client.js';
+import { IS_PREVIEW, isWarming, previewSeconds } from '../preview-mode.js';
 import { INTRO, ACTIVE, QUALIFIED } from './round-sim.js';
 import { ROUNDS } from './show-director.js';
 import { createMatchFlow } from './match-flow.js';
@@ -19,7 +20,11 @@ import { SYMBOLS } from './rounds/pattern-panic.js';
 import { TEAM_COLORS, teamScores } from './rounds/egg-haul.js';
 
 // gallery hover / poster (?preview) gets a fuller crowd; behind the lobby card 12 keeps CPU low
-const ATTRACT_BOTS = new URLSearchParams(location.search).has('preview') ? 24 : 12;
+const ATTRACT_BOTS = IS_PREVIEW ? 24 : 12;
+// ?preview warm-up: seconds into play to stop at (race / final, other kinds); cap = safety net
+const PREVIEW_RACE_SECONDS = 4;
+const PREVIEW_PLAY_SECONDS = 25;
+const PREVIEW_CAP_SECONDS = 60;
 const SHOW_META = { title: 'Bean Royale Show', emoji: '🫘', blurb: 'A full show for up to 32 beans: a race opener, survival, logic, hunt and team rounds knock the field down, then a final crowns one winner.' };
 
 /** opts: { round: id } for a single-round page, or { show: true } for the full show */
@@ -146,7 +151,16 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
   const stepsDue = createFixedSteps();
   const ticker = startTicker(60, () => {
     for (let n = stepsDue(performance.now()); n > 0; n--) step();
-  });
+  }, { warmStep: step, isMid: isMidRound, warmSeconds: previewSeconds(PREVIEW_CAP_SECONDS) });
+
+  // Preview > mid-round: bots finish races / grab the crown 7-16 s into play, so those stop early; other kinds run longer
+  function isMidRound() {
+    const sim = game.flow?.stage === 'round' ? game.flow.sim : null;
+    if (sim?.phase !== 'play') return false;
+    const finishes = sim.round.kind === 'race' || sim.round.kind === 'final';
+    return sim.playTime >= (finishes ? PREVIEW_RACE_SECONDS : PREVIEW_PLAY_SECONDS);
+  }
+
   // Net > land my inputs just before the server tick takes them (server measures their wait)
   function shiftTicks(ms) {
     if (!ms) return;
@@ -163,7 +177,8 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
     const sim = flow.sim;
     sim.step();
     countdown(sim);
-    handleEvents(sim.events, false); sim.events = [];
+    if (!isWarming()) handleEvents(sim.events, false);
+    sim.events = [];
     if (sim.phase === 'end') flow.finishRound();
   }
 
@@ -178,7 +193,7 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
 
   function countdown(sim) {
     const left = sim.phase === 'intro' ? Math.ceil(INTRO - sim.clock) : 0;
-    if (left !== lastCount && left > 0 && left <= 3) { audio.beep(); hud.big(String(left), 0.9); }
+    if (left !== lastCount && left > 0 && left <= 3 && !isWarming()) { audio.beep(); hud.big(String(left), 0.9); }
     if (left === 0 && lastCount > 0) hud.intro(null);
     lastCount = left;
   }
