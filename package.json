@@ -12,13 +12,15 @@
     "load-test": "node src/features/multiplayer-rooms/room-load-test.js",
     "capacity-test": "node src/features/multiplayer-rooms/room-capacity-test.js",
     "capture": "node src/features/demo-capture/capture-demos.js",
-    "instagram": "node src/features/demo-capture/capture-instagram-reels.js"
+    "instagram": "node src/features/demo-capture/capture-instagram-reels.js",
+    "instagram:upload": "node src/features/demo-capture/upload-reels.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",
+    "@vercel/blob": "^1.1.1",
     "playwright": "^1.49.1"
   },
   "engines": {
