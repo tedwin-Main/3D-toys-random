@@ -50,6 +50,8 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createTurboSim, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, TEAM } from './turbo-sim.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
@@ -75,8 +77,7 @@ Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 30, bottom: -30, n
 scene.add(sun);
 
 // Field > pitch with stripes + lines, glass walls, rounded corners, glowing goals
-const L = 30, WD = 18, GOAL_W = 5.5, GOAL_D = 4.5, GOAL_H = 5, CR = 6, BR = 1.5;
-const BLUE = '#3fa7ff', ORANGE = '#ff9f43', TEAM = [BLUE, ORANGE];
+const [BLUE, ORANGE] = TEAM;
 function canvasTex(w, h, draw) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   draw(c.getContext('2d'), w, h);
@@ -251,197 +252,12 @@ const sfx = {
   beep(hi) { tone(hi ? 880 : 440, hi ? 880 : 440, hi ? 0.45 : 0.16, 0.11, 'square'); },
 };
 
-// Game > World
-const BOT_NAMES = ['Striker', 'Keeper', 'Nitro', 'Volley', 'Header', 'Bicycle', 'Panenka', 'Rabona', 'Chip', 'Nutmeg', 'Curler', 'Sweeper', 'Libero', 'Tiki'];
-const MATCH_TIME = 180, CAR_R = 1.35;
-const world = { mode: 'attract', phase: 'count', t: 3, clock: MATCH_TIME, score: [0, 0], players: new Map(), ball: { x: 0, y: BR, z: 0, vx: 0, vy: 0, vz: 0, last: null }, lastGoal: null };
-let events = [];
+// Game > World: match rules live in turbo-sim.js (the relay server runs the same code in matches)
+const sim = createTurboSim();
+const world = sim.world;
 const rng = Math.random;
-function addPlayer(id, nick, color, bot, team) {
-  const p = { id, nick, color, bot, team, x: 0, z: 0, h: 0, vx: 0, vz: 0, steer: 0, boost: 1, boosting: false, goals: 0, inGas: 0, inSteer: 0, inBoost: 0, skill: 0.75 + rng() * 0.2, role: 0 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) { world.players.delete(id); const g = cars3d.get(id); if (g) { scene.remove(g); cars3d.delete(id); } }
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
-function kickoff() {
-  Object.assign(world.ball, { x: 0, y: BR + 3, z: 0, vx: 0, vy: 0, vz: 0, last: null });
-  for (const t of [0, 1]) {
-    const team = [...world.players.values()].filter((p) => p.team === t), s = t === 0 ? -1 : 1;
-    // fan out across own half facing the ball
-    team.forEach((p, k) => {
-      const row = Math.floor(k / 3), col = k % 3, z = (col - 1) * 9 + (row % 2 ? 4 : 0);
-      Object.assign(p, { x: s * (12 + row * 8), z, h: s < 0 ? Math.PI / 2 : -Math.PI / 2, vx: 0, vz: 0, steer: 0, boost: Math.max(p.boost, 0.35) });
-    });
-  }
-  world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3;
-}
-
-// Run engine > car physics: forward/lateral split, boost, walls + rounded corners + goal mouths
-function clampArena(o, r, allowGoal) {
-  // goal pocket: inside the mouth the car or ball may go past the end line
-  if (allowGoal && Math.abs(o.z) < GOAL_W - r * 0.6 && Math.abs(o.x) > L - r) {
-    const s = Math.sign(o.x), back = L + GOAL_D - r;
-    let hit = 0;
-    if (Math.abs(o.x) > back) { o.x = s * back; if (o.vx * s > 0) { o.vx *= -0.6; hit = 1; } }
-    if (Math.abs(o.z) > GOAL_W - r) { o.z = Math.sign(o.z) * (GOAL_W - r); o.vz *= -0.6; hit = 1; }
-    return hit;
-  }
-  let hit = 0;
-  const xl = L - r, zl = WD - r;
-  if (Math.abs(o.x) > xl) { o.x = Math.sign(o.x) * xl; if (o.vx * Math.sign(o.x) > 0) { o.vx *= -0.65; hit = 1; } }
-  if (Math.abs(o.z) > zl) { o.z = Math.sign(o.z) * zl; if (o.vz * Math.sign(o.z) > 0) { o.vz *= -0.65; hit = 1; } }
-  const cx = Math.sign(o.x) * (L - CR), cz = Math.sign(o.z) * (WD - CR);
-  if (Math.abs(o.x) > L - CR && Math.abs(o.z) > WD - CR) {
-    const dx = o.x - cx, dz = o.z - cz, d = Math.hypot(dx, dz), lim = CR - r;
-    if (d > lim) { const nx = dx / d, nz = dz / d; o.x = cx + nx * lim; o.z = cz + nz * lim; const vn = o.vx * nx + o.vz * nz; if (vn > 0) { o.vx -= 1.65 * vn * nx; o.vz -= 1.65 * vn * nz; hit = 1; } }
-  }
-  return hit;
-}
-function stepCar(p, dt) {
-  const live = world.phase === 'play' || world.phase === 'goal' || world.mode === 'attract' && world.phase !== 'count';
-  const fx = Math.sin(p.h), fz = Math.cos(p.h);
-  let vf = p.vx * fx + p.vz * fz, vl = p.vx * fz - p.vz * fx;
-  const gas = live ? p.inGas : 0;
-  p.boosting = live && p.inBoost && p.boost > 0.01 && gas >= 0;
-  const top = p.boosting ? 30 : 21;
-  if (p.boosting) { vf += 30 * dt; p.boost = Math.max(0, p.boost - 0.38 * dt); }
-  else p.boost = Math.min(1, p.boost + 0.06 * dt);
-  if (gas > 0) vf += 24 * gas * dt * (1 - Math.max(vf, 0) / top);
-  else if (gas < 0) vf -= (vf > 0 ? 36 : 14) * -gas * dt;
-  else vf *= 1 - 1.4 * dt;
-  vf = clamp(vf, -11, top + 2);
-  p.steer += (clamp(p.inSteer, -1, 1) * (live ? 1 : 0) - p.steer) * (1 - Math.exp(-dt * 12));
-  p.h += p.steer * 2.7 * clamp(vf / 7, -1, 1) * dt;
-  vl *= Math.exp(-7 * dt);
-  const nfx = Math.sin(p.h), nfz = Math.cos(p.h);
-  p.vx = nfx * vf + nfz * vl; p.vz = nfz * vf - nfx * vl;
-  p.x += p.vx * dt; p.z += p.vz * dt;
-  clampArena(p, CAR_R, true);
-}
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function carBumps(ps) {
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > CAR_R * 2 || d < 1e-4) continue;
-    const nx = dx / d, nz = dz / d, pen = (CAR_R * 2 - d) / 2;
-    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
-    const vr = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-    if (vr < 0) { a.vx += nx * vr * 0.85; a.vz += nz * vr * 0.85; b.vx -= nx * vr * 0.85; b.vz -= nz * vr * 0.85; if (vr < -8) events.push(['u']); }
-  }
-}
-
-// Run engine > ball: gravity, bounce, rolling drag, car hits with loft, goals
-function stepBall(dt, ps) {
-  const b = world.ball;
-  b.vy -= 24 * dt;
-  b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
-  if (b.y < BR) { b.y = BR; if (b.vy < -2) { b.vy *= -0.55; } else b.vy = 0; }
-  if (b.y > 14) { b.y = 14; b.vy = -Math.abs(b.vy) * 0.5; }
-  const ground = b.y < BR + 0.05, k = Math.exp(-(ground ? 0.45 : 0.08) * dt);
-  b.vx *= k; b.vz *= k;
-  // crossbar height: above it the goal mouth is a wall
-  const inMouth = b.y < GOAL_H - 0.3;
-  if (clampArena(b, BR, inMouth) && Math.hypot(b.vx, b.vz) > 6) events.push(['k', 0.4]);
-  if (!inMouth && Math.abs(b.x) > L - BR && Math.abs(b.z) < GOAL_W) { b.x = Math.sign(b.x) * (L - BR); b.vx = -b.vx * 0.6; }
-  for (const p of ps) {
-    const dx = b.x - p.x, dz = b.z - p.z, d = Math.hypot(dx, dz);
-    if (d > CAR_R + BR || d < 1e-4 || b.y > 3.4) continue;
-    const nx = dx / d, nz = dz / d;
-    b.x = p.x + nx * (CAR_R + BR); b.z = p.z + nz * (CAR_R + BR);
-    const vr = (b.vx - p.vx) * nx + (b.vz - p.vz) * nz;
-    if (vr < 0) {
-      const hit = -vr;
-      b.vx += nx * (hit * 1.4 + 2.5); b.vz += nz * (hit * 1.4 + 2.5);
-      b.vy += Math.min(hit * 0.35, 9);
-      p.vx += nx * vr * 0.2; p.vz += nz * vr * 0.2;
-      b.last = p.id;
-      if (hit > 3) events.push(['k', Math.min(hit / 20, 1)]);
-    }
-  }
-  const sp = Math.hypot(b.vx, b.vz);
-  if (sp > 45) { b.vx *= 45 / sp; b.vz *= 45 / sp; }
-  if (world.phase === 'play' && Math.abs(b.x) > L + BR * 0.6 && Math.abs(b.z) < GOAL_W) {
-    // ball in the right-hand goal (+x) scores for Blue, left-hand for Orange
-    const team = b.x > 0 ? 0 : 1;
-    world.score[team]++;
-    const scorer = world.players.get(b.last);
-    if (scorer && scorer.team === team) scorer.goals++;
-    world.lastGoal = { team, by: scorer && scorer.team === team ? scorer.id : null, own: !!scorer && scorer.team !== team };
-    events.push(['g', team, b.last ?? 0, world.lastGoal.own ? 1 : 0, +b.x.toFixed(1), +b.z.toFixed(1)]);
-    world.phase = 'goal'; world.t = 3;
-  }
-}
-
-// Run engine > bots: striker gets behind the ball toward the enemy goal, support trails, keeper guards
-function assignRoles() {
-  const b = world.ball;
-  for (const t of [0, 1]) {
-    const team = [...world.players.values()].filter((p) => p.team === t && p.bot);
-    const all = [...world.players.values()].filter((p) => p.team === t);
-    const own = t === 0 ? -L : L;
-    // nearest-to-ball bot attacks, deepest bot keeps goal when the team has 3+
-    const byBall = team.slice().sort((p, q) => Math.hypot(p.x - b.x, p.z - b.z) - Math.hypot(q.x - b.x, q.z - b.z));
-    byBall.forEach((p, i) => (p.role = i === 0 ? 0 : 1));
-    if (all.length >= 3 && team.length >= 2) { const keeper = team.slice().sort((p, q) => Math.abs(p.x - own) - Math.abs(q.x - own))[0]; if (keeper.role !== 0) keeper.role = 2; }
-  }
-}
-function botThink(p) {
-  const b = world.ball, s = p.team === 0 ? 1 : -1, oppX = s * (L + 2), ownX = -s * L;
-  let tx, tz, boost = 0, gasMax = 1;
-  const lead = 0.25;
-  const bx = b.x + b.vx * lead, bz = b.z + b.vz * lead;
-  if (p.role === 0) {
-    const gx = oppX - bx, gz = 0 - bz, gl = Math.hypot(gx, gz) || 1;
-    const behindX = bx - (gx / gl) * 3.2, behindZ = bz - (gz / gl) * 3.2;
-    const toBallX = bx - p.x, toBallZ = bz - p.z, tbl = Math.hypot(toBallX, toBallZ) || 1;
-    const aligned = (toBallX * gx + toBallZ * gz) / (tbl * gl);
-    if (aligned > 0.55) { tx = bx; tz = bz; boost = tbl > 8 && aligned > 0.85 ? 1 : 0; }
-    else {
-      // swing around the ball instead of knocking it backward
-      const side = Math.sign((p.z - bz) || 1);
-      tx = behindX; tz = behindZ + (Math.abs(p.x - behindX) < 4 ? 0 : side * 3);
-      boost = Math.hypot(tx - p.x, tz - p.z) > 18 ? 1 : 0;
-    }
-  } else if (p.role === 2) {
-    tx = ownX + s * 3; tz = clamp(bz * 0.5, -GOAL_W + 1, GOAL_W - 1);
-    if (Math.hypot(bx - ownX, bz) < 14) { tx = bx - s * 2.5; tz = bz; boost = 1; }
-    if (Math.hypot(tx - p.x, tz - p.z) < 2) gasMax = 0;
-  } else {
-    tx = clamp(bx - s * 10, -L + 4, L - 4); tz = clamp(-bz * 0.6 + (p.id % 2 ? 6 : -6), -WD + 3, WD - 3);
-    if (Math.hypot(tx - p.x, tz - p.z) < 3) gasMax = 0.2;
-  }
-  let d = Math.atan2(tx - p.x, tz - p.z) - p.h; d = Math.atan2(Math.sin(d), Math.cos(d));
-  p.inSteer = clamp(d * 2.4, -1, 1);
-  p.inGas = Math.abs(d) > 2.2 ? -0.6 : gasMax * (Math.abs(d) > 1.2 ? 0.5 : 1);
-  p.inBoost = boost && Math.abs(d) < 0.35 && rng() < p.skill ? 1 : 0;
-}
-
-// Game > Phases: kickoff countdown, play, goal celebration, full time
-let lastBeep = 0;
-function phases(dt) {
-  world.t -= dt;
-  if (world.phase === 'count') {
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { world.phase = 'play'; events.push(['c', 0]); }
-  } else if (world.phase === 'play') {
-    if (world.mode === 'match') world.clock -= dt;
-    if (world.clock <= 0 && world.mode === 'match') {
-      // tied at full time: next goal wins
-      if (world.score[0] === world.score[1]) { world.clock = 0; world.over = true; }
-      else { world.phase = 'final'; world.t = 10; events.push(['f']); }
-    }
-  } else if (world.phase === 'goal' && world.t <= 0) {
-    if (world.over || (world.mode === 'match' && world.clock <= 0)) { world.phase = 'final'; world.t = 10; events.push(['f']); }
-    else kickoff();
-  } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract'; world.score = [0, 0]; world.clock = MATCH_TIME; world.over = false;
-  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], TEAM[i % 2], true, i % 2);
-  kickoff();
-}
+function startAttract() { sim.startAttract(); }
 
 // Multiplayer > Lobby: humans alternate teams, bots fill the smaller side
 const lobby = createLobby({
@@ -452,23 +268,20 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match'; world.score = [0, 0]; world.clock = MATCH_TIME; world.over = false;
+  // the relay server runs the match; every page (lobby host too) drives its own car as a guest
+  onStart({ bots, seed }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', phase: 'count', t: 3, score: [0, 0], over: false });
     ['teams'].forEach((id) => (document.getElementById(id).style.display = 'block'));
     ['score', 'top'].forEach((id) => (document.getElementById(id).style.display = 'flex'));
     document.getElementById('boost').style.display = 'grid';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3; return; }
-    const count = [0, 0];
-    for (const p of lobby.room.players) { const t = count[0] <= count[1] ? 0 : 1; count[t]++; addPlayer(p.id, p.nick, p.color, false, t); }
-    for (let i = 0; i < bots; i++) { const t = count[0] <= count[1] ? 0 : 1; count[t]++; addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, TEAM[t], true, t); }
-    kickoff();
+    serverMatch.start({ bots, seed });
   },
   onLobby() {
+    serverMatch.stop();
     ['teams', 'score', 'top', 'boost'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
     startAttract();
@@ -476,44 +289,22 @@ const lobby = createLobby({
 });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
-  for (const p of players) if (!world.players.has(p.id)) {
-    const n = [0, 1].map((t) => [...world.players.values()].filter((q) => q.team === t).length);
-    const t = n[0] <= n[1] ? 0 : 1;
-    // keep 14 seats: a joining human takes a bot's place on the smaller team
-    if (world.players.size >= 14) { const bot = [...world.players.values()].find((q) => q.bot && q.team === t); if (bot) removePlayer(bot.id); }
-    const car = addPlayer(p.id, p.nick, p.color, false, t);
-    Object.assign(car, { x: (t === 0 ? -1 : 1) * (L - 6), z: 0, h: t === 0 ? Math.PI / 2 : -Math.PI / 2 });
-  }
-}
+const serverMatch = createServerMatchClient(lobby);
 
-// Multiplayer > Net
-const remoteIn = new Map();
+// Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot() {
-  const b = world.ball;
-  return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), ck: f2(world.clock), sc: world.score, ov: world.over ? 1 : 0, ev: events,
-    B: [f2(b.x), f2(b.y), f2(b.z), f2(b.vx), f2(b.vy), f2(b.vz)],
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), (p.bot ? 1 : 0) | (p.boosting ? 2 : 0), p.team, f2(p.boost), p.goals]),
-  }, world.players.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
-  step: (p, dt) => { const keep = events; events = []; stepCar(p, dt); events = keep; },
+  step: (p, dt) => { const keep = sim.events; sim.events = []; sim.stepCar(p, dt); sim.events = keep; },
   live: () => true,
   seed: () => {},
   merge: (p, host) => { p.boost = host.boost; p.h = blendAngle(p.h, host.h, 0.2); },
@@ -528,12 +319,12 @@ function applySnap(s) {
   for (const [id, px, pz, h, pvx, pvz, steer, fl, team, boost, goals] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1), team);
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1), team);
     if (p.team !== team) { p.team = team; const g = cars3d.get(id); if (g) g.userData.paint.color.set(TEAM[team]); }
     Object.assign(p, { x: px, z: pz, h, vx: pvx, vz: pvz, steer, boosting: !!(fl & 2), boost, goals });
     if (id === lobby.room.me) pred.correct(p);
   }
-  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
   playEvents(s.ev);
   snapAt = pacing.arrived();
 }
@@ -617,35 +408,18 @@ function hud(dt) {
   document.getElementById('teams').innerHTML = [0, 1].map((t) => `<h4 style="color:${TEAM[t]}">${t === 0 ? 'BLUE' : 'ORANGE'}</h4>` + [...world.players.values()].filter((p) => p.team === t).sort((a, b) => b.goals - a.goals).map((p) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.goals ? '⚽'.repeat(Math.min(p.goals, 4)) : ''}</em></div>`).join('')).join('');
 }
 
-// Run engine > sim tick (worker)
-let sendT = 0, roleT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match predicts my car and streams input to the server
+const isHostSim = () => world.mode === 'attract';
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { inGas: local.gas, inSteer: local.steer, inBoost: local.boost });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { inGas: inp.g2, inSteer: inp.s, inBoost: inp.b }); }
-    const ps = [...world.players.values()];
-    roleT -= dt;
-    if (roleT <= 0) { roleT = 0.4; assignRoles(); }
-    for (const p of ps) if (p.bot) botThink(p);
-    for (let k = 0; k < 2; k++) {
-      for (const p of ps) stepCar(p, dt / 2);
-      carBumps(ps);
-      if (world.phase !== 'count') stepBall(dt / 2, ps);
-    }
-    phases(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
-    } else { playEvents(events); events = []; }
-  } else if (world.mode === 'match' && room) {
-    pred.tick(world.players.get(room.me), { inGas: local.gas, inSteer: local.steer, inBoost: local.boost }, dt, 1 / 60);
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: +local.gas.toFixed(2), s: +local.steer.toFixed(2), b: local.boost }); }
+    sim.step(dt);
+    playEvents(sim.events); sim.events = [];
+    return;
   }
+  const me = lobby.room && world.players.get(lobby.room.me);
+  pred.tick(me, { inGas: local.gas, inSteer: local.steer, inBoost: local.boost }, dt, STEP);
+  serverMatch.tickInput(() => ({ g2: +local.gas.toFixed(2), s: +local.steer.toFixed(2), b: local.boost }));
 }
 startTicker(60, simTick);
 
@@ -656,6 +430,7 @@ function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
   const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
+  for (const [id, g] of cars3d) if (!world.players.has(id)) { scene.remove(g); cars3d.delete(id); }
   for (const p of world.players.values()) {
     let g = cars3d.get(p.id);
     if (!g) { g = makeCar(p); cars3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }

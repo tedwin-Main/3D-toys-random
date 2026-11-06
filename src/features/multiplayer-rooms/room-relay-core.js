@@ -140,7 +140,7 @@ export function createRelayCore({ maxSeats = MAX_SEATS, hostedGames = {} } = {})
     // Hosted game > advance every room host the relay runs (60 Hz from room-relay.js)
     tickHosted(nowMs) { for (const room of rooms.values()) room.server?.tick(nowMs); },
     // relay-stats: jitter queue summary per running hosted match (no player data)
-    hostedQueues() { return [...rooms.values()].filter((r) => r.server?.running).map((r) => r.server.takeQueueStats()); },
+    hostedQueues() { return [...rooms.values()].filter((r) => r.server?.running).map((r) => r.server.takeQueueStats()).filter(Boolean); },
     // drop silent conns so ghosts don't hold host
     sweep(now = Date.now()) {
       for (const conn of conns) if (now - conn.lastSeen > SILENT_MS) { conn.sock.close(); this.close(conn); }

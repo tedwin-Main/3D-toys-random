@@ -16,6 +16,7 @@
     "instagram:upload": "node src/features/demo-capture/upload-reels.js"
   },
   "dependencies": {
+    "three": "0.160.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

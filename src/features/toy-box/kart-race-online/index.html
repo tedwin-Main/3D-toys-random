@@ -55,6 +55,9 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createKartSim, STEP, LAPS, ITEM_ICON } from './kart-sim.js';
+import { W, NS } from './kart-track.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
@@ -100,11 +103,10 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400).rotateX(-Math.
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Track > Build: star-shaped closed spline, wide for 14 karts, road + curbs + gantry + crowd + trees + pads + item rows
-const W = 18, NS = 1000;
-const track = { P: [], Tn: [], Sd: [], curv: [], vmax: [], len: 0, group: new THREE.Group(), pads: [], boxes: [] };
-scene.add(track.group);
-function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+// Track > meshes for the sim's circuit data (kart-track.js): road + curbs + gantry + crowd + trees + pads + item boxes
+const trackGroup = new THREE.Group();
+scene.add(trackGroup);
+let track = null, trackCrowd = null;
 function ribbon(off0, off1, mat, y, vScale) {
   const pos = [], uv = [], idx = [];
   let acc = 0;
@@ -125,35 +127,25 @@ function ribbon(off0, off1, mat, y, vScale) {
 }
 let builtSeed = null;
 const boxMeshes = [];
-function buildTrack(seed) {
-  if (builtSeed === seed) return;
-  builtSeed = seed;
-  const rng = mulberry(seed);
-  for (const c of [...track.group.children]) track.group.remove(c);
-  const K = 12, pts = [];
-  for (let i = 0; i < K; i++) { const a = (i / K) * Math.PI * 2, r = 85 + rng() * 50; pts.push(new THREE.Vector3(Math.cos(a) * r * 1.3, 0, Math.sin(a) * r)); }
-  const curve = new THREE.CatmullRomCurve3(pts, true, 'centripetal');
-  track.len = curve.getLength();
-  track.P = curve.getSpacedPoints(NS).slice(0, NS);
-  track.Tn = track.P.map((p, i) => track.P[(i + 1) % NS].clone().sub(track.P[(i - 1 + NS) % NS]).normalize());
-  track.Sd = track.Tn.map((t) => new THREE.Vector3(t.z, 0, -t.x));
-  const ds = track.len / NS;
-  track.curv = track.Tn.map((t, i) => track.Tn[(i + 2) % NS].clone().sub(track.Tn[(i - 2 + NS) % NS]).length() / (4 * ds));
-  const raw = track.curv.map((k) => Math.min(33, Math.sqrt(19 / Math.max(k, 1e-4))));
-  track.vmax = raw.map((_, i) => { let m = Infinity; for (let j = 0; j < 50; j++) m = Math.min(m, raw[(i + j) % NS] + j * 0.32); return m; });
-  track.group.add(ribbon(-W / 2, W / 2, new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.92 }), 0.02, 22));
+// rebuilt only when the sim moved to a new seed
+function showTrack() {
+  if (builtSeed === sim.world.seed) return;
+  builtSeed = sim.world.seed;
+  track = sim.track;
+  for (const c of [...trackGroup.children]) trackGroup.remove(c);
+  trackGroup.add(ribbon(-W / 2, W / 2, new THREE.MeshStandardMaterial({ map: asphaltTex, roughness: 0.92 }), 0.02, 22));
   const curbMat = new THREE.MeshStandardMaterial({ map: curbTex, roughness: 0.7 });
-  track.group.add(ribbon(W / 2, W / 2 + 1.4, curbMat, 0.04, 3), ribbon(-W / 2 - 1.4, -W / 2, curbMat, 0.04, 3));
+  trackGroup.add(ribbon(W / 2, W / 2 + 1.4, curbMat, 0.04, 3), ribbon(-W / 2 - 1.4, -W / 2, curbMat, 0.04, 3));
   const P0 = track.P[0], ang = Math.atan2(track.Tn[0].x, track.Tn[0].z);
   const line = new THREE.Mesh(new THREE.PlaneGeometry(W, 2).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: checkerTex }));
   line.position.set(P0.x, 0.05, P0.z); line.rotation.y = ang;
-  track.group.add(line);
+  trackGroup.add(line);
   const gantry = new THREE.Group(), gm = new THREE.MeshStandardMaterial({ color: 0x2a2d3a });
   for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.7, 8, 0.7), gm); p.position.set(s * (W / 2 + 2), 4, 0); p.castShadow = true; gantry.add(p); }
   const banner = new THREE.Mesh(new THREE.BoxGeometry(W + 4.8, 1.8, 0.4), [gm, gm, gm, gm, new THREE.MeshStandardMaterial({ map: canvasTex(512, 64, (g, w, h) => { g.fillStyle = '#1a6cff'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff'; g.font = '900 42px system-ui'; g.textAlign = 'center'; g.fillText('KART PARTY GP', w / 2, 47); }) }), gm]);
   banner.position.y = 8; gantry.add(banner);
   gantry.position.set(P0.x, 0, P0.z); gantry.rotation.y = ang;
-  track.group.add(gantry);
+  trackGroup.add(gantry);
   const stand = new THREE.Group(), standMat = new THREE.MeshStandardMaterial({ color: 0xc8ccd6 });
   for (let r = 0; r < 5; r++) { const step = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8 + r * 0.8, 50), standMat); step.position.set(r * 1.2, (0.8 + r * 0.8) / 2, 0); step.castShadow = step.receiveShadow = true; stand.add(step); }
   const crowd = new THREE.InstancedMesh(new THREE.BoxGeometry(0.45, 0.8, 0.45), new THREE.MeshStandardMaterial(), 5 * 50);
@@ -163,8 +155,8 @@ function buildTrack(seed) {
   stand.add(crowd);
   stand.position.copy(P0).addScaledVector(track.Sd[0], W / 2 + 5);
   stand.rotation.y = ang;
-  track.group.add(stand);
-  track.crowd = crowd;
+  trackGroup.add(stand);
+  trackCrowd = crowd;
   const nT = 500, trunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.3, 0.4, 2.5, 6).translate(0, 1.25, 0), new THREE.MeshStandardMaterial({ color: 0x6b4a30 }), nT);
   const tops = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(2.2, 0).translate(0, 4, 0), new THREE.MeshStandardMaterial({ flatShading: true }), nT);
   let placed = 0;
@@ -181,24 +173,12 @@ function buildTrack(seed) {
   }
   trunks.count = tops.count = placed;
   trunks.castShadow = tops.castShadow = true;
-  track.group.add(trunks, tops);
-  // boost pads on long straights, item box rows spread around the lap
-  track.pads = [];
+  trackGroup.add(trunks, tops);
   const padMat = new THREE.MeshBasicMaterial({ map: canvasTex(64, 128, (g, w, h) => { g.fillStyle = '#1aa6ff'; g.fillRect(0, 0, w, h); g.fillStyle = '#bff0ff'; for (let y = 0; y < 3; y++) { g.beginPath(); g.moveTo(8, 40 + y * 34); g.lineTo(w / 2, 14 + y * 34); g.lineTo(w - 8, 40 + y * 34); g.lineTo(w - 8, 52 + y * 34); g.lineTo(w / 2, 26 + y * 34); g.lineTo(8, 52 + y * 34); g.fill(); } }), transparent: true });
-  const straight = [];
-  for (let i = 80; i < NS - 40; i++) if (track.vmax[i] > 31) straight.push(i);
-  for (let k = 0; k < 4 && straight.length; k++) {
-    const i = straight[Math.floor((k + 0.5) / 4 * straight.length)], side = (k % 2 ? 1 : -1) * W * 0.25;
+  for (const p of track.pads) {
     const pad = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 5.5).rotateX(-Math.PI / 2), padMat);
-    const p = track.P[i].clone().addScaledVector(track.Sd[i], side);
-    pad.position.set(p.x, 0.06, p.z); pad.rotation.y = Math.atan2(track.Tn[i].x, track.Tn[i].z);
-    track.group.add(pad);
-    track.pads.push(p);
-  }
-  track.boxes = [];
-  for (const frac of [0.18, 0.5, 0.78]) {
-    const i = Math.floor(frac * NS);
-    for (let s = -2; s <= 2; s++) track.boxes.push({ x: track.P[i].x + track.Sd[i].x * s * 3.2, z: track.P[i].z + track.Sd[i].z * s * 3.2, t: 0 });
+    pad.position.set(p.x, 0.06, p.z); pad.rotation.y = Math.atan2(track.Tn[p.i].x, track.Tn[p.i].z);
+    trackGroup.add(pad);
   }
   boxMeshes.forEach((b) => scene.remove(b));
   boxMeshes.length = 0;
@@ -299,192 +279,12 @@ const sfx = {
   lap() { tone(660, 990, 0.2, 0.12, 'square'); },
 };
 
-// Game > World
-const BOT_NAMES = ['Zoom', 'Turbo Tina', 'Revs', 'Skid', 'Nitro', 'Vroom', 'Piston', 'Drift King', 'Lugnut', 'Sparky', 'Gears', 'Torque', 'Clutch', 'Muffler'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const LAPS = 3, ITEMS = ['boost', 'banana', 'shell'], ITEM_ICON = { boost: '🍄', banana: '🍌', shell: '🐢' };
-const world = { mode: 'attract', phase: 'race', t: 0, raceT: 0, karts: new Map(), bananas: [], shells: [], order: [], endT: 0, seed: 3 };
+// Game > World: race rules live in kart-sim.js (the relay server runs the same code in matches)
+const sim = createKartSim();
+const world = sim.world;
 const karts3d = new Map();
-let events = [];
 const rng = Math.random;
-function addKart(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, z: 0, h: 0, vx: 0, vz: 0, steer: 0, idx: 0, lastIdx: 0, lap: 0, half: false, prog: 0, boost: 0, spin: 0, item: null, finished: false, finishT: 0, place: 1, inGas: 0, inSteer: 0, inDrift: 0, itemSeq: 0, lastItem: 0, resetSeq: 0, lastReset: 0, skill: 0.9 + rng() * 0.08, lane: (rng() - 0.5) * W * 0.5, aiItemT: 2 + rng() * 4, vl: 0, vf: 0 };
-  world.karts.set(id, p);
-  return p;
-}
-function removeKart(id) { world.karts.delete(id); const k = karts3d.get(id); if (k) { scene.remove(k); karts3d.delete(id); } }
-function clearKarts() { for (const id of [...world.karts.keys()]) removeKart(id); world.bananas = []; world.shells = []; world.order = []; }
-function gridSlot(k) {
-  // staggered 2-wide grid behind the line
-  const back = 8 + Math.floor(k / 2) * 6, side = (k % 2 ? 1 : -1) * W * 0.24;
-  const i = (NS - Math.round(back / (track.len / NS))) % NS;
-  return { i, p: track.P[i].clone().addScaledVector(track.Sd[i], side) };
-}
-function gridAll() {
-  [...world.karts.values()].forEach((p, k) => {
-    const g = gridSlot(k);
-    Object.assign(p, { x: g.p.x, z: g.p.z, h: Math.atan2(track.Tn[g.i].x, track.Tn[g.i].z), vx: 0, vz: 0, idx: g.i, lastIdx: g.i, lap: 0, half: false, boost: 0, spin: 0, item: null, finished: false, finishT: 0 });
-  });
-}
-function nearestIdx(x, z, from) {
-  let best = from, bd = Infinity;
-  for (let k = -70; k <= 70; k++) { const i = (from + k + NS) % NS, p = track.P[i], d = (p.x - x) ** 2 + (p.z - z) ** 2; if (d < bd) { bd = d; best = i; } }
-  return { i: best, d: Math.sqrt(bd) };
-}
-
-// Run engine > kart physics (all karts): forward/lateral split, grip vs drift, offroad, boost, spin-out
-const STEP = 1 / 60;
-function stepKart(p, dt) {
-  const racing = world.phase === 'race' && !p.finished;
-  const fx = Math.sin(p.h), fz = Math.cos(p.h);
-  let vf = p.vx * fx + p.vz * fz, vl = p.vx * fz - p.vz * fx;
-  const near = nearestIdx(p.x, p.z, p.idx), off = near.d > W / 2 + 1.4;
-  let gas = racing || (p.finished && world.mode === 'match') ? p.inGas : 0;
-  if (p.finished) gas = Math.min(gas, 0.4);
-  if (p.spin > 0) gas = 0;
-  if (gas > 0) vf += 20 * gas * dt * (1 - Math.max(vf, 0) / (off ? 16 : 35 + p.boost * 14));
-  else if (gas < 0) vf -= (vf > 0 ? 34 : 10) * -gas * dt;
-  vf *= 1 - (off ? 1.4 : 0.25) * dt;
-  if (world.phase !== 'race' || p.spin > 0) vf *= 1 - 2.2 * dt;
-  p.steer += (THREE.MathUtils.clamp(p.inSteer, -1, 1) - p.steer) * (1 - Math.exp(-dt * 10));
-  const speedK = THREE.MathUtils.clamp(Math.abs(vf) / 7, 0, 1) * Math.sign(vf || 1);
-  const drift = p.inDrift && Math.abs(vf) > 6;
-  const grip = drift ? 1.1 : off ? 3.5 : 7.5;
-  p.h += p.steer * (drift ? 2.6 : 1.9) * speedK * dt * (1 - Math.min(Math.abs(vf) / 90, 0.35));
-  if (p.spin > 0) { p.spin -= dt; p.h += 9 * dt; }
-  vl *= Math.exp(-grip * dt);
-  const nfx = Math.sin(p.h), nfz = Math.cos(p.h);
-  p.vx = nfx * vf + nfz * vl; p.vz = nfz * vf - nfx * vl;
-  p.x += p.vx * dt; p.z += p.vz * dt;
-  p.vf = vf; p.vl = vl;
-  p.lastIdx = p.idx;
-  p.idx = nearestIdx(p.x, p.z, p.idx).i;
-  p.boost = Math.max(0, p.boost - dt * 0.7);
-  if (racing) for (const b of track.pads) if ((b.x - p.x) ** 2 + (b.z - p.z) ** 2 < 7) { if (p.boost < 0.6) events.push(['o', p.id]); p.boost = 1; }
-  if (p.boost > 0.5 && gas > 0) { const k = 1 + 3 * dt; p.vx *= k; p.vz *= k; }
-  // laps: far half must be visited before the line counts
-  if (p.idx > NS * 0.45 && p.idx < NS * 0.55) p.half = true;
-  if (p.half && p.idx < NS * 0.1 && p.lastIdx > NS * 0.9) {
-    p.half = false;
-    // ghost = guest prediction copy: laps + finish order stay host-only
-    if (racing && !p.ghost) {
-      p.lap++;
-      if (p.lap >= LAPS) { p.finished = true; p.finishT = world.raceT; world.order.push(p.id); events.push(['F', p.id]); }
-      else events.push(['L', p.id, p.lap]);
-    }
-  }
-  p.prog = p.finished ? 1e6 - world.order.indexOf(p.id) : p.lap * NS + p.idx + (p.half || p.idx < NS * 0.5 ? 0 : -NS);
-  if (p.resetSeq !== p.lastReset) {
-    p.lastReset = p.resetSeq;
-    const i = p.idx; Object.assign(p, { x: track.P[i].x, z: track.P[i].z, h: Math.atan2(track.Tn[i].x, track.Tn[i].z), vx: 0, vz: 0 });
-  }
-}
-function separate(ps) {
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > 2.6 || d < 1e-3) continue;
-    const push = (2.6 - d) / d / 2;
-    a.x -= dx * push; a.z -= dz * push; b.x += dx * push; b.z += dz * push;
-    // trade a little velocity so bumps feel physical
-    const nx = dx / d, nz = dz / d, vrel = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-    if (vrel < 0) { a.vx += nx * vrel * 0.5; a.vz += nz * vrel * 0.5; b.vx -= nx * vrel * 0.5; b.vz -= nz * vrel * 0.5; }
-  }
-}
-
-// Run engine > items: boxes, bananas (spin-out), homing shells
-function useItem(p) {
-  const it = p.item;
-  if (!it || p.finished) return;
-  p.item = null;
-  const fx = Math.sin(p.h), fz = Math.cos(p.h);
-  if (it === 'boost') { p.boost = 1.6; events.push(['o', p.id]); }
-  else if (it === 'banana') { world.bananas.push({ x: p.x - fx * 3, z: p.z - fz * 3, owner: p.id, life: 60 }); events.push(['t', p.id]); }
-  else if (it === 'shell') { world.shells.push({ x: p.x + fx * 2.6, z: p.z + fz * 2.6, h: p.h, owner: p.id, life: 5, idx: p.idx }); events.push(['t', p.id]); }
-}
-function hitKart(p) { if (p.spin > 0) return; p.spin = 1.1; p.item = p.item === 'boost' ? p.item : p.item; events.push(['h', p.id]); }
-function items(dt, ps) {
-  for (const b of track.boxes) {
-    b.t = Math.max(0, b.t - dt);
-    if (b.t > 0) continue;
-    for (const p of ps) if (!p.item && !p.finished && (p.x - b.x) ** 2 + (p.z - b.z) ** 2 < 4) {
-      b.t = 3;
-      // rubber-banding: back markers get more shells and boosts
-      const back = p.place / Math.max(ps.length, 1);
-      const r = rng();
-      p.item = r < 0.25 + back * 0.35 ? 'boost' : r < 0.55 + back * 0.2 ? 'shell' : 'banana';
-      events.push(['b', p.id]);
-      break;
-    }
-  }
-  for (const b of world.bananas) {
-    b.life -= dt;
-    for (const p of ps) if (b.life > 0 && (p.x - b.x) ** 2 + (p.z - b.z) ** 2 < 2.4) { b.life = 0; hitKart(p); }
-  }
-  world.bananas = world.bananas.filter((b) => b.life > 0);
-  for (const s of world.shells) {
-    s.life -= dt;
-    // home on nearest kart ahead within 45 u, otherwise follow the track tangent
-    let tgt = null, bd = 45 * 45;
-    for (const p of ps) { if (p.id === s.owner && s.life > 4.6) continue; const dx = p.x - s.x, dz = p.z - s.z, d = dx * dx + dz * dz; if (d < bd && dx * Math.sin(s.h) + dz * Math.cos(s.h) > 0) { bd = d; tgt = p; } }
-    s.idx = nearestIdx(s.x, s.z, s.idx).i;
-    const want = tgt ? Math.atan2(tgt.x - s.x, tgt.z - s.z) : Math.atan2(track.Tn[(s.idx + 6) % NS].x, track.Tn[(s.idx + 6) % NS].z);
-    let d = want - s.h; d = Math.atan2(Math.sin(d), Math.cos(d));
-    s.h += THREE.MathUtils.clamp(d, -3.2 * dt, 3.2 * dt);
-    s.x += Math.sin(s.h) * 46 * dt; s.z += Math.cos(s.h) * 46 * dt;
-    for (const p of ps) if (s.life > 0 && !(p.id === s.owner && s.life > 4.6) && (p.x - s.x) ** 2 + (p.z - s.z) ** 2 < 3) { s.life = 0; hitKart(p); }
-    for (const b of world.bananas) if (s.life > 0 && (b.x - s.x) ** 2 + (b.z - s.z) ** 2 < 2) { s.life = 0; b.life = 0; events.push(['x', +s.x.toFixed(1), +s.z.toFixed(1)]); }
-  }
-  world.shells = world.shells.filter((s) => s.life > 0);
-}
-
-// Run engine > bots: aim at a lookahead point on their lane, brake to curvature speed, fire items
-function botThink(p, dt) {
-  const i = (p.idx + 14) % NS;
-  p.lane += (Math.sin(world.raceT * 0.23 + p.id) * W * 0.28 - p.lane) * dt * 0.5;
-  const tx = track.P[i].x + track.Sd[i].x * p.lane, tz = track.P[i].z + track.Sd[i].z * p.lane;
-  let d = Math.atan2(tx - p.x, tz - p.z) - p.h; d = Math.atan2(Math.sin(d), Math.cos(d));
-  p.inSteer = THREE.MathUtils.clamp(d * 3, -1, 1);
-  const v = Math.hypot(p.vx, p.vz), target = track.vmax[p.idx] * p.skill;
-  p.inGas = v < target ? 1 : v > target + 3 ? -0.6 : 0.2;
-  p.inDrift = 0;
-  if (p.item) { p.aiItemT -= dt; if (p.aiItemT <= 0) { p.aiItemT = 1.5 + rng() * 4; p.itemSeq++; } }
-}
-
-// Game > Phases: countdown, race, results
-let lastBeep = 0;
-function phases(dt) {
-  const ps = [...world.karts.values()];
-  if (world.mode === 'attract') {
-    world.phase = 'race'; world.raceT += dt;
-    for (const p of ps) if (p.lap >= LAPS) { p.lap = 0; p.finished = false; world.order = world.order.filter((id) => id !== p.id); }
-    return;
-  }
-  if (world.phase === 'count') {
-    world.t -= dt;
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { world.phase = 'race'; world.raceT = 0; events.push(['c', 0]); }
-  } else if (world.phase === 'race') {
-    world.raceT += dt;
-    const humans = ps.filter((p) => !p.bot);
-    // race ends when every human is home, or 25 s after the winner
-    if (world.order.length && (humans.every((p) => p.finished) || world.raceT - (world.karts.get(world.order[0])?.finishT ?? world.raceT) > 25)) { world.phase = 'end'; world.t = 9; }
-  } else if (world.phase === 'end') {
-    world.t -= dt;
-    if (world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  }
-}
-function startRace() {
-  world.phase = 'count'; world.t = 3.5; lastBeep = 4; world.raceT = 0; world.order = []; world.bananas = []; world.shells = [];
-  for (const b of track.boxes) b.t = 0;
-  gridAll();
-}
-function startAttract() {
-  clearKarts();
-  world.mode = 'attract';
-  buildTrack(3); world.seed = 3;
-  for (let i = 0; i < 8; i++) addKart(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  gridAll();
-}
+function startAttract() { sim.startAttract(); showTrack(); }
 
 // Multiplayer > Lobby: track seed in start packet
 const lobby = createLobby({
@@ -495,23 +295,21 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ seed, bots, isHost }) {
-    clearKarts();
-    world.mode = 'match'; world.seed = seed;
-    buildTrack(seed);
+  // the relay server runs the race; every page (lobby host too) drives its own kart as a guest
+  onStart({ seed, bots }) {
+    sim.clearKarts();
+    Object.assign(world, { mode: 'match', phase: 'count', t: 3.5 });
+    sim.loadTrack(seed); showTrack();
     skidCount = 0; skid.count = 0;
     ['race', 'list', 'top'].forEach((id) => (document.getElementById(id).style.display = id === 'top' ? 'flex' : 'block'));
     document.getElementById('results').style.display = 'none';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
-    for (const p of lobby.room.players) addKart(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addKart(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startRace();
+    serverMatch.start({ bots, seed });
   },
   onLobby() {
+    serverMatch.stop();
     ['race', 'list', 'top', 'item', 'results'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
     startAttract();
@@ -519,46 +317,22 @@ const lobby = createLobby({
 });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.karts.values()]) if (!p.bot && !ids.has(p.id)) removeKart(p.id);
-  for (const p of players) if (!world.karts.has(p.id)) {
-    // keep 14 seats: a joining human takes over the last-placed bot's kart position
-    let from = null;
-    if (world.karts.size >= 14) { from = [...world.karts.values()].filter((q) => q.bot).sort((a, b) => a.prog - b.prog)[0]; if (from) removeKart(from.id); }
-    const k = addKart(p.id, p.nick, p.color, false);
-    const src = from ?? [...world.karts.values()].sort((a, b) => a.prog - b.prog)[0];
-    if (src && src !== k) Object.assign(k, { x: src.x, z: src.z, h: src.h, idx: src.idx, lastIdx: src.idx, lap: src.lap, half: src.half });
-    else { const g = gridSlot(world.karts.size - 1); Object.assign(k, { x: g.p.x, z: g.p.z, h: Math.atan2(track.Tn[g.i].x, track.Tn[g.i].z), idx: g.i, lastIdx: g.i }); }
-  }
-}
+const serverMatch = createServerMatchClient(lobby);
 
-// Multiplayer > Net
-const remoteIn = new Map();
+// Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot() {
-  return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), seed: world.seed, ord: world.order, ev: events,
-    K: [...world.karts.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), p.lap, p.idx, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), f2(p.boost), p.item, p.place, f2(p.finishT), f2(p.spin), Math.round(p.prog)]),
-    Bx: track.boxes.map((b) => (b.t > 0 ? 1 : 0)),
-    Ba: world.bananas.map((b) => [f2(b.x), f2(b.z)]),
-    Sh: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.h)]),
-  }, world.karts.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
-  step: (p, dt) => { const keep = events; events = []; stepKart(p, dt); events = keep; },
+  step: (p, dt) => { const keep = sim.events; sim.events = []; sim.stepKart(p, dt); sim.events = keep; },
   live: (p) => !p.finished,
   seed: (p) => { p.ghost = true; p.lastReset = p.resetSeq = 0; },
   merge: (p, host) => { Object.assign(p, { lap: host.lap, half: host.half, boost: host.boost, spin: host.spin }); p.h = blendAngle(p.h, host.h, 0.2); },
@@ -566,20 +340,20 @@ const pred = createPrediction({
 });
 function applySnap(s) {
   names.read(s);
-  if (s.seed !== world.seed) { world.seed = s.seed; buildTrack(s.seed); }
+  if (sim.loadTrack(s.seed)) showTrack();
   Object.assign(world, { phase: s.ph, t: s.t, raceT: s.rt, order: s.ord });
   const seen = new Set();
   for (const a of s.K) {
     const [id, x, z, h, vx, vz, steer, lap, idx, fl, boost, item, place, finishT, spin, prog] = a;
     seen.add(id);
     if (!world.karts.has(id) && !names.name(id)) continue;
-    const p = world.karts.get(id) ?? addKart(id, ...names.name(id), !!(fl & 1));
+    const p = world.karts.get(id) ?? sim.addKart(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, h, vx, vz, steer, lap, idx, finished: !!(fl & 2), half: !!(fl & 4), boost, item, place, finishT, spin, prog });
     if (id === lobby.room.me) pred.correct(p);
     const fx = Math.sin(h), fz = Math.cos(h);
     p.vf = vx * fx + vz * fz; p.vl = vx * fz - vz * fx;
   }
-  for (const id of [...world.karts.keys()]) if (!seen.has(id)) removeKart(id);
+  for (const id of [...world.karts.keys()]) if (!seen.has(id)) sim.removeKart(id);
   s.Bx.forEach((t, i) => { if (track.boxes[i]) track.boxes[i].t = t ? 1 : 0; });
   world.bananas = s.Ba.map(([x, z]) => ({ x, z }));
   world.shells = s.Sh.map(([x, z, h]) => ({ x, z, h }));
@@ -633,7 +407,6 @@ const bigEl = document.getElementById('big');
 let bigText = '', flashT = 0;
 function big(html) { if (html !== bigText) { bigText = html; bigEl.innerHTML = html; } }
 function flash(t) { big(t); flashT = 1.4; }
-function ranked() { return [...world.karts.values()].sort((a, b) => b.prog - a.prog); }
 let hudT = 0;
 function hud(dt) {
   if (world.mode !== 'match') return;
@@ -648,7 +421,7 @@ function hud(dt) {
   if (me) itemEl.textContent = me.item ? ITEM_ICON[me.item] : '';
   if (hudT > 0) return;
   hudT = 0.2;
-  const r = ranked();
+  const r = sim.ranked();
   if (me) {
     const place = r.indexOf(me) + 1;
     document.getElementById('pos').innerHTML = `${ord(place)}<small>/${r.length}</small>`;
@@ -688,35 +461,19 @@ function drawMap() {
   }
 }
 
-// Run engine > sim tick (worker)
-let acc = 0, sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match predicts my kart and streams input to the server
+let acc = 0;
+const isHostSim = () => world.mode === 'attract';
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.karts.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { inGas: local.gas, inSteer: local.steer, inDrift: local.drift, itemSeq: local.itemSeq, resetSeq: local.resetSeq });
-    for (const [id, inp] of remoteIn) { const p = world.karts.get(id); if (p) Object.assign(p, { inGas: inp.g2, inSteer: inp.s, inDrift: inp.d, itemSeq: inp.it, resetSeq: inp.r }); }
-    acc += dt;
-    while (acc >= STEP) {
-      const ps = [...world.karts.values()];
-      for (const p of ps) if (p.bot) botThink(p, STEP);
-      for (const p of ps) { stepKart(p, STEP); if (p.itemSeq !== p.lastItem) { p.lastItem = p.itemSeq; if (world.phase === 'race') useItem(p); } }
-      if (world.phase === 'race') { separate(ps); items(STEP, ps); }
-      ranked().forEach((p, i) => (p.place = i + 1));
-      phases(STEP);
-      acc -= STEP;
-    }
-    if (world.mode === 'match' && room) {
-      sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
-    } else { playEvents(events); events = []; }
-  } else if (world.mode === 'match' && room) {
-    pred.tick(world.karts.get(room.me), { inGas: local.gas, inSteer: local.steer, inDrift: local.drift }, dt, 1 / 60);
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', g2: local.gas, s: local.steer, d: local.drift, it: local.itemSeq, r: local.resetSeq }); }
+    for (acc += dt; acc >= STEP; acc -= STEP) sim.step();
+    playEvents(sim.events); sim.events = [];
+    return;
   }
+  const me = lobby.room && world.karts.get(lobby.room.me);
+  pred.tick(me, { inGas: local.gas, inSteer: local.steer, inDrift: local.drift }, dt, STEP);
+  serverMatch.tickInput(() => ({ g2: local.gas, s: local.steer, d: local.drift, it: local.itemSeq, r: local.resetSeq }));
 }
 startTicker(60, simTick);
 
@@ -728,6 +485,7 @@ function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
   const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
+  for (const [id, k] of karts3d) if (!world.karts.has(id)) { scene.remove(k); karts3d.delete(id); }
   for (const p of world.karts.values()) {
     let k = karts3d.get(p.id);
     if (!k) { k = makeKart(p); karts3d.set(p.id, k); k.position.set(p.x, 0, p.z); k.rotation.y = p.h; }
@@ -756,7 +514,7 @@ function loop() {
   for (let i = world.bananas.length; i < pools.banana.length; i++) pools.banana[i].visible = false;
   world.shells.forEach((s, i) => { const m = poolMesh('shell', i); m.visible = true; m.position.set(s.x + Math.sin(s.h) * 46 * age, 0.6, s.z + Math.cos(s.h) * 46 * age); m.rotation.y = time * 12; });
   for (let i = world.shells.length; i < pools.shell.length; i++) pools.shell[i].visible = false;
-  if (track.crowd) track.crowd.position.y = Math.abs(Math.sin(time * 8)) * 0.12;
+  if (trackCrowd) trackCrowd.position.y = Math.abs(Math.sin(time * 8)) * 0.12;
   hud(dt);
   drawMap();
   // camera: chase own kart (or overhead), attract mode rides along with a bot
