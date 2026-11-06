@@ -26,9 +26,10 @@ export async function renderCard(page, file, { kicker, big, sub }) {
   await page.screenshot({ path: file });
 }
 
-// Title bar: glossy pill, demo title + style tag; sits above IG caption safe zone
+// Title bar: glossy pill, demo title + style tag; sits above IG caption safe zone.
+// Full-frame viewport + clip: resizing shared page tears screenshot mid-relayout.
 export async function renderBar(page, file, title, style) {
-  await page.setViewportSize({ width: W, height: BAR_H });
+  await page.setViewportSize({ width: W, height: H });
   await page.setContent(`<style>${AERO_CSS}
     .bar{margin:20px 60px;height:190px;border-radius:95px;display:flex;flex-direction:column;justify-content:center;padding:0 64px;
       background:linear-gradient(180deg,rgba(130,215,255,.95) 0%,rgba(40,150,235,.92) 50%,rgba(10,105,205,.94) 52%,rgba(40,160,240,.95) 100%);
@@ -36,7 +37,7 @@ export async function renderBar(page, file, title, style) {
     .t{font-weight:800;font-size:62px;line-height:1.05;text-shadow:0 2px 6px rgba(0,40,110,.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .s{margin-top:10px;font-weight:700;font-size:26px;letter-spacing:5px;text-transform:uppercase;color:#e8fbff}</style>
     <div class="bar"><div class="t" style="font-size:${title.length > 18 ? 50 : 62}px">${esc(title)}</div><div class="s">Frutiger Aero · ${esc(style)}</div></div>`);
-  await page.screenshot({ path: file, omitBackground: true });
+  await page.screenshot({ path: file, omitBackground: true, clip: { x: 0, y: 0, width: W, height: BAR_H } });
 }
 
 // Hook: full-frame transparent PNG, bold glossy bubble below IG top bar, shown for first ~1.3 s
