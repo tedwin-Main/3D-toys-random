@@ -7,6 +7,8 @@ import { networkInterfaces } from 'node:os';
 import { extname, join, normalize, sep } from 'node:path';
 import { CATEGORIES, TABS, STACKS, listAssets } from './list-assets.js';
 import { createRoomRelay } from '../multiplayer-rooms/room-relay.js';
+import { createFeedbackRoute } from '../toy-feedback/feedback-route.js';
+import { TOYS as TOY_LIST } from '../toy-box/common/toy-list.js';
 
 const PORT = Number(process.env.PORT ?? 5066);
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -16,6 +18,8 @@ const TOYS = join(ROOT, 'features', 'toy-box');
 const TOYS_BASE = '/3d-toys/';
 // toy deps stay private; room server code lives outside toy-box
 const TOYS_PRIVATE = ['node_modules', 'package.json', 'package-lock.json'];
+// Toy Box > Feedback: GITHUB_TOKEN set in Render dashboard; unset = form says offline
+const feedback = createFeedbackRoute({ token: process.env.GITHUB_TOKEN, repo: process.env.FEEDBACK_REPO ?? 'tedwin-Main/3D-toys-random', toys: TOY_LIST });
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -82,6 +86,7 @@ const http = createServer(async (req, res) => {
   // no favicon file; 204 keeps console clean
   if (path === '/favicon.ico') return res.writeHead(204).end();
   if (path === '/3d-toys') return res.writeHead(301, { location: TOYS_BASE }).end();
+  if (path === TOYS_BASE + 'feedback') return feedback.handle(req, res);
   // Toy Box > Lobby > invite link: LAN address so friends on other devices can join
   if (path === TOYS_BASE + 'lan.json') {
     const ip = Object.values(networkInterfaces()).flat().find((n) => n && n.family === 'IPv4' && !n.internal)?.address ?? null;
