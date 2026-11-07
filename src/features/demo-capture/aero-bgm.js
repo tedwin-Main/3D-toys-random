@@ -14,23 +14,27 @@ const SCALES = {
   minor: [0, 2, 3, 5, 7, 8, 10],
 };
 
-// Mood per style: tempo divides 12 s into whole bars (80 bpm 4 bars, 100 bpm 5, 120 bpm 6)
+// Mood per style: tempo divides 12 s into whole bars (80 bpm 4 bars, 100 bpm 5, 120 bpm 6).
+// audioName = reel's "original audio" title on Instagram; wet = reverb send; sparkle = end-of-loop flourish voice
 const STYLE_MOODS = {
-  core: { bpm: 100, root: 62, scale: 'lydian', chords: [0, 3, 5, 4], lead: 'bell', drums: 'soft', seed: 11 },
-  eco: { bpm: 100, root: 65, scale: 'major', chords: [0, 4, 5, 3], lead: 'marimba', drums: 'soft', seed: 23 },
-  dark: { bpm: 80, root: 57, scale: 'dorian', chords: [0, 6, 3, 4], lead: 'bell', drums: 'none', seed: 37 },
-  aquatic: { bpm: 100, root: 64, scale: 'lydian', chords: [0, 1, 5, 4], lead: 'marimba', drums: 'shaker', seed: 41 },
-  humanity: { bpm: 120, root: 67, scale: 'major', chords: [0, 5, 3, 4], lead: 'marimba', drums: 'pop', seed: 53 },
-  technozen: { bpm: 80, root: 62, scale: 'major', chords: [0, 3, 0, 4], lead: 'bell', drums: 'none', seed: 67 },
-  space: { bpm: 80, root: 60, scale: 'lydian', chords: [0, 1, 0, 6], lead: 'bell', drums: 'none', seed: 71 },
-  metro: { bpm: 120, root: 64, scale: 'major', chords: [5, 3, 0, 4], lead: 'pluck', drums: 'pop', seed: 83 },
-  console: { bpm: 100, root: 65, scale: 'lydian', chords: [0, 3, 1, 4], lead: 'marimba', drums: 'soft', seed: 97 },
-  y2k: { bpm: 120, root: 62, scale: 'mixolydian', chords: [0, 6, 3, 4], lead: 'pluck', drums: 'pop', seed: 101 },
-  mcbling: { bpm: 120, root: 66, scale: 'major', chords: [0, 5, 1, 4], lead: 'pluck', drums: 'pop', seed: 113 },
-  vectorheart: { bpm: 120, root: 63, scale: 'major', chords: [3, 4, 2, 5], lead: 'bell', drums: 'pop', seed: 127 },
-  skeuo: { bpm: 100, root: 60, scale: 'major', chords: [0, 3, 4, 0], lead: 'marimba', drums: 'shaker', seed: 131 },
-  retro: { bpm: 120, root: 57, scale: 'minor', chords: [0, 5, 2, 6], lead: 'pluck', drums: 'pop', seed: 149 },
+  core: { bpm: 100, root: 62, scale: 'lydian', chords: [0, 3, 5, 4], lead: 'bell', drums: 'soft', wet: 0.36, seed: 11, audioName: 'Glass Desktop Dreams' },
+  eco: { bpm: 100, root: 65, scale: 'major', chords: [0, 4, 5, 3], lead: 'glock', drums: 'soft', seed: 23, audioName: 'Eco Aero Breeze' },
+  dark: { bpm: 80, root: 57, scale: 'dorian', chords: [0, 6, 3, 4], lead: 'bell', drums: 'none', wet: 0.4, seed: 37, audioName: 'Dark Aero Night' },
+  aquatic: { bpm: 80, root: 64, scale: 'lydian', chords: [0, 1, 5, 4], lead: 'bell', drums: 'none', wet: 0.45, sparkle: 'bubble', seed: 41, audioName: 'Aquatic Aero Dreams' },
+  humanity: { bpm: 120, root: 67, scale: 'major', chords: [0, 5, 3, 4], lead: 'glock', drums: 'pop', seed: 53, audioName: 'Sunny Stock Smiles' },
+  technozen: { bpm: 80, root: 62, scale: 'major', chords: [0, 3, 0, 4], lead: 'bell', drums: 'none', wet: 0.42, seed: 67, audioName: 'Technozen Spa' },
+  space: { bpm: 80, root: 60, scale: 'lydian', chords: [0, 1, 0, 6], lead: 'bell', drums: 'none', wet: 0.42, seed: 71, audioName: 'Space Aero Drift' },
+  metro: { bpm: 120, root: 64, scale: 'major', chords: [5, 3, 0, 4], lead: 'pluck', drums: 'pop', seed: 83, audioName: 'Metro Tile Groove' },
+  console: { bpm: 100, root: 65, scale: 'lydian', chords: [0, 3, 1, 4], lead: 'marimba', drums: 'soft', seed: 97, audioName: 'Console Menu Loop' },
+  y2k: { bpm: 120, root: 62, scale: 'mixolydian', chords: [0, 6, 3, 4], lead: 'pluck', drums: 'pop', seed: 101, audioName: 'Y2K Chrome Pop' },
+  mcbling: { bpm: 120, root: 68, scale: 'major', chords: [0, 5, 1, 4], lead: 'glock', drums: 'pop', seed: 113, audioName: 'McBling Sparkle Pop' },
+  vectorheart: { bpm: 120, root: 63, scale: 'major', chords: [3, 4, 2, 5], lead: 'bell', drums: 'pop', seed: 127, audioName: 'Web 2.0 Swoosh' },
+  skeuo: { bpm: 100, root: 60, scale: 'major', chords: [0, 3, 4, 0], lead: 'marimba', drums: 'shaker', seed: 131, audioName: 'Leather & Wood Lounge' },
+  retro: { bpm: 120, root: 60, scale: 'mixolydian', chords: [0, 6, 3, 4], lead: 'chip', drums: 'pop', seed: 149, audioName: 'Beige Box Chiptune' },
 };
+const DEFAULT_WET = 0.28;
+
+export const audioNameFor = (styleId) => STYLE_MOODS[styleId].audioName;
 
 // Rhythms in eighth-note steps per bar: 1 = note onset
 const RHYTHMS = [
@@ -71,7 +75,7 @@ export function composeLoop(mood) {
       degree = Math.max(chord - 2, Math.min(chord + 9, degree));
       events.push({ inst: mood.lead, t: t0 + step * beat / 2, dur: beat * 0.9, midi: scaleNote(mood, degree, 1), vel: strong ? 0.9 : 0.65 });
     });
-    if (b === bars - 1) for (let s = 0; s < 8; s++) events.push({ inst: 'sparkle', t: t0 + s * beat / 2, dur: beat / 2, midi: scaleNote(mood, chord + s, 2), vel: 0.35 });
+    if (b === bars - 1) for (let s = 0; s < 8; s++) events.push({ inst: mood.sparkle ?? 'sparkle', t: t0 + s * beat / 2, dur: beat / 2, midi: scaleNote(mood, chord + s, 2), vel: 0.35 });
     events.push(...percussion(mood.drums, t0, beat));
   }
   return events;
@@ -90,7 +94,7 @@ function percussion(kit, t0, beat) {
 }
 
 // Page side: synthesize events with OfflineAudioContext, return interleaved stereo floats
-async function synthesizeInPage({ events, secs, rate }) {
+async function synthesizeInPage({ events, secs, rate, reverbWet }) {
   const ctx = new OfflineAudioContext(2, secs * rate, rate);
   const master = ctx.createGain();
   master.gain.value = 0.55;
@@ -98,7 +102,7 @@ async function synthesizeInPage({ events, secs, rate }) {
   const ir = ctx.createBuffer(2, rate * 2.2, rate);
   for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3); }
   verb.buffer = ir;
-  const wet = ctx.createGain(); wet.gain.value = 0.28;
+  const wet = ctx.createGain(); wet.gain.value = reverbWet;
   master.connect(ctx.destination); master.connect(verb); verb.connect(wet); wet.connect(ctx.destination);
   const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
   const noise = ctx.createBuffer(1, rate, rate);
@@ -110,6 +114,10 @@ async function synthesizeInPage({ events, secs, rate }) {
     marimba: (e) => { const g = env(e.t, 0.2 * e.vel, 0.003, 0.45); osc('sine', hz(e.midi), e.t, e.t + 0.6, g); const g2 = env(e.t, 0.06 * e.vel, 0.001, 0.08); osc('sine', hz(e.midi) * 4, e.t, e.t + 0.12, g2); },
     pluck: (e) => { const g = env(e.t, 0.12 * e.vel, 0.003, 0.35); const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(5000, e.t); f.frequency.exponentialRampToValueAtTime(600, e.t + 0.3); f.connect(g); osc('square', hz(e.midi), e.t, e.t + 0.4, f); },
     sparkle: (e) => { const g = env(e.t, 0.07 * e.vel, 0.002, 0.3); osc('triangle', hz(e.midi), e.t, e.t + 0.35, g); },
+    // chip: bare square, PC-speaker feel; glock: bright octave-up bar; bubble: rising sine blip
+    chip: (e) => { const g = env(e.t, 0.06 * e.vel, 0.002, 0.18); osc('square', hz(e.midi), e.t, e.t + 0.22, g); },
+    glock: (e) => { const g = env(e.t, 0.13 * e.vel, 0.002, 0.9); osc('sine', hz(e.midi + 12), e.t, e.t + 1, g); const g2 = env(e.t, 0.04 * e.vel, 0.001, 0.15); osc('sine', hz(e.midi + 12) * 5.4, e.t, e.t + 0.2, g2); },
+    bubble: (e) => { const g = env(e.t, 0.07 * e.vel, 0.002, 0.12); const o = osc('sine', hz(e.midi), e.t, e.t + 0.16, g); o.frequency.exponentialRampToValueAtTime(hz(e.midi) * 1.6, e.t + 0.1); },
     pad: (e) => {
       const g = ctx.createGain(); g.gain.setValueAtTime(0, e.t); g.gain.linearRampToValueAtTime(0.035 * e.vel, e.t + 0.4); g.gain.setValueAtTime(0.035 * e.vel, e.t + e.dur - 0.3); g.gain.linearRampToValueAtTime(0, e.t + e.dur); g.connect(master);
       const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400; f.connect(g);
@@ -145,7 +153,7 @@ export const bgmFile = (dir, styleId) => join(dir, `bgm-${styleId}.wav`);
 export async function renderStyleLoops(browser, outDir) {
   const page = await browser.newPage();
   for (const [styleId, mood] of Object.entries(STYLE_MOODS)) {
-    const samples = await page.evaluate(synthesizeInPage, { events: composeLoop(mood), secs: BGM_SECS, rate: SAMPLE_RATE });
+    const samples = await page.evaluate(synthesizeInPage, { events: composeLoop(mood), secs: BGM_SECS, rate: SAMPLE_RATE, reverbWet: mood.wet ?? DEFAULT_WET });
     await writeFile(bgmFile(outDir, styleId), encodeWav(samples, SAMPLE_RATE));
   }
   await page.close();
