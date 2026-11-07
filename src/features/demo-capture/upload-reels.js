@@ -8,6 +8,8 @@ const ROOT = join(import.meta.dirname, '..', '..', '..');
 const OUT = join(ROOT, 'src', 'features', 'instagram-posts');
 const startArg = process.argv.find((a) => a.startsWith('--start='));
 const queueOnly = process.argv.includes('--queue-only');
+// --new-only: upload media just for entries without blob URLs (new reels), then the queue
+const newOnly = process.argv.includes('--new-only');
 
 function loadBlobToken() {
   try { process.loadEnvFile(join(ROOT, '.env')); } catch {}
@@ -25,7 +27,8 @@ loadBlobToken();
 const queue = JSON.parse(await readFile(join(OUT, 'post-queue.json'), 'utf8'));
 const missingUrls = queue.entries.filter((e) => !e.videoUrl || !e.coverUrl).map((e) => e.name);
 if (queueOnly && missingUrls.length) throw new Error(`--queue-only needs uploaded media; missing: ${missingUrls.join(', ')}`);
-for (const entry of queueOnly ? [] : queue.entries) {
+const toUpload = queueOnly ? [] : newOnly ? queue.entries.filter((e) => !e.videoUrl || !e.coverUrl) : queue.entries;
+for (const entry of toUpload) {
   entry.videoUrl = await uploadFile(join(OUT, entry.video), entry.video, 'video/mp4');
   entry.coverUrl = await uploadFile(join(OUT, entry.cover), entry.cover, 'image/jpeg');
   console.log(`uploaded day ${entry.day}: ${entry.name}`);

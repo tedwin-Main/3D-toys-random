@@ -21,7 +21,7 @@ export const CATEGORIES = [
   { id: 'algorithms', label: 'Algorithms', group: 'live' },
   { id: 'aero', label: 'Frutiger Aero', group: 'live', subs: [
     { id: 'core', label: 'Core Aero' }, { id: 'eco', label: 'Eco Aero' }, { id: 'dark', label: 'Dark Aero' }, { id: 'aquatic', label: 'Aquatic Aero' },
-    { id: 'humanity', label: 'Humanity Aero' }, { id: 'technozen', label: 'Technozen' }, { id: 'space', label: 'Space Aero' }, { id: 'metro', label: 'Frutiger Metro' },
+    { id: 'humanity', label: 'Humanity Aero' }, { id: 'technozen', label: 'Technozen' }, { id: 'space', label: 'Space Aero' }, { id: 'metro', label: 'Frutiger Metro' }, { id: 'glasscity', label: 'Glass City' },
     { id: 'console', label: 'Console Menus' }, { id: 'y2k', label: 'Y2K Futurism' }, { id: 'mcbling', label: 'McBling' }, { id: 'vectorheart', label: 'Web 2.0 & Vectorheart' },
     { id: 'skeuo', label: 'Skeuomorphism' }, { id: 'retro', label: '90s Desktop & Web' },
   ] },
@@ -39,7 +39,7 @@ export const TABS = [
   { id: 'creative', label: 'Creative Code', cats: ['generative', 'motion', 'audio', 'generators'] },
   { id: 'apps', label: 'Apps & Algorithms', cats: ['apps', 'algorithms'] },
   { id: 'aero', label: 'Retro Aesthetics', cats: ['aero'], families: [
-    { id: 'frutiger', label: 'Frutiger Aero', styles: ['core', 'eco', 'dark', 'aquatic', 'humanity', 'technozen', 'space', 'metro'] },
+    { id: 'frutiger', label: 'Frutiger Aero', styles: ['core', 'eco', 'dark', 'aquatic', 'humanity', 'technozen', 'space', 'metro', 'glasscity'] },
     { id: '2000s', label: '2000s', styles: ['y2k', 'mcbling', 'vectorheart', 'skeuo', 'console'] },
     { id: '90s', label: '90s', styles: ['retro'] },
   ] },

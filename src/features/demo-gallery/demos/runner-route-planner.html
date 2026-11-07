@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Runner Route Planner</title>
+<meta name="category" content="aero" />
+<meta name="style" content="glasscity" />
+<meta name="order" content="61" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="three.js, A* pathfinding, rooftop graph, TubeGeometry route, patrol drone, OrbitControls" />
+<meta name="description" content="A tilt-shift diorama of a spotless white city block split into orange, green and blue districts. Every rooftop is a node in a graph, linked by jumps, drops, climbs and red zip-lines, and A* plots the fastest free-running line between two roofs as a glowing red arc that draws itself across the skyline before a runner sprints it. A patrol drone sweeps a searchlight and calls out the runner if it catches them. Click two roofs to plan your own route. Hard because the graph is built from real roof geometry with directed climb and drop limits, and the route is one TubeGeometry over chained Bezier hops revealed with a draw range." />
+<meta name="prompt" content="Make a three.js diorama, one HTML file: a white minimalist city block of 63 buildings (concrete and blue glass, colored district bands in orange, green and blue), streets below, glass towers on the horizon, blue sky and soft shadows. Build a directed rooftop graph from geometry (jump gaps under 4.5 m, climbs under 4.5 m, drops under 10 m, plus a few red zip-lines from tall roofs). Click a start and goal roof, run A*, then draw the route as a glowing red tube over Bezier hops that reveals progressively, and send a runner along it. Add a patrol drone with a searchlight cone that flags the runner when spotted, a clean HUD listing hops, distance and move types, orbit controls, and an attract mode that plans random routes." />
+<style>
+:root { --red: #e8202a; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #d6e8f4; font-family: "Helvetica Neue", "Segoe UI", system-ui, sans-serif; }
+canvas { display: block; }
+#panel { position: fixed; left: 24px; top: 24px; width: 230px; background: rgba(255, 255, 255, 0.92); color: #141a20; box-shadow: 0 10px 30px rgba(20, 60, 100, 0.18); pointer-events: none; }
+#panel header { background: var(--red); color: #fff; font-size: 11px; letter-spacing: 4px; padding: 8px 14px; font-weight: 700; }
+#panel .body { padding: 12px 14px 14px; }
+#panel .big { font-size: 34px; font-weight: 200; letter-spacing: -1px; line-height: 1; }
+#panel .big small { font-size: 12px; letter-spacing: 3px; font-weight: 600; margin-left: 4px; }
+#panel dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; margin: 12px 0 0; font-size: 12px; }
+#panel dt { color: #6b7782; letter-spacing: 1px; } #panel dd { margin: 0; font-weight: 600; text-align: right; }
+#status { margin-top: 10px; font-size: 11px; letter-spacing: 3px; color: var(--red); font-weight: 700; min-height: 14px; }
+#hint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); color: #3d566b; font-size: 12px; letter-spacing: 1px; white-space: nowrap; background: rgba(255, 255, 255, 0.7); padding: 6px 14px; }
+@media (max-width: 600px) { #panel { left: 12px; top: 12px; width: 180px; } #panel .big { font-size: 26px; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<div id="panel"><header>ROUTE PLANNER</header><div class="body">
+  <div class="big" id="dist">0<small>M</small></div>
+  <dl><dt>HOPS</dt><dd id="hops">0</dd><dt>JUMPS</dt><dd id="jumps">0</dd><dt>DROPS</dt><dd id="drops">0</dd><dt>CLIMBS</dt><dd id="climbs">0</dd><dt>ZIP-LINES</dt><dd id="zips">0</dd><dt>EST. TIME</dt><dd id="eta">0.0 s</dd></dl>
+  <div id="status"></div>
+</div></div>
+<div id="hint">click a start roof, then a goal roof · drag to orbit</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const RED = 0xe8202a, GRID_X = 9, GRID_Z = 7, PITCH = 12;
+const LIMITS = { jumpGap: 4.5, climb: 4.5, drop: 10 };
+const DISTRICTS = [0xff8a1f, 0x3ec46d, 0x2f8de4];
+let seed = 7331;
+const rnd = () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(1.5, devicePixelRatio)); renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd6e8f4);
+scene.fog = new THREE.Fog(0xd6e8f4, 120, 330);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 1, 900);
+camera.position.set(82, 92, 108);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 8, 0); controls.enableDamping = true; controls.maxPolarAngle = 1.25; controls.minDistance = 60; controls.maxDistance = 240;
+
+scene.add(new THREE.HemisphereLight(0xeaf5ff, 0x8090a0, 1.0));
+const sun = new THREE.DirectionalLight(0xfff2de, 2.4);
+sun.position.set(70, 120, 40); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 10, far: 320 });
+sun.shadow.bias = -0.0005; scene.add(sun);
+
+const BOX = new THREE.BoxGeometry(1, 1, 1);
+const MAT = {
+  concrete: new THREE.MeshStandardMaterial({ color: 0xeef1f4, roughness: 0.88 }),
+  glass: new THREE.MeshPhysicalMaterial({ color: 0x8cc4ec, roughness: 0.12, metalness: 0.25, clearcoat: 1, envMapIntensity: 1.4 }),
+  street: new THREE.MeshStandardMaterial({ color: 0xb9c3cc, roughness: 1 }),
+  trim: new THREE.MeshStandardMaterial({ color: 0xcfd6dd, roughness: 0.7 }),
+  district: DISTRICTS.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 })),
+  red: new THREE.MeshStandardMaterial({ color: RED, emissive: RED, emissiveIntensity: 0.5 }),
+  pick: new THREE.MeshBasicMaterial({ color: RED, transparent: true, opacity: 0.55, depthWrite: false }),
+};
+function box(mat, w, h, d, x, y, z, parent = scene) {
+  const m = new THREE.Mesh(BOX, mat); m.scale.set(w, h, d); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); return m;
+}
+const ground = box(MAT.street, 600, 1, 600, 0, -0.5, 0); ground.castShadow = false;
+
+// City > grid of buildings, heights from smooth waves so neighbours stay climbable
+const roofs = [];
+for (let gx = 0; gx < GRID_X; gx++) for (let gz = 0; gz < GRID_Z; gz++) {
+  const x = (gx - (GRID_X - 1) / 2) * PITCH, z = (gz - (GRID_Z - 1) / 2) * PITCH;
+  const h = Math.round(9 + 7 * Math.sin(gx * 0.7 + 0.4) + 5 * Math.cos(gz * 0.9 - gx * 0.3) + rnd() * 4 + (rnd() < 0.08 ? 12 : 0));
+  const w = 7.5 + rnd() * 2.5, d = 7.5 + rnd() * 2.5, glass = rnd() < 0.35, district = Math.min(2, Math.floor(gx / 3));
+  const body = box(glass ? MAT.glass : MAT.concrete, w, h, d, x, h / 2, z);
+  box(MAT.district[district], w + 0.06, 0.7, d + 0.06, x, h - 1.4, z);
+  box(MAT.trim, w, 0.4, d, x, h + 0.2, z);
+  decorateRoof(x, h + 0.4, z, w, d);
+  roofs.push({ id: roofs.length, x, z, h: h + 0.4, w, d, body });
+}
+function decorateRoof(x, y, z, w, d) {
+  const n = 1 + Math.floor(rnd() * 3);
+  for (let i = 0; i < n; i++) box(MAT.trim, 1 + rnd() * 1.5, 0.6 + rnd() * 1.2, 1 + rnd() * 1.5, x + (rnd() - 0.5) * (w - 3), y + 0.5, z + (rnd() - 0.5) * (d - 3));
+}
+
+// Horizon > ring of glass towers
+for (let i = 0; i < 70; i++) {
+  const a = (i / 70) * Math.PI * 2 + rnd() * 0.05, r = 110 + rnd() * 120, h = 30 + rnd() * rnd() * 120;
+  box(rnd() < 0.6 ? MAT.glass : MAT.concrete, 10 + rnd() * 14, h, 10 + rnd() * 14, Math.cos(a) * r, h / 2, Math.sin(a) * r).castShadow = false;
+}
+
+// Graph > directed edges from roof geometry; cost in seconds of running
+const SPEED = 7;
+const edges = roofs.map(() => []);
+function link(a, b, move, cost) { edges[a.id].push({ to: b.id, move, cost }); }
+for (const a of roofs) for (const b of roofs) {
+  if (a === b) continue;
+  const dx = Math.abs(a.x - b.x), dz = Math.abs(a.z - b.z);
+  if (dx > PITCH + 0.1 || dz > PITCH + 0.1) continue;
+  const gap = Math.max(dx - (a.w + b.w) / 2, dz - (a.d + b.d) / 2, 0), dh = b.h - a.h, dist = Math.hypot(dx, dz);
+  if (gap > LIMITS.jumpGap) continue;
+  if (dh > LIMITS.climb) continue;
+  if (-dh > LIMITS.drop) continue;
+  const move = dh > 1.2 ? 'climb' : dh < -2.5 ? 'drop' : 'jump';
+  link(a, b, move, dist / SPEED + (move === 'climb' ? 1.6 + dh * 0.3 : move === 'drop' ? 0.6 : 0.3));
+}
+// Graph > zip-lines: tall roof to a much lower roof three blocks out
+const zipLine = new THREE.LineBasicMaterial({ color: RED });
+for (const a of [...roofs].sort((p, q) => q.h - p.h).slice(0, 4)) {
+  const b = roofs.filter((r) => r.h < a.h - 7 && Math.hypot(r.x - a.x, r.z - a.z) > PITCH * 2.5 && Math.hypot(r.x - a.x, r.z - a.z) < PITCH * 3.6).sort(() => rnd() - 0.5)[0];
+  if (!b) continue;
+  link(a, b, 'zip', Math.hypot(a.x - b.x, a.z - b.z) / 14);
+  scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a.x, a.h + 3, a.z), new THREE.Vector3(b.x, b.h + 1.2, b.z)]), zipLine));
+  box(MAT.red, 0.3, 3, 0.3, a.x, a.h + 1.5, a.z); box(MAT.red, 0.3, 1.2, 0.3, b.x, b.h + 0.6, b.z);
+}
+
+// A* > straight-line distance at zip speed keeps heuristic admissible
+function planRoute(startId, goalId) {
+  const goal = roofs[goalId], h = (id) => Math.hypot(roofs[id].x - goal.x, roofs[id].z - goal.z) / 14;
+  const g = new Map([[startId, 0]]), came = new Map(), open = new Set([startId]);
+  while (open.size) {
+    let cur = null;
+    for (const id of open) if (cur === null || g.get(id) + h(id) < g.get(cur) + h(cur)) cur = id;
+    if (cur === goalId) return rebuildPath(came, cur);
+    open.delete(cur);
+    for (const e of edges[cur]) {
+      const cost = g.get(cur) + e.cost;
+      if (cost < (g.get(e.to) ?? Infinity)) { g.set(e.to, cost); came.set(e.to, { from: cur, edge: e }); open.add(e.to); }
+    }
+  }
+  return null;
+}
+function rebuildPath(came, id) {
+  const hops = [];
+  while (came.has(id)) { const step = came.get(id); hops.unshift({ from: step.from, ...step.edge }); id = step.from; }
+  return hops;
+}
+
+// Route > chained Bezier hops as one tube, revealed by draw range
+const routeMat = new THREE.MeshStandardMaterial({ color: RED, emissive: RED, emissiveIntensity: 0.35 });
+const runnerDot = new THREE.Mesh(new THREE.SphereGeometry(0.7, 20, 14), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: RED, emissiveIntensity: 0.3 }));
+runnerDot.castShadow = true; scene.add(runnerDot);
+const markers = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.2, 32), MAT.pick); m.visible = false; scene.add(m); return m; });
+let route = null;
+const roofPoint = (r, lift = 0.6) => new THREE.Vector3(r.x, r.h + lift, r.z);
+function hopCurve(hop) {
+  const a = roofPoint(roofs[hop.from]), b = roofPoint(roofs[hop.to]);
+  if (hop.move === 'zip') return new THREE.LineCurve3(a.clone().setY(a.y + 2.4), b.clone().setY(b.y + 0.6));
+  const mid = a.clone().lerp(b, 0.5); mid.y = Math.max(a.y, b.y) + 2 + a.distanceTo(b) * 0.08;
+  return new THREE.QuadraticBezierCurve3(a, mid, b);
+}
+function showRoute(hops) {
+  if (route) { scene.remove(route.mesh); route.mesh.geometry.dispose(); }
+  const path = new THREE.CurvePath(); hops.forEach((hop) => path.add(hopCurve(hop)));
+  const geo = new THREE.TubeGeometry(path, hops.length * 40, 0.28, 8, false);
+  geo.setDrawRange(0, 0);
+  const mesh = new THREE.Mesh(geo, routeMat); scene.add(mesh);
+  route = { mesh, path, hops, reveal: 0, run: 0, total: hops.reduce((s, h) => s + h.cost, 0) };
+  paintPanel(hops);
+}
+
+const $ = (id) => document.getElementById(id);
+function paintPanel(hops) {
+  const count = (m) => hops.filter((h) => h.move === m).length;
+  const meters = hops.reduce((s, h) => s + Math.hypot(roofs[h.from].x - roofs[h.to].x, roofs[h.from].z - roofs[h.to].z), 0);
+  $('dist').innerHTML = `${Math.round(meters)}<small>M</small>`;
+  $('hops').textContent = hops.length; $('jumps').textContent = count('jump'); $('drops').textContent = count('drop');
+  $('climbs').textContent = count('climb'); $('zips').textContent = count('zip');
+  $('eta').textContent = `${hops.reduce((s, h) => s + h.cost, 0).toFixed(1)} s`;
+}
+function setStatus(text) { $('status').textContent = text; }
+
+// Picking > first roof = start, second = goal
+let pickStart = null;
+function pickRoof(id) {
+  const r = roofs[id];
+  if (pickStart === null) {
+    pickStart = id; markers[1].visible = false; placeMarker(markers[0], r); setStatus('PICK A GOAL'); return;
+  }
+  placeMarker(markers[1], r);
+  plan(pickStart, id); pickStart = null;
+}
+function placeMarker(m, r) { m.position.set(r.x, r.h + 0.15, r.z); m.visible = true; }
+function plan(a, b) {
+  if (a === b) return setStatus('SAME ROOF');
+  placeMarker(markers[0], roofs[a]); placeMarker(markers[1], roofs[b]);
+  const hops = planRoute(a, b);
+  if (!hops) return setStatus('NO ROUTE');
+  setStatus('ROUTE LOCKED'); showRoute(hops);
+}
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let downAt = null, lastInput = -1e9;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; lastInput = performance.now(); });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(roofs.map((r) => r.body), false)[0];
+  if (hit) pickRoof(roofs.find((r) => r.body === hit.object).id);
+});
+addEventListener('wheel', () => (lastInput = performance.now()), { passive: true });
+
+// Drone > patrol loop, rotors, searchlight cone that spots the runner
+const drone = new THREE.Group();
+box(MAT.concrete, 2.2, 0.5, 2.2, 0, 0, 0, drone);
+const rotors = [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]].map(([x, z]) => box(MAT.trim, 1.8, 0.05, 0.18, x, 0.35, z, drone));
+box(MAT.red, 0.4, 0.2, 0.4, 0, -0.35, 0, drone);
+const CONE_H = 26, CONE_R = 7;
+const cone = new THREE.Mesh(new THREE.ConeGeometry(CONE_R, CONE_H, 32, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff6d8, transparent: true, opacity: 0.09, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+cone.position.y = -CONE_H / 2; drone.add(cone); scene.add(drone);
+function flyDrone(t) {
+  drone.position.set(Math.cos(t * 0.13) * 34, 40 + Math.sin(t * 0.5) * 1.5, Math.sin(t * 0.21) * 26);
+  rotors.forEach((r, i) => (r.rotation.y = t * 30 + i));
+  const p = runnerDot.position, dx = p.x - drone.position.x, dz = p.z - drone.position.z, below = drone.position.y - p.y;
+  const spotted = route && below > 0 && below < CONE_H && Math.hypot(dx, dz) < (below / CONE_H) * CONE_R;
+  cone.material.color.set(spotted ? 0xff5050 : 0xfff6d8);
+  if (spotted) setStatus('SPOTTED'); else if ($('status').textContent === 'SPOTTED') setStatus('ROUTE LOCKED');
+}
+
+// Attract > random start/goal that has a decent route
+function randomRoute() {
+  for (let tries = 0; tries < 40; tries++) {
+    const a = Math.floor(rnd() * roofs.length), b = Math.floor(rnd() * roofs.length), hops = a !== b && planRoute(a, b);
+    if (hops && hops.length >= 6) return plan(a, b);
+  }
+}
+
+function fit() { camera.aspect = innerWidth / innerHeight; camera.fov = camera.aspect < 0.8 ? 60 : 38; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+fit(); addEventListener('resize', fit);
+
+const REVEAL_SECS = 1.6;
+let nextAttract = 9;
+randomRoute();
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime, idle = performance.now() - lastInput > 8000;
+  if (route) {
+    route.reveal = Math.min(1, route.reveal + dt / REVEAL_SECS);
+    route.mesh.geometry.setDrawRange(0, Math.floor(route.mesh.geometry.index.count * route.reveal / 6) * 6);
+    if (route.reveal >= 1) route.run = (route.run + dt / Math.max(3, route.total * 0.6)) % 1.15;
+    runnerDot.position.copy(route.path.getPointAt(Math.min(1, route.reveal < 1 ? 0 : route.run)));
+    routeMat.emissiveIntensity = 0.35 + Math.sin(t * 4) * 0.12;
+  }
+  if (idle && t > nextAttract) { nextAttract = t + 9; randomRoute(); }
+  markers.forEach((m, i) => (m.scale.setScalar(1 + Math.sin(t * 3 + i) * 0.08)));
+  flyDrone(t);
+  controls.autoRotate = idle; controls.autoRotateSpeed = 0.4;
+  controls.update(); renderer.render(scene, camera);
+});
+window.__routes = { plan, randomRoute, roofs: () => roofs.length };
+</script>
+</body>
+</html>

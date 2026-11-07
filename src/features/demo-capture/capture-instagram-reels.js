@@ -1,4 +1,4 @@
-// Records the 59 aero demos with sound and builds Instagram reels, covers, compilations and the daily post queue.
+// Records the 64 aero demos with sound and builds Instagram reels, covers, compilations and the daily post queue.
 
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
@@ -139,6 +139,12 @@ async function cleanWorkDir() {
 
 // ---- run ----
 const { all, styles } = await loadAeroStyles();
+// --queue-only: rewrite post-queue.json captions from reel-scripts.js; no recording or rendering
+if (flags.has('--queue-only')) {
+  await writePostQueue(all, OUT);
+  console.log(`queue rewritten: ${join(OUT, 'post-queue.json')}`);
+  process.exit(0);
+}
 const picked = all.filter((d) => !only.length || only.includes(d.name));
 await mkdir(TMP, { recursive: true });
 const server = await ensureServer();

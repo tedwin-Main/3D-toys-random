@@ -25,6 +25,7 @@ const STYLE_MOODS = {
   technozen: { bpm: 80, root: 62, scale: 'major', chords: [0, 3, 0, 4], lead: 'bell', drums: 'none', wet: 0.42, seed: 67, audioName: 'Technozen Spa' },
   space: { bpm: 80, root: 60, scale: 'lydian', chords: [0, 1, 0, 6], lead: 'bell', drums: 'none', wet: 0.42, seed: 71, audioName: 'Space Aero Drift' },
   metro: { bpm: 120, root: 64, scale: 'major', chords: [5, 3, 0, 4], lead: 'pluck', drums: 'pop', seed: 83, audioName: 'Metro Tile Groove' },
+  glasscity: { bpm: 80, root: 57, scale: 'dorian', chords: [0, 5, 3, 6], lead: 'bell', drums: 'none', wet: 0.4, seed: 89, audioName: 'Rooftop Glass Drift' },
   console: { bpm: 100, root: 65, scale: 'lydian', chords: [0, 3, 1, 4], lead: 'marimba', drums: 'soft', seed: 97, audioName: 'Console Menu Loop' },
   y2k: { bpm: 120, root: 62, scale: 'mixolydian', chords: [0, 6, 3, 4], lead: 'pluck', drums: 'pop', seed: 101, audioName: 'Y2K Chrome Pop' },
   mcbling: { bpm: 120, root: 68, scale: 'major', chords: [0, 5, 1, 4], lead: 'glock', drums: 'pop', seed: 113, audioName: 'McBling Sparkle Pop' },

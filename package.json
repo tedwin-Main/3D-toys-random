@@ -13,7 +13,8 @@
     "capacity-test": "node src/features/multiplayer-rooms/room-capacity-test.js",
     "capture": "node src/features/demo-capture/capture-demos.js",
     "instagram": "node src/features/demo-capture/capture-instagram-reels.js",
-    "instagram:upload": "node src/features/demo-capture/upload-reels.js"
+    "instagram:upload": "node src/features/demo-capture/upload-reels.js",
+    "instagram:queue": "node src/features/demo-capture/capture-instagram-reels.js --queue-only"
   },
   "dependencies": {
     "three": "0.160.0",

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Skyline Ambient Synth</title>
+<meta name="category" content="aero" />
+<meta name="style" content="glasscity" />
+<meta name="order" content="64" />
+<meta name="capture" content="3500" />
+<meta name="tags" content="Web Audio, generative music, lookahead scheduler, convolution reverb, per-layer analysers, Canvas 2D" />
+<meta name="description" content="A generative ambient-electronica machine dressed as a clean white skyline: soft detuned pads, a delayed arpeggio, a warm sub bass, a quiet pulse and glassy bells, all synthesized live in A dorian at 76 bpm. Every tower is wired to one layer, so its windows light up with that layer's level, and tapping a tower mutes or wakes its layer. A small red runner hops roof to roof on the beat. Hard because the music is scheduled ahead of time with a lookahead clock (no audio files), the reverb impulse is generated noise, and each layer has its own analyser driving the towers." />
+<meta name="prompt" content="Make a single-file generative ambient-electronica toy with Web Audio and Canvas 2D in a clean white-city style: a lookahead scheduler at 76 bpm in A dorian over a four-chord loop, five layers (detuned saw pads through a breathing low-pass, a dotted-eighth delayed triangle arpeggio, a sub bass, a soft kick and offbeat noise pulse, and sparse inharmonic bells into a generated convolution reverb), each layer on its own gain and analyser. Draw a skyline of glass towers where each tower's lit windows follow its layer's level, tap a tower or legend chip to toggle its layer, show the current chord, and animate a red runner dot hopping between rooftops on each beat. Visuals keep animating with simulated levels before the first tap starts audio." />
+<style>
+:root { --red: #e8202a; --ink: #12181e; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #cfe3f2; font-family: "Helvetica Neue", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: pointer; }
+#hud { position: fixed; left: 26px; top: 22px; color: var(--ink); pointer-events: none; }
+#hud .k { font-size: 11px; letter-spacing: 5px; font-weight: 700; }
+#hud .k::before { content: ''; display: inline-block; width: 10px; height: 10px; background: var(--red); margin-right: 10px; vertical-align: -1px; }
+#chord { font-size: 54px; font-weight: 200; letter-spacing: -1px; margin-top: 2px; }
+#meta { font-size: 11px; letter-spacing: 3px; color: #51677a; }
+#legend { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 32px); }
+#legend button { font-family: inherit; font-size: 11px; letter-spacing: 3px; font-weight: 700; padding: 9px 14px; border: 0; cursor: pointer; background: rgba(255, 255, 255, 0.9); color: #9aa7b2; }
+#legend button i { display: inline-block; width: 8px; height: 8px; margin-right: 8px; vertical-align: 0; opacity: 0.35; }
+#legend button.on { color: var(--ink); } #legend button.on i { opacity: 1; }
+#start { position: fixed; right: 26px; top: 26px; font-size: 11px; letter-spacing: 4px; font-weight: 700; color: #fff; background: var(--red); padding: 10px 16px; pointer-events: none; transition: opacity 0.4s; }
+@media (max-width: 600px) { #chord { font-size: 38px; } #hud { left: 16px; top: 16px; } #start { right: 14px; top: 16px; } #legend button { padding: 7px 9px; letter-spacing: 1px; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div class="k">SKYLINE AMBIENT</div><div id="chord">Am9</div><div id="meta">76 BPM · A DORIAN · BAR 1</div></div>
+<div id="start">TAP FOR SOUND</div>
+<div id="legend"></div>
+<script>
+const BPM = 76, STEP_SECS = 60 / BPM / 4, STEPS_PER_BAR = 16, LOOKAHEAD = 0.12;
+const CHORDS = [
+  { name: 'Am9', notes: [57, 60, 64, 67, 71] }, { name: 'Fmaj7', notes: [53, 57, 60, 64, 69] },
+  { name: 'Cmaj9', notes: [48, 55, 59, 62, 64] }, { name: 'G6/B', notes: [47, 55, 59, 62, 64] },
+];
+const LAYERS = [
+  { id: 'pad', label: 'PAD', color: '#2f8de4' }, { id: 'arp', label: 'ARP', color: '#e8202a' },
+  { id: 'bass', label: 'BASS', color: '#ff8a1f' }, { id: 'pulse', label: 'PULSE', color: '#12181e' },
+  { id: 'bells', label: 'BELLS', color: '#3ec46d' },
+];
+const ARP_PATTERN = [0, 2, 4, 1, 3, 2, 4, 1, 0, 3, 2, 4, 1, 2, 3, 4];
+const hz = (midi) => 440 * 2 ** ((midi - 69) / 12);
+let seed = 4242;
+const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+// Audio > graph: layer gain, layer analyser, master compressor; reverb + delay sends
+let ac = null, master, reverb, delay;
+const layerState = LAYERS.map(() => ({ on: true, gain: null, analyser: null, buf: null, level: 0, peak: 0 }));
+function buildAudio() {
+  ac = new AudioContext();
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 3;
+  master = ac.createGain(); master.gain.value = 0.7; master.connect(comp).connect(ac.destination);
+  reverb = ac.createConvolver(); reverb.buffer = noiseImpulse(3.2); const wet = ac.createGain(); wet.gain.value = 0.55; reverb.connect(wet).connect(master);
+  delay = ac.createDelay(1); delay.delayTime.value = STEP_SECS * 3;
+  const fb = ac.createGain(); fb.gain.value = 0.38; delay.connect(fb).connect(delay); delay.connect(reverb);
+  layerState.forEach((s) => {
+    s.gain = ac.createGain(); s.analyser = ac.createAnalyser(); s.analyser.fftSize = 512; s.buf = new Float32Array(512);
+    s.gain.connect(s.analyser).connect(master); s.gain.gain.value = s.on ? 1 : 0;
+  });
+  delay.connect(layerState[1].gain);
+}
+function noiseImpulse(secs) {
+  const len = ac.sampleRate * secs, buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 2.6; }
+  return buf;
+}
+function envelope(node, t, attack, peak, release) {
+  node.gain.setValueAtTime(0.0001, t); node.gain.exponentialRampToValueAtTime(peak, t + attack); node.gain.exponentialRampToValueAtTime(0.0001, t + attack + release);
+}
+function tone(type, freq, t, attack, peak, release, out, detune = 0) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.value = freq; o.detune.value = detune;
+  envelope(g, t, attack, peak, release); o.connect(g).connect(out); o.start(t); o.stop(t + attack + release + 0.05);
+  return g;
+}
+
+// Voices > one function per layer, scheduled at time t
+function playPad(chord, t) {
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(500, t); lp.frequency.linearRampToValueAtTime(1400, t + 1.6); lp.frequency.linearRampToValueAtTime(600, t + 3.4); lp.Q.value = 2;
+  lp.connect(layerState[0].gain); lp.connect(reverb);
+  chord.notes.forEach((n) => [-8, 8].forEach((cents) => tone('sawtooth', hz(n), t, 1.1, 0.025, 2.6, lp, cents)));
+}
+function playArp(chord, step, t) {
+  if (step % 2 && rnd() < 0.35) return;
+  const g = tone('triangle', hz(chord.notes[ARP_PATTERN[step]] + 12), t, 0.005, 0.07, 0.28, layerState[1].gain);
+  g.connect(delay);
+}
+function playBass(chord, step, t) {
+  if (![0, 6, 8, 14].includes(step)) return;
+  tone('sine', hz(chord.notes[0] - 12), t, 0.02, step % 8 ? 0.16 : 0.3, step % 8 ? 0.4 : 1.2, layerState[2].gain);
+}
+function playPulse(step, t) {
+  const out = layerState[3].gain;
+  if (step % 8 === 0) { const o = ac.createOscillator(), g = ac.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18); envelope(g, t, 0.004, 0.45, 0.3); o.connect(g).connect(out); o.start(t); o.stop(t + 0.4); }
+  if (step % 4 === 2) {
+    const src = ac.createBufferSource(), hp = ac.createBiquadFilter(), g = ac.createGain();
+    src.buffer = reverb.buffer; hp.type = 'highpass'; hp.frequency.value = 7000; envelope(g, t, 0.002, 0.12, 0.06);
+    src.connect(hp).connect(g).connect(out); src.start(t, rnd() * 0.5, 0.1);
+  }
+}
+function playBells(chord, step, t) {
+  if (step % 2 || rnd() > 0.18) return;
+  const f = hz(chord.notes[Math.floor(rnd() * chord.notes.length)] + 24);
+  [[1, 0.06, 2.4], [2.76, 0.02, 1.2], [5.4, 0.008, 0.6]].forEach(([m, v, r]) => tone('sine', f * m, t, 0.003, v, r, layerState[4].gain).connect(reverb));
+}
+
+// Scheduler > lookahead clock queues steps slightly ahead of audio time
+let nextStepTime = 0, stepIndex = 0;
+function schedule() {
+  while (nextStepTime < ac.currentTime + LOOKAHEAD) {
+    const bar = Math.floor(stepIndex / STEPS_PER_BAR), step = stepIndex % STEPS_PER_BAR, chord = CHORDS[bar % CHORDS.length], t = nextStepTime;
+    if (step === 0) playPad(chord, t);
+    playArp(chord, step, t); playBass(chord, step, t); playPulse(step, t); playBells(chord, step, t);
+    nextStepTime += STEP_SECS; stepIndex++;
+  }
+}
+function unlockAudio() {
+  if (ac) return;
+  try { buildAudio(); } catch { return; }
+  nextStepTime = ac.currentTime + 0.1; setInterval(schedule, 25);
+  document.getElementById('start').style.opacity = 0;
+}
+
+function toggleLayer(i) {
+  const s = layerState[i]; s.on = !s.on;
+  if (s.gain) s.gain.gain.setTargetAtTime(s.on ? 1 : 0, ac.currentTime, 0.15);
+  document.querySelectorAll('#legend button')[i].classList.toggle('on', s.on);
+}
+
+// Clock > beat phase from audio time, or wall clock before sound starts
+const t0 = performance.now();
+function musicTime() { return ac ? ac.currentTime - (nextStepTime - stepIndex * STEP_SECS) : (performance.now() - t0) / 1000; }
+function readLevels(t) {
+  layerState.forEach((s, i) => {
+    let target;
+    // auto-gain: level relative to this layer's slowly decaying peak, so quiet layers still fill their tower
+    if (s.analyser) { s.analyser.getFloatTimeDomainData(s.buf); let sum = 0; for (const v of s.buf) sum += v * v; const rms = Math.sqrt(sum / s.buf.length); s.peak = Math.max(rms, s.peak * 0.999, 1e-4); target = (rms / s.peak) * 0.95; }
+    else target = 0.45 + 0.35 * Math.sin(t * (0.9 + i * 0.37) + i) * Math.sin(t * 2.6 + i * 2);
+    if (!s.on) target = 0;
+    // meter: jump up on hits, fall slowly so beats read as pulses
+    s.level = target > s.level ? s.level + (target - s.level) * 0.5 : Math.max(target, s.level - 0.012);
+  });
+}
+
+// Skyline > towers assigned to layers in turn, sized once per resize
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+let W = 0, H = 0, towers = [], farTowers = [];
+function layoutSkyline() {
+  const dpr = Math.min(2, devicePixelRatio); W = innerWidth; H = innerHeight;
+  canvas.width = W * dpr; canvas.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  seed = 4242; towers = []; farTowers = [];
+  const ground = H * 0.9;
+  for (let x = -20, i = 0; x < W + 20; i++) { const w = 40 + rnd() * 60; farTowers.push({ x, w, h: H * (0.2 + rnd() * 0.35) }); x += w + 6; }
+  for (let x = W * 0.03, i = 0; x < W * 0.97; i++) {
+    const w = Math.max(46, W * (0.045 + rnd() * 0.035)), h = H * (0.22 + rnd() * 0.42);
+    towers.push({ x, w, top: ground - h, ground, layer: i % LAYERS.length }); x += w + W * 0.012;
+  }
+}
+function drawSky(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2f78c8'); g.addColorStop(0.55, '#a9cfeb'); g.addColorStop(1, '#eef4f8');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  const sx = W * 0.78, sy = H * 0.2, glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, H * 0.45);
+  glow.addColorStop(0, 'rgba(255,252,240,0.95)'); glow.addColorStop(0.08, 'rgba(255,250,235,0.6)'); glow.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let i = 0; i < 5; i++) { const cx = ((i * 0.27 + t * 0.006) % 1.3 - 0.15) * W, cy = H * (0.12 + i * 0.05); ctx.beginPath(); ctx.ellipse(cx, cy, W * 0.12, H * 0.012, 0, 0, Math.PI * 2); ctx.fill(); }
+}
+function drawFarCity() {
+  ctx.fillStyle = 'rgba(190,214,232,0.9)';
+  const ground = H * 0.9;
+  farTowers.forEach((f) => ctx.fillRect(f.x, ground - f.h, f.w, f.h));
+}
+function drawTower(tw) {
+  const s = layerState[tw.layer], layer = LAYERS[tw.layer], h = tw.ground - tw.top;
+  const g = ctx.createLinearGradient(tw.x, 0, tw.x + tw.w, 0);
+  g.addColorStop(0, s.on ? '#7fb2dc' : '#c7d2db'); g.addColorStop(0.5, s.on ? '#a8cdea' : '#d9e0e6'); g.addColorStop(1, s.on ? '#5f97c6' : '#bcc8d2');
+  ctx.fillStyle = g; ctx.fillRect(tw.x, tw.top, tw.w, h);
+  const cols = Math.max(3, Math.floor(tw.w / 11)), rows = Math.floor(h / 14), cw = tw.w / cols, lit = Math.round(rows * s.level);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const y = tw.ground - (r + 1) * 14, on = r < lit;
+    ctx.fillStyle = on ? (r === lit - 1 ? layer.color : 'rgba(255,255,255,0.92)') : 'rgba(255,255,255,0.22)';
+    ctx.fillRect(tw.x + c * cw + 2, y + 3, cw - 4, 9);
+  }
+  ctx.fillStyle = '#f4f6f8'; ctx.fillRect(tw.x - 2, tw.top - 6, tw.w + 4, 6);
+  ctx.fillStyle = layer.color; ctx.globalAlpha = s.on ? 1 : 0.3; ctx.fillRect(tw.x, tw.top + 10, tw.w, 4); ctx.globalAlpha = 1;
+}
+// Runner > hops one roof per beat on a parabola
+function drawRunner(mt) {
+  const beat = mt / (STEP_SECS * 4), i = Math.floor(beat) % towers.length, f = beat % 1;
+  const a = towers[i], b = towers[(i + 1) % towers.length];
+  if (!a || !b || b.x < a.x) return;
+  const ax = a.x + a.w * 0.5, bx = b.x + b.w * 0.5, ay = a.top - 6, by = b.top - 6;
+  const x = ax + (bx - ax) * f, y = ay + (by - ay) * f - Math.sin(f * Math.PI) * 60;
+  ctx.fillStyle = 'rgba(232,32,42,0.25)';
+  for (let k = 1; k <= 6; k++) { const ft = Math.max(0, f - k * 0.04); ctx.beginPath(); ctx.arc(ax + (bx - ax) * ft, ay + (by - ay) * ft - Math.sin(ft * Math.PI) * 60, 5 - k * 0.5, 0, Math.PI * 2); ctx.fill(); }
+  ctx.fillStyle = '#e8202a'; ctx.beginPath(); ctx.arc(x, y - 5, 6, 0, Math.PI * 2); ctx.fill();
+}
+function paintHud(mt) {
+  const bar = Math.floor(mt / (STEP_SECS * STEPS_PER_BAR));
+  document.getElementById('chord').textContent = CHORDS[((bar % CHORDS.length) + CHORDS.length) % CHORDS.length].name;
+  document.getElementById('meta').textContent = `76 BPM · A DORIAN · BAR ${Math.max(1, bar + 1)}`;
+}
+
+// Input > tap a tower toggles its layer; any tap arms audio
+canvas.addEventListener('pointerdown', (e) => {
+  const first = !ac; unlockAudio();
+  if (first) return;
+  const hit = towers.find((tw) => e.clientX >= tw.x && e.clientX <= tw.x + tw.w && e.clientY >= tw.top - 10 && e.clientY <= tw.ground);
+  if (hit) toggleLayer(hit.layer);
+});
+document.getElementById('legend').append(...LAYERS.map((l, i) => {
+  const b = document.createElement('button'); b.className = 'on'; b.innerHTML = `<i style="background:${l.color}"></i>${l.label}`;
+  b.addEventListener('click', () => { unlockAudio(); toggleLayer(i); });
+  return b;
+}));
+
+layoutSkyline(); addEventListener('resize', layoutSkyline);
+function frame() {
+  const t = (performance.now() - t0) / 1000, mt = musicTime();
+  readLevels(t);
+  drawSky(t); drawFarCity();
+  ctx.fillStyle = '#eef3f7'; ctx.fillRect(0, H * 0.9, W, H * 0.1);
+  towers.forEach(drawTower); drawRunner(mt); paintHud(mt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__ambient = { unlockAudio, toggleLayer, levels: () => layerState.map((s) => +s.level.toFixed(2)) };
+</script>
+</body>
+</html>

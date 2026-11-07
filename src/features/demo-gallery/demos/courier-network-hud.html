@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Courier Network HUD</title>
+<meta name="category" content="aero" />
+<meta name="style" content="glasscity" />
+<meta name="order" content="62" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="SVG isometric map, BFS routing, time-trial splits, text scramble, CSS glass, Web Audio blips" />
+<meta name="description" content="The terminal a rooftop courier would check before a drop, in a sterile white-and-red city interface: an isometric SVG map of three colour-coded districts, a job board of encrypted parcels, a message that unscrambles itself letter by letter, and a time-trial clock with checkpoint splits that go green when you beat par and red when you don't. Pick a job and the route draws itself across the rooftops while the courier pip runs it. Hard because the isometric city, the route and the moving pip are all generated SVG, routing is a BFS over roofs with a climb limit, and the splits are computed against a per-route par time." />
+<meta name="prompt" content="Build a single-file HTML/CSS/SVG courier terminal in a clean white minimal city style with one red accent: an isometric SVG map of an 8x8 rooftop grid in orange, green and blue districts drawn back to front, a job board of parcels with codenames, districts, distance and heat, a decrypted message panel with a letter-scramble reveal, and a time-trial clock with checkpoint pips and green/red splits against par. Selecting a job runs a BFS route over roofs with a climb limit, draws it as an animated dashed red line and moves a courier pip along it. Soft Web Audio blips, mobile layout, and an attract mode that cycles jobs." />
+<style>
+:root { --red: #e8202a; --ink: #12181e; --mute: #7a8792; --line: #dfe5ea; --panel: rgba(255, 255, 255, 0.86); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); font-family: "Helvetica Neue", "Segoe UI", system-ui, sans-serif; background: #eef3f7; }
+body { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: 64px 1fr 40px; gap: 14px; padding: 18px; background: linear-gradient(#cfe4f4, #f4f7fa 55%); }
+.skyline { position: fixed; inset: auto 0 0 0; height: 46vh; z-index: -1; opacity: 0.45; background:
+  linear-gradient(90deg, transparent 4%, #bcd3e6 4% 9%, transparent 9% 12%, #c9dcec 12% 15%, transparent 15% 22%, #b3cbe0 22% 28%, transparent 28% 61%, #c3d7e9 61% 66%, transparent 66% 72%, #b6cee3 72% 79%, transparent 79% 88%, #c8dbeb 88% 93%, transparent 93%) bottom / 100% 100% no-repeat; filter: blur(2px); }
+header { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; background: var(--panel); padding: 0 20px; box-shadow: 0 6px 22px rgba(30, 70, 110, 0.08); }
+.logo { width: 26px; height: 26px; background: var(--red); clip-path: polygon(0 0, 100% 0, 100% 30%, 30% 30%, 30% 100%, 0 100%); }
+header h1 { margin: 0; font-size: 13px; letter-spacing: 6px; font-weight: 700; }
+header .net { margin-left: auto; font-size: 11px; letter-spacing: 3px; color: var(--mute); }
+header .net b { color: var(--red); }
+#mapCard { position: relative; background: var(--panel); box-shadow: 0 6px 22px rgba(30, 70, 110, 0.08); overflow: hidden; }
+#map { width: 100%; height: 100%; display: block; }
+.legend { position: absolute; left: 16px; bottom: 14px; display: flex; gap: 14px; font-size: 10px; letter-spacing: 2px; color: var(--mute); }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
+#timer { position: absolute; right: 18px; top: 16px; text-align: right; }
+#clock { font-size: 46px; font-weight: 200; letter-spacing: -1px; font-variant-numeric: tabular-nums; line-height: 1; }
+#pips { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+#pips span { width: 18px; height: 4px; background: var(--line); transition: background 0.2s; }
+#pips span.hit { background: var(--red); }
+#splits { margin-top: 8px; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 1.6; }
+#splits .ahead { color: #1e9e57; } #splits .behind { color: var(--red); }
+aside { display: grid; grid-template-rows: auto 1fr; gap: 14px; min-height: 0; }
+.card { background: var(--panel); box-shadow: 0 6px 22px rgba(30, 70, 110, 0.08); }
+.card h2 { margin: 0; padding: 10px 16px; font-size: 10px; letter-spacing: 4px; color: #fff; background: var(--ink); font-weight: 700; }
+#msg { padding: 14px 16px 16px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.6; min-height: 112px; }
+#msg .from { color: var(--mute); font-size: 11px; letter-spacing: 2px; margin-bottom: 6px; font-family: inherit; }
+#jobs { overflow: auto; min-height: 0; }
+.job { display: grid; grid-template-columns: 6px 1fr auto; gap: 12px; align-items: center; padding: 12px 16px 12px 0; border-bottom: 1px solid var(--line); cursor: pointer; transition: background 0.2s; }
+.job:hover { background: rgba(232, 32, 42, 0.05); }
+.job.on { background: #fff; box-shadow: inset 3px 0 0 var(--red); }
+.job .tint { width: 6px; height: 100%; }
+.job b { display: block; font-size: 13px; letter-spacing: 2px; }
+.job small { color: var(--mute); font-size: 11px; letter-spacing: 1px; }
+.job .heat { font-size: 11px; letter-spacing: 2px; font-weight: 700; text-align: right; }
+footer { grid-column: 1 / 3; display: flex; align-items: center; overflow: hidden; font-size: 11px; letter-spacing: 3px; color: var(--mute); background: var(--panel); }
+footer span { white-space: nowrap; animation: tick 40s linear infinite; padding-left: 100%; }
+@keyframes tick { to { transform: translateX(-100%); } }
+#route { fill: none; stroke: var(--red); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 10 8; animation: march 0.8s linear infinite; filter: drop-shadow(0 0 4px rgba(232, 32, 42, 0.6)); }
+@keyframes march { to { stroke-dashoffset: -18; } }
+@media (max-width: 760px) {
+  body { grid-template-columns: 1fr; grid-template-rows: 52px 46vh 1fr 34px; padding: 10px; gap: 10px; }
+  header, footer { grid-column: 1; } header .net { display: none; }
+  #clock { font-size: 30px; } #splits { display: none; } #msg { min-height: 84px; font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<div class="skyline"></div>
+<header><div class="logo"></div><h1>COURIER NETWORK</h1><div class="net">RUNNERS ONLINE <b id="online">14</b> · SIGNAL CLEAN</div></header>
+<section id="mapCard">
+  <svg id="map" viewBox="-420 -150 840 600" preserveAspectRatio="xMidYMid meet"><g id="city"></g><polyline id="route" points="" /><g id="cps"></g><circle id="pip" r="7" fill="#12181e" stroke="#fff" stroke-width="3" /></svg>
+  <div id="timer"><div id="clock">00:00.00</div><div id="pips"></div><div id="splits"></div></div>
+  <div class="legend"><span><i style="background:#ff8a1f"></i>HARBOUR</span><span><i style="background:#3ec46d"></i>GARDENS</span><span><i style="background:#2f8de4"></i>CENTRAL</span></div>
+</section>
+<aside>
+  <div class="card"><h2>MESSAGE</h2><div id="msg"><div class="from" id="from">—</div><div id="text"></div></div></div>
+  <div class="card" id="jobs"><h2>OPEN JOBS</h2><div id="jobList"></div></div>
+</aside>
+<footer><span>WEATHER CLEAR · WIND 4 KT NW · PATROL DRONES ACTIVE IN CENTRAL · CRANE 7 OFFLINE · KEEP OFF THE STREETS · STAY ON THE ROOFS · </span></footer>
+<script>
+const GRID = 8, TW = 92, TH = 46, CLIMB_LIMIT = 3;
+const DISTRICTS = [{ name: 'HARBOUR', color: '#ff8a1f' }, { name: 'GARDENS', color: '#3ec46d' }, { name: 'CENTRAL', color: '#2f8de4' }];
+const JOBS = [
+  { code: 'KESTREL', from: [0, 7], to: [7, 1], heat: 2, sender: 'DISPATCH / M', text: 'Parcel is sealed. Drop it at the blue crane before the shift change. Do not touch the street.' },
+  { code: 'LANTERN', from: [6, 7], to: [1, 0], heat: 1, sender: 'DISPATCH / M', text: 'Quiet run. Gardens roofs are clear today. Take the long glass bridge if it is open.' },
+  { code: 'PAPERWEIGHT', from: [0, 0], to: [7, 7], heat: 3, sender: 'UNKNOWN', text: 'They moved the drones to Central. You have ninety seconds once you cross the canal.' },
+  { code: 'ORIGAMI', from: [3, 7], to: [4, 0], heat: 2, sender: 'DISPATCH / M', text: 'Client wants it by hand. Climb the orange tower and wait for the light to blink twice.' },
+  { code: 'STILLWATER', from: [7, 4], to: [0, 3], heat: 1, sender: 'RUNNER / 12', text: 'Owe you one for last week. The harbour vents are hot, so stay high and keep moving.' },
+];
+const $ = (id) => document.getElementById(id);
+const svg = (tag, attrs) => { const el = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+
+// City > heights from smooth waves; district by column band
+const heights = [...Array(GRID)].map((_, x) => [...Array(GRID)].map((_, z) => Math.max(1, Math.round(3 + 2.2 * Math.sin(x * 0.8 + 1) + 1.8 * Math.cos(z * 0.7 - x * 0.2) + ((x * 7 + z * 13) % 5 === 0 ? 3 : 0)))));
+const districtOf = (x) => Math.min(2, Math.floor((x * 3) / GRID));
+const iso = (x, z, h) => [(x - z) * (TW / 2), (x + z) * (TH / 2) - h * 22];
+const roofCenter = (x, z) => iso(x + 0.5, z + 0.5, heights[x][z]);
+const pts = (list) => list.map((p) => p.join(',')).join(' ');
+
+function drawBlock(x, z) {
+  const h = heights[x][z], inset = 0.12;
+  const corner = (dx, dz, hh) => iso(x + dx, z + dz, hh);
+  const a = corner(inset, inset, h), b = corner(1 - inset, inset, h), c = corner(1 - inset, 1 - inset, h), d = corner(inset, 1 - inset, h);
+  const b0 = corner(1 - inset, inset, 0), c0 = corner(1 - inset, 1 - inset, 0), d0 = corner(inset, 1 - inset, 0);
+  const g = svg('g', {});
+  g.append(svg('polygon', { points: pts([d, c, c0, d0]), fill: '#d9e1e8' }));
+  g.append(svg('polygon', { points: pts([b, c, c0, b0]), fill: '#c4cfd9' }));
+  const band = (from, to, fill) => g.append(svg('polygon', { points: pts([from, to, [to[0], to[1] + 6], [from[0], from[1] + 6]]), fill }));
+  const color = DISTRICTS[districtOf(x)].color;
+  band([d[0], d[1] + 14], [c[0], c[1] + 14], color); band([b[0], b[1] + 14], [c[0], c[1] + 14], color);
+  g.append(svg('polygon', { points: pts([a, b, c, d]), fill: '#ffffff', stroke: '#e3e8ed', 'stroke-width': 1 }));
+  if ((x + z * 3) % 4 === 0) { const [cx, cy] = roofCenter(x, z); g.append(svg('rect', { x: cx - 8, y: cy - 12, width: 16, height: 10, fill: '#e7ecf0' })); }
+  return g;
+}
+function drawCity() {
+  const city = $('city');
+  for (let s = 0; s < GRID * 2 - 1; s++) for (let x = 0; x < GRID; x++) { const z = s - x; if (z >= 0 && z < GRID) city.append(drawBlock(x, z)); }
+}
+
+// Routing > BFS over roofs, steps blocked when climb > limit
+function planRoute(from, to) {
+  const key = ([x, z]) => x * GRID + z, came = new Map([[key(from), null]]), queue = [from];
+  while (queue.length) {
+    const cur = queue.shift();
+    if (key(cur) === key(to)) break;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur[0] + dx, nz = cur[1] + dz;
+      if (nx < 0 || nz < 0 || nx >= GRID || nz >= GRID || came.has(key([nx, nz]))) continue;
+      if (heights[nx][nz] - heights[cur[0]][cur[1]] > CLIMB_LIMIT) continue;
+      came.set(key([nx, nz]), cur); queue.push([nx, nz]);
+    }
+  }
+  const path = [];
+  for (let c = to; c; c = came.get(key(c))) path.unshift(c);
+  return path[0] && key(path[0]) === key(from) ? path : [from];
+}
+
+// Run > courier pip, checkpoints every third roof, splits vs par
+const SECS_PER_HOP = 0.9;
+let run = null;
+function startJob(i) {
+  const job = JOBS[i];
+  document.querySelectorAll('.job').forEach((el, k) => el.classList.toggle('on', k === i));
+  const path = planRoute(job.from, job.to), points = path.map(([x, z]) => roofCenter(x, z));
+  $('route').setAttribute('points', pts(points));
+  const checkpoints = path.map((_, k) => k).filter((k) => k > 0 && (k % 3 === 0 || k === path.length - 1));
+  $('cps').replaceChildren(...checkpoints.map((k) => svg('circle', { cx: points[k][0], cy: points[k][1], r: 6, fill: '#fff', stroke: '#e8202a', 'stroke-width': 3 })));
+  $('pips').replaceChildren(...checkpoints.map(() => document.createElement('span')));
+  $('splits').replaceChildren();
+  run = { job, points, checkpoints, start: performance.now(), hit: 0, pace: 0.82 + Math.random() * 0.3 };
+  decode(job.sender, job.text); blip(660);
+}
+function stepRun(now) {
+  if (!run) return;
+  // rAF timestamp can predate a job started this frame, so clamp at zero
+  const elapsed = Math.max(0, (now - run.start) / 1000), hopSecs = SECS_PER_HOP * run.pace, last = run.points.length - 1;
+  const u = Math.min(last, elapsed / hopSecs), k = Math.floor(u), f = u - k, a = run.points[k], b = run.points[Math.min(last, k + 1)];
+  const hopArc = Math.sin(f * Math.PI) * 10;
+  $('pip').setAttribute('cx', a[0] + (b[0] - a[0]) * f); $('pip').setAttribute('cy', a[1] + (b[1] - a[1]) * f - hopArc);
+  $('clock').textContent = clockText(Math.min(elapsed, last * hopSecs));
+  while (run.hit < run.checkpoints.length && u >= run.checkpoints[run.hit]) addSplit(run.checkpoints[run.hit] * hopSecs, run.checkpoints[run.hit] * SECS_PER_HOP);
+}
+function addSplit(time, par) {
+  $('pips').children[run.hit].classList.add('hit');
+  const delta = time - par, row = document.createElement('div');
+  row.className = delta <= 0 ? 'ahead' : 'behind';
+  row.textContent = `CP${run.hit + 1}  ${clockText(time)}  ${delta <= 0 ? '−' : '+'}${Math.abs(delta).toFixed(2)}`;
+  $('splits').append(row); run.hit++; blip(delta <= 0 ? 880 : 440);
+}
+const clockText = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${(s % 60).toFixed(2).padStart(5, '0')}`;
+
+// Message > letters scramble then lock in left to right
+const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*+=/<>';
+let decodeTimer = null;
+function decode(sender, text) {
+  clearInterval(decodeTimer);
+  $('from').textContent = `FROM ${sender}`;
+  let locked = 0;
+  decodeTimer = setInterval(() => {
+    locked = Math.min(text.length, locked + 2);
+    $('text').textContent = text.slice(0, locked) + [...text.slice(locked)].map((c) => (c === ' ' ? ' ' : GLYPHS[Math.floor(Math.random() * GLYPHS.length)])).join('');
+    if (locked >= text.length) clearInterval(decodeTimer);
+  }, 30);
+}
+
+// Jobs > board rows with district tint and heat
+function drawJobs() {
+  $('jobList').replaceChildren(...JOBS.map((job, i) => {
+    const row = document.createElement('div'), d = DISTRICTS[districtOf(job.to[0])], hops = planRoute(job.from, job.to).length - 1;
+    row.className = 'job';
+    row.innerHTML = `<i class="tint" style="background:${d.color}"></i><div><b>${job.code}</b><small>${DISTRICTS[districtOf(job.from[0])].name} → ${d.name} · ${hops * 40} M</small></div><div class="heat" style="color:${job.heat > 2 ? '#e8202a' : '#7a8792'}">HEAT ${'■'.repeat(job.heat)}${'□'.repeat(3 - job.heat)}</div>`;
+    row.addEventListener('click', () => { lastInput = performance.now(); startJob(i); });
+    return row;
+  }));
+}
+
+// Audio > soft sine blips once a gesture arms it
+let ac = null;
+function unlockAudio() { if (!ac) try { ac = new AudioContext(); } catch {} }
+addEventListener('pointerdown', unlockAudio);
+function blip(freq) {
+  if (!ac) return;
+  const t = ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = freq; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.3);
+}
+
+// Attract > next job once the run finishes and nobody touched anything
+let lastInput = -1e9, jobIndex = 0;
+drawCity(); drawJobs(); startJob(0);
+function frame(now) {
+  stepRun(now);
+  const done = run && run.hit >= run.checkpoints.length && now - run.start > (run.points.length * SECS_PER_HOP * run.pace + 2.5) * 1000;
+  if (done && now - lastInput > 8000) startJob((jobIndex = (jobIndex + 1) % JOBS.length));
+  if (Math.random() < 0.004) $('online').textContent = 12 + Math.floor(Math.random() * 6);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__courier = { startJob };
+</script>
+</body>
+</html>
