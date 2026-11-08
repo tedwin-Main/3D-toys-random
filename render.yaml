@@ -19,5 +19,5 @@ services:
       - key: NODE_VERSION
         value: "24"
       # Toy Box feedback: fine-grained PAT, Issues read/write on this repo; set in dashboard
-      - key: GITHUB_TOKEN
+      - key: FEEDBACK_SUBMISSION
         sync: false
