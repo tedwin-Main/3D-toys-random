@@ -69,6 +69,7 @@ import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { keyId } from '../common/key-state.js';
 
 // Scene > Renderer, camera, sky, lights, sea far below the floating holes
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -793,7 +794,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   else lobby.room.toHost({ g: 'p', seq: ++shotSeq, a: +a.toFixed(4), p: +p.toFixed(3) });
 });
 renderer.domElement.addEventListener('pointercancel', () => (aim = null));
-addEventListener('keydown', (e) => { if (e.code === 'Escape') aim = null; if (e.code === 'KeyF' && !e.repeat) setFollow(!follow); });
+addEventListener('keydown', (e) => { if (e.code === 'Escape') aim = null; if (keyId(e) === 'KeyF' && !e.repeat) setFollow(!follow); });
 addEventListener('wheel', (e) => setZoom(zoom * (e.deltaY > 0 ? 1.1 : 0.9)), { passive: true });
 
 // HUD > hole info, leaderboard, banner, scorecard

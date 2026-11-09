@@ -57,6 +57,7 @@ import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
+import { keyId, trackKeys } from '../common/key-state.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer + bloom, neon grid floor, arena walls
@@ -521,7 +522,7 @@ function rideOwn(dt) {
 }
 
 // Input > turns queue (edge-triggered), boost hold, camera toggle, phone joystick + BOOST
-const keys = {};
+const keys = trackKeys();
 let camMode = 0;
 function localTurn(d) {
   if (world.mode !== 'match' || world.phase !== 'play') return;
@@ -536,15 +537,14 @@ function localTurn(d) {
   sendInput();
 }
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
+  const id = keyId(e);
   if (!e.repeat) {
-    if (e.code === 'KeyA' || e.code === 'ArrowLeft') localTurn(-1);
-    if (e.code === 'KeyD' || e.code === 'ArrowRight') localTurn(1);
-    if (e.code === 'KeyC') camMode = (camMode + 1) % 2;
+    if (id === 'KeyA' || id === 'ArrowLeft') localTurn(-1);
+    else if (id === 'KeyD' || id === 'ArrowRight') localTurn(1);
+    else if (id === 'KeyC') camMode = (camMode + 1) % 2;
   }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 // flick stick left/right = one 90° turn; must ease back under 0.3 before the next flick
 let flickArmed = true;
 const pad = createTouchPad({

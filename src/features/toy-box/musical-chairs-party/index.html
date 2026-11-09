@@ -49,6 +49,7 @@ import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, dark club, disco ball, sweeping colored spots
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -544,14 +545,12 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keys + touch stick + shove button
-const keys = {};
+const keys = trackKeys();
 let dashSeq = 0, dashLocal = 0;
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if (e.code === 'Space' && !e.repeat) { dashSeq++; dashLocal = 1; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const dashEl = document.getElementById('dash');
 dashEl.addEventListener('pointerdown', (e) => { e.preventDefault(); dashSeq++; dashLocal = 1; });
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;

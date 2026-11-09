@@ -57,6 +57,7 @@ import { createLobby } from '../common/room-lobby.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
+import { keyId } from '../common/key-state.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, sunny sky, meadow
@@ -410,7 +411,7 @@ function choose(d) {
 }
 pad.querySelectorAll('button').forEach((b) => (b.onclick = () => choose(+b.dataset.d)));
 const KEYS = { KeyW: 0, ArrowUp: 0, KeyD: 1, ArrowRight: 1, KeyS: 2, ArrowDown: 2, KeyA: 3, ArrowLeft: 3, Space: 4 };
-addEventListener('keydown', (e) => { if (e.code in KEYS) { e.preventDefault(); choose(KEYS[e.code]); } });
+addEventListener('keydown', (e) => { const id = keyId(e); if (id in KEYS) { e.preventDefault(); choose(KEYS[id]); } });
 
 // HUD > turn line, D-pad, scoreboard
 const bigEl = document.getElementById('big');

@@ -59,6 +59,7 @@ import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, warm sky, island arena with low rim, candy pillars, bushes
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -473,13 +474,11 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keyboard, touch stick, dash button
-const keys = {}, local = { x: 0, z: 0, dashSeq: 0 };
+const keys = trackKeys(), local = { x: 0, z: 0, dashSeq: 0 };
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if ((e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.dashSeq++;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;
 let stickId = null, sx = 0, sz = 0;
 stick.addEventListener('pointerdown', (e) => { stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });

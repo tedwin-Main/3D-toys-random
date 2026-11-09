@@ -57,6 +57,7 @@ import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, pastel sky, striped carnival plaza, rim wall with bunting, pillars, center carousel
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -517,13 +518,11 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keyboard + phone joystick + DASH button
-const keys = {}, local = { x: 0, z: 0, dashSeq: 0 };
+const keys = trackKeys(), local = { x: 0, z: 0, dashSeq: 0 };
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if ((e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.dashSeq++;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const pad = createTouchPad({ buttons: [{ id: 'dash', label: 'DASH', color: 'rgba(255, 122, 168, 0.75)' }], onStart: gameAudio.unlock });
 pad.onPress('dash', () => local.dashSeq++);
 function readInput() {

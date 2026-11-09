@@ -49,6 +49,7 @@
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { keyId, trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, camera, sky, lights, grass plate with grid
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });
@@ -389,19 +390,17 @@ cv.addEventListener('pointerup', (e) => {
 cv.addEventListener('pointercancel', (e) => { pinch.delete(e.pointerId); pointer = null; });
 cv.addEventListener('pointerleave', () => (hover.ok = false));
 addEventListener('wheel', (e) => { orbit.dist = THREE.MathUtils.clamp(orbit.dist * (e.deltaY > 0 ? 1.1 : 0.9), 8, 90); }, { passive: true });
-const keys = {};
+const keys = trackKeys();
 const TOOL_KEYS = { KeyB: 'place', KeyE: 'erase', KeyP: 'paint', KeyI: 'pick' };
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  keys[e.code] = true;
   if (state.mode !== 'match') return;
-  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); undo(); return; }
-  if (TOOL_KEYS[e.code]) setTool(TOOL_KEYS[e.code]);
+  if ((e.ctrlKey || e.metaKey) && keyId(e) === 'KeyZ') { e.preventDefault(); undo(); return; }
+  if (TOOL_KEYS[keyId(e)]) setTool(TOOL_KEYS[keyId(e)]);
   const n = e.code.startsWith('Digit') ? +e.code.slice(5) : NaN;
   if (n >= 1 && n <= 9) setColor(n - 1 + (e.shiftKey ? 9 : 0));
   if (n === 0) setColor(9);
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 function undo() { const u = undoStack.pop(); if (!u) return; localEdit(u); undoStack.pop(); sfx.erase(0.6); }
 
 // HUD > tool buttons, palette, info line, builders list

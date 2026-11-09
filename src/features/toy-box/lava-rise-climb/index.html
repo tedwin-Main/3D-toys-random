@@ -49,6 +49,7 @@ import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, hot sky, lava glow light
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -530,14 +531,12 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > camera-relative WASD + jump, touch stick + jump button
-const keys = {};
+const keys = trackKeys();
 let jumpPress = 0, jumpSeq = 0;
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if (e.code === 'Space' && !e.repeat) jumpPress = 1;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 document.getElementById('jump').addEventListener('pointerdown', (e) => { e.preventDefault(); jumpPress = 1; });
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;
 let stickId = null, sx = 0, sz = 0;

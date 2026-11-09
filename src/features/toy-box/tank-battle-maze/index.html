@@ -59,6 +59,7 @@ import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, camera, lights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -626,14 +627,12 @@ function boomLite(p) { for (let i = 0; i < 14; i++) { const a = rng() * Math.PI 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keyboard + mouse aim (ground raycast) + twin touch sticks
-const keys = {};
+const keys = trackKeys();
 const local = { t: 0, r: 0, aim: 0, fireSeq: 0, aimSet: false };
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if (e.code === 'Space' && !e.repeat) local.fireSeq++;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const mouse = new THREE.Vector2(), ray = new THREE.Raycaster(), groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.2), hit = new THREE.Vector3();
 let mouseActive = false;
 renderer.domElement.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') { mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); mouseActive = true; } });

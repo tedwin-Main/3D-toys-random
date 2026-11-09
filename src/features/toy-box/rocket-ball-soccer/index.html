@@ -55,6 +55,7 @@ import { createServerMatchClient } from '../common/server-run/server-match-clien
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { keyId, trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, night stadium, floodlights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -351,14 +352,12 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keys + touch stick (up = gas, sideways = steer)
-const keys = {};
+const keys = trackKeys();
 let ballCam = true;
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
-  if (e.code === 'KeyC' && !e.repeat) ballCam = !ballCam;
+  if (keyId(e) === 'KeyC' && !e.repeat) ballCam = !ballCam;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;
 let stickId = null, sx = 0, sz = 0;
 stick.addEventListener('pointerdown', (e) => { stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });

@@ -62,6 +62,7 @@ import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction, blendAngle } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { keyId, trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, camera, sky, sun that follows the camera focus
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -177,7 +178,7 @@ function showTrack() {
   const padMat = new THREE.MeshBasicMaterial({ map: canvasTex(64, 128, (g, w, h) => { g.fillStyle = '#1aa6ff'; g.fillRect(0, 0, w, h); g.fillStyle = '#bff0ff'; for (let y = 0; y < 3; y++) { g.beginPath(); g.moveTo(8, 40 + y * 34); g.lineTo(w / 2, 14 + y * 34); g.lineTo(w - 8, 40 + y * 34); g.lineTo(w - 8, 52 + y * 34); g.lineTo(w / 2, 26 + y * 34); g.lineTo(8, 52 + y * 34); g.fill(); } }), transparent: true });
   for (const p of track.pads) {
     const pad = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 5.5).rotateX(-Math.PI / 2), padMat);
-    pad.position.set(p.x, 0.06, p.z); pad.rotation.y = Math.atan2(track.Tn[p.i].x, track.Tn[p.i].z);
+    pad.position.set(p.x, 0.06, p.z); pad.rotation.y = Math.atan2(track.Tn[p.i].x, track.Tn[p.i].z) + Math.PI; // texture chevrons face local -Z
     trackGroup.add(pad);
   }
   boxMeshes.forEach((b) => scene.remove(b));
@@ -378,17 +379,15 @@ const ord = (n) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 
 const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(2).padStart(5, '0')}`;
 
 // Input > keys + touch buttons
-const keys = {}, touch = {};
+const keys = trackKeys(), touch = {};
 const local = { itemSeq: 0, resetSeq: 0 };
 let camMode = 0;
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
-  if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.itemSeq++;
-  if (e.code === 'KeyR' && !e.repeat) local.resetSeq++;
-  if (e.code === 'KeyC' && !e.repeat) camMode = (camMode + 1) % 2;
+  if ((keyId(e) === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.itemSeq++;
+  if (keyId(e) === 'KeyR' && !e.repeat) local.resetSeq++;
+  if (keyId(e) === 'KeyC' && !e.repeat) camMode = (camMode + 1) % 2;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 // Kart Party > phone controls: joystick steers + gas / brake, ITEM + DRIFT buttons
 const pad = createTouchPad({
   buttons: [{ id: 'item', label: 'ITEM', color: 'rgba(255, 210, 63, 0.55)' }, { id: 'drift', label: 'DRIFT', color: 'rgba(255, 140, 60, 0.55)' }],

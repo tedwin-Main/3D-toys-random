@@ -49,6 +49,7 @@ import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, camera, lights
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -501,13 +502,11 @@ function playEvents(evs) {
 }
 
 // Input > Keyboard + touch stick + dash button
-const keys = {};
+const keys = trackKeys();
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if (['Space', 'ShiftLeft', 'ShiftRight'].includes(e.code) && !e.repeat) local.dashSeq++;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const local = { x: 0, z: 0, dashSeq: 0 };
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;
 let stickId = null, sx = 0, sz = 0;

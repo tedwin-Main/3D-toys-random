@@ -57,6 +57,7 @@ import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, sky, ice sheet, snow banks, lake past the back edge, mountains, trees, igloo
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -552,12 +553,10 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keyboard + phone joystick + SLIDE button (hold to charge, hold again to sweep)
-const keys = {}, local = { x: 0, held: false };
+const keys = trackKeys(), local = { x: 0, held: false };
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const pad = createTouchPad({ buttons: [{ id: 'slide', label: 'SLIDE', color: 'rgba(58, 134, 255, 0.75)' }], onStart: gameAudio.unlock });
 function readInput() {
   local.x = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x, -1, 1);

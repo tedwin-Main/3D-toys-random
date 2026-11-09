@@ -50,6 +50,7 @@ import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, sky, round meadow, outer fields, trees, barn
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -564,13 +565,11 @@ function playEvents(evs) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > keyboard + phone joystick + BARK button
-const keys = {}, local = { x: 0, z: 0, barkSeq: 0 };
+const keys = trackKeys(), local = { x: 0, z: 0, barkSeq: 0 };
 addEventListener('keydown', (e) => {
-  keys[e.code] = true;
   if ((e.code === 'Space' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') && !e.repeat) local.barkSeq++;
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
 });
-addEventListener('keyup', (e) => (keys[e.code] = false));
 const pad = createTouchPad({ buttons: [{ id: 'bark', label: 'BARK', color: 'rgba(184, 242, 106, 0.7)' }], onStart: gameAudio.unlock });
 pad.onPress('bark', () => local.barkSeq++);
 function readInput() {

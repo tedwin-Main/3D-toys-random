@@ -1,13 +1,14 @@
 // Reads party royale controls (keys + touch pad) into camera-relative bean input with press counters.
 
 import { createTouchPad } from '../touch-joystick.js';
+import { keyId, trackKeys } from '../key-state.js';
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'];
 const PREVENT = new Set([...MOVE_KEYS, 'Space', 'ShiftLeft', 'ShiftRight']);
 
 /** Returns { input, read(camYaw), turn }; input = { mx, mz, jumpSeq, diveSeq, grab } */
 export function createPartyInput() {
-  const keys = {};
+  const keys = trackKeys();
   const input = { mx: 0, mz: 0, jumpSeq: 0, diveSeq: 0, grab: false };
   const pad = createTouchPad({
     buttons: [{ id: 'jump', label: 'JUMP', color: 'rgba(255, 210, 63, 0.85)' }, { id: 'dive', label: 'DIVE', color: 'rgba(70, 214, 255, 0.8)' }, { id: 'grab', label: 'GRAB', color: 'rgba(255, 122, 198, 0.8)' }],
@@ -17,13 +18,10 @@ export function createPartyInput() {
 
   addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
-    keys[e.code] = true;
     if (!e.repeat && e.code === 'Space') input.jumpSeq++;
-    if (!e.repeat && (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.code === 'KeyF')) input.diveSeq++;
+    if (!e.repeat && (e.code === 'ShiftLeft' || e.code === 'ShiftRight' || keyId(e) === 'KeyF')) input.diveSeq++;
     if (PREVENT.has(e.code)) e.preventDefault();
   });
-  addEventListener('keyup', (e) => (keys[e.code] = false));
-  addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
   addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0 && e.target.tagName === 'CANVAS') keys.Mouse = true; });
   addEventListener('pointerup', () => (keys.Mouse = false));
 

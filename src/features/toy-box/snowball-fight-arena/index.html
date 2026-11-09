@@ -61,6 +61,7 @@ import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, winter sky, low sun
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -555,9 +556,8 @@ function addFeed(html) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // Input > WASD + mouse aim on the ground, click/hold throws; touch stick + tap to throw
-const keys = {};
-addEventListener('keydown', (e) => { keys[e.code] = true; if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); });
-addEventListener('keyup', (e) => (keys[e.code] = false));
+const keys = trackKeys();
+addEventListener('keydown', (e) => { if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault(); });
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), aimHit = new THREE.Vector3();
 const local = { mx: 0, mz: 0, ax: 0, az: 0, fire: 0, seq: 0, q: [], nextFire: 0, hasAim: false };
 let mouseX = innerWidth / 2, mouseY = innerHeight / 2;
@@ -565,7 +565,7 @@ const cv = renderer.domElement;
 cv.addEventListener('pointermove', (e) => { mouseX = e.clientX; mouseY = e.clientY; local.hasAim = true; });
 cv.addEventListener('pointerdown', (e) => { mouseX = e.clientX; mouseY = e.clientY; local.hasAim = true; local.fire = 1; });
 addEventListener('pointerup', () => (local.fire = 0));
-addEventListener('blur', () => { local.fire = 0; for (const k in keys) keys[k] = false; });
+addEventListener('blur', () => { local.fire = 0; });
 const stick = document.getElementById('stick'), knob = stick.firstElementChild;
 let stickId = null, sx = 0, sz = 0;
 stick.addEventListener('pointerdown', (e) => { e.stopPropagation(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); moveStick(e); });
