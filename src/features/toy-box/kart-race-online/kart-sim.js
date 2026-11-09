@@ -72,8 +72,11 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     let gas = racing || (p.finished && world.mode === 'match') ? p.inGas : 0;
     if (p.finished) gas = Math.min(gas, 0.4);
     if (p.spin > 0) gas = 0;
-    if (gas > 0) vf += 20 * gas * dt * (1 - Math.max(vf, 0) / (off ? 16 : 35 + p.boost * 14));
+    // boost: capped surge to +10 top speed; never multiply velocity (compounds per frame)
+    const bk = Math.min(p.boost, 1);
+    if (gas > 0) vf += 20 * gas * dt * (1 - Math.max(vf, 0) / (off ? 16 : 35 + bk * 10));
     else if (gas < 0) vf -= (vf > 0 ? 34 : 10) * -gas * dt;
+    if (bk > 0 && gas > 0 && !off && vf < 35 + bk * 10) vf += 26 * bk * dt;
     vf *= 1 - (off ? 1.4 : 0.25) * dt;
     if (world.phase !== 'race' || p.spin > 0) vf *= 1 - 2.2 * dt;
     p.steer += (clamp(p.inSteer, -1, 1) - p.steer) * (1 - Math.exp(-dt * 10));
@@ -92,7 +95,6 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     p.boost = Math.max(0, p.boost - dt * 0.7);
     miniTurbo(p, drift && racing, dt);
     if (racing) for (const b of track.pads) if ((b.x - p.x) ** 2 + (b.z - p.z) ** 2 < 7) { if (p.boost < 0.6) emit(['o', p.id]); p.boost = 1; }
-    if (p.boost > 0.5 && gas > 0) { const k = 1 + 3 * dt; p.vx *= k; p.vz *= k; }
     // laps: far half must be visited before the line counts
     if (p.idx > NS * 0.45 && p.idx < NS * 0.55) p.half = true;
     if (p.half && p.idx < NS * 0.1 && p.lastIdx > NS * 0.9) {
