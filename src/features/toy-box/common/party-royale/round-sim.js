@@ -32,14 +32,22 @@ export function createRoundSim({ round, seed, roster, keep }) {
     eliminate(b) { if (b.status !== ACTIVE) return; b.status = OUT; activeCache = null; b.outTick = sim.tick; sim.out.push(b.id); sim.emit('o', b.id); },
     step: () => stepRound(sim),
   };
+  const slots = spawnOrder(seed, roster.length);
   roster.forEach((r, i) => {
-    const b = newBean(r.id, { nick: r.nick, color: r.color, bot: !!r.bot, status: ACTIVE, cp: 0, holding: null, heldBy: 0, holdT: 0, skill: 0.65 + rng() * 0.3, brain: {} });
-    placeAtSpawn(b, course.spawn(i, roster.length));
+    const b = newBean(r.id, { nick: r.nick, color: r.color, bot: !!r.bot, status: ACTIVE, cp: 0, holding: null, heldBy: 0, holdT: 0, skill: 0.65 + rng() * 0.3, brain: {}, slot: slots[i] });
+    placeAtSpawn(b, course.spawn(slots[i], roster.length));
     sim.beans.set(b.id, b); sim.list.push(b);
   });
   course.update(0);
   round.start?.(sim);
   return sim;
+}
+
+// seeded shuffle of start slots (own stream, same on host and guests): join order never decides the front row
+export function spawnOrder(seed, n) {
+  const r = mulberry32(seed ^ 0x5bd1e995), slots = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [slots[i], slots[j]] = [slots[j], slots[i]]; }
+  return slots;
 }
 
 function placeAtSpawn(b, pose) {

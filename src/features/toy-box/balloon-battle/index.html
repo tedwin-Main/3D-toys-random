@@ -50,6 +50,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -250,7 +251,8 @@ function placePick(k) {
   }
 }
 function startMatch() {
-  const ps = [...world.players.values()];
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng);
   ps.forEach((p, k) => { rimSpawn(p, (k / ps.length) * Math.PI * 2); p.pops = 0; p.outs = 0; p.inv = 0; });
   world.picks = [];
   for (let k = 0; k < PICK_N; k++) placePick(k);

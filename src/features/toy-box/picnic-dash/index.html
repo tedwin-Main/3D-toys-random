@@ -54,6 +54,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
 import { createGameAudio } from '../common/game-audio.js';
@@ -215,10 +216,15 @@ function spawnFruit() {
 }
 function newMatchState(mode, P, turns) {
   const n = sizeFor(P.length);
-  // spawns spread round the edge, trees scattered but never cutting the meadow apart
-  const edge = [];
-  for (let k = 0; k < n - 1; k++) edge.push(k, (n - 1) + k * n, n * n - 1 - k, (n - 1 - k) * n);
-  P.forEach((p, k) => Object.assign(p, { at: edge[Math.floor((k * edge.length) / P.length)], lock: false, from: null, bounced: false }));
+  // spawns evenly spaced round the edge from a random start; seats drawn by lot so join order never decides who starts in a corner
+  const ring = [];
+  for (let k = 0; k < n - 1; k++) ring.push(k);
+  for (let k = 0; k < n - 1; k++) ring.push(n - 1 + k * n);
+  for (let k = 0; k < n - 1; k++) ring.push(n * n - 1 - k);
+  for (let k = 0; k < n - 1; k++) ring.push((n - 1 - k) * n);
+  const off = Math.floor(rng() * ring.length), seats = shuffleInPlace([...P.keys()], rng);
+  P.forEach((p, k) => Object.assign(p, { at: ring[(off + Math.floor((seats[k] * ring.length) / P.length)) % ring.length], lock: false, from: null, bounced: false }));
+  // trees scattered but never cutting the meadow apart
   let trees = [];
   for (let tries = 0; tries < 40; tries++) {
     const spawns = new Set(P.map((p) => p.at));
@@ -269,7 +275,8 @@ function bfs(from) {
   return { dist, first };
 }
 function botDir(p) {
-  if (rng() > 0.4 + p.skill * 0.6) return Math.floor(rng() * 5);
+  // skill = focus: weak bots often hop at random
+  if (rng() > 0.2 + p.skill * 0.8) return Math.floor(rng() * 5);
   const mine = bfs(p.at), others = S.P.filter((q) => q !== p).map((q) => bfs(q.at).dist);
   let best = null;
   for (const f of S.fruit) {

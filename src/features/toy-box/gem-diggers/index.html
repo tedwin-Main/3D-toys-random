@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Gem Diggers</title>
 <style>
   :root { --ink: #fff; --card: rgba(18, 24, 14, 0.72); --gem: #5fe3ff; }
@@ -29,8 +29,9 @@
   #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--gem); }
   #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
   @media (pointer: coarse), (max-width: 900px) { #hint { display: none; } }
-  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } #board { top: auto; bottom: 12px; right: 10px; font-size: 11.5px; min-width: 150px; } }
+  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } }
 </style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
 </head>
 <body>
 <div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
@@ -47,8 +48,10 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
+import { reseatTurn } from '../common/turn-seats.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, sky, sun, island under the field
@@ -352,6 +355,8 @@ const lobby = createLobby({
     const P = [];
     for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
     for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.35 + rng() * 0.55 });
+    // shuffle seats so the host doesn't always dig first (Minesweeper Flags picks the starter at random)
+    shuffleInPlace(P, rng);
     S = newMatchState('match', P, settings.clock ?? 15);
     prevS = null; lastSig = '';
   },
@@ -366,15 +371,16 @@ function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.r
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 function onRoster(players) {
   if (S.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id)), cur = S.P[S.turn];
+  const ids = new Set(players.map((p) => p.id)), before = S.P;
   S.P = S.P.filter((p) => p.bot || ids.has(p.id));
   for (const p of players) if (!player(p.id)) {
     if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
     S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
   }
   // keep the shovel with whoever had it (or the next seat if they left)
-  const k = S.P.indexOf(cur);
-  if (k >= 0) S.turn = k; else { S.turn %= Math.max(1, S.P.length); startTurn(); }
+  const seat = reseatTurn(before, S.turn, S.P);
+  S.turn = seat.turn;
+  if (seat.left) startTurn();
 }
 function applyState(s) {
   const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;

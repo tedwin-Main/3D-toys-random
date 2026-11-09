@@ -9,7 +9,7 @@ export const ITEM_ICON = { boost: '🍄', banana: '🍌', shell: '🐢' };
 export const MAX_KARTS = 14;
 const BOT_NAMES = ['Zoom', 'Turbo Tina', 'Revs', 'Skid', 'Nitro', 'Vroom', 'Piston', 'Drift King', 'Lugnut', 'Sparky', 'Gears', 'Torque', 'Clutch', 'Muffler'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const ATTRACT_BOTS = 8, ATTRACT_SEED = 3;
+const ATTRACT_BOTS = 8, ATTRACT_SEED = 3, MT_SHORT = 0.7, MT_LONG = 1.6;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const f2 = (v) => Math.round(v * 100) / 100;
 const rng = Math.random;
@@ -32,7 +32,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
 
   // Game > World
   sim.addKart = (id, nick, color, bot) => {
-    const p = { id, nick, color, bot, x: 0, z: 0, h: 0, vx: 0, vz: 0, steer: 0, idx: 0, lastIdx: 0, lap: 0, half: false, prog: 0, boost: 0, spin: 0, item: null, finished: false, finishT: 0, place: 1, inGas: 0, inSteer: 0, inDrift: 0, itemSeq: 0, lastItem: 0, resetSeq: 0, lastReset: 0, skill: 0.9 + rng() * 0.08, lane: (rng() - 0.5) * W * 0.5, aiItemT: 2 + rng() * 4, vl: 0, vf: 0 };
+    const p = { id, nick, color, bot, x: 0, z: 0, h: 0, vx: 0, vz: 0, steer: 0, idx: 0, lastIdx: 0, lap: 0, half: false, prog: 0, boost: 0, driftT: 0, spin: 0, item: null, finished: false, finishT: 0, place: 1, inGas: 0, inSteer: 0, inDrift: 0, itemSeq: 0, lastItem: 0, resetSeq: 0, lastReset: 0, skill: 0.9 + rng() * 0.08, lane: (rng() - 0.5) * W * 0.5, aiItemT: 2 + rng() * 4, vl: 0, vf: 0 };
     world.karts.set(id, p);
     return p;
   };
@@ -48,10 +48,13 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     return { i, x: track.P[i].x + track.Sd[i].x * side, z: track.P[i].z + track.Sd[i].z * side };
   }
   const heading = (i) => Math.atan2(track.Tn[i].x, track.Tn[i].z);
+  // random grid each race: join order (humans first) never hands out pole position
   function gridAll() {
-    [...world.karts.values()].forEach((p, k) => {
+    const order = [...world.karts.values()];
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+    order.forEach((p, k) => {
       const g = gridSlot(k);
-      Object.assign(p, { x: g.x, z: g.z, h: heading(g.i), vx: 0, vz: 0, idx: g.i, lastIdx: g.i, lap: 0, half: false, boost: 0, spin: 0, item: null, finished: false, finishT: 0 });
+      Object.assign(p, { x: g.x, z: g.z, h: heading(g.i), vx: 0, vz: 0, idx: g.i, lastIdx: g.i, lap: 0, half: false, boost: 0, driftT: 0, spin: 0, item: null, finished: false, finishT: 0 });
     });
   }
   function nearestIdx(x, z, from) {
@@ -87,6 +90,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     p.lastIdx = p.idx;
     p.idx = nearestIdx(p.x, p.z, p.idx).i;
     p.boost = Math.max(0, p.boost - dt * 0.7);
+    miniTurbo(p, drift && racing, dt);
     if (racing) for (const b of track.pads) if ((b.x - p.x) ** 2 + (b.z - p.z) ** 2 < 7) { if (p.boost < 0.6) emit(['o', p.id]); p.boost = 1; }
     if (p.boost > 0.5 && gas > 0) { const k = 1 + 3 * dt; p.vx *= k; p.vz *= k; }
     // laps: far half must be visited before the line counts
@@ -106,6 +110,12 @@ export function createKartSim({ onEnd = () => {} } = {}) {
       const i = p.idx; Object.assign(p, { x: track.P[i].x, z: track.P[i].z, h: heading(i), vx: 0, vz: 0 });
     }
   };
+  // mini-turbo: hold a drift past MT_SHORT, release for a boost; past MT_LONG for a bigger one
+  function miniTurbo(p, drifting, dt) {
+    if (drifting) { p.driftT += dt; return; }
+    if (p.driftT >= MT_SHORT) { p.boost = Math.max(p.boost, p.driftT >= MT_LONG ? 1 : 0.75); emit(['o', p.id]); }
+    p.driftT = 0;
+  }
   function separate(ps) {
     for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
       const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
@@ -135,10 +145,10 @@ export function createKartSim({ onEnd = () => {} } = {}) {
       if (b.t > 0) continue;
       for (const p of ps) if (!p.item && !p.finished && (p.x - b.x) ** 2 + (p.z - b.z) ** 2 < 4) {
         b.t = 3;
-        // rubber-banding: back markers get more shells and boosts
-        const back = p.place / Math.max(ps.length, 1);
-        const r = rng();
-        p.item = r < 0.25 + back * 0.35 ? 'boost' : r < 0.55 + back * 0.2 ? 'shell' : 'banana';
+        // rubber-banding: leader mostly gets bananas (defence), back markers mostly boosts
+        const back = (p.place - 1) / Math.max(ps.length - 1, 1);
+        const r = rng(), boostOdds = 0.1 + back * 0.5;
+        p.item = r < boostOdds ? 'boost' : r < boostOdds + 0.35 ? 'shell' : 'banana';
         emit(['b', p.id]);
         break;
       }

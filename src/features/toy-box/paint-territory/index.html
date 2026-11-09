@@ -49,6 +49,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -256,7 +257,7 @@ const blobs = new Map();
 let events = [], deltas = [];
 const rng = Math.random;
 function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, slot: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, inX: 0, inZ: 0, bombSeq: 0, lastBomb: 0, bombCD: 0, tiles: 0, ai: { t: 0, tx: 0, tz: 0 } };
+  const p = { id, nick, color, bot, slot: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, inX: 0, inZ: 0, bombSeq: 0, lastBomb: 0, bombCD: 0, tiles: 0, ai: { t: 0, tx: 0, tz: 0 }, skill: 0.55 + rng() * 0.4 };
   world.players.set(id, p);
   return p;
 }
@@ -270,7 +271,8 @@ function assignSlots() {
   texDirty = true;
 }
 function spawnAll() {
-  const ps = [...world.players.values()];
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng);
   ps.forEach((p, i) => {
     const a = (i / ps.length) * Math.PI * 2 + Math.PI / 4;
     let x = Math.cos(a) * 17, z = Math.sin(a) * 17;
@@ -359,17 +361,20 @@ function botThink(p, dt) {
   if (ai.t <= 0) {
     ai.t = 0.6 + rng() * 0.6;
     let best = null, bs = -1e9;
-    for (let i = 0; i < 26; i++) {
+    const rivals = [...world.players.values()].filter((q) => q !== p);
+    // skill: weighs more patches, picks steadier, and claims ground rivals won't paint straight back
+    for (let i = 0, n = Math.round(35 * p.skill); i < n; i++) {
       const x = (rng() - 0.5) * (G - 4), z = (rng() - 0.5) * (G - 4), k = tileIdx(x, z);
       if (k < 0 || solid[k]) continue;
       const v = grid[k] === p.slot ? -6 : grid[k] ? 4 : 3;
-      const s = v - Math.hypot(x - p.x, z - p.z) * 0.18;
+      const crowd = rivals.filter((q) => Math.hypot(q.x - x, q.z - z) < 7).length;
+      const s = v - Math.hypot(x - p.x, z - p.z) * 0.18 - crowd * 2.5 * p.skill + rng() * 12 * (1 - p.skill);
       if (s > bs) { bs = s; best = [x, z]; }
     }
     if (best) { ai.tx = best[0]; ai.tz = best[1]; }
     // enemy paint ahead? throw a bomb
     const fx = p.x + Math.sin(p.face) * 7, fz = p.z + Math.cos(p.face) * 7, k = tileIdx(fx, fz);
-    if (k >= 0 && grid[k] && grid[k] !== p.slot && rng() < 0.5) p.bombSeq++;
+    if (k >= 0 && grid[k] && grid[k] !== p.slot && rng() < 0.67 * p.skill) p.bombSeq++;
   }
   const dx = ai.tx - p.x, dz = ai.tz - p.z, l = Math.hypot(dx, dz) || 1;
   // wiggle so trails cover area instead of thin lines

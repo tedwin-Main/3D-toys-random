@@ -43,6 +43,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -234,7 +235,7 @@ let events = [];
 const rng = Math.random;
 
 function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, ang: 0, y: 0, vy: 0, alive: false, falling: false, dashCD: 0, dashT: 0, wins: 0, inX: 0, inZ: 0, dashSeq: 0, lastDash: 0, respawn: 0, aiT: 0, aiX: 0, aiZ: 0 };
+  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, ang: 0, y: 0, vy: 0, alive: false, falling: false, dashCD: 0, dashT: 0, wins: 0, inX: 0, inZ: 0, dashSeq: 0, lastDash: 0, respawn: 0, aiT: 0, aiX: 0, aiZ: 0, skill: 0.55 + rng() * 0.4 };
   world.players.set(id, p);
   return p;
 }
@@ -245,7 +246,8 @@ function removePlayer(id) {
 }
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
 function spawnAll() {
-  const ps = [...world.players.values()];
+  // shuffled slots each round: join order never fixes who starts beside whom
+  const ps = shuffleInPlace([...world.players.values()], rng);
   ps.forEach((p, i) => {
     const a = (i / ps.length) * Math.PI * 2;
     // 14 cars need a wider circle so nobody spawns touching
@@ -331,11 +333,14 @@ function botThink(p, dt) {
   let tx = -p.x, tz = -p.z;
   if (best) { tx = best.x - p.x + best.x * 0.25; tz = best.z - p.z + best.z * 0.25; }
   const r = Math.hypot(p.x, p.z);
-  const edge = THREE.MathUtils.smoothstep(r, world.ring - 4.5, world.ring - 1);
+  // skill = edge sense: sharp bots start backing off the rim sooner (0.75 = old 4.5)
+  const edge = THREE.MathUtils.smoothstep(r, world.ring - (1.5 + 4 * p.skill), world.ring - 1);
   const l = Math.hypot(tx, tz) || 1;
-  p.inX = THREE.MathUtils.lerp(tx / l, -p.x / (r || 1), edge) + (rng() - 0.5) * 0.4;
-  p.inZ = THREE.MathUtils.lerp(tz / l, -p.z / (r || 1), edge) + (rng() - 0.5) * 0.4;
-  if (best && bd < 5 && edge < 0.5 && rng() < 0.35) p.dashSeq++;
+  // skill steadies steering and times dashes (0.75 = old fixed bot)
+  const wob = 1.6 * (1 - p.skill);
+  p.inX = THREE.MathUtils.lerp(tx / l, -p.x / (r || 1), edge) + (rng() - 0.5) * wob;
+  p.inZ = THREE.MathUtils.lerp(tz / l, -p.z / (r || 1), edge) + (rng() - 0.5) * wob;
+  if (best && bd < 5 && edge < 0.5 && rng() < 0.47 * p.skill) p.dashSeq++;
 }
 
 // Game > Phases (host / attract): countdown, fight with shrinking ring, round + match end

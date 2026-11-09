@@ -55,6 +55,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -245,7 +246,8 @@ function addPlayer(id, nick, color, bot) {
 function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
 function spawnAll() {
-  const ps = [...world.players.values()], off = rng() * Math.PI * 2;
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng), off = rng() * Math.PI * 2;
   ps.forEach((p, i) => {
     const a = off + (i / ps.length) * Math.PI * 2;
     Object.assign(p, { x: Math.cos(a) * 21, z: Math.sin(a) * 21, vx: 0, vz: 0, face: Math.atan2(-Math.cos(a), -Math.sin(a)), hits: 0, frozen: 0, inv: 0, ammo: MAX_AMMO, ax: 0, az: 0, pending: [] });
@@ -264,7 +266,8 @@ function throwBall(p, tx, tz) {
   const T = 0.3 + dc / 32, y0 = 1.4, y1 = 0.9;
   const b = { id: world.nextBall++, x: sx, y: y0, z: sz, vx: (p.x + dx - sx) / T, vy: (y1 - y0 + 0.5 * G * T * T) / T, vz: (p.z + dz - sz) / T, owner: p.id };
   world.balls.set(b.id, b);
-  p.ammo--; p.cd = CD + (p.bot ? 0.25 + rng() * 0.5 : 0); p.face = Math.atan2(nx, nz);
+  // throwing ends post-thaw protection
+  p.ammo--; p.cd = CD + (p.bot ? 0.25 + rng() * 0.5 : 0); p.face = Math.atan2(nx, nz); p.inv = 0;
   events.push(['t', p.id]);
   return true;
 }

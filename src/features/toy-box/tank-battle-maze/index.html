@@ -357,6 +357,8 @@ function fire(p) {
     world.shells.push(s);
   }
   p.cd = 0.45;
+  // firing ends spawn protection (no shooting from behind the bubble)
+  p.inv = 0;
   events.push(['f', p.id]);
 }
 function kill(victim, killerId) {

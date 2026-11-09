@@ -121,6 +121,8 @@ function setCell(x, y, z, c) {
   return prev;
 }
 const pops = [];
+// builder credit only for a block that really landed (block cap can refuse it)
+const isNewBlock = (x, y, z, c, prev) => c >= 0 && prev < 0 && cells.has(key(x, y, z));
 const _m = new THREE.Matrix4(), _c = new THREE.Color();
 function rebuild() {
   instKeys = [...cells.keys()];
@@ -255,10 +257,11 @@ const outbox = [];
 function onData(d, from) {
   if (!d || d._lobby || state.mode !== 'match') return;
   const room = lobby.room;
-  if (d.g === 'hello' && room.isHost) room.send({ g: 'full', o: encode() }, { to: from });
+  // late joiner gets the plate plus builder counts, so its scoreboard matches everyone's
+  if (d.g === 'hello' && room.isHost) room.send({ g: 'full', o: encode(), pl: [...state.placed] }, { to: from });
   else if (d.g === 'op' && room.isHost) applyOps(d.o, from, true);
   else if (d.g === 'ops' && !room.isHost) applyOps(d.o, d.by, false);
-  else if (d.g === 'full' && from === room.host) { decodeInto(d.o); pops.length = 0; }
+  else if (d.g === 'full' && from === room.host) { decodeInto(d.o); pops.length = 0; if (Array.isArray(d.pl)) state.placed = new Map(d.pl); }
   else if (d.g === 'cur') {
     const c = remoteCursor(from);
     if (c) { c.last = performance.now(); c.g.visible = d.v; if (d.v) c.target.set(d.x + OX + 0.5, d.y + 0.5, d.z + OZ + 0.5); }
@@ -271,26 +274,39 @@ function applyOps(ops, by, relay) {
     if (![x, y, z, c].every(Number.isInteger) || c < -1 || c >= PALETTE.length) continue;
     const prev = setCell(x, y, z, c);
     if (prev === undefined) continue;
-    if (c >= 0 && prev < 0) state.placed.set(who, (state.placed.get(who) ?? 0) + 1);
+    // host judges new blocks; guests take its 6th-field verdict (own optimistic edits hide prev)
+    const fresh = relay ? isNewBlock(x, y, z, c, prev) : o[5] === 1;
+    if (fresh) credit(who);
     // 5th field = author, so every tab can credit the right builder
-    if (relay) outbox.push([x, y, z, c, who]);
+    if (relay) outbox.push([x, y, z, c, who, fresh ? 1 : 0]);
   }
 }
+const credit = (who) => state.placed.set(who, (state.placed.get(who) ?? 0) + 1);
 // edits from this tab: host applies directly; guest applies optimistically and sends to host
 function localEdit(ops) {
   const room = lobby.room;
   const undo = [];
-  for (const [x, y, z, c] of ops) { const prev = setCell(x, y, z, c); if (prev !== undefined && prev !== c) { undo.push([x, y, z, prev]); if (c >= 0 && prev < 0) state.placed.set(room.me, (state.placed.get(room.me) ?? 0) + 1); } }
+  const relayed = [];
+  for (const [x, y, z, c] of ops) {
+    const prev = setCell(x, y, z, c);
+    if (prev === undefined || prev === c) continue;
+    undo.push([x, y, z, prev]);
+    // only host credits on the spot; guest credit comes back with host's relay
+    const fresh = room.isHost && isNewBlock(x, y, z, c, prev);
+    if (fresh) credit(room.me);
+    relayed.push([x, y, z, c, room.me, fresh ? 1 : 0]);
+  }
   if (!undo.length) return false;
   undoStack.push(undo);
   if (undoStack.length > 200) undoStack.shift();
-  if (room.isHost) outbox.push(...ops.map((o) => [...o.slice(0, 4), room.me])); else room.toHost({ g: 'op', o: ops });
+  if (room.isHost) outbox.push(...relayed); else room.toHost({ g: 'op', o: ops });
   return true;
 }
 setInterval(() => {
   const room = lobby.room;
   if (state.mode !== 'match' || !room) return;
-  if (room.isHost && outbox.length) room.send({ g: 'ops', o: outbox.splice(0), by: room.host });
+  // 400-op chunks: guests apply at most 400 ops per message
+  while (room.isHost && outbox.length) room.send({ g: 'ops', o: outbox.splice(0, 400), by: room.host });
   sendCursor();
 }, 60);
 let curSent = '';

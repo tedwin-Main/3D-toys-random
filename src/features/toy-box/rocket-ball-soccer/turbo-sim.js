@@ -7,7 +7,7 @@ export const STEP = 1 / 60;
 export const L = 30, WD = 18, GOAL_W = 5.5, GOAL_D = 4.5, GOAL_H = 5, CR = 6, BR = 1.5;
 export const TEAM = ['#3fa7ff', '#ff9f43'];
 const BOT_NAMES = ['Striker', 'Keeper', 'Nitro', 'Volley', 'Header', 'Bicycle', 'Panenka', 'Rabona', 'Chip', 'Nutmeg', 'Curler', 'Sweeper', 'Libero', 'Tiki'];
-const MATCH_TIME = 180, CAR_R = 1.35, MAX_CARS = 14, ATTRACT_BOTS = 8, ROLE_EVERY = 0.4;
+const MATCH_TIME = 180, CAR_R = 1.35, MAX_CARS = 14, ATTRACT_BOTS = 8, ROLE_EVERY = 0.4, KICKOFF_BOOST = 0.33; // Rocket League kickoff: every car 33 of 100 boost
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const f2 = (v) => Math.round(v * 100) / 100;
 const rng = Math.random;
@@ -38,7 +38,8 @@ export function createTurboSim({ onEnd = () => {} } = {}) {
       // fan out across own half facing the ball
       team.forEach((p, k) => {
         const row = Math.floor(k / 3), col = k % 3, z = (col - 1) * 9 + (row % 2 ? 4 : 0);
-        Object.assign(p, { x: s * (12 + row * 8), z, h: s < 0 ? Math.PI / 2 : -Math.PI / 2, vx: 0, vz: 0, steer: 0, boost: Math.max(p.boost, 0.35) });
+        // every kickoff resets boost to a third, so a full tank never carries over
+        Object.assign(p, { x: s * (12 + row * 8), z, h: s < 0 ? Math.PI / 2 : -Math.PI / 2, vx: 0, vz: 0, steer: 0, boost: KICKOFF_BOOST });
       });
     }
     world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3;
@@ -221,12 +222,20 @@ export function createTurboSim({ onEnd = () => {} } = {}) {
     for (let i = 0; i < Math.min(bots, MAX_CARS - world.players.size); i++) { const t = smallerTeam(); sim.addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, TEAM[t], true, t); }
     kickoff();
   };
-  // Multiplayer > roster: leavers drop; a joining human takes a bot's place on the smaller team (keeps 14 seats)
+  // Multiplayer > roster: a leaver's car is taken over by a bot (teams stay even); a joining human takes a bot's place on the smaller team (keeps 14 seats)
   sim.syncRoster = (humans) => {
     const ids = new Set(humans.map((h) => h.id));
-    for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) sim.removePlayer(p.id);
+    for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) replaceWithBot(p);
     for (const h of humans) if (!world.players.has(h.id)) joinLate(h);
   };
+  function replaceWithBot(p) {
+    sim.removePlayer(p.id);
+    let id = -1;
+    while (world.players.has(id)) id--;
+    const name = BOT_NAMES[(-id - 1) % BOT_NAMES.length];
+    const bot = sim.addPlayer(id, `${name} 🤖`, TEAM[p.team], true, p.team);
+    Object.assign(bot, { x: p.x, z: p.z, h: p.h, vx: p.vx, vz: p.vz, boost: p.boost });
+  }
   function joinLate(h) {
     const t = smallerTeam();
     if (world.players.size >= MAX_CARS) { const bot = [...world.players.values()].find((q) => q.bot && q.team === t); if (!bot) return; sim.removePlayer(bot.id); }

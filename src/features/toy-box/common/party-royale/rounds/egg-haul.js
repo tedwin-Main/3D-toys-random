@@ -26,7 +26,8 @@ export default {
   },
   start(sim) {
     const { teams } = sim.course;
-    sim.list.forEach((b, i) => (b.team = i % teams));
+    // team follows the start slot so each bean spawns at its own nest
+    sim.list.forEach((b) => (b.team = b.slot % teams));
     const count = teams * 3 + 2;
     sim.data.eggs = Array.from({ length: count }, (_, k) => { const a = k * 2.4, r = 0.6 + (k % 4) * 0.7; return { x: Math.sin(a) * r, z: Math.cos(a) * r, carrier: 0, nest: -1 }; });
   },

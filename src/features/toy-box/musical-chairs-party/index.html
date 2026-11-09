@@ -351,7 +351,7 @@ function botThink(p, dt) {
     if (p.think <= 0 || Math.hypot(p.wx - p.x, p.wz - p.z) < 1) { p.think = 1.2 + rng() * 2; const a = rng() * 6.28, r = Math.sqrt(rng()) * (R - 2); p.wx = Math.cos(a) * r; p.wz = Math.sin(a) * r; }
     const dx = p.wx - p.x, dz = p.wz - p.z, d = Math.hypot(dx, dz) || 1;
     p.mx = (dx / d) * 0.55; p.mz = (dz / d) * 0.55;
-    p.react = 0.12 + (1 - p.skill) * 0.55 + rng() * 0.2;
+    p.react = 0.12 + (1 - p.skill) * 0.8 + rng() * 0.2;
     p.target = -1;
     if (rng() < 0.002) p.dash = 1;
     return;

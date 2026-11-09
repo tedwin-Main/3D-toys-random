@@ -311,12 +311,14 @@ function onChange(prev, cur) {
   if (prev?.ph !== cur.ph || prev?.rd !== cur.rd) {
     if (cur.ph === 'pick') { clearTokens(); myPick = null; buildPad(cur.K); }
     if (cur.ph === 'reveal' && cur.res) {
-      dropTokens(cur.res, cur.P);
-      const w = cur.P.find((p) => p.id === cur.res.win);
+      // own copy of result: throttled background timers can fire after next round clears S.res
+      const res = cur.res;
+      dropTokens(res, cur.P);
+      const w = cur.P.find((p) => p.id === res.win);
       setTimeout(() => {
-        if (w) { sfx.win(w.id === me); flash(`<small>lowest lonely number · +${cur.res.v}</small>🍀 ${esc(w.nick)}`); }
+        if (w) { sfx.win(w.id === me); flash(`<small>lowest lonely number · +${res.v}</small>🍀 ${esc(w.nick)}`); }
         else { sfx.none(); flash('<small>every number was shared</small>Nobody'); }
-      }, Math.min(cur.K, (cur.res.v ?? cur.K)) * 280 + 400);
+      }, Math.min(cur.K, (res.v ?? cur.K)) * 280 + 400);
     }
   }
   if (match) for (const p of cur.P) if (p.lock && !prev?.P?.find((q) => q.id === p.id)?.lock) sfx.lock(p.id === me);

@@ -48,6 +48,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -230,9 +231,11 @@ function clearPlayers() { for (const id of [...world.players.keys()]) removePlay
 function edgeSpawn(p, a) { Object.assign(p, { x: Math.sin(a) * (R_ISLE - 3), z: Math.cos(a) * (R_ISLE - 3), y: 0, vx: 0, vz: 0, vy: 0, face: a + Math.PI, fall: 0, stun: 0, dashT: 0 }); }
 function pickNext(cur) { let n; do n = Math.floor(rng() * ZONES.length); while (n === cur); return n; }
 function startMatch() {
-  const ps = [...world.players.values()];
-  ps.forEach((p, k) => { edgeSpawn(p, (k / ps.length) * Math.PI * 2); p.pts = 0; p.falls = 0; p.lastWhole = 0; });
-  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, zone: 0, next: pickNext(0), hopT: HOP_T, hold: 0, crowd: 0, winner: null });
+  // shuffled slots on a randomly turned ring + random first hill: join order never picks who starts nearest the ring
+  const ps = [...world.players.values()], off = rng() * Math.PI * 2, zone = Math.floor(rng() * ZONES.length);
+  shuffleInPlace(ps, rng);
+  ps.forEach((p, k) => { edgeSpawn(p, off + (k / ps.length) * Math.PI * 2); p.pts = 0; p.falls = 0; p.lastWhole = 0; });
+  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, zone, next: pickNext(zone), hopT: HOP_T, hold: 0, crowd: 0, winner: null });
 }
 
 // Run engine > movement, shove dash, island edge falls + respawn

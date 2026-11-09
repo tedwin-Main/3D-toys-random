@@ -53,6 +53,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -222,7 +223,8 @@ function addPlayer(id, nick, color, bot) {
 function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
 function spawnAll() {
-  const ps = [...world.players.values()], n = ps.length;
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng), n = ps.length;
   ps.forEach((p, k) => { const a = (k / n) * Math.PI * 2; Object.assign(p, { x: Math.sin(a) * 16, z: Math.cos(a) * 16, vx: 0, vz: 0, face: a + Math.PI, alive: true, bomb: false, immune: 0, dashT: 0, dashCD: 0, place: 0 }); });
 }
 function startRound() {
@@ -305,11 +307,13 @@ function botThink(p, dt) {
       if (bd < 3.2 && p.dashCD <= 0 && rng() < p.skill * 0.25) p.dashSeq++;
     }
   } else {
+    // skill = awareness: sharp runners spot a bomb from farther and dash away sooner
     for (const q of others) if (q.bomb) {
       const dx = p.x - q.x, dz = p.z - q.z, d = Math.hypot(dx, dz) || 1;
+      if (d > 4 + 16 * p.skill) continue;
       const w = 1 / Math.max(d - 1, 0.5) ** 1.4;
       tx += (dx / d) * w; tz += (dz / d) * w;
-      if (d < 2.6 && p.dashCD <= 0 && rng() < p.skill * 0.2) p.dashSeq++;
+      if (d < 1.4 + 1.6 * p.skill && p.dashCD <= 0 && rng() < p.skill * 0.2) p.dashSeq++;
     }
     // stay off the rim and out of pillars, with a lazy wander so runners spread out
     const r = Math.hypot(p.x, p.z);

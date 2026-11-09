@@ -43,6 +43,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -284,7 +285,7 @@ const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, players: n
 let events = [];
 const rng = Math.random;
 function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, pen: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, mx: 0, mz: 0, barkSeq: 0, lastBark: 0, barkCD: 0, barkT: 0, score: 0, skill: 0.55 + rng() * 0.4, aim: null, aimT: 0 };
+  const p = { id, nick, color, bot, pen: 99, x: 0, z: 0, vx: 0, vz: 0, face: 0, mx: 0, mz: 0, barkSeq: 0, lastBark: 0, barkCD: 0, barkT: 0, score: 0, skill: 0.55 + rng() * 0.4, aim: null, aimT: 0 };
   world.players.set(id, p);
   return p;
 }
@@ -295,13 +296,15 @@ function spawnSheep(s) {
   // golden fleece is rare and worth 3, so packs of dogs fight over it
   Object.assign(s, { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, dead: 0, gold: rng() < 0.08, boost: 0, wa: rng() * 7, wt: rng() * 2, ws: 0.5 });
 }
-function assignPens() {
+// match start shuffles pens (join order never fixes whose pen sits beside whose); roster changes keep current order
+function assignPens(shuffle = false) {
   const ps = [...world.players.values()];
+  if (shuffle) shuffleInPlace(ps, rng); else ps.sort((a, b) => a.pen - b.pen);
   ps.forEach((p, k) => (p.pen = k));
   buildPens(ps);
 }
 function startMatch() {
-  assignPens();
+  assignPens(true);
   const ps = [...world.players.values()], n = ps.length;
   ps.forEach((p) => { const a = penAngle(p.pen, n); Object.assign(p, { x: Math.sin(a) * (R_FIELD - 4), z: Math.cos(a) * (R_FIELD - 4), vx: 0, vz: 0, face: a + Math.PI, score: 0, barkCD: 0, aim: null }); });
   world.sheep = Array.from({ length: Math.min(50, Math.max(22, 16 + n * 3)) }, () => { const s = {}; spawnSheep(s); return s; });

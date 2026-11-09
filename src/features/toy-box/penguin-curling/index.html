@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Penguin Curling</title>
 <style>
   :root { --ink: #fff; --card: rgba(16, 24, 40, 0.62); }
@@ -32,9 +32,12 @@
   #top b { padding: 0 6px; letter-spacing: 0.15em; color: #7fd1ff; }
   #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
   @media (pointer: coarse) { #hint { display: none; } #power { bottom: 200px; } }
+  /* narrow portrait: phase banner sits above the power bar, clear of the top-right board */
+  @media (max-width: 700px) and (orientation: portrait) { #phase { top: auto; bottom: calc(244px + env(safe-area-inset-bottom, 0px)); font-size: 14px; } }
 </style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
 </head>
-<body>
+<body data-hud-board="top">
 <div id="info" class="card"><div class="a" id="round"></div><div class="m" id="mine"></div></div>
 <div id="phase" class="card"></div>
 <div id="board" class="card"></div>
@@ -263,6 +266,9 @@ function lineUp() {
   const ps = [...world.players.values()], prev = new Map(world.order.map((id, k) => [id, k]));
   if (world.round === 1) ps.sort(() => rng() - 0.5);
   else ps.sort((a, b) => b.score - a.score || (prev.get(a.id) ?? 99) - (prev.get(b.id) ?? 99));
+  // last end's final thrower never opens the next end (no back-to-back throws)
+  const lastThrower = world.order.findLast((id) => world.players.has(id));
+  if (ps.length > 1 && ps[0].id === lastThrower) [ps[0], ps[1]] = [ps[1], ps[0]];
   for (const p of ps) Object.assign(p, { vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, plan: null });
   Object.assign(world, { order: ps.map((p) => p.id), ti: -1, turn: null });
   bench();

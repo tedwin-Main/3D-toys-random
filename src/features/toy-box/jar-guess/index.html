@@ -244,10 +244,10 @@ function placeGuess(id, v) {
 function scoreGuesses(g, n) {
   const ids = Object.keys(g).filter((id) => g[id] != null);
   const err = (id) => Math.abs(g[id] - n);
-  const errs = [...new Set(ids.map(err))].sort((a, b) => a - b);
   const pts = {};
   for (const id of ids) {
-    const rank = errs.indexOf(err(id));
+    // competition rank (1, 2, 2, 4): ties share a place and push the next guess down
+    const rank = ids.filter((o) => err(o) < err(id)).length;
     pts[id] = (RANK_PTS[rank] ?? (err(id) <= n * 0.1 ? 1 : 0)) + (err(id) === 0 ? 3 : 0);
   }
   return pts;

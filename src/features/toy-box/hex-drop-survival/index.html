@@ -49,6 +49,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -198,7 +199,8 @@ function addPlayer(id, nick, color, bot) {
 function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
 function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
 function spawnAll() {
-  const ps = [...world.players.values()], n = ps.length;
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng), n = ps.length;
   ps.forEach((p, k) => {
     const a = (k / n) * Math.PI * 2, r = n > 1 ? 9 : 0;
     Object.assign(p, { x: Math.sin(a) * r, z: Math.cos(a) * r, y: 0, vx: 0, vy: 0, vz: 0, face: a + Math.PI, alive: true, ground: true, jumpBuf: 0, place: 0 });
@@ -276,7 +278,8 @@ function botThink(p, dt) {
   if (p.thinkT <= 0 || tdist < 1.2 || !solidAt(p.tx, p.tz, L)) {
     p.thinkT = 0.5 + rng() * 0.5;
     let best = null, bs = -Infinity;
-    for (let k = 0; k < 40; k++) {
+    // skill = how many tiles it weighs and how steady the pick is
+    for (let k = 0, n = Math.round(10 + 40 * p.skill); k < n; k++) {
       const t = tiles[L * PER + Math.floor(rng() * PER)];
       if (t.state !== 0) continue;
       const d = Math.hypot(t.x - p.x, t.z - p.z);
@@ -284,7 +287,7 @@ function botThink(p, dt) {
       let nb = 0;
       for (const [dq, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]) { const kk = keyIdx.get((t.q + dq) * 100 + t.r + dr); if (kk !== undefined && tiles[L * PER + kk].state === 0) nb++; }
       // also prefer tiles away from the rim and from other beans
-      const sc = nb * 1.4 - d * 0.25 - Math.hypot(t.x, t.z) * 0.06 + rng() * 2;
+      const sc = nb * 1.4 - d * 0.25 - Math.hypot(t.x, t.z) * 0.06 + rng() * 8 * (1 - p.skill);
       if (sc > bs) { bs = sc; best = t; }
     }
     if (best) { p.tx = best.x; p.tz = best.z; }

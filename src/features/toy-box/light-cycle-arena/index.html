@@ -52,6 +52,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -216,7 +217,9 @@ function startRound() {
   grid.fill(0);
   nextGid = 1;
   const ps = [...world.players.values()];
-  const order = SLOTS.map((s, i) => i);
+  // shuffle riders over the slots in use so nobody keeps the same start lane every round
+  const order = SLOTS.map((s, i) => i).slice(0, Math.min(ps.length, SLOTS.length));
+  shuffleInPlace(order, rng);
   ps.forEach((p, k) => {
     const s = SLOTS[order[k % SLOTS.length]];
     Object.assign(p, { x: s.x, z: s.z, dir: s.dir, alive: true, boost: false, energy: 1, corners: [s.x, s.z], cells: [], turns: [], stall: 0, place: 0, gid: nextGid++ });
@@ -330,12 +333,15 @@ function botThink(p, dt) {
   if (!p.alive || world.phase !== 'play') return;
   p.think -= dt;
   const ahead = freeRay(p.x, p.z, p.dir, 30);
-  const danger = ahead < 3 + (p.boost ? 5 : 2.5) * p.skill;
+  const danger = ahead < 1.5 + (p.boost ? 7 : 4) * p.skill;
   if (!danger && p.think > 0) return;
   p.think = 0.25 + rng() * 0.35;
   const opts = [[0, p.dir], [1, (p.dir + 1) % 4], [-1, (p.dir + 3) % 4]].map(([d, dir]) => {
     const ray = freeRay(p.x, p.z, dir, 30);
-    return { d, s: Math.min(area(p.x, p.z, dir, 400), 400) + ray * 2 + (d === 0 ? 6 : 0) + rng() * 10 * (1.1 - p.skill) };
+    // skill = foresight: how much free space it counts, and how steady the pick is
+    // weak riders sometimes judge by the straight ray only and drive into dead ends
+    const look = Math.round(120 + 380 * p.skill), myopic = rng() < 0.6 * (1 - p.skill);
+    return { d, s: (myopic ? 0 : (Math.min(area(p.x, p.z, dir, look), look) / look) * 400) + ray * 2 + (d === 0 ? 6 : 0) + rng() * 40 * (1.1 - p.skill) };
   });
   // rare random wiggle keeps bots from drawing perfect squares
   if (!danger && rng() < 0.08) opts[1 + Math.floor(rng() * 2)].s += 30;

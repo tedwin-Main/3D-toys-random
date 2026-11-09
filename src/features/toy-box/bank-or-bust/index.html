@@ -345,7 +345,7 @@ function onRoster(players) {
     // late joiner: sits out this round, starts level with last place
     if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.total - c.total)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
     const np = newPlayer(p.id, p.nick, p.color, false);
-    np.total = Math.min(...S.P.map((q) => q.total), 0) || 0;
+    np.total = S.P.length ? Math.min(...S.P.map((q) => q.total)) : 0;
     if (S.ph !== 'intro') np.bank = 0;
     S.P.push(np);
   }

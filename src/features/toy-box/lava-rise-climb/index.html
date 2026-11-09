@@ -44,6 +44,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -352,7 +353,8 @@ function botThink(p, dt, t) {
 // Game > Phases: countdown on the base, climb with rising lava, crown or last survivor wins
 let lastBeep = 0;
 function spawnAll() {
-  const ps = [...world.players.values()], off = rng() * 6.28;
+  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
+  const ps = shuffleInPlace([...world.players.values()], rng), off = rng() * 6.28;
   ps.forEach((p, i) => {
     const a = off + (i / ps.length) * Math.PI * 2;
     Object.assign(p, { x: Math.sin(a) * 4.6, y: 0, z: Math.cos(a) * 4.6, vx: 0, vy: 0, vz: 0, face: a, ground: plats[0], jumps: 0, out: false, place: 0, best: 0, target: null });
@@ -390,6 +392,8 @@ function phases(dt) {
 function finish(p) {
   world.winner = p?.id ?? null;
   if (p) p.place = 1;
+  // climbers still up when the crown falls: ranked by height behind the winner, ahead of every lava victim
+  [...world.players.values()].filter((q) => !q.out && q !== p).sort((a, b) => b.y - a.y).forEach((q, k) => (q.place = k + 2));
   world.phase = 'final'; world.t = world.mode === 'attract' ? 5 : 9;
   events.push(['w', world.winner ?? 0]);
 }

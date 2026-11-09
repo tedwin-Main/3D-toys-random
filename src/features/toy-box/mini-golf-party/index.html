@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
 <title>Putt Party</title>
 <style>
   :root { --ink: #fff; --card: rgba(14, 22, 34, 0.66); }
@@ -38,8 +38,15 @@
   #card .bd { color: #5ee07a; font-weight: 800; }
   #card .bg { color: #ff8a8a; }
   #card .foot { opacity: 0.6; font-size: 12px; margin-top: 8px; }
+  #card { max-height: calc(100dvh - 32px); overflow-y: auto; touch-action: pan-x pan-y; }
+  /* touch camera: zoom out, zoom in, follow own ball (wheel / F on desktop) */
+  #camBtns { bottom: calc(14px + env(safe-area-inset-bottom, 0px)); left: calc(14px + env(safe-area-inset-left, 0px)); padding: 6px; display: none; gap: 6px; }
+  #camBtns button { font: inherit; font-size: 18px; font-weight: 900; color: inherit; background: rgba(255, 255, 255, 0.14); border: 0; border-radius: 10px; min-width: 44px; height: 44px; padding: 0 10px; cursor: pointer; }
+  #camBtns button.on { background: #ffd23f; color: #1b2433; }
   @media (pointer: coarse) { #hint { display: none; } }
+  @media (hover: hover) and (pointer: fine) { #camBtns { display: none !important; } }
 </style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
 </head>
 <body>
 <div id="info" class="card"><div class="h" id="holeName"></div><div class="m" id="holeMeta"></div></div>
@@ -48,6 +55,7 @@
 <div id="hint" class="card">On <b>your turn</b>: drag back from anywhere and release to putt · <b>wheel</b> zoom to your ball · <b>F</b> follow ball</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <div id="card" class="card"></div>
+<div id="camBtns" class="card"><button id="zoomOut" aria-label="Zoom out">−</button><button id="zoomIn" aria-label="Zoom in">+</button><button id="followBtn" aria-label="Follow my ball">🎯</button></div>
 
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -56,6 +64,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -95,7 +104,7 @@ const feltTex = canvasTex(128, 128, (g, w, h) => { g.fillStyle = '#fff'; g.fillR
 const arrowTex = canvasTex(64, 64, (g, w, h) => { g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 7; g.lineCap = 'round'; for (const y of [18, 50]) { g.beginPath(); g.moveTo(14, y + 10); g.lineTo(32, y - 6); g.lineTo(50, y + 10); g.stroke(); } });
 const waterTex = canvasTex(128, 128, (g, w, h) => { g.fillStyle = '#2f8fe8'; g.fillRect(0, 0, w, h); g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = 2; for (let i = 0; i < 14; i++) { const x = Math.random() * w, y = Math.random() * h; g.beginPath(); g.arc(x, y, 6 + Math.random() * 10, 0.2, 1.4); g.stroke(); } });
 
-// Holes > map data: '#' wall, '.' felt, 'S' tee, 'H' cup, 'O' bumper, 'X' windmill, '~' water, ':' sand, '^v<>' slope
+// Holes > map data (par set from bot play: avg strokes 2.2-2.4, 2.1-2.4, 2.3-2.5, 1.5-1.8, 5.0, 3.2-3.3): '#' wall, '.' felt, 'S' tee, 'H' cup, 'O' bumper, 'X' windmill, '~' water, ':' sand, '^v<>' slope
 const HOLES = [
   { name: 'First Putt', par: 2, map: [
     '##########',
@@ -130,7 +139,7 @@ const HOLES = [
     '#SS.....#...H.#',
     '###############',
   ] },
-  { name: 'Slip n Slide', par: 3, map: [
+  { name: 'Slip n Slide', par: 2, map: [
     '##############',
     '#SSS.........#',
     '#SSS.........#',
@@ -140,13 +149,13 @@ const HOLES = [
     '      #~~..H#',
     '      #######',
   ] },
-  { name: 'Sand Snake', par: 4, map: [
+  { name: 'Sand Snake', par: 5, map: [
     '###########',
     '#SSS......#',
     '#SSS......#',
     '#######...#',
     '#...:::...#',
-    '#...:::...#',
+    '#.........#',
     '#...#######',
     '#...O.....#',
     '#.......H.#',
@@ -166,7 +175,7 @@ const HOLES = [
     '################',
   ] },
 ];
-const T = 2, R = 0.2, SUB = 1 / 120, MAX_STROKES = 8, MAX_ROLL = 15, TURN_GAP = 0.6;
+const T = 2, R = 0.2, SUB = 1 / 120, MAX_STROKES = 6, MAX_ROLL = 15, TURN_GAP = 0.6;
 const SLOPE = { '^': [0, -1], v: [0, 1], '>': [1, 0], '<': [-1, 0] };
 const solid = (ch) => ch === '#' || ch === ' ';
 let H = null;
@@ -464,8 +473,8 @@ const sfx = {
 // Game > World
 const BOT_NAMES = ['Birdie', 'Bogey Bob', 'Chip', 'Eagle Eye', 'Fore!', 'Gimme', 'Hacker', 'Lumpy', 'Mulligan', 'Putty', 'Sandy', 'Tee-Rex', 'Albatross', 'Shank'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-// turn: whose putt it is; rolling: that putt is still moving; tt: shot clock (or gap before next turn); order: tee-off order
-const world = { mode: 'attract', phase: 'intro', t: 2.5, hole: 0, ht: 0, balls: new Map(), turn: null, rolling: false, roll: 0, tt: 0, clock: 20, order: [] };
+// turn: whose putt it is; rolling: that putt is still moving; tt: shot clock (or gap before next turn); order: tee-off order; last: previous putter (host)
+const world = { mode: 'attract', phase: 'intro', t: 2.5, hole: 0, ht: 0, balls: new Map(), turn: null, rolling: false, roll: 0, tt: 0, clock: 20, order: [], last: null };
 let events = [];
 const rng = Math.random;
 function addBall(id, nick, color, bot) {
@@ -474,7 +483,12 @@ function addBall(id, nick, color, bot) {
   world.balls.set(id, b);
   return b;
 }
-function removeBall(id) { world.balls.delete(id); world.order = world.order.filter((o) => o !== id); const g = balls3d.get(id); if (g) { scene.remove(g); balls3d.delete(id); } }
+function removeBall(id) {
+  // last putter leaving: hand "last" to the seat before them so rotation still reaches whoever sat next
+  if (world.last === id) { const k = world.order.indexOf(id), n = world.order.length; world.last = n > 1 ? world.order[(k - 1 + n) % n] : null; }
+  world.balls.delete(id); world.order = world.order.filter((o) => o !== id);
+  const g = balls3d.get(id); if (g) { scene.remove(g); balls3d.delete(id); }
+}
 function clearBalls() { for (const id of [...world.balls.keys()]) removeBall(id); world.order = []; }
 function teeSpot(k) {
   // spread across tee tiles, up to 4 balls per tile
@@ -482,11 +496,12 @@ function teeSpot(k) {
   return { x: s.x + o[0], z: s.z + o[1] };
 }
 function loadHole(i) {
-  // honor: best score on the last hole tees off first, ties keep previous order
+  // honor: best score on the last hole tees off first, ties keep previous order; hole 1 order is drawn by lot
+  if (i === 0) shuffleInPlace(world.order, rng);
   if (i > 0) { const prev = new Map(world.order.map((id, k) => [id, k])); world.order.sort((a, c) => (world.balls.get(a)?.scores[i - 1] ?? 99) - (world.balls.get(c)?.scores[i - 1] ?? 99) || prev.get(a) - prev.get(c)); }
   setHole(i);
   world.hole = i; world.ht = 0; world.phase = 'intro'; world.t = world.mode === 'attract' ? 1 : 2.8;
-  world.turn = null; world.rolling = false; world.tt = 0;
+  world.turn = null; world.last = null; world.rolling = false; world.tt = 0;
   world.order.forEach((id, k) => { const b = world.balls.get(id), p = teeSpot(k); Object.assign(b, { x: p.x, z: p.z, vx: 0, vz: 0, lastX: p.x, lastZ: p.z, strokes: 0, teed: false, holed: false, done: false }); });
 }
 function shoot(b, a, p) {
@@ -498,16 +513,17 @@ function shoot(b, a, p) {
   world.rolling = true; world.roll = 0;
   events.push(['k', b.id, +p.toFixed(2)]);
 }
-// Game > Turn order: everyone tees off in honor order, then the ball farthest from the cup (by path) putts next
-function awayFrom(b) {
-  const f = H.field[Math.floor(b.z / T) * H.cols + Math.floor(b.x / T)];
-  return (f < 0 ? 99 : f) * T + 0.3 * Math.hypot(H.cup.x - b.x, H.cup.z - b.z);
-}
+// Game > Turn order: strict rotation in honor order (tee-off included), holed balls skipped
 function nextUp() {
-  const live = world.order.map((id) => world.balls.get(id)).filter((b) => b && !b.done);
-  return live.find((b) => !b.teed) ?? live.sort((a, c) => awayFrom(c) - awayFrom(a))[0] ?? null;
+  const n = world.order.length, from = world.order.indexOf(world.last);
+  for (let k = 1; k <= n; k++) {
+    const b = world.balls.get(world.order[(from + k + n) % n]);
+    if (b && !b.done) return b;
+  }
+  return null;
 }
-function pickUp(b) { b.done = true; b.scores[world.hole] = MAX_STROKES; events.push(['m', b.id]); }
+// minigolf stroke cap: not holed after 6 strokes scores 7
+function pickUp(b) { b.done = true; b.scores[world.hole] = MAX_STROKES + 1; events.push(['m', b.id]); }
 function turns(dt) {
   if (world.phase !== 'play') return;
   const list = [...world.balls.values()];
@@ -528,7 +544,7 @@ function turns(dt) {
     if (world.tt > 0) return;
     const n = nextUp();
     if (!n) return;
-    world.turn = n.id; world.tt = world.clock;
+    world.turn = world.last = n.id; world.tt = world.clock;
     n.botT = world.mode === 'attract' ? 0.5 + rng() * 0.6 : 0.9 + rng() * 1.4;
     events.push(['t', n.id]);
     return;
@@ -536,7 +552,6 @@ function turns(dt) {
   world.tt -= dt;
   if (b.bot) { b.botT -= dt; if (b.botT <= 0) { const s = planShot(b, b.skill); shoot(b, s.a, s.p); } return; }
   // shot clock ran out: penalty stroke, then a weak putt is played for them so the ball still moves
-  // (left resting it would stay farthest from the cup and take every turn until the stroke cap)
   if (world.tt <= 0) {
     b.strokes++; b.teed = true;
     events.push(['o', b.id]);
@@ -565,10 +580,11 @@ function simBalls(dt) {
         Object.assign(b, { x: b.lastX, z: b.lastZ, vx: 0, vz: 0 });
         if (b.id === world.turn) b.strokes++;
       } else if (r === 'c') {
-        // knocked in counts too, at least 1 stroke
-        Object.assign(b, { holed: true, done: true, vx: 0, vz: 0, x: H.cup.x, z: H.cup.z, teed: true });
-        b.scores[world.hole] = Math.max(1, b.strokes);
-        events.push(['c', b.id, Math.max(1, b.strokes)]);
+        // knocked in by a rival counts as holed plus a tap-in stroke (no free hole-in-one off the tee)
+        const strokes = b.id === world.turn ? Math.max(1, b.strokes) : b.strokes + 1;
+        Object.assign(b, { holed: true, done: true, vx: 0, vz: 0, x: H.cup.x, z: H.cup.z, teed: true, strokes });
+        b.scores[world.hole] = strokes;
+        events.push(['c', b.id, strokes]);
       }
     }
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
@@ -611,7 +627,7 @@ function startAttract() {
 // Multiplayer > Lobby
 const lobby = createLobby({
   game: 'mini-golf', title: 'Putt Party', emoji: '⛳', accent: '#5ee07a',
-  blurb: 'Take turns: everyone tees off, then whoever is farthest from the cup putts next. Knock rivals around, dodge water and windmills. 6 holes, lowest total wins.',
+  blurb: 'Take turns: putts rotate around the group in honor order. Knock rivals around, dodge water and windmills. 6 holes, lowest total wins.',
   maxBots: 13, defaultBots: 3, minPlayers: 2,
   note: 'Up to 14 golfers per room (humans + bots). Drag back to aim on phone or mouse. Fewer golfers = quicker rounds.',
   settings: [{ key: 'clock', label: 'Shot clock', options: [[15, '15 s'], [20, '20 s'], [30, '30 s']], value: 20 }],
@@ -626,7 +642,7 @@ const lobby = createLobby({
     world.mode = 'match';
     world.clock = settings.clock ?? 20;
     ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
-    document.getElementById('top').style.display = 'flex';
+    ['top', 'camBtns'].forEach((id) => (document.getElementById(id).style.display = 'flex'));
     syncTop();
     if (!isHost) { world.phase = 'intro'; return; }
     for (const p of lobby.room.players) addBall(p.id, p.nick, p.color, false);
@@ -634,7 +650,7 @@ const lobby = createLobby({
     loadHole(0);
   },
   onLobby() {
-    ['info', 'board', 'top', 'card'].forEach((id) => (document.getElementById(id).style.display = 'none'));
+    ['info', 'board', 'top', 'card', 'camBtns'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
     startAttract();
   },
@@ -648,7 +664,7 @@ function onRoster(players) {
   for (const p of players) if (!world.balls.has(p.id)) {
     // keep 14 seats: a joining human replaces the worst bot
     if (world.balls.size >= 14) { const bot = [...world.balls.values()].filter((b) => b.bot).sort((a, c) => score(c) - score(a))[0]; if (bot) removeBall(bot.id); }
-    // late joiner tees off next (untee'd balls go first)
+    // late joiner takes the last seat; tees off when the rotation reaches them
     const b = addBall(p.id, p.nick, p.color, false);
     for (let h = 0; h < world.hole; h++) b.scores[h] = HOLES[h].par + 2;
     const t = teeSpot(world.balls.size - 1);
@@ -726,14 +742,36 @@ const label = (d) => ({ '-3': 'Albatross!', '-2': 'Eagle!', '-1': 'Birdie!', 0: 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rel = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : `${n}`);
 
-// Input > drag-back slingshot aim on any pointer, wheel zoom, F follow
+// Input > drag-back slingshot aim on any pointer, wheel / pinch / buttons zoom, F / button follow
 const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 function groundAt(e) { ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); const p = new THREE.Vector3(); return ray.ray.intersectPlane(ground, p) ? p : null; }
 const myBall = () => world.balls.get(lobby.room?.me);
 function canAim() { const b = myBall(); return world.mode === 'match' && world.phase === 'play' && b && !b.done && world.turn === b.id && !world.rolling; }
 let aim = null, shotSeq = 0, zoom = 1, follow = false;
+const setZoom = (z) => { zoom = clamp(z, 0.35, 1.25); };
+const followBtn = document.getElementById('followBtn');
+function setFollow(on) { follow = on; followBtn.classList.toggle('on', on); }
+document.getElementById('zoomIn').onclick = () => setZoom(zoom * 0.8);
+document.getElementById('zoomOut').onclick = () => setZoom(zoom * 1.25);
+followBtn.onclick = () => setFollow(!follow);
+// two-finger pinch zooms; a second finger cancels any aim in progress
+const touches = new Map();
+let pinch = null;
+const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+function trackTouch(e) { if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); }
+function dropTouch(e) { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; }
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || !canAim()) return;
+  trackTouch(e);
+  if (touches.size === 2) { aim = null; pinch = { d0: Math.max(1, spread()), z0: zoom }; }
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!touches.has(e.pointerId)) return;
+  trackTouch(e);
+  if (pinch) setZoom((pinch.z0 * pinch.d0) / Math.max(1, spread()));
+});
+for (const ev of ['pointerup', 'pointercancel']) renderer.domElement.addEventListener(ev, dropTouch);
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || pinch || !canAim()) return;
   const g = groundAt(e);
   if (!g) return;
   aim = { id: e.pointerId, g0: g, a: 0, p: 0 };
@@ -755,8 +793,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   else lobby.room.toHost({ g: 'p', seq: ++shotSeq, a: +a.toFixed(4), p: +p.toFixed(3) });
 });
 renderer.domElement.addEventListener('pointercancel', () => (aim = null));
-addEventListener('keydown', (e) => { if (e.code === 'Escape') aim = null; if (e.code === 'KeyF' && !e.repeat) follow = !follow; });
-addEventListener('wheel', (e) => { zoom = clamp(zoom * (e.deltaY > 0 ? 1.1 : 0.9), 0.35, 1.25); }, { passive: true });
+addEventListener('keydown', (e) => { if (e.code === 'Escape') aim = null; if (e.code === 'KeyF' && !e.repeat) setFollow(!follow); });
+addEventListener('wheel', (e) => setZoom(zoom * (e.deltaY > 0 ? 1.1 : 0.9)), { passive: true });
 
 // HUD > hole info, leaderboard, banner, scorecard
 const bigEl = document.getElementById('big');
