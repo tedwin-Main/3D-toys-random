@@ -379,7 +379,8 @@ function phases(dt) {
     const ps = [...world.players.values()], al = ps.filter((p) => !p.out);
     for (const p of al) {
       p.best = Math.max(p.best, p.y);
-      if (p.y < world.lava + 0.15) { p.out = true; world.deaths++; p.place = ps.length - world.deaths + 1; events.push(['b', p.id, f2(p.x), f2(world.lava), f2(p.z)]); }
+      // place from climbers still up: spectators + leavers never shift it
+      if (p.y < world.lava + 0.15) { p.out = true; world.deaths++; p.place = ps.filter((q) => !q.out).length + 1; events.push(['b', p.id, f2(p.x), f2(world.lava), f2(p.z)]); }
       else if (p.ground === crownPlat || (Math.abs(p.y - crownPlat.y) < 0.05 && Math.hypot(p.x - platX(crownPlat, world.time), p.z - platZ(crownPlat, world.time)) < 2.3)) return finish(p);
     }
     const left = ps.filter((p) => !p.out);
@@ -469,7 +470,7 @@ function onData(d, from) {
     remoteJ.set(from, d.j);
     if (d.st) { const v = world.players.get(d.st); if (v) { events.push(['s', from, d.st]); if (v.bot) squash(v); } }
   }
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row

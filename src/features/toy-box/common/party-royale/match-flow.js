@@ -62,6 +62,7 @@ export function createMatchFlow({ show, roundId, rosterNow, send, onRound, onRes
     // a human left mid-round: out of this round and of the show
     dropPlayer(id) {
       const b = flow.sim?.beans.get(id);
+      if (b) b.left = true; // never revived as a tie qualifier
       if (b?.status === ACTIVE && flow.stage === 'round') flow.sim.eliminate(b);
       flow.roster = flow.roster.filter((r) => r.id !== id);
     },

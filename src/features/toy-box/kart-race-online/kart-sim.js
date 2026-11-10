@@ -102,7 +102,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
       // ghost = guest prediction copy: laps + finish order stay host-only
       if (racing && !p.ghost) {
         p.lap++;
-        if (p.lap >= LAPS) { p.finished = true; p.finishT = world.raceT; world.order.push(p.id); emit(['F', p.id]); }
+        if (p.lap >= LAPS) { p.finished = true; p.finishT = world.raceT; if (!world.order.length) world.firstFinishT = world.raceT; world.order.push(p.id); emit(['F', p.id]); }
         else emit(['L', p.id, p.lap]);
       }
     }
@@ -205,8 +205,8 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     } else if (world.phase === 'race') {
       world.raceT += dt;
       const humans = ps.filter((p) => !p.bot);
-      // race ends when every human is home, or 25 s after the winner
-      if (world.order.length && (humans.every((p) => p.finished) || world.raceT - (world.karts.get(world.order[0])?.finishT ?? world.raceT) > 25)) { world.phase = 'end'; world.t = 9; }
+      // race ends when every human is home, or 25 s after the winner (kept even if the winner leaves)
+      if (world.order.length && (humans.every((p) => p.finished) || world.raceT - world.firstFinishT > 25)) { world.phase = 'end'; world.t = 9; }
     } else if (world.phase === 'end') {
       world.t -= dt;
       if (world.t <= 0) { world.phase = 'done'; onEnd(); }

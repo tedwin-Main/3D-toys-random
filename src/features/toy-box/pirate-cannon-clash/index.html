@@ -55,6 +55,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -429,7 +430,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -567,8 +568,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && ships.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { thr: local.thr, turn: local.turn, seqL: local.seqL, seqR: local.seqR });
-    for (const [id, inp] of remoteIn) { const p = ships.get(id); if (p) Object.assign(p, { thr: inp.a, turn: inp.b, seqL: inp.l, seqR: inp.r }); }
+    if (me && world.mode === 'match') { Object.assign(me, { thr: local.thr, turn: local.turn }); applyPresses(me, { seqL: ['lastL', local.seqL], seqR: ['lastR', local.seqR] }); }
+    for (const [id, inp] of remoteIn) { const p = ships.get(id); if (p) { Object.assign(p, { thr: axis(inp.a), turn: axis(inp.b) }); applyPresses(p, { seqL: ['lastL', inp.l], seqR: ['lastR', inp.r] }); } }
     const ps = [...ships.values()];
     for (const p of ps) if (p.bot) botThink(p, dt);
     for (const p of ps) stepShip(p, dt);

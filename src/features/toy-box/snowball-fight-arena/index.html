@@ -55,6 +55,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, num } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -466,7 +467,7 @@ function onData(d, from) {
   if (d.g === 'i' && lobby.room.isHost) {
     const p = world.players.get(from);
     if (!p) return;
-    Object.assign(p, { mx: d.mx, mz: d.mz, ax: d.ax, az: d.az });
+    Object.assign(p, { mx: axis(d.mx), mz: axis(d.mz), ax: num(d.ax, p.ax), az: num(d.az, p.az) });
     const q = d.q || [];
     let last = remoteSeq.get(from);
     // first packet from this guest (or after host migration): adopt its counter without replaying old throws
@@ -474,7 +475,7 @@ function onData(d, from) {
     for (const [s, tx, tz] of q) if (s > last) { p.pending.push([tx, tz]); last = s; }
     remoteSeq.set(from, last);
   }
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row

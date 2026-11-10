@@ -417,7 +417,11 @@ function onRoster(players) {
   const ids = new Set(players.map((p) => p.id)), before = S.P;
   S.P = S.P.filter((p) => p.bot || ids.has(p.id));
   // late joiner: waits out this round as a wreck, plays from the next one
-  for (const p of players) if (!player(p.id)) S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, x: -50, y: -50, hp: 0, alive: false });
+  for (const p of players) if (!player(p.id)) {
+    // keep 14 seats: a late human takes a knocked-out (else lowest-scoring) bot's seat
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.alive - c.alive || a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, x: -50, y: -50, hp: 0, alive: false });
+  }
   const seat = reseatTurn(before, S.turn, S.P), midTurn = seat.left && (S.ph === 'aim' || S.ph === 'fly');
   // shooter left mid-turn: park on the seat before the next one so nextTurn lands on it (not past it)
   S.turn = midTurn ? (seat.turn - 1 + S.P.length) % Math.max(1, S.P.length) : seat.turn;

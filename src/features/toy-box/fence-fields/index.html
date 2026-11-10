@@ -197,7 +197,7 @@ const placed = (e) => S.E[e] === '1';
 const sides = (b) => G.boxEdges(b % G.C, Math.floor(b / G.C)).reduce((n, e) => n + placed(e), 0);
 // host: apply one fence; returns pens closed
 function build(id, e) {
-  if (S.ph !== 'play' || S.P[S.turn]?.id !== id || !(e >= 0 && e < G.ne) || placed(e)) return -1;
+  if (S.ph !== 'play' || S.P[S.turn]?.id !== id || !Number.isInteger(e) || e < 0 || e >= G.ne || placed(e)) return -1;
   S.E = S.E.slice(0, e) + '1' + S.E.slice(e + 1);
   S.F[e] = id; S.last = e; S.mv++;
   let got = 0;
@@ -317,7 +317,11 @@ function onRoster(players) {
   if (S?.mode !== 'match' || !lobby.room.isHost) return;
   const ids = new Set(players.map((p) => p.id)), before = S.P;
   S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 });
+  for (const p of players) if (!player(p.id)) {
+    // keep 14 seats: a late human takes the lowest-scoring bot's seat
+    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
+    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 });
+  }
   // keep the turn with whoever had it; if they left, the next seat plays
   const seat = reseatTurn(before, S.turn, S.P);
   S.turn = seat.turn;

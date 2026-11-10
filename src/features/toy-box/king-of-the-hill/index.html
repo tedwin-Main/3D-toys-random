@@ -48,6 +48,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { pickLeader } from '../common/pick-leader.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -219,6 +221,7 @@ const sfx = {
 const BOT_NAMES = ['Sir Bonk', 'Dame Wobble', 'Lancelot', 'Gawain', 'Percy', 'Morgana', 'Tristan', 'Bedivere', 'Galahad', 'Elaine', 'Kay', 'Mordred', 'Isolde', 'Merlin'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const MATCH_T = 150, WIN_PTS = 60, HOP_T = 18, SPEED = 7.2, PR = 0.78;
+const OVERTIME = 15; // s added once when the lead is tied at time-up
 const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, zone: 0, next: 1, hopT: HOP_T, hold: 0, crowd: 0, players: new Map(), winner: null };
 let events = [];
 const rng = Math.random;
@@ -335,9 +338,11 @@ function phases(dt) {
       if (Math.floor(k.pts) !== k.lastWhole) { k.lastWhole = Math.floor(k.pts); events.push(['p', k.id]); }
     }
     if (world.hopT <= 0) { world.zone = world.next; world.next = pickNext(world.zone); world.hopT = HOP_T; events.push(['m']); }
-    const top = ps.reduce((a, b) => (b.pts > (a?.pts ?? -1) ? b : a), null);
-    if (world.left <= 0 || (top && top.pts >= WIN_PTS)) {
-      world.winner = top?.id ?? null;
+    const { winner: top, tied } = pickLeader(ps, (p) => p.pts);
+    // tied scoring lead at time-up: one overtime, then a draw (join order never breaks a tie)
+    if (world.left <= 0 && !top && tied[0]?.pts > 0 && !world.overtime && world.mode === 'match') { world.overtime = true; world.left = OVERTIME; }
+    else if (world.left <= 0 || (top && top.pts >= WIN_PTS)) {
+      world.winner = top?.id ?? null; world.overtime = false;
       if (top) events.push(['w', top.id]);
       world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
     }
@@ -400,7 +405,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -477,7 +482,7 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>stand alone in the ring</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pts - a.pts)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>👑 ${esc(top?.nick ?? '')}`); }
+  else if (world.phase === 'final') { const top = world.players.get(world.winner); big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${top ? `👑 ${esc(top.nick)}` : 'Draw!'}`); }
   else if (flashT <= 0) big(me?.fall ? '<small>climbing back up…</small>' : '');
   const holder = world.players.get(world.hold);
   zoneEl.innerHTML = world.phase !== 'play' ? '👑 get ready' : world.crowd > 1 ? `⚔️ ${world.crowd} knights share the ring · points split` : holder ? `👑 <span style="color:${holder.color}">${esc(holder.nick)}</span>${holder.id === lobby.room?.me ? ' (you!)' : ''} holds the crown` : '👑 crown is free';
@@ -499,8 +504,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, dashSeq: local.dashSeq });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, dashSeq: inp.d }); }
+    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { dashSeq: ['lastDash', local.dashSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { dashSeq: ['lastDash', inp.d] }); } }
     const ps = [...world.players.values()];
     for (const p of ps) if (p.bot) botThink(p, dt);
     for (const p of ps) stepPlayer(p, dt);

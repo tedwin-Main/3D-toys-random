@@ -246,7 +246,8 @@ function crash(p) {
   p.alive = false;
   p.pts += world.outCount;
   world.outCount++;
-  p.place = world.players.size - world.outCount + 1;
+  // place from riders still on the grid: late-join spectators and leavers never shift it
+  p.place = [...world.players.values()].filter((q) => q.alive).length + 1;
   for (const c of p.cells) if (grid[c] === p.gid) grid[c] = 0;
   events.push(['x', p.id, +p.x.toFixed(1), +p.z.toFixed(1), p.place]);
 }
@@ -306,6 +307,27 @@ function ride(p, dist) {
   }
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Host migration > guests never keep the trail grid: promoted host rebuilds it from each live rider's corners so trails collide again
+function rebuildGrid() {
+  grid.fill(0);
+  nextGid = 1;
+  for (const p of world.players.values()) {
+    Object.assign(p, { gid: nextGid++, cells: [], turns: [], stall: 0 });
+    if (!p.alive) continue; // crashed trails are already derezzed
+    const pts = [...p.corners, p.x, p.z];
+    for (let i = 0; i + 3 < pts.length; i += 2) markTrail(p, pts[i], pts[i + 1], pts[i + 2], pts[i + 3]);
+    p.cell = cellOf(p.x, p.z);
+  }
+  kfDirty = true;
+}
+function markTrail(p, x0, z0, x1, z1) {
+  const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.45));
+  for (let k = 0; k <= n; k++) {
+    const c = cellOf(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n);
+    if (c >= 0 && p.cells[p.cells.length - 1] !== c) { grid[c] = p.gid; p.cells.push(c); }
+  }
+}
 
 // Run engine > bots: compare straight / left / right by reachable area, steer away early
 function freeRay(x, z, dir, max) { const [dx, dz] = DIRS[dir]; let n = 0; for (let k = 1; k <= max; k++) { const c = cellOf(x + dx * k, z + dz * k); if (c < 0 || grid[c]) break; n++; } return n; }
@@ -388,7 +410,7 @@ const lobby = createLobby({
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
     room.on('roster', onRoster);
-    room.on('host', syncTop);
+    room.on('host', (isHost) => { syncTop(); if (isHost && world.mode === 'match') rebuildGrid(); });
   },
   onStart({ bots, isHost }) {
     clearPlayers();
@@ -438,7 +460,7 @@ function onData(d, from) {
     const q = d.q ?? [], fresh = q.slice(Math.max(0, q.length - (d.n - last)));
     fresh.forEach((t, i) => { const [dir, cell = -1] = [].concat(t); p.turns.push([dir, cell, d.n - fresh.length + 1 + i]); });
   }
-  if (d.g === 's' && !room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !room.isHost && from === room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let kfDirty = true, kfT = 0;

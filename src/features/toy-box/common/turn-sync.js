@@ -3,19 +3,27 @@
 // Multiplayer > Turn sync
 // onState(state): guest got a newer state; onAction(fromId, action): host got an action (host's own included)
 export function createTurnSync({ onState, onAction }) {
-  let room = null, ver = 0, seq = 0, last = null;
+  let room = null, ver = 0, seq = 0, last = null, stateFrom = null;
   const seen = new Map();
+  // only current host's states count; new host restarts version count (a spoofed huge v can't freeze guests)
+  function onHostState(r, d, from) {
+    if (from !== r.host || !Number.isFinite(d.v)) return;
+    if (from !== stateFrom) { stateFrom = from; ver = 0; }
+    if (d.v <= ver) return;
+    ver = d.v; last = d.s; onState(d.s);
+  }
   const api = {
     // lobby onJoin: start listening on this room
     attach(r) {
       room = r;
       r.on('data', (d, from) => {
         if (!d || d._lobby) return;
-        if (d.g === 'T' && !r.isHost && d.v > ver) { ver = d.v; last = d.s; onState(d.s); }
+        if (d.g === 'T' && !r.isHost) onHostState(r, d, from);
         if (d.g === 'A' && r.isHost) {
           // websocket keeps order; seq drops replays after a reconnect
-          if ((seen.get(from) ?? 0) >= d.q) return;
-          seen.set(from, d.q);
+          const q = Number(d.q);
+          if (!(q > (seen.get(from) ?? 0))) return;
+          seen.set(from, q);
           onAction(from, d.a);
         }
       });

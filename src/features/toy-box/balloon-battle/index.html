@@ -50,6 +50,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { pickLeader } from '../common/pick-leader.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -233,6 +235,7 @@ const sfx = {
 const BOT_NAMES = ['Poppy', 'Bingo', 'Squeak', 'Twirl', 'Pinky', 'Zippo', 'Bubbles', 'Dizzy', 'Fizz', 'Noodle', 'Sprocket', 'Jinx', 'Tango', 'Sparky'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const MATCH_T = 150, WIN_POPS = 20, SPEED = 9, TURN = 3.4, DASH_V = 19, OUT_T = 4, START_BAL = 3;
+const OVERTIME = 15; // s added once when the lead is tied at time-up
 const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, players: new Map(), picks: [], winner: null };
 let events = [];
 const rng = Math.random;
@@ -384,9 +387,11 @@ function phases(dt) {
     if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'play'; }
   } else if (world.phase === 'play') {
     world.left -= dt;
-    const top = ps.reduce((a, b) => (b.pops > (a?.pops ?? -1) ? b : a), null);
-    if (world.left <= 0 || (top && top.pops >= WIN_POPS)) {
-      world.winner = top?.id ?? null;
+    const { winner: top, tied } = pickLeader(ps, (p) => p.pops);
+    // tied scoring lead at time-up: one overtime, then a draw (join order never breaks a tie)
+    if (world.left <= 0 && !top && tied[0]?.pops > 0 && !world.overtime && world.mode === 'match') { world.overtime = true; world.left = OVERTIME; }
+    else if (world.left <= 0 || (top && top.pops >= WIN_POPS)) {
+      world.winner = top?.id ?? null; world.overtime = false;
       if (top) events.push(['w', top.id]);
       world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
     }
@@ -449,7 +454,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -542,7 +547,7 @@ function hud(dt) {
   if (world.mode !== 'match') { if (flashT <= 0) big(''); return; }
   const me = world.players.get(lobby.room?.me);
   if (world.phase === 'count') big(`<small>poke balloons from behind</small>${Math.max(1, Math.ceil(world.t))}`);
-  else if (world.phase === 'final') { const top = [...world.players.values()].sort((a, b) => b.pops - a.pops)[0]; big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (world.phase === 'final') { const top = world.players.get(world.winner); big(`<small>final · back to lobby in ${Math.max(0, Math.ceil(world.t))}s</small>${top ? `🏆 ${esc(top.nick)}` : 'Draw!'}`); }
   else if (flashT <= 0) big(me?.out ? '<small>ghost · respawning soon</small>👻' : '');
   hudT -= dt;
   if (hudT > 0) return;
@@ -562,8 +567,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, dashSeq: local.dashSeq });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, dashSeq: inp.d }); }
+    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { dashSeq: ['lastDash', local.dashSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { dashSeq: ['lastDash', inp.d] }); } }
     const ps = [...world.players.values()];
     if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, dt);
     for (const p of ps) stepPlayer(p, dt);

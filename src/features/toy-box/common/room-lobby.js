@@ -207,15 +207,16 @@ export function createLobby(opts) {
       renderRoom();
     });
     r.on('host', () => renderRoom());
-    r.on('data', (d) => handleLobbyMessage(r, d));
+    r.on('data', (d, from) => handleLobbyMessage(r, d, from));
     r.on('close', () => { state.running = false; state.room = null; wrap.hidden = false; renderJoin('Disconnected from room.'); opts.onLobby?.(); });
     opts.onJoin?.(r);
     renderRoom();
   }
 
   // Lobby > control messages from host: settings change, match start, back to lobby
-  function handleLobbyMessage(r, d) {
-    if (!d || !d._lobby) return;
+  // only host may steer lobby; guests spoofing start / lobby / settings are ignored
+  function handleLobbyMessage(r, d, from) {
+    if (!d || !d._lobby || from !== r.host) return;
     if (d._lobby === 'settings') { Object.assign(state.settings, d.values); renderRoom(); }
     if (d._lobby === 'start') { state.running = true; state.seed = d.seed; state.bots = d.bots; Object.assign(state.settings, d.settings); wrap.hidden = true; opts.onStart?.({ seed: d.seed, bots: d.bots, isHost: r.isHost, late: !!d.late, settings: { ...state.settings } }); }
     if (d._lobby === 'lobby') { state.running = false; wrap.hidden = false; renderRoom(); opts.onLobby?.(); }

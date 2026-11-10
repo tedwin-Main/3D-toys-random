@@ -54,6 +54,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, num, applyPresses } from '../common/guest-input.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -561,7 +562,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -732,8 +733,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.tanks.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { inT: local.t, inR: local.r, aim: local.aim, fireSeq: local.fireSeq });
-    for (const [id, inp] of remoteIn) { const p = world.tanks.get(id); if (p) Object.assign(p, { inT: inp.t, inR: inp.r, aim: inp.a, fireSeq: inp.f }); }
+    if (me && world.mode === 'match') { Object.assign(me, { inT: local.t, inR: local.r, aim: local.aim }); applyPresses(me, { fireSeq: ['lastFire', local.fireSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.tanks.get(id); if (p) { Object.assign(p, { inT: axis(inp.t), inR: axis(inp.r), aim: num(inp.a, p.aim) }); applyPresses(p, { fireSeq: ['lastFire', inp.f] }); } }
     acc += dt;
     while (acc >= STEP) {
       for (const p of world.tanks.values()) if (p.bot && p.alive) botThink(p, STEP);

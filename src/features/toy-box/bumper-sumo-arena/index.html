@@ -43,6 +43,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -362,16 +363,12 @@ function phases(dt) {
   } else if (world.phase === 'fight') {
     world.t += dt;
     world.ring = Math.max(R_MIN, R0 - Math.max(0, world.t - 10) * 0.16);
-    if (inRound.length <= 1) {
-      // solo practice: respawn instead of ending
-      for (const p of inRound) if (!p.alive && p.falling && (p.respawn -= dt) <= 0) Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, y: 0, vy: 0, falling: false, alive: true });
-    } else {
-      const alive = inRound.filter((p) => p.alive);
-      if (alive.length <= 1) {
-        world.winner = alive[0]?.id ?? null;
-        if (alive[0]) alive[0].wins++;
-        world.phase = 'roundEnd'; world.t = 3.2;
-      }
+    // last car on the ring takes the round; also ends when rivals leave (no endless solo practice)
+    const alive = inRound.filter((p) => p.alive);
+    if (alive.length <= 1) {
+      world.winner = alive[0]?.id ?? null;
+      if (alive[0]) alive[0].wins++;
+      world.phase = 'roundEnd'; world.t = 3.2;
     }
   } else if (world.phase === 'roundEnd') {
     world.t -= dt;
@@ -454,7 +451,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
@@ -553,8 +550,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') { me.inX = local.x; me.inZ = local.z; me.dashSeq = local.dashSeq; }
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { p.inX = inp.x; p.inZ = inp.z; p.dashSeq = inp.d; } }
+    if (me && world.mode === 'match') { me.inX = local.x; me.inZ = local.z; applyPresses(me, { dashSeq: ['lastDash', local.dashSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { p.inX = axis(inp.x); p.inZ = axis(inp.z); applyPresses(p, { dashSeq: ['lastDash', inp.d] }); } }
     acc += dt;
     while (acc >= STEP) {
       for (const p of world.players.values()) if (p.bot && p.alive) botThink(p, STEP);

@@ -49,6 +49,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -380,7 +381,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let kfDirty = true, kfT = 0;
@@ -501,8 +502,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, jumpSeq: local.jumpSeq });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, jumpSeq: inp.j }); }
+    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { jumpSeq: ['lastJump', local.jumpSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { jumpSeq: ['lastJump', inp.j] }); } }
     const ps = [...world.players.values()];
     for (const p of ps) if (p.bot) botThink(p, dt);
     for (const p of ps) stepPlayer(p, dt);

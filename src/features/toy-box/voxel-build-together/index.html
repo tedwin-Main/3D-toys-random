@@ -261,7 +261,7 @@ function onData(d, from) {
   // late joiner gets the plate plus builder counts, so its scoreboard matches everyone's
   if (d.g === 'hello' && room.isHost) room.send({ g: 'full', o: encode(), pl: [...state.placed] }, { to: from });
   else if (d.g === 'op' && room.isHost) applyOps(d.o, from, true);
-  else if (d.g === 'ops' && !room.isHost) applyOps(d.o, d.by, false);
+  else if (d.g === 'ops' && !room.isHost && from === room.host) applyOps(d.o, d.by, false);
   else if (d.g === 'full' && from === room.host) { decodeInto(d.o); pops.length = 0; if (Array.isArray(d.pl)) state.placed = new Map(d.pl); }
   else if (d.g === 'cur') {
     const c = remoteCursor(from);

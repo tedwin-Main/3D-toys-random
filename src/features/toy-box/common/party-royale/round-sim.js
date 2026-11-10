@@ -150,9 +150,9 @@ function endRound(sim) {
 // nobody left standing: beans that went out within the last second share the qualify (a show never ends empty)
 const TIE_WINDOW = 60;
 function reviveLastFallers(sim) {
-  const last = Math.max(...sim.list.map((b) => b.outTick ?? -Infinity));
+  const last = Math.max(...sim.list.filter((b) => !b.left).map((b) => b.outTick ?? -Infinity));
   for (const b of sim.list) {
-    if (b.outTick == null || b.outTick < last - TIE_WINDOW) continue;
+    if (b.left || b.outTick == null || b.outTick < last - TIE_WINDOW) continue;
     sim.out.splice(sim.out.indexOf(b.id), 1);
     b.status = ACTIVE; sim.qualify(b);
   }

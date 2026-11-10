@@ -2133,7 +2133,7 @@ function hostAdopt() {
 // Net > in: guests send actions to host; host relays round messages
 function onData(d, from) {
   if (!d || d._lobby) return;
-  if (d.g === 'm') onMsg(d.m);
+  if (d.g === 'm' && from === lobby.room.host) onMsg(d.m);
   if (d.g === 'c' && lobby.room.isHost && H) {
     if (d.t === 'click') hostClick(from, d.x, d.y);
     if (d.t === 'place') { const err = hostPlace(from, d.x, d.y); if (err) toSeat(from, { t: 'error', text: err }); }

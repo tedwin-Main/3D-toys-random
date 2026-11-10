@@ -45,6 +45,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { axis } from '../common/guest-input.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -399,7 +400,7 @@ function phases(dt) {
     if (seated >= world.chairs.length || seated >= al.length || world.t <= 0) {
       let losers = al.filter((p) => p.seat < 0);
       // nobody sat at all: keep one random survivor so the match can still end
-      if (losers.length === al.length && al.length) losers = losers.filter((p) => p !== al[Math.floor(rng() * al.length)]);
+      if (losers.length === al.length && al.length) { const keep = al[Math.floor(rng() * al.length)]; losers = losers.filter((p) => p !== keep); }
       const place = al.length;
       for (const p of losers) { p.out = true; p.place = place; events.push(['o', p.id, +p.x.toFixed(1), +p.z.toFixed(1)]); }
       world.phase = 'out'; world.t = 2.6;
@@ -479,12 +480,12 @@ function onData(d, from) {
   if (d.g === 'i' && lobby.room.isHost) {
     const p = world.players.get(from);
     if (!p) return;
-    p.mx = d.mx; p.mz = d.mz;
+    p.mx = axis(d.mx); p.mz = axis(d.mz);
     const last = remoteDash.get(from);
     if (last !== undefined && d.dq > last) p.dash = 1;
     remoteDash.set(from, d.dq);
   }
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row

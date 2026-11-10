@@ -53,6 +53,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -237,7 +238,7 @@ function startWave() {
   for (const p of alive) p.bomb = false;
   // roughly one bomb per four survivors
   const n = Math.max(1, Math.min(alive.length - 1, Math.round(alive.length / 4)));
-  alive.sort(() => rng() - 0.5).slice(0, n).forEach((p) => { p.bomb = true; p.immune = 0; });
+  shuffleInPlace(alive, rng).slice(0, n).forEach((p) => { p.bomb = true; p.immune = 0; });
   world.fuseMax = world.fuse = 9 + alive.length * 0.7 + rng() * 5;
   world.phase = 'play';
   events.push(['a', n]);
@@ -338,6 +339,9 @@ function phases(dt) {
   if (world.phase === 'count') {
     if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
     if (world.t <= 0) { events.push(['c', 0]); startWave(); }
+  } else if ((world.phase === 'play' || world.phase === 'wave') && ps.length > 1 && ps.filter((p) => p.alive).length <= 1) {
+    // rivals left mid-wave: last one standing wins now, no blast
+    endBombRound(ps, ps.filter((p) => p.alive));
   } else if (world.phase === 'play') {
     world.fuse -= dt;
     if (world.fuse <= 0) {
@@ -351,17 +355,20 @@ function phases(dt) {
       for (const h of holders) { h.place = ps.filter((p) => p.alive).length + 1; }
       world.outCount += holders.length;
       const alive = ps.filter((p) => p.alive);
-      if (alive.length <= 1 && ps.length > 1 || alive.length === 0) {
-        const w = alive[0];
-        if (w) { w.pts += world.outCount + 2; w.wins++; w.place = 1; world.winner = w.id; events.push(['w', w.id]); }
-        world.phase = 'round'; world.t = world.mode === 'attract' ? 2.5 : 4.5;
-      } else { world.phase = 'wave'; world.t = 2.2; }
+      if (alive.length <= 1 && ps.length > 1 || alive.length === 0) endBombRound(ps, alive);
+      else { world.phase = 'wave'; world.t = 2.2; }
     }
   } else if (world.phase === 'wave' && world.t <= 0) startWave();
   else if (world.phase === 'round' && world.t <= 0) {
     if (world.mode === 'attract' || world.round < ROUNDS) { world.round = world.mode === 'attract' ? 1 : world.round + 1; startRound(); }
     else { world.phase = 'final'; world.t = 10; }
   } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
+}
+// round over: lone survivor scores + wins, bombs cleared
+function endBombRound(ps, alive) {
+  const w = alive[0];
+  if (w) { w.pts += world.outCount + 2; w.wins++; w.place = 1; w.bomb = false; world.winner = w.id; events.push(['w', w.id]); }
+  world.phase = 'round'; world.t = world.mode === 'attract' ? 2.5 : 4.5;
 }
 function startAttract() {
   clearPlayers();
@@ -422,7 +429,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -530,8 +537,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { mx: local.x, mz: local.z, dashSeq: local.dashSeq });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { mx: inp.x, mz: inp.z, dashSeq: inp.d }); }
+    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { dashSeq: ['lastDash', local.dashSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { dashSeq: ['lastDash', inp.d] }); } }
     const ps = [...world.players.values()];
     for (const p of ps) if (p.bot) botThink(p, dt);
     for (const p of ps) stepPlayer(p, dt);

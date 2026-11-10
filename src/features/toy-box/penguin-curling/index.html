@@ -52,6 +52,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { pickLeader } from '../common/pick-leader.js';
+import { axis } from '../common/guest-input.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -439,7 +441,8 @@ function phases(dt) {
   else if (world.phase === 'score' && world.t <= 0) {
     if (world.round < world.rounds) startRound();
     else {
-      const top = ps.reduce((a, b) => (b.score > (a?.score ?? -1) ? b : a), null);
+      // tied top score = shared draw, never decided by join order
+      const { winner: top } = pickLeader(ps, (p) => p.score);
       world.winner = top?.id ?? null;
       if (top) events.push(['w', top.id]);
       world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
@@ -505,7 +508,7 @@ const remoteIn = new Map();
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
@@ -576,7 +579,7 @@ function hud(dt) {
   const mySp = me ? Math.hypot(me.vx, me.vz) : 0, tp = world.players.get(world.turn), myTurn = !!me && tp === me;
   const nth = `${world.ti + 1}/${world.order.length}`, hammer = world.players.get(world.order[world.order.length - 1]);
   if (ph === 'count') big(world.round === 1 ? `<small>stop closest to the fish</small>${Math.max(1, secs)}` : `<small>get ready</small>round ${world.round}`);
-  else if (ph === 'final') { const top = [...world.players.values()].sort((a, b) => b.score - a.score)[0]; big(`<small>final · back to lobby in ${secs}s</small>🏆 ${esc(top?.nick ?? '')}`); }
+  else if (ph === 'final') { const top = world.players.get(world.winner); big(`<small>final · back to lobby in ${secs}s</small>${top ? `🏆 ${esc(top.nick)}` : 'Draw!'}`); }
   else if (flashT <= 0) big('');
   const t = ph === 'count' ? `🐧 round ${world.round} of ${world.rounds}${hammer ? ` · ${hammer === me ? 'you have' : `${hammer.nick} has`} the last throw` : ''}`
     : ph === 'aim' ? (myTurn ? `your throw ${nth} · hold SLIDE to charge, release to go · ${secs}s` : `🐧 ${tp?.nick ?? ''} throws ${nth} · ${secs}s`)
@@ -605,7 +608,7 @@ function simTick(dt) {
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
     if (me && world.mode === 'match') Object.assign(me, { ax: local.x, held: local.held });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { ax: inp.x, held: !!inp.h }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { ax: axis(inp.x), held: !!inp.h }); }
     const ps = [...world.players.values()];
     for (const p of ps) if (p.bot) botThink(p);
     for (const p of ps) stepPlayer(p, dt);

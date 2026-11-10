@@ -582,7 +582,8 @@ function simBalls(dt) {
         if (b.id === world.turn) b.strokes++;
       } else if (r === 'c') {
         // knocked in by a rival counts as holed plus a tap-in stroke (no free hole-in-one off the tee)
-        const strokes = b.id === world.turn ? Math.max(1, b.strokes) : b.strokes + 1;
+        // un-teed ball knocked in scores 2 (tee shot + tap-in), never a free ace
+        const strokes = b.id === world.turn ? Math.max(1, b.strokes) : Math.max(b.teed ? 0 : 2, b.strokes + 1);
         Object.assign(b, { holed: true, done: true, vx: 0, vz: 0, x: H.cup.x, z: H.cup.z, teed: true, strokes });
         b.scores[world.hole] = strokes;
         events.push(['c', b.id, strokes]);
@@ -683,7 +684,7 @@ function onData(d, from) {
     const b = world.balls.get(from);
     if (b) shoot(b, d.a, d.p);
   }
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 let cardT = 0;
@@ -694,7 +695,7 @@ function snapshot(withCard) {
     g: 's', ph: world.phase, t: f2(world.t), hole: world.hole, ht: f2(world.ht), ev: events, tn: world.turn, tt: f2(world.tt), rl: world.rolling ? 1 : 0,
     B: [...world.balls.values()].map((b) => [b.id, f2(b.x), f2(b.z), f2(b.vx), f2(b.vz), (b.bot ? 1 : 0) | (b.holed ? 2 : 0) | (b.done ? 4 : 0) | (b.teed ? 8 : 0), b.strokes]),
   };
-  if (withCard) { s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null)]); s.od = world.order; s.ck = world.clock; }
+  if (withCard) { s.sc = [...world.balls.values()].map((b) => [b.id, b.scores.map((v) => v ?? null), f2(b.lastX), f2(b.lastZ)]); s.od = world.order; s.ck = world.clock; }
   return names.stamp(s, world.balls.values());
 }
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
@@ -714,7 +715,8 @@ function applySnap(s) {
     if (!vx && !vz) { b.lastX = x; b.lastZ = z; }
   }
   for (const id of [...world.balls.keys()]) if (!seen.has(id)) removeBall(id);
-  if (s.sc) for (const [id, sc] of s.sc) { const b = world.balls.get(id); if (b) b.scores = sc.map((v) => (v == null ? undefined : v)); }
+  // rest spot rides along so a promoted host resets water shots to the right place
+  if (s.sc) for (const [id, sc, lx, lz] of s.sc) { const b = world.balls.get(id); if (b) { b.scores = sc.map((v) => (v == null ? undefined : v)); if (lx != null) { b.lastX = lx; b.lastZ = lz; } } }
   if (s.od) world.order = s.od.filter((id) => world.balls.has(id));
   if (s.ck) world.clock = s.ck;
   playEvents(s.ev);

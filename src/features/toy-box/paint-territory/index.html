@@ -49,6 +49,8 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { pickLeader } from '../common/pick-leader.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
@@ -309,6 +311,7 @@ function resolve(p) {
 
 // Run engine > step: roll with terrain speed, paint trail, bombs, bumps
 const STEP = 1 / 60;
+const OVERTIME = 15; // s added once when the lead is tied at time-up
 // one blob's drive: own paint fast, enemy paint slow; shared by host sim and guest prediction
 function moveBlob(p, dt, play) {
   p.bombCD = Math.max(0, p.bombCD - dt);
@@ -408,8 +411,10 @@ function phases(dt) {
     world.t -= dt;
     if (world.t <= 0) {
       countTiles();
-      const top = [...world.players.values()].sort((a, b) => b.tiles - a.tiles)[0];
-      world.phase = 'end'; world.t = 7; world.winner = top?.id ?? null;
+      const { winner: top, tied } = pickLeader([...world.players.values()], (p) => p.tiles);
+      // tied turf: one overtime, then a draw (join order never breaks a tie)
+      if (!top && tied[0]?.tiles > 0 && !world.overtime) { world.overtime = true; world.t = OVERTIME; return; }
+      world.phase = 'end'; world.t = 7; world.winner = top?.id ?? null; world.overtime = false;
     }
   } else if (world.phase === 'end') {
     world.t -= dt;
@@ -484,7 +489,7 @@ let keyT = 0;
 function onData(d, from) {
   if (!d || d._lobby) return;
   if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && world.mode === 'match') applySnap(d);
+  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
 const KEY_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -593,8 +598,8 @@ function simTick(dt) {
   const room = lobby.room;
   if (isHostSim()) {
     const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { inX: local.x, inZ: local.z, bombSeq: local.bombSeq });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { inX: inp.x, inZ: inp.z, bombSeq: inp.b }); }
+    if (me && world.mode === 'match') { Object.assign(me, { inX: local.x, inZ: local.z }); applyPresses(me, { bombSeq: ['lastBomb', local.bombSeq] }); }
+    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { inX: axis(inp.x), inZ: axis(inp.z) }); applyPresses(p, { bombSeq: ['lastBomb', inp.b] }); } }
     acc += dt;
     while (acc >= STEP) {
       for (const p of world.players.values()) if (p.bot) botThink(p, STEP);
