@@ -48,7 +48,8 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
-import { reseatTurn } from '../common/turn-seats.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createFenceGame, fieldGrid } from './fence-rules.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, sky, sun, meadow
@@ -103,19 +104,8 @@ const postMat = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.8
 const railGeo = mergeGeometries([new THREE.BoxGeometry(CELL - 0.2, 0.12, 0.09).translate(0, 0.42, 0), new THREE.BoxGeometry(CELL - 0.2, 0.12, 0.09).translate(0, 0.78, 0)]);
 const WOOD = new THREE.Color(0xc89262);
 let G = null;
-function geom(C, R) {
-  const nh = C * (R + 1), nv = (C + 1) * R;
-  const ends = (e) => (e < nh ? [[e % C, Math.floor(e / C)], [e % C + 1, Math.floor(e / C)]] : [[(e - nh) % (C + 1), Math.floor((e - nh) / (C + 1))], [(e - nh) % (C + 1), Math.floor((e - nh) / (C + 1)) + 1]]);
-  // box (c, r) -> its four edge ids; edge -> the 1 or 2 boxes it borders
-  const boxEdges = (c, r) => [r * C + c, (r + 1) * C + c, nh + r * (C + 1) + c, nh + r * (C + 1) + c + 1];
-  const edgeBoxes = (e) => {
-    const out = [];
-    if (e < nh) { const c = e % C, r = Math.floor(e / C); if (r > 0) out.push((r - 1) * C + c); if (r < R) out.push(r * C + c); }
-    else { const k = e - nh, c = k % (C + 1), r = Math.floor(k / (C + 1)); if (c > 0) out.push(r * C + c - 1); if (c < C) out.push(r * C + c); }
-    return out;
-  };
-  return { C, R, nh, ne: nh + nv, nb: C * R, ends, boxEdges, edgeBoxes, ox: -(C * CELL) / 2, oz: -(R * CELL) / 2 };
-}
+// field topology from fence-rules.js plus where the field sits in the scene
+const geom = (C, R) => ({ ...fieldGrid(C, R), ox: -(C * CELL) / 2, oz: -(R * CELL) / 2 });
 const postPos = (c, r) => [G.ox + c * CELL, G.oz + r * CELL];
 let rails = null, posts = null, tiles = null, sheepBody = null, sheepHead = null;
 const anim = { rail: [], box: [] };
@@ -177,104 +167,25 @@ const sfx = {
   win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.07, 'square', i * 0.12)); },
 };
 
-// Game > rules: one fence per turn; closing pens scores them and keeps the turn
-const BOT_NAMES = ['Shep', 'Woolly', 'Farmer Fi', 'Bo Peep', 'Rambo', 'Fluff', 'Hay Day', 'Barley', 'Clover', 'Mutton', 'Fenceworth', 'Posty', 'Gate Kate', 'Pip'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0', '#00f5d4'];
-const INTRO = 2.2, BOT_THINK = [0.7, 1.4];
-// S.E: '0'/'1' per edge; S.O: owner id per box (null = open); S.F: who built each edge (for tint); S.order: turn order ids
+// Game > rules live in fence-rules.js: this page runs them for attract mode only, a match is run by the relay server
+// S.E: '0'/'1' per edge; S.O: owner id per box (null = open); S.F: who built each edge (for tint); S.P: seats in turn order
+const attract = createFenceGame();
 let S = null;
-const rng = Math.random;
 const player = (id) => S.P.find((p) => p.id === id);
-function sizeFor(n, pick) {
-  if (pick && pick !== 'auto') return +pick;
-  return n <= 2 ? 4 : n <= 4 ? 5 : n <= 7 ? 6 : n <= 10 ? 7 : 8;
-}
-function newState(mode, players, size, clock) {
-  const g = geom(size, size);
-  return { mode, ph: 'intro', tt: INTRO, C: size, R: size, clock, E: '0'.repeat(g.ne), F: new Array(g.ne).fill(null), O: new Array(g.nb).fill(null), P: players, turn: 0, last: -1, got: 0, mv: 0 };
-}
 const placed = (e) => S.E[e] === '1';
-const sides = (b) => G.boxEdges(b % G.C, Math.floor(b / G.C)).reduce((n, e) => n + placed(e), 0);
-// host: apply one fence; returns pens closed
-function build(id, e) {
-  if (S.ph !== 'play' || S.P[S.turn]?.id !== id || !Number.isInteger(e) || e < 0 || e >= G.ne || placed(e)) return -1;
-  S.E = S.E.slice(0, e) + '1' + S.E.slice(e + 1);
-  S.F[e] = id; S.last = e; S.mv++;
-  let got = 0;
-  for (const b of G.edgeBoxes(e)) if (sides(b) === 4 && S.O[b] == null) { S.O[b] = id; got++; }
-  const p = player(id);
-  p.score += got;
-  S.got = got;
-  if (!S.E.includes('0')) { S.ph = 'final'; S.tt = 12; return got; }
-  // no pen closed: next player
-  if (!got) S.turn = (S.turn + 1) % S.P.length;
-  startTurn();
-  return got;
-}
-function startTurn() { S.tt = S.clock; const p = S.P[S.turn]; if (p) p.think = BOT_THINK[0] + rng() * (BOT_THINK[1] - BOT_THINK[0]); }
-// bots: take any pen; else a fence that doesn't hand over a 3rd side; else the move that gives away the smallest chain
-function chainIfGiven(e) {
-  // count pens the next player could sweep after edge e
-  const E = S.E.split('');
-  E[e] = '1';
-  const sideCount = (b) => G.boxEdges(b % G.C, Math.floor(b / G.C)).reduce((n, x) => n + (E[x] === '1'), 0);
-  let n = 0, again = true;
-  while (again) {
-    again = false;
-    for (let b = 0; b < G.nb; b++) if (sideCount(b) === 3) { const x = G.boxEdges(b % G.C, Math.floor(b / G.C)).find((q) => E[q] !== '1'); E[x] = '1'; n++; again = true; }
-  }
-  return n;
-}
-function botMove(p) {
-  const free = [];
-  for (let e = 0; e < G.ne; e++) if (!placed(e)) free.push(e);
-  const sloppy = rng() < (p.slop ?? 0.1);
-  const closing = free.filter((e) => G.edgeBoxes(e).some((b) => sides(b) === 3));
-  if (closing.length && !(sloppy && rng() < 0.4)) return closing[Math.floor(rng() * closing.length)];
-  const safe = free.filter((e) => G.edgeBoxes(e).every((b) => sides(b) < 2));
-  if (safe.length && !sloppy) return safe[Math.floor(rng() * safe.length)];
-  if (sloppy) return free[Math.floor(rng() * free.length)];
-  let best = null, bestN = Infinity;
-  for (const e of free) { const n = chainIfGiven(e) + rng() * 0.1; if (n < bestN) { bestN = n; best = e; } }
-  return best;
-}
-// timeout: a random fence for the idle player; no planning, so waiting out the clock never beats playing
-function autoMove() {
-  const p = S.P[S.turn], free = [];
-  for (let e = 0; e < G.ne; e++) if (!placed(e)) free.push(e);
-  build(p.id, free[Math.floor(rng() * free.length)]);
-}
-
-// Run engine > host tick: intro, bot turns, shot clock; publish on change
-let dirty = true;
-function hostTick(dt) {
-  if (!S) return;
-  const before = `${S.ph}|${S.mv}|${S.turn}|${S.P.length}`;
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) { S.ph = 'play'; S.turn = 0; startTurn(); }
-  else if (S.ph === 'play') {
-    const p = S.P[S.turn];
-    if (!p) { S.turn = 0; startTurn(); }
-    else if (p.bot) { p.think -= dt; if (p.think <= 0) build(p.id, botMove(p)); }
-    else if (S.tt <= 0) autoMove();
-  } else if (S.ph === 'final' && S.tt <= 0) {
-    if (S.mode === 'attract') startAttract();
-    else if (lobby.room?.isHost) lobby.backToLobby();
-  }
-  if (before !== `${S.ph}|${S.mv}|${S.turn}|${S.P.length}`) dirty = true;
-  if (dirty && S.mode === 'match' && lobby.room?.isHost) { sync.publish(S); dirty = false; }
-}
-function startAttract() {
-  const bots = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, slop: 0.15 }));
-  S = newState('attract', bots, 5, 10);
-  S.tt = 1;
+function startAttract() { attract.startAttract(); S = attract.state; resetView(); }
+// Run engine > attract tick: a finished field starts over on a fresh board
+function attractTick(dt) {
+  attract.tick(dt);
+  if (S === attract.state) return;
+  S = attract.state;
   resetView();
 }
 
 // Multiplayer > lobby + state sync (host publishes S, guests send fence picks)
 const sync = createTurnSync({
   onState(s) { if (started) applyState(s); },
-  onAction(from, a) { if (a.t === 'edge' && S?.mode === 'match' && build(from, a.e) >= 0) dirty = true; },
+  onDone() { serverMatch.finish(); },
 });
 let started = false;
 const lobby = createLobby({
@@ -289,45 +200,24 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     started = true;
     showHud(true);
     syncTop();
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, slop: 0.06 + rng() * 0.14 });
-    // shuffle seats so the host doesn't always start
-    for (let i = P.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [P[i], P[j]] = [P[j], P[i]]; }
-    S = newState('match', P, sizeFor(P.length, settings.size), settings.clock ?? 15);
-    resetView();
-    dirty = true;
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { started = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); started = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   document.getElementById('top').style.display = on ? 'flex' : 'none';
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S?.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id)), before = S.P;
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) {
-    // keep 14 seats: a late human takes the lowest-scoring bot's seat
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 });
-  }
-  // keep the turn with whoever had it; if they left, the next seat plays
-  const seat = reseatTurn(before, S.turn, S.P);
-  S.turn = seat.turn;
-  if (seat.left) startTurn();
-  dirty = true;
-}
 // view: rebuild meshes for a fresh board, then animate what changes
 let shown = null;
 function resetView() { G = null; buildBoard(S.C, S.R); shown = { E: '0'.repeat(G.ne), O: new Array(G.nb).fill(null) }; }
@@ -405,9 +295,9 @@ function hud(dt) {
   document.getElementById('board').innerHTML = rows.map(({ p, i }) => `<div class="row ${p.id === me ? 'me' : ''} ${i === S.turn && S.ph === 'play' ? 'up' : ''}"><b>${i === S.turn && S.ph === 'play' ? '▶' : ''}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
 }
 
-// Run engine > host / attract tick (worker keeps a background host tab ticking); guests just run the clock
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S?.mode === 'attract' || lobby.room?.isHost) { if (S?.mode === 'attract' || started) hostTick(dt); }
+  if (S?.mode === 'attract') attractTick(dt);
   else if (S) S.tt -= dt;
 });
 

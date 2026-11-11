@@ -10,7 +10,7 @@ From the repo root (one server for Render Studio + toys + rooms):
 npm run setup   # first time: installs both folders
 npm start       # http://localhost:5066/ (studio) and http://localhost:5066/3d-toys/ (toys)
 npm test        # pool, Break Builder, party royale and relay tests (node --test)
-npm run capacity-test  # relay load at 14 / 24 / 32 / 40 / 50 players
+npm run capacity-test  # relay load at 14 / 24 / 32 / 40 / 50 players (party royale); add --game=<room game> for a relay-run classic game
 ```
 
 Toys alone: `npm run toys` from the root serves only the toy box on http://localhost:5055/3d-toys/.
@@ -63,16 +63,16 @@ Notes:
 
 ## Multiplayer
 
-Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, host-authoritative). Open two tabs to test. Game data rides short text frames (`common/relay-wire.js`: `>to|sticky|json` up, `<from|json` down): the relay reads only the header and forwards the payload bytes untouched, one shared buffer per fan-out, so a peer cannot spoof `from`. Party royale rounds run on the relay itself (`multiplayer-rooms/hosted-games.js` > `party-royale/party-server-host.js`): the relay is peer `SERVER_PEER` (0), so every player is one hop from the host.
+Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `?room=CODE`, server-authoritative: every multiplayer game runs on the relay, the lobby host only starts and stops it). Open two tabs to test. Game data rides short text frames (`common/relay-wire.js`: `>to|sticky|json` up, `<from|json` down): the relay reads only the header and forwards the payload bytes untouched, one shared buffer per fan-out, so a peer cannot spoof `from`. Party royale rounds run on the relay itself (`multiplayer-rooms/hosted-games.js` > `party-royale/party-server-host.js`): the relay is peer `SERVER_PEER` (0), so every player is one hop from the host.
 
-- `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; host-validated clicks over the room relay. Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
-- `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring, start slots shuffled each round: host-authoritative 60 Hz sim, 20 Hz snapshots + events, guest extrapolation, host migration, bots, touch stick
+- `wheres-waldo-game/`: Waldo Hunt, online Where's Waldo for 2-14 with bots: race (best of 5) or hide & seek in seeded Malaysian crowds, decoys ramp each round; server-validated clicks (`waldo-rounds.js` on the relay via `waldo-server-host.js`; the page asks `hello` for the round on screen). Single 2D-canvas page (old React app history in tedwin-Main/wheres-waldo-game).
+- `bumper-sumo-arena/`: online bumper-car sumo on a shrinking ring, start slots shuffled each round: the relay runs the 60 Hz sim (`sumo-sim.js`), every page is a predicted guest, bots, touch stick
 - `tank-battle-maze/`: online 14-tank deathmatch: seeded maze (backtracker + loops, merged wall boxes, occupancy LOS grid), ricochet shells, crates, BFS bots that lead + dodge, kill feed, minimap, twin touch sticks
-- `paint-territory/`: online turf painting: 48x48 owner grid as premultiplied DataTexture + wobbly-edge floor shader, delta + 1 s keyframe sync, paint bombs, terrain-dependent speed, mirrored seeded pillars, bots seeking unclaimed/enemy turf
+- `paint-territory/`: online turf painting: 48x48 owner grid as premultiplied DataTexture + wobbly-edge floor shader, delta + 2 s keyframe sync, relay-run (`turf-sim.js`), paint bombs, terrain-dependent speed, mirrored seeded pillars, bots seeking unclaimed/enemy turf
 - `kart-race-online/`: Online 14-kart race: drift physics with mini-turbo on release, item boxes by place (leader mostly bananas, back markers mostly boosts; boost, banana, homing shell), seeded circuits, random grid each race, 3 laps, live positions.
-- `mini-golf-party/`: Turn-based online mini golf for up to 14: putts rotate in honor order (hole 1 drawn by lot, holed balls skipped), shot clock (host setting, timeout = +1 stroke and a weak putt is played for you), resting balls can be knocked (only the putter pays water penalties), drag-back putting, 6-stroke cap (not holed scores 7), 6 holes, par 19 tuned to bot play (bumpers, windmills, slopes, water, sand), simulation-planning bots, scorecard.
+- `mini-golf-party/`: Turn-based online mini golf for up to 14: putts rotate in honor order (hole 1 drawn by lot, holed balls skipped), shot clock (lobby setting, timeout = +1 stroke and a weak putt is played for you), resting balls can be knocked (only the putter pays water penalties), drag-back putting, 6-stroke cap (not holed scores 7), 6 holes, par 19 tuned to bot play (bumpers, windmills, slopes, water, sand), simulation-planning bots, scorecard.
 - `hex-drop-survival/`: Online last-one-standing for up to 14: three hex floors where touched tiles drop, jump gaps, bots that hunt solid ground, 3 rounds of points.
-- `voxel-build-together/`: Co-op voxel builder for up to 14: live cursors with names, host-ordered edits (host decides builder credit), 16-color palette, undo, save/load in browser, auto-building attract mode.
+- `voxel-build-together/`: Co-op voxel builder for up to 14: live cursors with names (peer to peer), server-ordered edits (`build-server-host.js` applies them in arrival order and decides builder credit; the plate survives the lobby host leaving), 16-color palette, undo, save/load in browser, auto-building attract mode.
 - `light-cycle-arena/`: Online light-cycle battle for up to 14: grid-exact trails, boost energy, flood-fill bots, bloom neon, minimap, 5 rounds.
 - `bomb-tag-arena/`: Online hot-potato tag for up to 14: bombs pass on contact with no tag-backs, dash, blast knockback, chase/flee bots, waves until one survives.
 - `rocket-ball-soccer/`: Online car soccer, Blue vs Orange up to 7v7 with bots (a leaver's car goes to a bot); boost (reset to a third each kickoff), ball cam, goal confetti, sudden death.
@@ -85,9 +85,48 @@ Rooms via `src/features/multiplayer-rooms/room-relay.js` (4-letter code, share `
 - `sheepdog-rush/`: Sheepdog Rush, online herding up to 14 with bots; boids flock (flee dogs, separation, cohesion, graze-wander), one pen per dog with gates cut in the ring fence, bark impulse ring, golden sheep worth 3, bots circle behind a sheep and walk it in, first to 30.
 - `balloon-battle/`: Balloon Battle, online balloon pop up to 14 with bots; stick sets heading with capped turn rate, lance-tip vs tail hit test, dash, 3 balloons + floating spare bundles (max 5), ghost respawn, confetti pops + pop feed, carousel + pillars, first to 20 pops.
 
+Classic games the relay runs (`multiplayer-rooms/hosted-games.js` > `common/server-run/sim-server-host.js`): Kart Party, Turbo Ball, Bumper Sumo, Hot Potato, Crown Keep, Chair Scramble, Balloon Battle, Sheepdog Rush, Snowball Brawl, Tank Brawl, Cannon Cove, Hex Drop, Splat Turf, Penguin Curling, Mini Golf, Light Cycles, Floor Is Lava. One hop from every player, no host tab to stall the room, no host advantage. Each game keeps its rules in a render-free `<game>-sim.js` next to its page; the page runs that sim for attract mode and for predicting the player's own piece, and mirrors the server's snapshots in a match.
+
+- Input: every tick up to 14 guests, every 2 ticks above (`inputEvery` in `common/server-run/relay-budget.js`), numbered; latest input wins on the server. Button presses ride as counters, so a lost packet never loses a press.
+- Snapshots: JSON, fastest of 60 / 30 / 20 / 15 Hz inside the relay budgets (`snapEvery`: 400 KB/s egress, 960 frames/s), from the running average frame size. Slow fields (scores, lap, items, pickups, barrels, crates, fort hp, maze / arena seed) ride only when they change, with a full copy every 15 snapshots and on roster change (`common/server-run/changed-only.js`). Hex Drop sends stepped-on tile indexes plus a full tile string each second; Splat Turf sends paint deltas plus a full grid string every 2 s.
+- Confirm metric: each snapshot carries `A = [id, seq, ...]`, the last input seq applied per human (mod 4096); `?debug` exposes `__serverMatch.stats.confirmMs` (press > server applies > ack back).
+- Measured 2026-11-11, relay on a laptop core, 14 humans and no bots, every human steering in circles and pressing its button (`npm run capacity-test -- 12 14 --game=<room game>`), confirm over loopback:
+
+| room game | snapshot | relay CPU incl. sim | relay egress | confirm p50 / p95 |
+|---|---|---|---|---|
+| kart-party | 788 B @ 30 Hz | 55 ms/s | 323 KB/s | 13.5 / 19.3 ms |
+| turbo-ball | 885 B @ 30 Hz | 65 ms/s | 362 KB/s | 13.3 / 19.8 ms |
+| bumper-sumo | 862 B @ 30 Hz | 59 ms/s | 308 KB/s | 12.9 / 19.3 ms |
+| hot-potato | 764 B @ 30 Hz | 62 ms/s | 313 KB/s | 13.3 / 19.3 ms |
+| crown-keep | 801 B @ 30 Hz | 62 ms/s | 327 KB/s | 13.7 / 19.4 ms |
+| chair-scramble | 773 B @ 30 Hz | 61 ms/s | 318 KB/s | 16.0 / 19.1 ms |
+| balloon-battle | 744 B @ 30 Hz | 69 ms/s | 306 KB/s | 16.5 / 18.7 ms |
+| hex-drop | 766 B @ 30 Hz | 65 ms/s | 313 KB/s | 17.0 / 18.8 ms |
+| cannon-cove | 806 B @ 30 Hz | 84 ms/s | 331 KB/s | 17.3 / 18.9 ms |
+| splat-turf | 1027 B @ 20 Hz | 63 ms/s | 288 KB/s | 14.1 / 19.6 ms |
+| sheepdog-rush | 1250 B @ 20 Hz | 70 ms/s | 343 KB/s | 13.8 / 18.6 ms |
+| tank-brawl | 1315 B @ 20 Hz | 73 ms/s | 336 KB/s | 15.2 / 19.1 ms |
+| snowball-brawl | 1356 B @ 20 Hz | 76 ms/s | 326 KB/s | 14.0 / 19.3 ms |
+| penguin-curling | 553 B @ 30 Hz | 67 ms/s | 227 KB/s | 16.6 / 18.8 ms |
+| mini-golf | 518 B @ 30 Hz | 59 ms/s | 218 KB/s | 16.4 / 18.2 ms |
+| light-cycles | 634 B @ 30 Hz | 50 ms/s | 260 KB/s | 16.7 / 18.3 ms |
+| floor-is-lava | 949 B @ 15-20 Hz (on the egress budget edge) | 53-60 ms/s | 203-287 KB/s | 15.4 / 18.5 ms |
+
+Rooms of up to 6 get 60 Hz even on the heaviest games (6 humans: snowball-brawl 660 B @ 60 Hz, 47 ms/s; tank-brawl 671 B @ 60 Hz, 45 ms/s). The free Render instance has 150 ms/s of CPU, so one full 14-player room fits; a second full room at the same time would lag both. Not yet measured live on Render.
+
+Before 2026-11-11 only Kart Party and Turbo Ball ran on the relay (input 30 Hz, snapshots 20 Hz at every room size); the other eleven ran on the lobby host's tab.
+
+Server-run since 2026-11-11 (no game runs on a browser tab any more):
+
+- Floor Is Lava (`lava-sim.js`): the server runs every jumper from input (`{ x, z, j }`, jump as a press counter) and draws the tower seed; each tab predicts its own jumper (`common/own-prediction.js`) and keeps its height local (adopts the server's height only when > 2.5 m off, or after 0.4 s standing on a different platform than the server says), so jumps never dip while the server catches up.
+- Light Cycles (`light-cycles-sim.js`): turns ride as a turn count plus the turn queue on keypress and every tick; the server keeps the grid, each tab predicts its own cycle.
+- Penguin Curling (`penguin-sim.js`) and Mini Golf (`mini-golf-sim.js`, shots `{ shot: [angle, power], q }` once per putt; bot shot search spread over ticks): the turn order, shot clock and physics run on the server.
+- Block Party (`build-server-host.js`) and Waldo Hunt (`waldo-server-host.js`) have their own small hosts (not the 60 Hz sim).
+- Full 14-bot matches on the server: lava 1.08 ms CPU per sim-second (746 B average snapshot), golf 1.81 ms (452 B), light cycles 0.88 ms (630 B).
+
 Real-time arenas (balloon, bomb tag, bumper sumo, hex drop, king of the hill, lava rise, light cycles, paint, pirates, sheepdog pens, snowball) shuffle start slots with `common/seat-shuffle.js`, so join order (host first) never fixes who starts beside whom.
 
-Turn-based and secret-pick games below sync through `common/turn-sync.js` (secret picks, bids, guesses and steps stay on the host until the reveal; a promoted host asks for them again): the host sends the whole game state only when it changes (versioned, sticky so late joiners get it), guests send numbered actions, and a promoted guest resumes from the last state it saw. Nothing moves between updates, so lag only delays a turn instead of making it jitter.
+Turn-based and secret-pick games below run on the relay (`common/server-run/turn-server-host.js`, 10 Hz, rules in each game's `<game>-rules.js`) and pages sync through `common/turn-sync.js`: secret picks, bids, guesses and steps stay inside the server game until the reveal, and the server draws the seed itself (a seed from a tab could leak hidden dice and tiles). The server sends the whole public state only when it changes (versioned, sticky so late joiners get it), every tab, lobby host included, sends numbered actions, and closing the lobby host's tab no longer pauses the match. Nothing moves between updates, so lag only delays a turn instead of making it jitter.
 
 - `bank-or-bust/`: Bank or Bust, push-your-luck dice up to 14 with bots; one shared 2-dice roll per beat, pot grows for everyone still in, bank (button / Space) to keep it; a single 1 busts the round, snake eyes wipe the total, doubles count twice, first roll of a round is safe, bank grace for lag; tumbling 3D dice, pawns sit when banked and tip when bust, coin stacks.
 - `fence-fields/`: Fence Fields, dots and boxes up to 14 with bots on a 3D meadow; board size scales with player count (or host pick), one fence per turn, closing a pen claims it (owner-colored tile + grazing sheep) and keeps the turn, turn clock (timeout builds a random fence), bots take free pens, avoid third sides, then give away the shortest chain.
@@ -96,7 +135,7 @@ Turn-based and secret-pick games below sync through `common/turn-sync.js` (secre
 - `gem-diggers/`: Gem Diggers, turn-based digging up to 14 with bots (random first digger) on a seeded 8-12 square meadow; gem +3 and dig again, bomb −2, empty tiles show adjacent bomb and gem counts and flood open, turn clock (timeout digs a random tile), bots read the numbers.
 - `lucky-low/`: Lucky Low, bluffing numbers up to 14 with bots; secret picks from 1 to players+3 (6-16), the lowest number nobody else picked wins and scores its own value, tokens drop on numbered pillars in order on the reveal.
 - `picnic-dash/`: Picnic Dash, simultaneous-turn grid race up to 14 with bots; each turn everyone picks a step in secret and all critters hop at once, same square or swapping = both bounce, walking into a stander bounces, apples 1 / watermelons 3, trees never cut the meadow apart, 15/20/30 turns.
-- `siege-hills/`: Siege Hills, turn-based catapult artillery up to 14 with bots; side-on heightmap strip, drag-back slingshot aim with arc preview (no wind) or arrow keys, random wind per turn, host simulates each shot and guests replay its arc, craters carve the ground, blast falloff + direct-hit bonus + fall damage, tide rises each lap late in a round, survive +3 / knockout +1 over 1-5 rounds.
+- `siege-hills/`: Siege Hills, turn-based catapult artillery up to 14 with bots; side-on heightmap strip, drag-back slingshot aim with arc preview (no wind) or arrow keys, random wind per turn, the server simulates each shot and every tab replays its arc, craters carve the ground, blast falloff + direct-hit bonus + fall damage, tide rises each lap late in a round, survive +3 / knockout +1 over 1-5 rounds.
 
 ## Party royale
 
@@ -129,7 +168,7 @@ Latency floor, per stage (press on a guest > server applies it > ack back):
 - **Jitter queue:** its wait is the cost of exact prediction (one input per tick). Skipping same-movement inputs (tried 2026-11-05) cut no confirm time and raised corrections p95 0.16 > 0.26, so it was reverted.
 - **2 > 32 player rise:** the server host sends one snapshot per human; the per-room cost on the relay is CPU, measured below.
 
-Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test -- 20 14,24,32` (humans only) and `-- 20 1,14,32 fill` (bots fill to 32), server-run rounds, relay on a laptop core. `room-relay.js` corks each socket for one event-loop turn (a burst leaves in one write).
+Seat cap: 32 (`MAX_SEATS` in `multiplayer-rooms/room-relay-core.js`; classic games keep 14). `npm run capacity-test -- 20 14,24,32` (humans only) and `-- 20 1,14,32 fill` (bots fill to 32), server-run rounds, relay on a laptop core; add `--game=kart-party` (or `turbo-ball`, `bumper-sumo`) to load a classic server-run game instead. `room-relay.js` corks each socket for one event-loop turn (a burst leaves in one write).
 
 | humans | beans | snapshot | relay CPU incl. sim | relay egress | per guest in | inputs in |
 |---|---|---|---|---|---|---|

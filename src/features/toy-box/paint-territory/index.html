@@ -49,10 +49,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
-import { pickLeader } from '../common/pick-leader.js';
-import { axis, applyPresses } from '../common/guest-input.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createTurfSim, STEP, G, HALF, MATCH_TIME, KEY_CHARS } from './turf-sim.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
@@ -80,20 +79,17 @@ Object.assign(sun.shadow.camera, { left: -32, right: 32, top: 32, bottom: -32, n
 scene.add(sun);
 
 // Arena > Paint grid: owner index per tile, uploaded as a color texture
-const G = 48, HALF = G / 2;
-const NONE = 0;
-const grid = new Uint8Array(G * G);
-const solid = new Uint8Array(G * G);
+// grid + rules live in turf-sim.js; this page draws them. Attract runs the sim here, a match mirrors the relay server's snapshots
+const sim = createTurfSim({ onGridChange: () => { texDirty = true; } });
+const world = sim.world, grid = sim.grid;
 const texData = new Uint8Array(G * G * 4);
 const paintTex = new THREE.DataTexture(texData, G, G);
 paintTex.magFilter = THREE.LinearFilter;
 paintTex.minFilter = THREE.LinearFilter;
 paintTex.colorSpace = THREE.SRGBColorSpace;
-let palette = ['#e9e4f2'];
 let texDirty = true;
-const tileIdx = (x, z) => { const tx = Math.floor(x + HALF), tz = Math.floor(z + HALF); return tx < 0 || tz < 0 || tx >= G || tz >= G ? -1 : tz * G + tx; };
 function refreshTex() {
-  const cols = palette.map((c) => new THREE.Color(c));
+  const cols = sim.palette.map((c) => new THREE.Color(c));
   for (let i = 0; i < G * G; i++) {
     const c = cols[grid[i]] ?? cols[0];
     // texture row 0 is the far edge (z = -HALF) because the plane's v runs opposite to +z
@@ -145,28 +141,21 @@ below.position.y = -3.01;
 scene.add(below);
 let pillarGroup = new THREE.Group();
 scene.add(pillarGroup);
-let pillars = [];
-function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-function buildArena(seed) {
-  const r = mulberry(seed);
+// pillar meshes rebuilt only when the sim moved to a new seeded arena
+let shownSeed = null;
+function showArena() {
+  const { seed, pillars, hue } = sim.arena;
+  if (shownSeed === seed) return;
+  shownSeed = seed;
   scene.remove(pillarGroup);
   pillarGroup = new THREE.Group();
   scene.add(pillarGroup);
-  pillars = [];
-  solid.fill(0);
-  // symmetric layout so no spawn corner is unfair
-  const n = 3 + Math.floor(r() * 3);
-  for (let i = 0; i < n; i++) {
-    const x = 4 + Math.floor(r() * 15), z = 4 + Math.floor(r() * 15), w = 2 + Math.floor(r() * 3), d = 2 + Math.floor(r() * 3);
-    for (const [sx, sz] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) pillars.push({ minx: sx > 0 ? x : -x - w, maxx: sx > 0 ? x + w : -x, minz: sz > 0 ? z : -z - d, maxz: sz > 0 ? z + d : -z });
-  }
-  const hue = r();
+  const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.35, 0.72), roughness: 0.5 });
   for (const b of pillars) {
-    const m = new THREE.Mesh(new RoundedBoxGeometry(b.maxx - b.minx, 2.2, b.maxz - b.minz, 2, 0.35), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(hue, 0.35, 0.72), roughness: 0.5 }));
+    const m = new THREE.Mesh(new RoundedBoxGeometry(b.maxx - b.minx, 2.2, b.maxz - b.minz, 2, 0.35), mat);
     m.position.set((b.minx + b.maxx) / 2, 1.1, (b.minz + b.maxz) / 2);
     m.castShadow = m.receiveShadow = true;
     pillarGroup.add(m);
-    for (let z = b.minz; z < b.maxz; z++) for (let x = b.minx; x < b.maxx; x++) { const k = tileIdx(x + 0.5, z + 0.5); if (k >= 0) solid[k] = 1; }
   }
 }
 // Arena > party lights around the rim
@@ -251,189 +240,8 @@ const sfx = {
   beep(hi) { tone(hi ? 880 : 520, hi ? 880 : 520, hi ? 0.4 : 0.15, 0.2, 'square'); },
 };
 
-// Game > World state
-const BOT_NAMES = ['Gloop', 'Splotch', 'Drip', 'Blorb', 'Smudge', 'Goober', 'Squish', 'Puddle', 'Blot', 'Jelly', 'Splash', 'Ooze', 'Smear', 'Glob'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const MATCH_TIME = 90, R = 0.9;
-const world = { mode: 'attract', phase: 'play', t: 0, players: new Map(), bombs: [], winner: null, seed: 7 };
 const blobs = new Map();
-let events = [], deltas = [];
-const rng = Math.random;
-function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, slot: 0, x: 0, z: 0, vx: 0, vz: 0, face: 0, inX: 0, inZ: 0, bombSeq: 0, lastBomb: 0, bombCD: 0, tiles: 0, ai: { t: 0, tx: 0, tz: 0 }, skill: 0.55 + rng() * 0.4 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) { world.players.delete(id); const b = blobs.get(id); if (b) { scene.remove(b); blobs.delete(id); } }
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); world.bombs = []; }
-function assignSlots() {
-  // paint slot = palette index; slot 0 is bare floor
-  palette = ['#e9e4f2'];
-  let s = 1;
-  for (const p of world.players.values()) { p.slot = s++; palette.push(p.color); }
-  texDirty = true;
-}
-function spawnAll() {
-  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
-  const ps = shuffleInPlace([...world.players.values()], rng);
-  ps.forEach((p, i) => {
-    const a = (i / ps.length) * Math.PI * 2 + Math.PI / 4;
-    let x = Math.cos(a) * 17, z = Math.sin(a) * 17;
-    Object.assign(p, { x, z, vx: 0, vz: 0, bombCD: 2, face: Math.atan2(-x, -z) });
-    resolve(p);
-  });
-}
-function paint(x, z, r, slot) {
-  const r2 = r * r;
-  for (let tz = Math.floor(z - r + HALF); tz <= Math.floor(z + r + HALF); tz++) for (let tx = Math.floor(x - r + HALF); tx <= Math.floor(x + r + HALF); tx++) {
-    if (tx < 0 || tz < 0 || tx >= G || tz >= G) continue;
-    const cx = tx - HALF + 0.5 - x, cz = tz - HALF + 0.5 - z;
-    if (cx * cx + cz * cz > r2) continue;
-    const k = tz * G + tx;
-    if (solid[k] || grid[k] === slot) continue;
-    grid[k] = slot; deltas.push(k, slot); texDirty = true;
-  }
-}
-// Run engine > collisions: arena bounds + pillar boxes
-function resolve(p) {
-  p.x = THREE.MathUtils.clamp(p.x, -HALF + R, HALF - R); p.z = THREE.MathUtils.clamp(p.z, -HALF + R, HALF - R);
-  for (const b of pillars) {
-    const cx = THREE.MathUtils.clamp(p.x, b.minx, b.maxx), cz = THREE.MathUtils.clamp(p.z, b.minz, b.maxz);
-    const dx = p.x - cx, dz = p.z - cz, d2 = dx * dx + dz * dz;
-    if (d2 >= R * R) continue;
-    if (d2 > 1e-8) {
-      const d = Math.sqrt(d2), k = (R - d) / d; p.x += dx * k; p.z += dz * k;
-      const nx = dx / d, nz = dz / d, vn = p.vx * nx + p.vz * nz;
-      if (vn < 0) { p.vx -= nx * vn * 1.5; p.vz -= nz * vn * 1.5; }
-    } else { p.x = b.maxx + R; }
-  }
-}
-
-// Run engine > step: roll with terrain speed, paint trail, bombs, bumps
-const STEP = 1 / 60;
-const OVERTIME = 15; // s added once when the lead is tied at time-up
-// one blob's drive: own paint fast, enemy paint slow; shared by host sim and guest prediction
-function moveBlob(p, dt, play) {
-  p.bombCD = Math.max(0, p.bombCD - dt);
-  let ix = play ? p.inX : 0, iz = play ? p.inZ : 0;
-  const l = Math.hypot(ix, iz); if (l > 1) { ix /= l; iz /= l; }
-  const k = tileIdx(p.x, p.z), own = k >= 0 && grid[k] === p.slot, enemy = k >= 0 && grid[k] && !own;
-  const max = own ? 12.5 : enemy ? 6.5 : 9.5;
-  p.vx += ix * 40 * dt; p.vz += iz * 40 * dt;
-  const drag = Math.exp(-(l > 0.1 ? 3 : 6) * dt); p.vx *= drag; p.vz *= drag;
-  const sp = Math.hypot(p.vx, p.vz); if (sp > max) { p.vx *= max / sp; p.vz *= max / sp; }
-  p.x += p.vx * dt; p.z += p.vz * dt;
-  resolve(p);
-  if (sp > 0.5) { let d = Math.atan2(p.vx, p.vz) - p.face; d = Math.atan2(Math.sin(d), Math.cos(d)); p.face += d * Math.min(1, dt * 10); }
-}
-function physics(dt) {
-  const ps = [...world.players.values()];
-  const play = world.phase === 'play';
-  for (const p of ps) {
-    moveBlob(p, dt, play);
-    if (play) paint(p.x, p.z, 1.35, p.slot);
-    if (play && p.bombSeq !== p.lastBomb) {
-      p.lastBomb = p.bombSeq;
-      if (p.bombCD <= 0) {
-        p.bombCD = 5;
-        const fx = Math.sin(p.face), fz = Math.cos(p.face);
-        const tx = THREE.MathUtils.clamp(p.x + fx * 7, -HALF + 1, HALF - 1), tz = THREE.MathUtils.clamp(p.z + fz * 7, -HALF + 1, HALF - 1);
-        world.bombs.push({ owner: p.id, slot: p.slot, color: p.color, sx: p.x, sz: p.z, tx, tz, t: 0, dur: 0.7 });
-        events.push(['t', p.id]);
-      }
-    } else if (!play) p.lastBomb = p.bombSeq;
-  }
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j], dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
-    if (d >= R * 2 || d < 1e-4) continue;
-    const nx = dx / d, nz = dz / d, ov = R * 2 - d;
-    a.x += nx * ov / 2; a.z += nz * ov / 2; b.x -= nx * ov / 2; b.z -= nz * ov / 2;
-    const vrel = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
-    if (vrel < 0) { const j2 = -vrel * 0.9; a.vx += j2 * nx; a.vz += j2 * nz; b.vx -= j2 * nx; b.vz -= j2 * nz; if (-vrel > 4) events.push(['u']); }
-  }
-  for (const b of world.bombs) {
-    b.t += dt;
-    if (b.t >= b.dur && !b.done) { b.done = true; if (play) paint(b.tx, b.tz, 3.6, b.slot); events.push(['s', +b.tx.toFixed(1), +b.tz.toFixed(1), b.color]); }
-  }
-  world.bombs = world.bombs.filter((b) => !b.done);
-}
-
-// Run engine > bots: head for nearest patch that isn't theirs, bomb enemy-heavy areas
-function botThink(p, dt) {
-  const ai = p.ai;
-  ai.t -= dt;
-  if (ai.t <= 0) {
-    ai.t = 0.6 + rng() * 0.6;
-    let best = null, bs = -1e9;
-    const rivals = [...world.players.values()].filter((q) => q !== p);
-    // skill: weighs more patches, picks steadier, and claims ground rivals won't paint straight back
-    for (let i = 0, n = Math.round(35 * p.skill); i < n; i++) {
-      const x = (rng() - 0.5) * (G - 4), z = (rng() - 0.5) * (G - 4), k = tileIdx(x, z);
-      if (k < 0 || solid[k]) continue;
-      const v = grid[k] === p.slot ? -6 : grid[k] ? 4 : 3;
-      const crowd = rivals.filter((q) => Math.hypot(q.x - x, q.z - z) < 7).length;
-      const s = v - Math.hypot(x - p.x, z - p.z) * 0.18 - crowd * 2.5 * p.skill + rng() * 12 * (1 - p.skill);
-      if (s > bs) { bs = s; best = [x, z]; }
-    }
-    if (best) { ai.tx = best[0]; ai.tz = best[1]; }
-    // enemy paint ahead? throw a bomb
-    const fx = p.x + Math.sin(p.face) * 7, fz = p.z + Math.cos(p.face) * 7, k = tileIdx(fx, fz);
-    if (k >= 0 && grid[k] && grid[k] !== p.slot && rng() < 0.67 * p.skill) p.bombSeq++;
-  }
-  const dx = ai.tx - p.x, dz = ai.tz - p.z, l = Math.hypot(dx, dz) || 1;
-  // wiggle so trails cover area instead of thin lines
-  const w = Math.sin(performance.now() / 300 + p.id) * 0.5;
-  p.inX = dx / l + (-dz / l) * w; p.inZ = dz / l + (dx / l) * w;
-}
-
-// Game > Phases: countdown, 90 s paint, results (tile share)
-let lastBeep = 0;
-function countTiles() {
-  const counts = new Array(palette.length).fill(0);
-  let open = 0;
-  for (let i = 0; i < G * G; i++) { if (solid[i]) continue; open++; counts[grid[i]]++; }
-  for (const p of world.players.values()) p.tiles = (counts[p.slot] ?? 0) / open;
-  return counts;
-}
-function phases(dt) {
-  if (world.mode === 'attract') {
-    world.phase = 'play';
-    world.t += dt;
-    // attract: wipe the floor every 40 s so it never saturates
-    if (world.t > 40) { world.t = 0; grid.fill(0); texDirty = true; }
-    return;
-  }
-  if (world.phase === 'count') {
-    world.t -= dt;
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { world.phase = 'play'; world.t = MATCH_TIME; events.push(['c', 0]); }
-  } else if (world.phase === 'play') {
-    world.t -= dt;
-    if (world.t <= 0) {
-      countTiles();
-      const { winner: top, tied } = pickLeader([...world.players.values()], (p) => p.tiles);
-      // tied turf: one overtime, then a draw (join order never breaks a tie)
-      if (!top && tied[0]?.tiles > 0 && !world.overtime) { world.overtime = true; world.t = OVERTIME; return; }
-      world.phase = 'end'; world.t = 7; world.winner = top?.id ?? null; world.overtime = false;
-    }
-  } else if (world.phase === 'end') {
-    world.t -= dt;
-    if (world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  }
-}
-function startMatch() {
-  grid.fill(0); texDirty = true; deltas = []; keyT = 0;
-  assignSlots();
-  world.phase = 'count'; world.t = 3; lastBeep = 4; world.winner = null; world.bombs = [];
-  spawnAll();
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract'; world.t = 0;
-  world.seed = 7; buildArena(7);
-  for (let i = 0; i < 6; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  grid.fill(0); assignSlots(); spawnAll();
-}
+const rng = Math.random, countTiles = sim.countTiles;
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -444,91 +252,64 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ seed, bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match'; world.seed = seed;
-    buildArena(seed);
+  // the relay server runs the match; every page (lobby host too) plays as a guest
+  onStart({ seed, bots }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', seed, phase: 'count', t: 3 });
+    sim.loadArena(seed);
     grid.fill(0); texDirty = true;
-    ['top', 'board'].forEach((id) => (document.getElementById(id).style.display = id === 'top' ? 'flex' : 'block'));
-    document.getElementById('share').style.display = 'block';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3; return; }
-    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startMatch();
+    serverMatch.start({ bots, seed });
   },
   onLobby() {
+    serverMatch.stop();
     ['top', 'board', 'share', 'bomb'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
-    startAttract();
+    sim.startAttract();
   },
 });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
-  for (const p of players) if (!world.players.has(p.id)) {
-    // keep 14 seats: joiner takes over the newest bot's paint slot
-    let slot = 0;
-    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).pop(); if (bot) { slot = bot.slot; removePlayer(bot.id); } }
-    const np = addPlayer(p.id, p.nick, p.color, false);
-    if (!slot) { slot = palette.length; palette.push(p.color); } else palette[slot] = p.color;
-    np.slot = slot; np.x = 0; np.z = 0; resolve(np);
-    texDirty = true; keyT = 0;
-  }
-}
+const serverMatch = createServerMatchClient(lobby);
 
-// Multiplayer > Net: grid deltas every snapshot, full keyframe each second (late joiners, new host)
-const remoteIn = new Map();
-let keyT = 0;
+// Multiplayer > Net: everything in a match comes from the relay server (blob rows, grid deltas, a full grid keyframe every 2 s)
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
 const f2 = (v) => Math.round(v * 100) / 100;
-const KEY_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot(withKey) {
-  const s = {
-    g: 's', ph: world.phase, t: f2(world.t), win: world.winner, seed: world.seed, ev: events, D: deltas,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), p.slot, p.bot ? 1 : 0, f2(p.bombCD)]),
-    B: world.bombs.map((b) => [f2(b.sx), f2(b.sz), f2(b.tx), f2(b.tz), f2(b.t), b.dur, b.color]),
-  };
-  if (withKey) { s.K = Array.from(grid, (v) => KEY_CHARS[v]).join(''); s.pal = palette; }
-  return names.stamp(s, world.players.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own blob moves on local input at once (no paint, no bombs)
-const pred = createPrediction({ step: (p, dt) => moveBlob(p, dt, world.phase === 'play'), live: () => true, angle: 'face' });
+const pred = createPrediction({ step: (p, dt) => sim.moveBlob(p, dt, world.phase === 'play'), live: () => true, angle: 'face' });
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
-  if (s.seed !== world.seed) { world.seed = s.seed; buildArena(s.seed); }
+  if (s.seed != null && s.seed !== world.seed) { world.seed = s.seed; sim.loadArena(s.seed); }
   Object.assign(world, { phase: s.ph, t: s.t, winner: s.win });
-  if (s.pal) { palette = s.pal; texDirty = true; }
+  if (s.pal) { sim.palette = s.pal; texDirty = true; }
   if (s.K) { for (let i = 0; i < G * G; i++) grid[i] = KEY_CHARS.indexOf(s.K[i]); texDirty = true; }
-  for (let i = 0; i < s.D.length; i += 2) grid[s.D[i]] = s.D[i + 1];
-  if (s.D.length) texDirty = true;
+  const painted = s.D ?? [];
+  for (let i = 0; i < painted.length; i += 2) grid[painted[i]] = painted[i + 1];
+  if (painted.length) texDirty = true;
   const seen = new Set();
   for (const a of s.P) {
     const [id, x, z, vx, vz, face, slot, bot, bombCD] = a;
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!bot);
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!bot);
     Object.assign(p, { x, z, vx, vz, face, slot, bombCD });
     if (id === lobby.room.me) pred.correct(p);
   }
-  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
   world.bombs = s.B.map(([sx, sz, tx, tz, t, dur, color]) => ({ sx, sz, tx, tz, t, dur, color }));
-  playEvents(s.ev);
+  playEvents(s.ev ?? []);
   snapAt = pacing.arrived();
 }
 function playEvents(evs) {
@@ -590,37 +371,21 @@ function hud(dt) {
   if (me) bombEl.textContent = me.bombCD > 0 ? `💣 bomb in ${Math.ceil(me.bombCD)}s` : '💣 bomb ready (Space)';
 }
 
-// Run engine > sim tick (worker)
-let acc = 0, sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match predicts my blob and streams input to the server
+let acc = 0;
+const isHostSim = () => world.mode === 'attract';
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') { Object.assign(me, { inX: local.x, inZ: local.z }); applyPresses(me, { bombSeq: ['lastBomb', local.bombSeq] }); }
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { inX: axis(inp.x), inZ: axis(inp.z) }); applyPresses(p, { bombSeq: ['lastBomb', inp.b] }); } }
-    acc += dt;
-    while (acc >= STEP) {
-      for (const p of world.players.values()) if (p.bot) botThink(p, STEP);
-      physics(STEP);
-      phases(STEP);
-      acc -= STEP;
-    }
-    if (world.mode === 'match' && room) {
-      sendT -= dt; keyT -= dt;
-      if (sendT <= 0) {
-        sendT = 0.05;
-        const key = keyT <= 0;
-        if (key) keyT = 1;
-        room.send(snapshot(key)); playEvents(events); events = []; deltas = [];
-      }
-    } else { playEvents(events); events = []; deltas = []; }
-  } else if (world.mode === 'match' && room) {
-    pred.tick(world.players.get(room.me), { inX: local.x, inZ: local.z }, dt, 1 / 60);
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: f2(local.x), z: f2(local.z), b: local.bombSeq }); }
+    for (acc += dt; acc >= STEP; acc -= STEP) sim.step();
+    playEvents(sim.events); sim.events = [];
+    sim.dropDeltas();
+    return;
   }
+  const room = lobby.room;
+  if (!room) return;
+  pred.tick(world.players.get(room.me), { inX: local.x, inZ: local.z }, dt, STEP);
+  serverMatch.tickInput(() => ({ x: f2(local.x), z: f2(local.z), b: local.bombSeq }));
 }
 startTicker(60, simTick);
 
@@ -629,7 +394,9 @@ const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 60, 40), camLook = new THREE.Vector3();
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  showArena();
   if (texDirty) refreshTex();
+  for (const [id, b] of blobs) if (!world.players.has(id)) { scene.remove(b); blobs.delete(id); }
   floorMat.uniforms.uTime.value = time;
   const hostSim = isHostSim();
   const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
@@ -675,7 +442,7 @@ function loop() {
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-startAttract();
+sim.startAttract();
 loop();
 
 addEventListener('resize', () => {

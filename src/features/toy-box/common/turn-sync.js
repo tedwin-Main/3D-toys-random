@@ -1,48 +1,36 @@
-// Synchronizes state for turn-based and simultaneous-pick multiplayer games.
+// Connects a turn-based or simultaneous-pick game page to the match the relay server runs: states in, actions out.
+
+import { SERVER_PEER } from './relay-wire.js';
 
 // Multiplayer > Turn sync
-// onState(state): guest got a newer state; onAction(fromId, action): host got an action (host's own included)
-export function createTurnSync({ onState, onAction }) {
-  let room = null, ver = 0, seq = 0, last = null, stateFrom = null;
-  const seen = new Map();
-  // only current host's states count; new host restarts version count (a spoofed huge v can't freeze guests)
-  function onHostState(r, d, from) {
-    if (from !== r.host || !Number.isFinite(d.v)) return;
-    if (from !== stateFrom) { stateFrom = from; ver = 0; }
-    if (d.v <= ver) return;
-    ver = d.v; last = d.s; onState(d.s);
+// The relay server runs the rules (server-run/turn-server-host.js); every tab, the lobby host included, is a guest of it.
+// onState(state): got a newer public state; onDone(): the server ended the match
+export function createTurnSync({ onState, onDone = () => {} }) {
+  let room = null, version = 0, actionSeq = 0, last = null;
+
+  // s = null: match over, nothing to draw
+  function onServerState(data) {
+    if (!Number.isFinite(data.v) || data.v <= version) return;
+    version = data.v; last = data.s;
+    if (data.s) onState(data.s);
   }
-  const api = {
+
+  return {
     // lobby onJoin: start listening on this room
-    attach(r) {
-      room = r;
-      r.on('data', (d, from) => {
-        if (!d || d._lobby) return;
-        if (d.g === 'T' && !r.isHost) onHostState(r, d, from);
-        if (d.g === 'A' && r.isHost) {
-          // websocket keeps order; seq drops replays after a reconnect
-          const q = Number(d.q);
-          if (!(q > (seen.get(from) ?? 0))) return;
-          seen.set(from, q);
-          onAction(from, d.a);
-        }
+    attach(joinedRoom) {
+      room = joinedRoom;
+      // new room (or relay restart): its server counts versions from 1 again
+      version = 0; last = null;
+      room.on('data', (data, from) => {
+        // only the server's word counts: a player spoofing a state or the match end is ignored
+        if (!data || data._lobby || from !== SERVER_PEER) return;
+        if (data.g === 'T') onServerState(data);
+        else if (data.g === 'done') onDone();
       });
     },
-    // host: send full state to everyone (late joiners get it from the relay's sticky slot)
-    publish(state) {
-      if (!room?.isHost) return;
-      last = state;
-      room.send({ g: 'T', v: ++ver, s: state }, { sticky: true });
-    },
-    // anyone: host runs it at once, guests send it to host
-    act(action) {
-      if (!room) return;
-      if (room.isHost) onAction(room.me, action);
-      else room.toHost({ g: 'A', q: ++seq, a: action });
-    },
-    // last state seen or published (a guest promoted to host resumes from it)
+    // seq lets the server drop replays after a reconnect
+    act(action) { room?.send({ g: 'A', q: ++actionSeq, a: action }, { to: SERVER_PEER }); },
+    // last state seen (late joiners get it from the relay's sticky slot before the lobby start packet)
     get state() { return last; },
-    reset() { last = null; seen.clear(); },
   };
-  return api;
 }

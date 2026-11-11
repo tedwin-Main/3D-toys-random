@@ -52,13 +52,13 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
-import { pickLeader } from '../common/pick-leader.js';
-import { axis } from '../common/guest-input.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createPenguinSim, STEP, XW, FRONT, BACK, HOG, RINGS, ROUNDS, SLIDING_SPEED } from './penguin-sim.js';
 import { trackKeys } from '../common/key-state.js';
 
 // Scene > Renderer, sky, ice sheet, snow banks, lake past the back edge, mountains, trees, igloo
@@ -81,7 +81,6 @@ sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 12, bottom: -56, near: 1, far: 120 });
 sun.target.position.set(0, 0, -22);
 scene.add(sun, sun.target);
-const XW = 8.5, FRONT = 6, BACK = -47, HOG = -22;
 function canvasTex(w, h, draw) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   draw(c.getContext('2d'), w, h);
@@ -142,7 +141,6 @@ igloo.position.set(-15, 0, 8); igloo.castShadow = true;
 scene.add(igloo);
 
 // Target > house rings (blue, white, red, white) with a fish on the button
-const RINGS = [[1.0, 5], [2.2, 3], [3.5, 2], [5.0, 1]];
 const house = new THREE.Group();
 [[5.0, 0x3a86ff], [3.5, 0xffffff], [2.2, 0xe63946], [1.0, 0xffffff]].forEach(([r, c], k) => {
   const d = new THREE.Mesh(new THREE.CircleGeometry(r, 56).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: c, roughness: 0.2, transparent: true, opacity: 0.85, polygonOffset: true, polygonOffsetFactor: -1 - k, polygonOffsetUnits: -1 - k }));
@@ -248,216 +246,11 @@ const sfx = {
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
 };
 
-// Game > World
-const BOT_NAMES = ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Mumble', 'Pebble', 'Iceberg', 'Snowy', 'Kowalski', 'Rico', 'Chilly', 'Frosty', 'Sardine', 'Puddles'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const ROUNDS = 8, AIM_T = 10, PR = 0.5, FR = 4.5, FR_SWEEP = 2.9, VMIN = 5, VMAX = 22, LEAN = 1.8;
-const WAIT_Z = 3.6;
-// turn: id of the penguin throwing now; order: this round's throw order; ti: index of turn in order
-const world = { mode: 'attract', phase: 'count', t: 3, round: 0, rounds: ROUNDS, hx: 0, hz: -37, best: 0, players: new Map(), winner: null, turn: null, order: [], ti: -1 };
-let events = [];
-const rng = Math.random;
-function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, ax: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, score: 0, last: 0, plan: null, skill: 0.35 + rng() * 0.55 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
-// throw order: shuffled in round 1, then leader first so last place throws last (the hammer); ties keep last round's order
-function lineUp() {
-  const ps = [...world.players.values()], prev = new Map(world.order.map((id, k) => [id, k]));
-  if (world.round === 1) ps.sort(() => rng() - 0.5);
-  else ps.sort((a, b) => b.score - a.score || (prev.get(a.id) ?? 99) - (prev.get(b.id) ?? 99));
-  // last end's final thrower never opens the next end (no back-to-back throws)
-  const lastThrower = world.order.findLast((id) => world.players.has(id));
-  if (ps.length > 1 && ps[0].id === lastThrower) [ps[0], ps[1]] = [ps[1], ps[0]];
-  for (const p of ps) Object.assign(p, { vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, plan: null });
-  Object.assign(world, { order: ps.map((p) => p.id), ti: -1, turn: null });
-  bench();
-}
-// penguins still to throw wait in a row behind the hack, next up on the left
-function bench() {
-  const wait = world.order.slice(world.ti + 1).map((id) => world.players.get(id)).filter((p) => p && !p.launched);
-  const n = wait.length, gap = Math.min(1.6, 14 / Math.max(1, n - 1));
-  wait.forEach((p, k) => Object.assign(p, { x: (k - (n - 1) / 2) * gap, z: WAIT_Z }));
-}
-// next thrower steps onto the hack; nobody left means the end is scored
-function nextTurn() {
-  do world.ti++; while (world.ti < world.order.length && !world.players.has(world.order[world.ti]));
-  if (world.ti >= world.order.length) { world.turn = null; scoreRound([...world.players.values()]); return; }
-  const p = world.players.get(world.order[world.ti]);
-  Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, armed: false, charging: false, plan: null });
-  world.turn = p.id;
-  bench();
-  world.phase = 'aim'; world.t = AIM_T;
-  events.push(['u', p.id]);
-}
-// fewer rounds in big rooms so 14 one-at-a-time throws per round stay a party game
-const roundsFor = (n) => clamp(Math.ceil(40 / Math.max(1, n)), 3, ROUNDS);
-function startRound() {
-  world.round++;
-  world.hx = (rng() - 0.5) * 8; world.hz = -33 - rng() * 7; world.best = 0;
-  lineUp();
-  world.phase = 'count'; world.t = world.round === 1 ? (world.mode === 'attract' ? 1.5 : 3.5) : 1.6;
-}
-function startMatch() {
-  for (const p of world.players.values()) { p.score = 0; p.last = 0; }
-  Object.assign(world, { round: 0, rounds: world.mode === 'attract' ? 2 : roundsFor(world.players.size), winner: null, order: [] });
-  startRound();
-}
-
-// Run engine > aim + charge meter, launch, belly-slide friction, sweep, lean, banks, lake
+// Game > rules + physics live in penguin-sim.js: this page steps them for attract mode only, a match is run by the relay server
+const sim = createPenguinSim();
+const world = sim.world;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const tri = (u) => 1 - Math.abs(1 - (u % 2));
-function launch(p, pow = p.pow) {
-  const v = VMIN + pow * (VMAX - VMIN);
-  Object.assign(p, { launched: true, charging: false, pow, vx: Math.sin(p.aim) * v, vz: -Math.cos(p.aim) * v });
-  events.push(['l', p.id]);
-}
-function stepPlayer(p, dt) {
-  if (p.out) return;
-  if (!p.launched) {
-    if (world.phase !== 'aim' || p.id !== world.turn) return;
-    p.aim = clamp(p.aim + p.ax * 0.7 * dt, -0.4, 0.4);
-    // must let go once per round so a key held from last round can't fire instantly
-    if (!p.held) p.armed = true;
-    if (p.held && p.armed && !p.charging) { p.charging = true; p.chT = 0; }
-    if (p.charging) { p.chT += dt; p.pow = tri(p.chT * 0.85); if (!p.held) launch(p); }
-    return;
-  }
-  const sp = Math.hypot(p.vx, p.vz);
-  p.sweep = p.held && sp > 0.3;
-  if (sp < 1e-3) { p.vx = p.vz = 0; return; }
-  const ns = Math.max(0, sp - (p.sweep ? FR_SWEEP : FR) * dt);
-  if (sp > 1) { const px = -p.vz / sp, pz = p.vx / sp; p.vx += px * p.ax * LEAN * dt; p.vz += pz * p.ax * LEAN * dt; }
-  const l = Math.hypot(p.vx, p.vz) || 1;
-  p.vx *= ns / l; p.vz *= ns / l;
-  p.x += p.vx * dt; p.z += p.vz * dt;
-  if (Math.abs(p.x) > XW - PR) { p.x = Math.sign(p.x) * (XW - PR); if (Math.abs(p.vx) > 1.5) events.push(['x', p.id, +p.x.toFixed(1), +p.z.toFixed(1)]); p.vx *= -0.6; }
-  if (p.z > FRONT - PR) { p.z = FRONT - PR; p.vz *= -0.5; }
-  if (p.z < BACK) { Object.assign(p, { out: true, vx: 0, vz: 0, z: BACK - 1.1, sweep: false }); events.push(['s', p.id]); }
-}
-function collide(ps) {
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j];
-    if (a.out || b.out || (!a.launched && !b.launched)) continue;
-    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > PR * 2 || d < 1e-4) continue;
-    const nx = dx / d, nz = dz / d, pen = PR * 2 - d;
-    const vr = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-    // a penguin still on the start line acts like a fixed post: only the slider moves
-    if (!a.launched || !b.launched) {
-      const m = a.launched ? a : b, s = a.launched ? -1 : 1;
-      m.x += nx * s * pen; m.z += nz * s * pen;
-      const vn = m.vx * nx + m.vz * nz;
-      if (vn * s < 0) { m.vx -= 1.8 * vn * nx; m.vz -= 1.8 * vn * nz; }
-      continue;
-    }
-    a.x -= nx * pen / 2; a.z -= nz * pen / 2; b.x += nx * pen / 2; b.z += nz * pen / 2;
-    if (vr < 0) {
-      const jj = -1.92 * vr / 2;
-      a.vx -= jj * nx; a.vz -= jj * nz; b.vx += jj * nx; b.vz += jj * nz;
-      if (-vr > 1.5) events.push(['k', a.id, b.id, +((a.x + b.x) / 2).toFixed(1), +((a.z + b.z) / 2).toFixed(1), +(-vr).toFixed(1)]);
-    }
-  }
-}
-
-// Run engine > bots: aim at the fish (or knock the leader off it), release at the right charge, sweep if short, lean toward the line
-function botThink(p) {
-  if (p.out) { p.held = false; return; }
-  if (!p.launched) {
-    if (world.phase !== 'aim' || p.id !== world.turn) { p.held = false; p.ax = 0; return; }
-    p.plan ??= { at: AIM_T - 1 - rng() * 1.6, tx: world.hx, tz: world.hz, want: null };
-    const pl = p.plan;
-    if (pl.want === null && world.t <= pl.at + 0.8) {
-      const sitters = [...world.players.values()].filter((q) => q !== p && q.launched && !q.out && Math.hypot(q.vx, q.vz) < 0.1 && Math.hypot(q.x - world.hx, q.z - world.hz) < 3.5);
-      let extra = 0;
-      // takeout: knock the rival sitting closest to the fish, more likely with the hammer (last throw of the end)
-      const hammer = world.ti === world.order.length - 1;
-      if (sitters.length && rng() < (hammer ? 0.85 : 0.45) * p.skill) {
-        const t = sitters.sort((a, b) => Math.hypot(a.x - world.hx, a.z - world.hz) - Math.hypot(b.x - world.hx, b.z - world.hz))[0];
-        pl.tx = t.x; pl.tz = t.z; extra = 4;
-      }
-      const err = 1.1 - p.skill;
-      pl.tx += (rng() - 0.5) * 3.5 * err; pl.tz += (rng() - 0.5) * 6 * err;
-      const v = Math.sqrt(2 * FR * (Math.hypot(pl.tx - p.x, pl.tz - p.z) + extra));
-      pl.want = clamp((v - VMIN) / (VMAX - VMIN) + (rng() - 0.5) * 0.3 * err, 0.04, 1);
-    }
-    p.ax = clamp((Math.atan2(pl.tx - p.x, -(pl.tz - p.z)) - p.aim) * 6, -1, 1);
-    p.held = world.t <= pl.at && !(p.charging && Math.abs(p.pow - pl.want) < 0.025);
-    return;
-  }
-  const sp = Math.hypot(p.vx, p.vz);
-  if (sp < 0.3) { p.held = false; p.ax = 0; return; }
-  const ux = p.vx / sp, uz = p.vz / sp, tx = p.plan?.tx ?? world.hx, tz = p.plan?.tz ?? world.hz;
-  const dx = tx - p.x, dz = tz - p.z, ahead = dx * ux + dz * uz, lat = dx * -uz + dz * ux;
-  p.held = ahead > (sp * sp) / (2 * FR) + 0.4 && rng() < p.skill * 0.8;
-  p.ax = clamp(lat * 0.6, -1, 1) * p.skill;
-}
-
-// Game > Phases: countdown, then per throw: aim (10 s shot clock) > slide (until every penguin stops) > rest; round scores after the last throw, final standings
-let lastBeep = 0;
-function scoreRound(ps) {
-  let best = null, bd = Infinity;
-  for (const p of ps) {
-    p.last = 0;
-    if (p.out) continue;
-    const d = Math.hypot(p.x - world.hx, p.z - world.hz);
-    for (const [r, pts] of RINGS) if (d < r) { p.last = pts; break; }
-    if (p.last && d < bd) { bd = d; best = p; }
-  }
-  // closest to the fish gets a +2 bonus on top of its ring points
-  if (best) best.last += 2;
-  for (const p of ps) { p.score += p.last; if (p.last) events.push(['p', p.id, p.last]); }
-  world.best = best?.id ?? 0;
-  events.push(['b', world.best, best?.last ?? 0]);
-  world.phase = 'score'; world.t = 3.2;
-}
-function phases(dt) {
-  const ps = [...world.players.values()];
-  world.t -= dt;
-  if (world.phase === 'count') {
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); nextTurn(); }
-  } else if (world.phase === 'aim') {
-    const p = world.players.get(world.turn);
-    // thrower left mid-turn: next one up
-    if (!p) nextTurn();
-    else if (p.launched || world.t <= 0) {
-      // shot clock ran out: a gentle push from wherever the meter was
-      if (!p.launched) launch(p, p.charging ? p.pow : 0.5 + rng() * 0.2);
-      world.phase = 'slide'; world.t = 10;
-    }
-  } else if (world.phase === 'slide') {
-    if (world.t <= 0 || ps.every((p) => p.out || Math.hypot(p.vx, p.vz) < 0.05)) {
-      for (const p of ps) p.vx = p.vz = 0;
-      // hog line: a throw that stops short of the blue line is out of play, off to the snow bank
-      const p = world.players.get(world.turn);
-      if (p && !p.out && p.z > HOG) { Object.assign(p, { out: true, hog: true, x: Math.sign(p.x || 1) * (XW + 1) }); events.push(['h', p.id]); }
-      world.phase = 'rest'; world.t = 0.8;
-    }
-  } else if (world.phase === 'rest' && world.t <= 0) nextTurn();
-  else if (world.phase === 'score' && world.t <= 0) {
-    if (world.round < world.rounds) startRound();
-    else {
-      // tied top score = shared draw, never decided by join order
-      const { winner: top } = pickLeader(ps, (p) => p.score);
-      world.winner = top?.id ?? null;
-      if (top) events.push(['w', top.id]);
-      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
-    }
-  } else if (world.phase === 'final' && world.t <= 0) {
-    if (world.mode === 'attract') startMatch();
-    else if (lobby.room?.isHost) lobby.backToLobby();
-  }
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract';
-  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  startMatch();
-}
+const rng = Math.random; // cosmetic only: spray, camera shake
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -468,72 +261,54 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match';
+  // the relay server runs the match; every page (lobby host too) plays its own penguin as a guest
+  onStart({ bots }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', phase: 'count', t: 3.5, round: 0, turn: null, order: [], ti: -1, winner: null });
     ['info', 'board', 'phase'].forEach((id) => (document.getElementById(id).style.display = 'block'));
     document.getElementById('top').style.display = 'flex';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
-    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startMatch();
+    serverMatch.start({ bots });
   },
   onLobby() {
+    serverMatch.stop();
     ['info', 'board', 'top', 'phase', 'power'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
-    startAttract();
+    sim.startAttract();
   },
 });
+const serverMatch = createServerMatchClient(lobby);
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
-  for (const p of players) if (!world.players.has(p.id)) {
-    // keep 14 seats: a late human takes the lowest-scoring bot's place
-    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.score - b.score)[0]; if (bot) removePlayer(bot.id); }
-    // late joiner throws last this round, or waits at the side until the next one
-    const np = Object.assign(addPlayer(p.id, p.nick, p.color, false), { x: XW - 0.6, z: WAIT_Z });
-    if (['count', 'aim', 'slide', 'rest'].includes(world.phase)) { world.order.push(np.id); bench(); }
-  }
-}
-
-// Multiplayer > Net: guest input 20 Hz, host snapshots with events
-const remoteIn = new Map();
+// Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot() {
-  return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, rs: world.rounds, hx: f2(world.hx), hz: f2(world.hz), b: world.best, win: world.winner, tu: world.turn, o: world.order, ti: world.ti, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.aim), f2(p.pow), (p.bot ? 1 : 0) | (p.launched ? 2 : 0) | (p.out ? 4 : 0) | (p.charging ? 8 : 0) | (p.sweep ? 16 : 0) | (p.hog ? 32 : 0), p.score, p.last]),
-  }, world.players.values());
-}
+// round facts ride only when they change: snapshot key > world field
+const SLOW_FIELDS = { rd: 'round', rs: 'rounds', hx: 'hx', hz: 'hz', b: 'best', win: 'winner', o: 'order' };
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
-  Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, rounds: s.rs, hx: s.hx, hz: s.hz, best: s.b, winner: s.win, turn: s.tu, order: s.o, ti: s.ti });
+  Object.assign(world, { phase: s.ph, t: s.t, turn: s.tu, ti: s.ti });
+  for (const [key, field] of Object.entries(SLOW_FIELDS)) if (key in s) world[field] = s[key];
   const seen = new Set();
   for (const [id, x, z, vx, vz, aim, pow, fl, score, last] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, vx, vz, aim, pow, launched: !!(fl & 2), out: !!(fl & 4), charging: !!(fl & 8), sweep: !!(fl & 16), hog: !!(fl & 32), score, last });
   }
-  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
-  playEvents(s.ev);
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
+  playEvents(s.ev ?? []);
   snapAt = pacing.arrived();
 }
 let shake = 0;
@@ -599,29 +374,27 @@ function hud(dt) {
   document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p.id === world.best && showLast ? '🐟 ' : p.id === world.turn ? '▶ ' : ''}${esc(p.nick)}</span><small>${showLast && p.last ? `+${p.last}` : ''}</small><em>${p.score}</em></div>`).join('');
 }
 
-// Run engine > sim tick (worker)
-let sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match streams my input to the server
+let acc = 0, sentInput = '';
+const isHostSim = () => world.mode === 'attract';
+// my input matters only on my throw or while my penguin still slides: idle players stay silent (relay CPU tracks message count)
+function inputMatters() {
+  const me = world.players.get(lobby.room.me);
+  return !!me && !me.out && (world.turn === me.id || Math.hypot(me.vx, me.vz) > SLIDING_SPEED);
+}
+function sendInput() {
+  const input = { x: +local.x.toFixed(2), h: local.held ? 1 : 0 }, key = `${input.x}|${input.h}`;
+  // one more message after going idle or changing keys, so the server never keeps a stale SLIDE hold
+  if (!inputMatters() && key === sentInput) return;
+  sentInput = key;
+  serverMatch.tickInput(() => input);
+}
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') Object.assign(me, { ax: local.x, held: local.held });
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) Object.assign(p, { ax: axis(inp.x), held: !!inp.h }); }
-    const ps = [...world.players.values()];
-    for (const p of ps) if (p.bot) botThink(p);
-    for (const p of ps) stepPlayer(p, dt);
-    collide(ps);
-    phases(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
-    } else { playEvents(events); events = []; }
-  } else if (world.mode === 'match' && room) {
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), h: local.held ? 1 : 0 }); }
-  }
+    for (acc += dt; acc >= STEP; acc -= STEP) sim.step();
+    playEvents(sim.events); sim.events = [];
+  } else if (lobby.room) sendInput();
 }
 startTicker(60, simTick);
 
@@ -635,6 +408,7 @@ function loop() {
   const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
   let idx = 0;
   const n = world.players.size;
+  for (const [id, g] of players3d) if (!world.players.has(id)) { scene.remove(g); players3d.delete(id); }
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makePenguin(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
@@ -701,7 +475,7 @@ function loop() {
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-startAttract();
+sim.startAttract();
 loop();
 
 addEventListener('resize', () => {

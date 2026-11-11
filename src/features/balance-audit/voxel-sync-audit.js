@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 
 const BASE = `http://localhost:${process.env.PORT ?? 5055}/3d-toys/voxel-build-together/`;
-const HOOK = ';window.__vox={edit:(o)=>localEdit(o),cells:()=>[...cells].map(([k,c])=>k+":"+c).sort().join("|"),n:()=>cells.size,placed:()=>JSON.stringify(Object.fromEntries(state.placed)),cap:MAX_BLOCKS,me:()=>lobby.room.me,mine:()=>state.placed.get(lobby.room.me)??0};';
+const HOOK = ';window.__vox={edit:(o)=>localEdit(o),cells:()=>[...board.cells].map(([k,c])=>k+":"+c).sort().join("|"),n:()=>board.cells.size,placed:()=>JSON.stringify(Object.fromEntries([...board.placed].sort((a,b)=>a[0]-b[0]))),cap:MAX_BLOCKS,me:()=>lobby.room.me,mine:()=>board.placed.get(lobby.room.me)??0};';
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-features=LocalNetworkAccessChecks'] });
 const ctx = await browser.newContext(), errors = [];
 

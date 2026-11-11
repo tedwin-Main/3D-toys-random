@@ -5,26 +5,24 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { listDemos, CATEGORIES } from '../studio-server/list-assets.js';
 import { recordDemoTake, rawVideoFile, rawAudioFile, RAW_SECS } from './record-demo-session.js';
 import { pickHighlightStart } from './pick-highlight.js';
-import { renderStyleLoops, bgmFile } from './aero-bgm.js';
+import { musicFileFor, missingMusic, styleMusicFile, masterMusicFile, missingCompilationMusic } from './aero-music.js';
 import { renderBar, renderCard, renderHook } from './reel-overlays.js';
-import { buildDemoReel, buildCover, cardSegment, clipSegment, xfadeChain, concatHard } from './build-reel-video.js';
+import { buildDemoReel, buildCover, addMusicToVideo, cardSegment, clipSegment, xfadeChain, concatHard } from './build-reel-video.js';
 import { REEL_SCRIPTS } from './reel-scripts.js';
 import { writePostQueue } from './write-post-queue.js';
+import { loadAeroStyles } from './aero-reel-catalog.js';
+import { REEL_SECS } from './reel-format.js';
 
 const SRC = join(import.meta.dirname, '..', '..');
-const DEMOS = join(SRC, 'features', 'demo-gallery', 'demos');
 const TMP = join(import.meta.dirname, '.instagram-capture');
 const OUT = join(SRC, 'features', 'instagram-posts');
 const BASE = 'http://localhost:5066';
-const REEL_SECS = 12;
 
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
 const only = args.filter((a) => !a.startsWith('--'));
-const slug = (t) => t.toLowerCase().replace(/&/g, ' ').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const tmp = (file) => join(TMP, file);
 
 // Run engine: reuse running server, else boot one for this run
@@ -37,17 +35,6 @@ async function ensureServer() {
     if (await healthy()) return child;
   }
   throw new Error('server did not start');
-}
-
-async function loadAeroStyles() {
-  const all = (await listDemos(DEMOS)).filter((d) => d.category === 'aero');
-  const scripted = new Set(REEL_SCRIPTS.map((s) => s.name));
-  const unscripted = all.filter((d) => !scripted.has(d.name)).map((d) => d.name);
-  if (unscripted.length) throw new Error(`no reel script for: ${unscripted.join(', ')}`);
-  const styles = CATEGORIES.find((c) => c.id === 'aero').subs
-    .map((s) => ({ ...s, demos: all.filter((d) => d.style === s.id) })).filter((s) => s.demos.length)
-    .map((s, i) => ({ ...s, file: `${String(i + 1).padStart(2, '0')}-${slug(s.label)}` }));
-  return { all, styles };
 }
 
 async function recordTakes(browser, demos) {
@@ -77,7 +64,7 @@ async function renderOverlays(browser, all, styles) {
 const takeOf = (d) => ({ rawVideo: rawVideoFile(TMP, d.name), rawAudio: rawAudioFile(TMP, d.name) });
 const hasTake = (d) => existsSync(rawVideoFile(TMP, d.name));
 
-// Per-demo: demo-sound-only reel, posting reel with BGM, cover
+// Per-demo: demo-sound-only reel, posting reel with aero music, cover
 async function buildDemoOutputs(demos, styles) {
   const highlights = new Map();
   for (const sub of ['reels', 'covers']) await mkdir(join(OUT, sub), { recursive: true });
@@ -88,14 +75,14 @@ async function buildDemoOutputs(demos, styles) {
     const shared = { ...takeOf(d), start, secs: REEL_SECS, hookPng: tmp(`${d.name}-hook.png`), barPng: tmp(`${d.name}-bar.png`) };
     await mkdir(join(OUT, 'demos', style.file), { recursive: true });
     buildDemoReel({ ...shared, out: join(OUT, 'demos', style.file, `${d.name}.mp4`) });
-    buildDemoReel({ ...shared, bgmWav: bgmFile(TMP, d.style), out: join(OUT, 'reels', `${d.name}.mp4`) });
+    buildDemoReel({ ...shared, bgm: musicFileFor(d.name), out: join(OUT, 'reels', `${d.name}.mp4`) });
     buildCover({ rawVideo: shared.rawVideo, at: start + 3, hookPng: shared.hookPng, barPng: shared.barPng, out: join(OUT, 'covers', `${d.name}.jpg`) });
     console.log(`built ${d.name} (highlight ${start.toFixed(1)} s)`);
   }
   return highlights;
 }
 
-// Per-style reels: card + 4.5 s per demo, crossfaded
+// Per-style reels: card + 4.5 s per demo, crossfaded, one music bed
 async function buildStyleReels(styles, highlights) {
   await mkdir(join(OUT, 'styles'), { recursive: true });
   for (const s of styles) {
@@ -106,12 +93,13 @@ async function buildStyleReels(styles, highlights) {
       clipSegment({ ...takeOf(d), barPng: tmp(`${d.name}-bar.png`), start: highlights.get(d.name) + 0.5, secs: 4.5, out: file });
       parts.push({ file, secs: 4.5 });
     }
-    xfadeChain(parts, join(OUT, 'styles', `${s.file}.mp4`), 0.4);
+    xfadeChain(parts, tmp(`style-${s.id}-video.mp4`), 0.4);
+    addMusicToVideo({ video: tmp(`style-${s.id}-video.mp4`), bgm: styleMusicFile(s.id), out: join(OUT, 'styles', `${s.file}.mp4`), loopMusic: true });
   }
   console.log('built per-style reels');
 }
 
-// Master reel: intro + (style card 0.8 s + 1.65 s per demo) + outro, hard cuts
+// Master reel: intro + (style card 0.8 s + 1.65 s per demo) + outro, hard cuts, one music bed
 async function buildMasterReel(styles, highlights) {
   const seq = [tmp('seg-intro.mp4')];
   cardSegment(tmp('card-intro.png'), 1.5, seq[0]);
@@ -128,13 +116,14 @@ async function buildMasterReel(styles, highlights) {
   seq.push(tmp('seg-outro.mp4'));
   cardSegment(tmp('card-outro.png'), 1.5, seq.at(-1));
   await mkdir(join(OUT, 'master'), { recursive: true });
-  concatHard(seq, join(OUT, 'master', 'frutiger-aero-all-styles.mp4'));
+  concatHard(seq, tmp('master-video.mp4'));
+  addMusicToVideo({ video: tmp('master-video.mp4'), bgm: masterMusicFile(), out: join(OUT, 'master', 'frutiger-aero-all-styles.mp4'), loopMusic: true });
   console.log('built master reel');
 }
 
-// keep raw takes (gitignored) so --build-only can rebuild; drop segments + overlays
+// keep raw takes and downloaded music (gitignored) so --build-only can rebuild; drop segments + overlays
 async function cleanWorkDir() {
-  for (const f of await readdir(TMP)) if (!/-raw\.(mp4|m4a)$/.test(f)) await rm(tmp(f), { recursive: true, force: true });
+  for (const f of await readdir(TMP)) if (f !== 'music' && !/-raw\.(mp4|m4a)$/.test(f)) await rm(tmp(f), { recursive: true, force: true });
 }
 
 // ---- run ----
@@ -147,11 +136,14 @@ if (flags.has('--queue-only')) {
 }
 const picked = all.filter((d) => !only.length || only.includes(d.name));
 await mkdir(TMP, { recursive: true });
+const missing = missingMusic(picked.map((d) => d.name));
+if (missing.length) throw new Error(`missing aero music for ${missing.length} reels (run npm run music): ${missing.join(', ')}`);
+const missingComp = only.length ? [] : missingCompilationMusic();
+if (missingComp.length) throw new Error(`missing aero compilation music (run npm run music): ${missingComp.join(', ')}`);
 const server = await ensureServer();
 const browser = await chromium.launch({ channel: 'chrome', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required', '--hide-scrollbars'] });
 const report = flags.has('--build-only') ? [] : await recordTakes(browser, picked);
 await renderOverlays(browser, all, styles);
-await renderStyleLoops(browser, TMP);
 await browser.close();
 if (server) server.kill();
 

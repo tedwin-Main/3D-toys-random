@@ -49,9 +49,9 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
-import { axis, applyPresses } from '../common/guest-input.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createHexSim, STEP, S, LAYERS, PER_FLOOR, OUT_Y, FALL_DELAY, ROUNDS, SPEED, GRAV } from './hex-sim.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
@@ -87,37 +87,24 @@ voidGlow.position.y = -40;
 scene.add(voidGlow);
 
 // Arena > hex layers: pointy-top axial grid, 169 tiles per floor
-const S = 1.5, N = 7, SQ3 = Math.sqrt(3), LAYERS = [0, -9, -18], OUT_Y = -27, FALL_DELAY = 0.55;
-const hexKeys = [];
-for (let q = -N; q <= N; q++) for (let r = -N; r <= N; r++) if (Math.abs(q + r) <= N) hexKeys.push([q, r]);
-const PER = hexKeys.length;
-const keyIdx = new Map(hexKeys.map(([q, r], k) => [q * 100 + r, k]));
-const tiles = [];
-LAYERS.forEach((y, L) => hexKeys.forEach(([q, r]) => tiles.push({ L, q, r, x: S * SQ3 * (q + r / 2), z: S * 1.5 * r, y, state: 0, t: 0, drop: 0, vy: 0 })));
-function hexAt(x, z, L) {
-  const qf = (SQ3 / 3 * x - z / 3) / S, rf = (2 / 3 * z) / S, sf = -qf - rf;
-  let q = Math.round(qf), r = Math.round(rf);
-  const s = Math.round(sf), dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
-  if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
-  const k = keyIdx.get(q * 100 + r);
-  return k === undefined ? -1 : L * PER + k;
-}
+// tile state + rules live in hex-sim.js; this page draws them. Attract runs the sim here, a match mirrors the relay server's snapshots
+const sim = createHexSim({ onTilesReset: () => redrawTiles() });
+const world = sim.world, tiles = sim.tiles, animTiles = sim.animTiles;
 const LAYER_COLORS = [[0xff7ac6, 0xff9fd6], [0x46d6ff, 0x86e6ff], [0xffd23f, 0xffe27a]];
 // one mesh per floor so floors above the camera focus can fade out of the way
 const hexGeo = new THREE.CylinderGeometry(S * 0.95, S * 0.9, 0.55, 6);
 const tileMeshes = LAYERS.map(() => {
-  const m = new THREE.InstancedMesh(hexGeo, new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05, transparent: true }), PER);
+  const m = new THREE.InstancedMesh(hexGeo, new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.05, transparent: true }), PER_FLOOR);
   m.castShadow = m.receiveShadow = true;
   scene.add(m);
   return m;
 });
 const flagUpdate = () => tileMeshes.forEach((m) => { m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; });
 const _m = new THREE.Matrix4(), _c = new THREE.Color(), _w = new THREE.Color(0xffffff), _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
-const animTiles = new Set();
 function baseColor(t) { return _c.set(LAYER_COLORS[t.L][(t.q + 2 * t.r + 300) % 3 === 0 ? 1 : 0]); }
 function drawTile(i, time = 0) {
   const t = tiles[i];
-  const mesh = tileMeshes[t.L], k0 = i - t.L * PER;
+  const mesh = tileMeshes[t.L], k0 = i - t.L * PER_FLOOR;
   if (t.state === 2 && t.drop < -14) { _m.makeScale(0, 0, 0); mesh.setMatrixAt(k0, _m); return; }
   const shake = t.state === 1 ? (1 - t.t / FALL_DELAY) * 0.09 : 0;
   _m.makeTranslation(t.x + Math.sin(time * 70 + i) * shake, t.y - 0.275 + t.drop, t.z + Math.cos(time * 60 + i) * shake);
@@ -125,20 +112,12 @@ function drawTile(i, time = 0) {
   const k = t.state === 0 ? 0 : t.state === 1 ? 0.25 + 0.65 * (1 - t.t / FALL_DELAY) : 0.9;
   mesh.setColorAt(k0, baseColor(t).lerp(_w, k));
 }
-function resetTiles() {
-  tiles.forEach((t, i) => { Object.assign(t, { state: 0, t: 0, drop: 0, vy: 0 }); drawTile(i); });
-  animTiles.clear();
+// every tile redrawn when the sim resets the floors (new round, keyframe resync)
+function redrawTiles() {
+  tiles.forEach((_, i) => drawTile(i));
   flagUpdate();
 }
-function triggerTile(i) { const t = tiles[i]; if (t.state !== 0) return false; t.state = 1; t.t = FALL_DELAY; animTiles.add(i); return true; }
-function stepTiles(dt) {
-  for (const i of animTiles) {
-    const t = tiles[i];
-    if (t.state === 1) { t.t -= dt; if (t.t <= 0) { t.state = 2; t.vy = 0; } }
-    else if (t.state === 2) { t.vy -= 30 * dt; t.drop += t.vy * dt; if (t.drop < -14) animTiles.delete(i); }
-  }
-}
-resetTiles();
+redrawTiles();
 
 // Players > bean model: capsule body, eyes, name tag
 function nameTag(nick, color) {
@@ -186,151 +165,7 @@ const sfx = {
   win() { [523, 659, 784, 1046].forEach((f, i) => tone(f, f, 0.2, 0.1, 'square', i * 0.11)); },
 };
 
-// Game > World
-const BOT_NAMES = ['Jelly', 'Wobbles', 'Bean', 'Squish', 'Hopper', 'Noodle', 'Gumdrop', 'Pip', 'Marsh', 'Boing', 'Taffy', 'Sprout', 'Fizz', 'Dumpling'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const ROUNDS = 3, SPEED = 7.2, JUMP = 11.5, GRAV = 30;
-const world = { mode: 'attract', phase: 'count', t: 3, round: 1, players: new Map(), outCount: 0, winner: null };
-let events = [], trig = [];
-const rng = Math.random;
-function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, face: 0, alive: true, ground: false, mx: 0, mz: 0, jumpSeq: 0, lastJump: 0, jumpBuf: 0, pts: 0, wins: 0, place: 0, tx: 0, tz: 0, thinkT: 0, skill: 0.75 + rng() * 0.2 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
-function spawnAll() {
-  // shuffled slots: join order never fixes who starts beside whom (host is always first to join)
-  const ps = shuffleInPlace([...world.players.values()], rng), n = ps.length;
-  ps.forEach((p, k) => {
-    const a = (k / n) * Math.PI * 2, r = n > 1 ? 9 : 0;
-    Object.assign(p, { x: Math.sin(a) * r, z: Math.cos(a) * r, y: 0, vx: 0, vy: 0, vz: 0, face: a + Math.PI, alive: true, ground: true, jumpBuf: 0, place: 0 });
-  });
-}
-function startRound() {
-  resetTiles();
-  spawnAll();
-  world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3.5; world.outCount = 0; world.winner = null;
-  kfDirty = true;
-}
-
-// Run engine > movement, jumping, landing on the highest live tile, bumping
-function stepPlayer(p, dt) {
-  if (!p.alive) return;
-  const frozen = world.phase === 'count';
-  let mx = frozen ? 0 : p.mx, mz = frozen ? 0 : p.mz;
-  const ml = Math.hypot(mx, mz);
-  if (ml > 1) { mx /= ml; mz /= ml; }
-  const acc = p.ground ? 42 : 14;
-  p.vx += clamp(mx * SPEED - p.vx, -acc * dt, acc * dt);
-  p.vz += clamp(mz * SPEED - p.vz, -acc * dt, acc * dt);
-  if (ml > 0.1) p.face = Math.atan2(mx, mz);
-  if (p.jumpSeq !== p.lastJump) { p.lastJump = p.jumpSeq; p.jumpBuf = 0.15; }
-  p.jumpBuf -= dt;
-  if (p.jumpBuf > 0 && p.ground && !frozen) { p.vy = JUMP; p.ground = false; p.jumpBuf = 0; events.push(['j', p.id]); }
-  const py = p.y;
-  p.vy -= GRAV * dt;
-  p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-  if (p.ground) {
-    const i = hexAt(p.x, p.z, layerOf(py));
-    if (i >= 0 && tiles[i].state !== 2) { p.y = tiles[i].y; p.vy = 0; if (!p.ghost && world.phase === 'play' && triggerTile(i)) trig.push(i); }
-    else p.ground = false;
-  } else if (p.vy <= 0) {
-    for (let L = 0; L < LAYERS.length; L++) {
-      const yL = LAYERS[L];
-      if (py >= yL - 0.05 && p.y <= yL) {
-        const i = hexAt(p.x, p.z, L);
-        if (i >= 0 && tiles[i].state !== 2) { p.y = yL; p.vy = 0; p.ground = true; events.push(['l', p.id]); break; }
-      }
-    }
-  }
-  // ghost = guest prediction copy: never touches tiles or placings
-  if (p.y < OUT_Y) {
-    p.alive = false;
-    if (p.ghost) return;
-    p.pts += world.outCount;
-    world.outCount++;
-    p.place = world.players.size - world.outCount + 1;
-    events.push(['o', p.id, p.place]);
-  }
-}
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function layerOf(y) { let best = 0; for (let L = 0; L < LAYERS.length; L++) if (Math.abs(LAYERS[L] - y) < Math.abs(LAYERS[best] - y)) best = L; return best; }
-function bump(ps) {
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j];
-    if (!a.alive || !b.alive || Math.abs(a.y - b.y) > 1.3) continue;
-    const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > 0.95 || d < 1e-4) continue;
-    const nx = dx / d, nz = dz / d, pen = (0.95 - d) / 2;
-    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
-    const vr = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
-    if (vr < 0) { a.vx += nx * vr * 0.9; a.vz += nz * vr * 0.9; b.vx -= nx * vr * 0.9; b.vz -= nz * vr * 0.9; }
-  }
-}
-
-// Run engine > bots: head for solid tiles with solid neighbours, hop gaps, keep moving
-function solidAt(x, z, L) { const i = hexAt(x, z, L); return i >= 0 && tiles[i].state === 0; }
-function botThink(p, dt) {
-  if (!p.alive) return;
-  const L = layerOf(p.y);
-  p.thinkT -= dt;
-  const tdist = Math.hypot(p.tx - p.x, p.tz - p.z);
-  if (p.thinkT <= 0 || tdist < 1.2 || !solidAt(p.tx, p.tz, L)) {
-    p.thinkT = 0.5 + rng() * 0.5;
-    let best = null, bs = -Infinity;
-    // skill = how many tiles it weighs and how steady the pick is
-    for (let k = 0, n = Math.round(10 + 40 * p.skill); k < n; k++) {
-      const t = tiles[L * PER + Math.floor(rng() * PER)];
-      if (t.state !== 0) continue;
-      const d = Math.hypot(t.x - p.x, t.z - p.z);
-      if (d < 2.5 || d > 12) continue;
-      let nb = 0;
-      for (const [dq, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]) { const kk = keyIdx.get((t.q + dq) * 100 + t.r + dr); if (kk !== undefined && tiles[L * PER + kk].state === 0) nb++; }
-      // also prefer tiles away from the rim and from other beans
-      const sc = nb * 1.4 - d * 0.25 - Math.hypot(t.x, t.z) * 0.06 + rng() * 8 * (1 - p.skill);
-      if (sc > bs) { bs = sc; best = t; }
-    }
-    if (best) { p.tx = best.x; p.tz = best.z; }
-  }
-  let dx = p.tx - p.x, dz = p.tz - p.z;
-  const d = Math.hypot(dx, dz) || 1;
-  dx /= d; dz /= d;
-  p.mx = dx; p.mz = dz;
-  if (p.ground) {
-    const ahead1 = solidAt(p.x + dx * 1.3, p.z + dz * 1.3, L) || hexAt(p.x + dx * 1.3, p.z + dz * 1.3, L) === hexAt(p.x, p.z, L);
-    if (!ahead1 && solidAt(p.x + dx * 3.6, p.z + dz * 3.6, L) && rng() < p.skill) p.jumpBuf = 0.1;
-    else if (!ahead1) p.thinkT = 0;
-  }
-}
-
-// Game > Phases: countdown, play until one bean stands, round results, final
-let lastBeep = 0;
-function phases(dt) {
-  const ps = [...world.players.values()];
-  world.t -= dt;
-  if (world.phase === 'count') {
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { world.phase = 'play'; events.push(['c', 0]); }
-  } else if (world.phase === 'play') {
-    const alive = ps.filter((p) => p.alive);
-    if (alive.length === 0 || (ps.length > 1 && alive.length <= 1)) {
-      const w = alive[0];
-      if (w) { w.pts += world.outCount + 2; w.wins++; w.place = 1; world.winner = w.id; events.push(['w', w.id]); }
-      world.phase = 'round'; world.t = world.mode === 'attract' ? 2.5 : 4.5;
-    }
-  } else if (world.phase === 'round' && world.t <= 0) {
-    if (world.mode === 'attract' || world.round < ROUNDS) { world.round = world.mode === 'attract' ? 1 : world.round + 1; startRound(); }
-    else { world.phase = 'final'; world.t = 10; }
-  } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract'; world.round = 1;
-  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  startRound();
-}
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -341,95 +176,73 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match'; world.round = 1;
-    ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
-    document.getElementById('top').style.display = 'flex';
+  // the relay server runs the match; every page (lobby host too) plays as a guest
+  onStart({ bots }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', round: 1, phase: 'count', t: 3.5 });
+    sim.resetTiles();
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3.5; resetTiles(); return; }
-    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startRound();
+    serverMatch.start({ bots });
   },
   onLobby() {
+    serverMatch.stop();
     ['info', 'board', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
-    startAttract();
+    sim.startAttract();
   },
 });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
-  for (const p of players) if (!world.players.has(p.id)) {
-    // keep 14 seats: replace a bot (already-out ones first); late joiner sits out the current round
-    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
-    const n = addPlayer(p.id, p.nick, p.color, false);
-    if (world.phase !== 'count') { n.alive = false; n.y = OUT_Y - 5; }
-    else { n.x = (rng() - 0.5) * 4; n.z = (rng() - 0.5) * 4; n.ground = true; }
-  }
-}
+const serverMatch = createServerMatchClient(lobby);
 
-// Multiplayer > Net: guest input 20 Hz, host snapshots + triggered tiles + keyframes
-const remoteIn = new Map();
+// Multiplayer > Net: everything in a match comes from the relay server (bean rows, triggered tiles, tile keyframes)
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f2 = (v) => Math.round(v * 100) / 100;
-let kfDirty = true, kfT = 0;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot(withKf) {
-  const s = {
-    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events, tr: trig,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vy), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.ground ? 4 : 0), p.pts, p.wins, p.place]),
-  };
-  if (withKf) s.K = tiles.map((t) => t.state).join('');
-  return names.stamp(s, world.players.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
-  step: (p, dt) => { const keep = events; events = []; stepPlayer(p, dt); events = keep; },
+  step: (p, dt) => { const keep = sim.events; sim.events = []; sim.stepPlayer(p, dt); sim.events = keep; },
   live: (p) => p.alive,
   seed: (p) => { p.lastJump = local.jumpSeq; p.ghost = true; },
   pos: ['x', 'z', 'y'], vel: ['vx', 'vz', 'vy'], angle: 'face',
 });
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
   const seen = new Set();
-  for (const [id, x, y, z, vx, vy, vz, face, fl, pts, wins, place] of s.P) {
+  for (const [id, x, y, z, vx, vy, vz, face, fl] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
-    Object.assign(p, { x, y, z, vx, vy, vz, face, alive: !!(fl & 2), ground: !!(fl & 4), pts, wins, place });
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1));
+    Object.assign(p, { x, y, z, vx, vy, vz, face, alive: !!(fl & 2), ground: !!(fl & 4) });
     if (id === lobby.room.me) pred.correct(p);
   }
-  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
-  for (const i of s.tr) triggerTile(i);
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
+  // scores ride only when they change
+  for (const [id, pts, wins, place] of s.S ?? []) { const p = world.players.get(id); if (p) Object.assign(p, { pts, wins, place }); }
+  for (const i of s.tr ?? []) sim.triggerTile(i);
   if (s.K) {
     let reset = false;
     for (let i = 0; i < tiles.length; i++) {
       const st = +s.K[i], t = tiles[i];
       if (st === t.state) continue;
       if (st === 0) { reset = true; break; }
-      if (st === 1 && t.state === 0) triggerTile(i);
+      if (st === 1 && t.state === 0) sim.triggerTile(i);
       else if (st === 2 && t.state !== 2) { t.state = 2; t.vy = 0; animTiles.add(i); }
     }
-    if (reset) { resetTiles(); for (let i = 0; i < tiles.length; i++) { const st = +s.K[i]; if (st === 1) triggerTile(i); else if (st === 2) { tiles[i].state = 2; tiles[i].drop = -15; drawTile(i); } } }
+    if (reset) { sim.resetTiles(); for (let i = 0; i < tiles.length; i++) { const st = +s.K[i]; if (st === 1) sim.triggerTile(i); else if (st === 2) { tiles[i].state = 2; tiles[i].drop = -15; drawTile(i); } } }
   }
-  playEvents(s.ev);
+  playEvents(s.ev ?? []);
   snapAt = pacing.arrived();
 }
 function playEvents(evs) {
@@ -494,41 +307,22 @@ function hud(dt) {
   document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.alive ? '' : 'out'} ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${'👑'.repeat(p.wins)} ${p.pts}</em></div>`).join('');
 }
 
-// Run engine > sim tick (worker)
-let sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match predicts my bean, animates tiles and streams input to the server
+let acc = 0;
+const isHostSim = () => world.mode === 'attract';
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { jumpSeq: ['lastJump', local.jumpSeq] }); }
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { jumpSeq: ['lastJump', inp.j] }); } }
-    const ps = [...world.players.values()];
-    for (const p of ps) if (p.bot) botThink(p, dt);
-    for (const p of ps) stepPlayer(p, dt);
-    bump(ps);
-    stepTiles(dt);
-    const ph = world.phase;
-    phases(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt; kfT -= dt;
-      if (sendT <= 0 || ph !== world.phase) {
-        sendT = 0.05;
-        const withKf = kfDirty || kfT <= 0;
-        if (withKf) { kfDirty = false; kfT = 1; }
-        room.send(snapshot(withKf));
-        playEvents(events); events = []; trig = [];
-      }
-    } else { playEvents(events); events = []; trig = []; }
-  } else {
-    if (room && world.mode === 'match') pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z, jumpSeq: local.jumpSeq }, dt, 1 / 60);
-    stepTiles(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), j: local.jumpSeq }); }
-    }
+    for (acc += dt; acc >= STEP; acc -= STEP) sim.step();
+    playEvents(sim.events); sim.events = [];
+    sim.dropTriggers();
+    return;
   }
+  sim.stepTiles(dt);
+  const room = lobby.room;
+  if (!room) return;
+  pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z, jumpSeq: local.jumpSeq }, dt, STEP);
+  serverMatch.tickInput(() => ({ x: +local.x.toFixed(2), z: +local.z.toFixed(2), j: local.jumpSeq }));
 }
 startTicker(60, simTick);
 
@@ -540,6 +334,7 @@ function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
   const age = hostSim ? 0 : Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.12));
+  for (const [id, g] of players3d) if (!world.players.has(id)) { scene.remove(g); players3d.delete(id); }
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeBean(p); players3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
@@ -583,7 +378,7 @@ function loop() {
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-startAttract();
+sim.startAttract();
 loop();
 
 addEventListener('resize', () => {

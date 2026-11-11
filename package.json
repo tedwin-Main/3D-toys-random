@@ -8,7 +8,7 @@
     "start": "node src/features/studio-server/start-server.js",
     "dev": "node --watch src/features/studio-server/start-server.js",
     "toys": "node src/features/multiplayer-rooms/start-server.js",
-    "test": "node --test \"src/features/toy-box/common/*.test.js\" \"src/features/toy-box/common/party-royale/*.test.js\" \"src/features/multiplayer-rooms/*.test.js\" \"src/features/toy-box/eight-ball-pool/*.test.js\" \"src/features/toy-box/physics-portfolio-builder/*.test.js\" \"src/features/toy-feedback/*.test.js\" \"src/features/balance-audit/*.test.js\"",
+    "test": "node --test \"src/features/toy-box/common/*.test.js\" \"src/features/toy-box/common/party-royale/*.test.js\" \"src/features/toy-box/common/server-run/*.test.js\" \"src/features/multiplayer-rooms/*.test.js\" \"src/features/toy-box/eight-ball-pool/*.test.js\" \"src/features/toy-box/physics-portfolio-builder/*.test.js\" \"src/features/toy-box/voxel-build-together/*.test.js\" \"src/features/toy-box/wheres-waldo-game/*.test.js\" \"src/features/toy-feedback/*.test.js\" \"src/features/balance-audit/*.test.js\" \"src/features/demo-capture/*.test.js\"",
     "load-test": "node src/features/multiplayer-rooms/room-load-test.js",
     "capacity-test": "node src/features/multiplayer-rooms/room-capacity-test.js",
     "audit:live": "node src/features/balance-audit/live-match-audit.js",
@@ -17,7 +17,10 @@
     "capture": "node src/features/demo-capture/capture-demos.js",
     "instagram": "node src/features/demo-capture/capture-instagram-reels.js",
     "instagram:upload": "node src/features/demo-capture/upload-reels.js",
-    "instagram:queue": "node src/features/demo-capture/capture-instagram-reels.js --queue-only"
+    "instagram:queue": "node src/features/demo-capture/capture-instagram-reels.js --queue-only",
+    "instagram:music": "node src/features/demo-capture/build-music-reels.js",
+    "instagram:motion": "node src/features/demo-capture/build-motion-reels.js",
+    "music": "node src/features/demo-capture/download-aero-music.js"
   },
   "dependencies": {
     "three": "0.160.0",

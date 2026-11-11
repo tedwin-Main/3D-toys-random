@@ -58,6 +58,8 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createJarGame } from './jar-rules.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, warm kitchen light, wooden table
@@ -215,89 +217,27 @@ const sfx = {
   tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
 };
 
-// Game > rules: secret guesses; points by closeness rank (ties share), within 10% = 1, exact +3
-const INTRO = 2.5, LOOK_T = 2.6, GUESS_T = 20, REVEAL_T = 6, FINAL_T = 12;
-const RANGES = [[15, 40], [30, 70], [50, 110], [80, 160], [120, 220], [160, 300], [200, 380], [260, 450]];
-const RANK_PTS = [5, 3, 2];
-const BOT_NAMES = ['Gumdrop', 'Counter', 'Sprinkles', 'Jellybean', 'Eyeball', 'Sugarplum', 'Lolly', 'Toffee', 'Nougat', 'Bonbon', 'Caramel', 'Fudge', 'Truffle', 'Mochi'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// Game > rules live in jar-rules.js: this page runs them for attract mode only, a match is run by the relay server (guesses never reach a browser before the reveal)
 // S: { mode, ph, tt, rd, rounds, jar: { shape, candy, n, seed }, res: { g: {id: guess}, pts: {id: pts} }, P: [{ id, nick, color, bot, score, lock, skill, at }] }
-let S = null;
-const rng = Math.random;
-const secret = new Map();
+const attract = createJarGame();
+let S = attract.state;
 const player = (id) => S.P.find((p) => p.id === id);
-function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, score: 0, lock: false, skill: 0.3 + rng() * 0.6, at: 0 }; }
-function startRound(rd) {
-  secret.clear();
-  for (const p of S.P) p.lock = false;
-  const [lo, hi] = RANGES[Math.min(rd - 1, RANGES.length - 1)];
-  const shape = Object.keys(SHAPES)[Math.floor(rng() * 4)], candy = ['ball', 'bean', 'cube'][Math.floor(rng() * 3)];
-  Object.assign(S, { rd, ph: 'look', tt: LOOK_T, jar: { shape, candy, n: lo + Math.floor(rng() * (hi - lo + 1)), seed: 1 + Math.floor(rng() * 2 ** 30) }, res: null });
-}
-function placeGuess(id, v) {
-  const p = player(id);
-  if (!p || S.ph !== 'guess' || !Number.isInteger(v) || v < 1 || v > 9999) return false;
-  secret.set(id, v); p.lock = true;
-  return true;
-}
-// pure scoring so it can be checked on its own: guesses {id: g}, n = answer -> {id: pts}
-function scoreGuesses(g, n) {
-  const ids = Object.keys(g).filter((id) => g[id] != null);
-  const err = (id) => Math.abs(g[id] - n);
-  const pts = {};
-  for (const id of ids) {
-    // competition rank (1, 2, 2, 4): ties share a place and push the next guess down
-    const rank = ids.filter((o) => err(o) < err(id)).length;
-    pts[id] = (RANK_PTS[rank] ?? (err(id) <= n * 0.1 ? 1 : 0)) + (err(id) === 0 ? 3 : 0);
-  }
-  return pts;
-}
-function reveal() {
-  const g = {};
-  for (const p of S.P) g[p.id] = secret.get(p.id) ?? null;
-  const pts = scoreGuesses(g, S.jar.n);
-  for (const p of S.P) p.score += pts[p.id] ?? 0;
-  Object.assign(S, { ph: 'reveal', tt: REVEAL_T, res: { g, pts } });
-}
-// bots: lognormal error around the true count, sharper with skill
-function botGuess(p) {
-  const z = (rng() + rng() + rng() - 1.5) * 1.4;
-  return Math.max(1, Math.round(S.jar.n * Math.exp(z * (0.38 - p.skill * 0.28))));
-}
-
-// Run engine > host tick: phases, bots, publish when anything but the clock changed
 const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
-let lastSig = '', prevS = null;
-function hostTick(dt) {
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) startRound(1);
-  else if (S.ph === 'look' && S.tt <= 0) { Object.assign(S, { ph: 'guess', tt: GUESS_T }); for (const p of S.P) p.at = 3 + rng() * 12; }
-  else if (S.ph === 'guess') {
-    for (const p of S.P) if (p.bot && !p.lock && GUESS_T - S.tt >= p.at) placeGuess(p.id, botGuess(p));
-    if (S.tt <= 0 || S.P.every((p) => p.lock)) reveal();
-  } else if (S.ph === 'reveal' && S.tt <= 0) {
-    if (S.rd < S.rounds) startRound(S.rd + 1);
-    else if (S.mode === 'attract') { for (const p of S.P) p.score = 0; startRound(1); }
-    else Object.assign(S, { ph: 'final', tt: FINAL_T });
-  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  const s = sig();
-  if (s !== lastSig) {
-    lastSig = s;
-    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
-    onChange(prevS, S);
-    prevS = JSON.parse(s);
-  }
-}
-function startAttract() {
-  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 4, jar: null, res: null, P: [] };
-  for (let i = 0; i < 5; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
-  prevS = null; lastSig = '';
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
 }
 
 // Multiplayer > lobby + state sync (host publishes S without guesses, guests send guesses)
 const sync = createTurnSync({
   onState(s) { if (lobbyStarted) applyState(s); },
-  onAction(from, a) { if (a.t === 'guess' && S.mode === 'match') placeGuess(from, a.v); },
+  onDone() { serverMatch.finish(); },
 });
 let lobbyStarted = false;
 const lobby = createLobby({
@@ -309,40 +249,24 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
-    room.on('host', (isHost) => {
-      syncTop();
-      // promoted mid-guess: the sealed guesses left with the old host, so everyone guesses again
-      if (isHost && S?.mode === 'match' && S.ph === 'guess') { for (const p of S.P) p.lock = false; secret.clear(); S.tt = Math.max(S.tt, 10); }
-    });
+    room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     lobbyStarted = true;
     showHud(true);
     syncTop();
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 6, jar: null, res: null, P: [] };
-    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
-    prevS = null; lastSig = '';
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   document.getElementById('top').style.display = on ? 'flex' : 'none';
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) {
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    S.P.push(newPlayer(p.id, p.nick, p.color, false));
-  }
-}
 function applyState(s) {
   const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
   S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
@@ -405,9 +329,9 @@ function hud(dt) {
   document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${rev ? `${S.res.g[p.id] ?? '—'} +${S.res.pts[p.id] ?? 0} · ` : S.ph === 'guess' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
 }
 
-// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  if (S.mode === 'attract') attractTick(dt);
   else S.tt -= dt;
 });
 

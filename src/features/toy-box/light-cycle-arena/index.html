@@ -52,13 +52,14 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../common/room-lobby.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createTouchPad } from '../common/touch-joystick.js';
 import { keyId, trackKeys } from '../common/key-state.js';
 import { createGameAudio } from '../common/game-audio.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createCycleSim, STEP, A, HALF, ROUNDS, SPEED, BOOST, DIRS, GRACE, cellOf, cellCenter } from './light-cycles-sim.js';
 
 // Scene > Renderer + bloom, neon grid floor, arena walls
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -76,7 +77,6 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 scene.add(new THREE.HemisphereLight(0x88ccff, 0x050510, 0.6));
-const A = 100, HALF = A / 2;
 const floor = new THREE.Mesh(new THREE.PlaneGeometry(A + 40, A + 40).rotateX(-Math.PI / 2), new THREE.ShaderMaterial({
   fog: true, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]),
   vertexShader: `varying vec3 vW; #include <fog_pars_vertex>
@@ -100,12 +100,6 @@ for (const [x, z, w, d] of [[0, -HALF, A + 0.6, 0.3], [0, HALF, A + 0.6, 0.3], [
   wall.position.set(x, 0.8, z);
   scene.add(wall);
 }
-
-// Grid > occupancy: owner id + 1 per 1x1 cell, crash on entering a lit cell
-const grid = new Int16Array(A * A);
-const cellOf = (x, z) => { const cx = Math.floor(x + HALF), cz = Math.floor(z + HALF); return cx < 0 || cz < 0 || cx >= A || cz >= A ? -1 : cz * A + cx; };
-const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-const cellCenter = (c) => [c % A - HALF + 0.5, Math.floor(c / A) - HALF + 0.5];
 
 // Cycles > model: dark chassis, glowing wheels and stripe in player color, name tag
 function nameTag(nick, color) {
@@ -187,218 +181,10 @@ const sfx = {
   win() { [523, 659, 784, 1046].forEach((f, i) => tone(f, f, 0.2, 0.1, 'square', i * 0.11)); },
 };
 
-// Game > World
-const BOT_NAMES = ['Flynn', 'Quorra', 'Rinzler', 'Byte', 'Pixel', 'Vector', 'Glitch', 'Neon', 'Raster', 'Sector', 'Kernel', 'Cache', 'Daemon', 'Proxy'];
-const BOT_COLORS = ['#ff9f43', '#c77dff', '#5ee07a', '#ff6ec7', '#ffd23f', '#a3e635', '#3fa7ff', '#ff5a5f', '#14b8a6', '#f8fafc', '#8b5cf6', '#2de2e6', '#00ffa3', '#ff3df5'];
-const ROUNDS = 5, SPEED = 17, BOOST = 28;
-// 16 spawns in a starburst: 3 abreast per direction at 8 out, plus 4 corner riders at 14 out, all heading outward so no early crossings
-// corner lane offset 14 > 8 keeps it clear of every inner rider path
-const SLOTS = [];
-for (const [out, k] of [[8, 0], [8, -6], [8, 6], [14, 14]]) for (let dir = 0; dir < 4; dir++) { const [dx, dz] = DIRS[dir]; SLOTS.push({ x: dx * out - dz * k + 0.5, z: dz * out + dx * k + 0.5, dir }); }
-const world = { mode: 'attract', phase: 'count', t: 3, round: 1, players: new Map(), outCount: 0, winner: null };
-let events = [];
-const rng = Math.random;
-if (/[?&]debug\b/.test(location.search)) window.__lightCycles = { world, grid };
-function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, x: 0, z: 0, dir: 0, alive: true, boost: false, energy: 1, pts: 0, wins: 0, corners: [], cells: [], cell: -1, turns: [], ack: 0, stall: 0, inBoost: false, think: 0, skill: 0.75 + rng() * 0.22, place: 0 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) {
-  const p = world.players.get(id);
-  if (p) for (const c of p.cells) if (grid[c] === slotOf(p)) grid[c] = 0;
-  world.players.delete(id);
-  const v = cycles3d.get(id);
-  if (v) { scene.remove(v.g, v.trail); cycles3d.delete(id); }
-}
-const slotOf = (p) => p.gid;
-let nextGid = 1;
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
-function startRound() {
-  grid.fill(0);
-  nextGid = 1;
-  const ps = [...world.players.values()];
-  // shuffle riders over the slots in use so nobody keeps the same start lane every round
-  const order = SLOTS.map((s, i) => i).slice(0, Math.min(ps.length, SLOTS.length));
-  shuffleInPlace(order, rng);
-  ps.forEach((p, k) => {
-    const s = SLOTS[order[k % SLOTS.length]];
-    Object.assign(p, { x: s.x, z: s.z, dir: s.dir, alive: true, boost: false, energy: 1, corners: [s.x, s.z], cells: [], turns: [], stall: 0, place: 0, gid: nextGid++ });
-    p.cell = cellOf(p.x, p.z);
-    grid[p.cell] = p.gid; p.cells.push(p.cell);
-  });
-  for (const v of cycles3d.values()) v.derez = 0;
-  world.phase = 'count'; world.t = world.mode === 'attract' ? 1.5 : 3.5; world.outCount = 0; world.winner = null;
-  kfDirty = true;
-}
-
-// Run engine > turns snap to cell centers, cells lit as the head enters them
-// queued turn = [dir, pressed cell (-1 = now), guest input seq]
-function turn(p, d) {
-  if (!p.alive || world.phase !== 'play') return;
-  const cx = Math.floor(p.x + HALF) - HALF + 0.5, cz = Math.floor(p.z + HALF) - HALF + 0.5;
-  p.x = cx; p.z = cz; p.stall = 0;
-  p.dir = (p.dir + (d > 0 ? 1 : 3)) % 4;
-  p.corners.push(cx, cz);
-  events.push(['t', p.id, cx, cz, p.dir]);
-}
-function crash(p) {
-  p.alive = false;
-  p.pts += world.outCount;
-  world.outCount++;
-  // place from riders still on the grid: late-join spectators and leavers never shift it
-  p.place = [...world.players.values()].filter((q) => q.alive).length + 1;
-  for (const c of p.cells) if (grid[c] === p.gid) grid[c] = 0;
-  events.push(['x', p.id, +p.x.toFixed(1), +p.z.toFixed(1), p.place]);
-}
-function applyTurn(p, [d, cell, seq]) {
-  if (seq) p.ack = seq;
-  const rewound = cell >= 0 ? rewindTo(p, cell) : 0;
-  if (rewound < 0) kfDirty = true; // turned off the pressed cell: resend corners
-  turn(p, d);
-  if (rewound > 0) ride(p, rewound); // replay the lost travel on the new heading, where the guest already sees it
-}
-// Lag compensation > guest turn pressed a few cells back (same straight run) rewinds the cycle to that cell
-// returns distance rewound, -1 when the cell is out of reach
-const REWIND = 6; // cells: ~350 ms at ride speed, ~210 ms boosting
-function rewindTo(p, cell) {
-  const k = p.cells.lastIndexOf(cell);
-  if (k < 0 || p.cells.length - 1 - k > REWIND) return -1;
-  const n = p.corners.length;
-  if (p.cells.lastIndexOf(cellOf(p.corners[n - 2], p.corners[n - 1])) > k) return -1; // turned since
-  for (const c of p.cells.splice(k + 1)) if (grid[c] === p.gid) grid[c] = 0;
-  const [cx, cz] = cellCenter(cell), back = Math.abs(p.x - cx) + Math.abs(p.z - cz);
-  p.cell = cell; p.x = cx; p.z = cz;
-  return back;
-}
-// pressed cell still 1-2 cells ahead (guest saw itself ahead of the host): hold the turn till the head gets there
-function turnDue(p, [, cell]) {
-  if (cell < 0 || cell === p.cell || p.cell < 0) return true;
-  const [dx, dz] = DIRS[p.dir], ex = cell % A - p.cell % A, ez = Math.floor(cell / A) - Math.floor(p.cell / A);
-  const ahead = ex * dx + ez * dz, side = ex * dz - ez * dx;
-  return side !== 0 || ahead <= 0 || ahead > 2;
-}
-// guest cycle waits this long at a wall for a turn still in flight before derezzing
-const GRACE = 0.25;
-const isRemoteHuman = (p) => !p.bot && p.id !== lobby.room?.me;
-function stepCycle(p, dt) {
-  if (!p.alive || world.phase !== 'play') return;
-  if (p.turns.length && turnDue(p, p.turns[0])) applyTurn(p, p.turns.shift());
-  if (p.stall > 0) { p.stall -= dt; if (p.stall <= 0) crash(p); return; }
-  p.boost = p.inBoost && p.energy > 0.02;
-  p.energy = clamp(p.energy + (p.boost ? -0.5 : 0.12) * dt, 0, 1);
-  ride(p, (p.boost ? BOOST : SPEED) * dt);
-}
-// walk cell by cell so fast cycles can't skip through a wall
-function ride(p, dist) {
-  const [dx, dz] = DIRS[p.dir];
-  let remain = dist;
-  while (remain > 0) {
-    const stepLen = Math.min(remain, 0.45);
-    p.x += dx * stepLen; p.z += dz * stepLen; remain -= stepLen;
-    const c = cellOf(p.x, p.z);
-    if (c === p.cell) continue;
-    if (c < 0 || grid[c]) {
-      if (!isRemoteHuman(p)) return crash(p);
-      p.x -= dx * stepLen; p.z -= dz * stepLen; p.stall = GRACE;
-      return;
-    }
-    grid[c] = p.gid; p.cells.push(c); p.cell = c;
-  }
-}
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-// Host migration > guests never keep the trail grid: promoted host rebuilds it from each live rider's corners so trails collide again
-function rebuildGrid() {
-  grid.fill(0);
-  nextGid = 1;
-  for (const p of world.players.values()) {
-    Object.assign(p, { gid: nextGid++, cells: [], turns: [], stall: 0 });
-    if (!p.alive) continue; // crashed trails are already derezzed
-    const pts = [...p.corners, p.x, p.z];
-    for (let i = 0; i + 3 < pts.length; i += 2) markTrail(p, pts[i], pts[i + 1], pts[i + 2], pts[i + 3]);
-    p.cell = cellOf(p.x, p.z);
-  }
-  kfDirty = true;
-}
-function markTrail(p, x0, z0, x1, z1) {
-  const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.45));
-  for (let k = 0; k <= n; k++) {
-    const c = cellOf(x0 + ((x1 - x0) * k) / n, z0 + ((z1 - z0) * k) / n);
-    if (c >= 0 && p.cells[p.cells.length - 1] !== c) { grid[c] = p.gid; p.cells.push(c); }
-  }
-}
-
-// Run engine > bots: compare straight / left / right by reachable area, steer away early
-function freeRay(x, z, dir, max) { const [dx, dz] = DIRS[dir]; let n = 0; for (let k = 1; k <= max; k++) { const c = cellOf(x + dx * k, z + dz * k); if (c < 0 || grid[c]) break; n++; } return n; }
-const seen = new Int32Array(A * A);
-let seenMark = 0;
-function area(x, z, dir, limit) {
-  const [dx, dz] = DIRS[dir], start = cellOf(x + dx, z + dz);
-  if (start < 0 || grid[start]) return 0;
-  seenMark++;
-  const q = [start]; seen[start] = seenMark;
-  let n = 0;
-  while (q.length && n < limit) {
-    const c = q.shift(); n++;
-    const cx = c % A, cz = (c - cx) / A;
-    for (const [ex, ez] of DIRS) {
-      const nx = cx + ex, nz = cz + ez;
-      if (nx < 0 || nz < 0 || nx >= A || nz >= A) continue;
-      const ni = nz * A + nx;
-      if (grid[ni] || seen[ni] === seenMark) continue;
-      seen[ni] = seenMark; q.push(ni);
-    }
-  }
-  return n;
-}
-function botThink(p, dt) {
-  if (!p.alive || world.phase !== 'play') return;
-  p.think -= dt;
-  const ahead = freeRay(p.x, p.z, p.dir, 30);
-  const danger = ahead < 1.5 + (p.boost ? 7 : 4) * p.skill;
-  if (!danger && p.think > 0) return;
-  p.think = 0.25 + rng() * 0.35;
-  const opts = [[0, p.dir], [1, (p.dir + 1) % 4], [-1, (p.dir + 3) % 4]].map(([d, dir]) => {
-    const ray = freeRay(p.x, p.z, dir, 30);
-    // skill = foresight: how much free space it counts, and how steady the pick is
-    // weak riders sometimes judge by the straight ray only and drive into dead ends
-    const look = Math.round(120 + 380 * p.skill), myopic = rng() < 0.6 * (1 - p.skill);
-    return { d, s: (myopic ? 0 : (Math.min(area(p.x, p.z, dir, look), look) / look) * 400) + ray * 2 + (d === 0 ? 6 : 0) + rng() * 40 * (1.1 - p.skill) };
-  });
-  // rare random wiggle keeps bots from drawing perfect squares
-  if (!danger && rng() < 0.08) opts[1 + Math.floor(rng() * 2)].s += 30;
-  const best = opts.sort((a, b) => b.s - a.s)[0];
-  if (best.d) p.turns.push([best.d, -1]);
-  p.inBoost = !danger && ahead > 20 && rng() < 0.4 * p.skill;
-}
-
-// Game > Phases: countdown, ride until one survives, round results, final
-let lastBeep = 0;
-function phases(dt) {
-  const ps = [...world.players.values()];
-  world.t -= dt;
-  if (world.phase === 'count') {
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { world.phase = 'play'; events.push(['c', 0]); }
-  } else if (world.phase === 'play') {
-    const alive = ps.filter((p) => p.alive);
-    if (alive.length === 0 || (ps.length > 1 && alive.length <= 1)) {
-      const w = alive[0];
-      if (w) { w.pts += world.outCount + 2; w.wins++; w.place = 1; world.winner = w.id; events.push(['w', w.id]); }
-      world.phase = 'round'; world.t = world.mode === 'attract' ? 2.5 : 4;
-    }
-  } else if (world.phase === 'round' && world.t <= 0) {
-    if (world.mode === 'attract' || world.round < ROUNDS) { world.round = world.mode === 'attract' ? 1 : world.round + 1; startRound(); }
-    else { world.phase = 'final'; world.t = 10; }
-  } else if (world.phase === 'final' && world.t <= 0 && lobby.room?.isHost) lobby.backToLobby();
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract'; world.round = 1;
-  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  startRound();
-}
+// Game > World: rules run in light-cycles-sim.js; this page steps it for the attract show and draws the relay server's match
+const sim = createCycleSim();
+const world = sim.world;
+if (/[?&]debug\b/.test(location.search)) window.__lightCycles = { world, grid: sim.grid };
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -409,100 +195,69 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
-    room.on('host', (isHost) => { syncTop(); if (isHost && world.mode === 'match') rebuildGrid(); });
+    room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match'; world.round = 1;
+  // the relay server runs the match; every page (lobby host too) rides its own cycle as a guest
+  onStart({ bots }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', round: 1, phase: 'count', t: 3.5, winner: null });
+    Object.assign(local, { turnLog: [], tn: 0, turnAt: 0 });
     ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
     document.getElementById('top').style.display = 'flex';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3.5; return; }
-    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startRound();
+    serverMatch.start({ bots });
   },
   onLobby() {
+    serverMatch.stop();
     ['info', 'board', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
-    startAttract();
+    sim.startAttract();
   },
 });
+const serverMatch = createServerMatchClient(lobby);
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) removePlayer(p.id);
-  for (const p of players) if (!world.players.has(p.id)) {
-    // keep 14 seats: replace a bot (crashed ones first); late joiner rides from next round
-    if (world.players.size >= 14) { const bot = [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.alive - b.alive || a.pts - b.pts)[0]; if (bot) removePlayer(bot.id); }
-    const n = addPlayer(p.id, p.nick, p.color, false);
-    n.alive = false; n.gid = nextGid++; n.x = 0; n.z = 0;
-  }
-}
 
-// Multiplayer > Net: guest turns sent instantly (ordered), boost at 20 Hz; host snapshots + turn events + corner keyframes
-const remoteSeq = new Map();
+// Multiplayer > Net: guest turns sent at once (running count), boost at the input rate; everything in a match comes from the relay server
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  const room = lobby.room;
-  if (room.isHost && d.g === 'i') {
-    const p = world.players.get(from);
-    if (!p) return;
-    p.inBoost = !!d.b;
-    // turns carry a running count so late or dropped packets can't double-turn
-    // first packet seen (new match or inherited host), or nothing to steer: just sync the count
-    const last = remoteSeq.get(from);
-    remoteSeq.set(from, d.n);
-    if (last === undefined || !p.alive || world.phase !== 'play') { p.ack = Math.max(p.ack, d.n); return; }
-    const q = d.q ?? [], fresh = q.slice(Math.max(0, q.length - (d.n - last)));
-    fresh.forEach((t, i) => { const [dir, cell = -1] = [].concat(t); p.turns.push([dir, cell, d.n - fresh.length + 1 + i]); });
-  }
-  if (d.g === 's' && !room.isHost && from === room.host && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f2 = (v) => Math.round(v * 100) / 100;
-let kfDirty = true, kfT = 0;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot(withKf) {
-  const s = {
-    g: 's', ph: world.phase, t: f2(world.t), rd: world.round, oc: world.outCount, win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), p.dir, (p.bot ? 1 : 0) | (p.alive ? 2 : 0) | (p.boost ? 4 : 0) | (p.stall > 0 ? 8 : 0), f2(p.energy), p.pts, p.wins, p.place, p.ack]),
-  };
-  if (withKf) s.K = [...world.players.values()].map((p) => [p.id, p.corners]);
-  return names.stamp(s, world.players.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, round: s.rd, outCount: s.oc, winner: s.win });
   const seenIds = new Set();
   for (const [id, x, z, dir, fl, energy, pts, wins, place, ack = 0] of s.P) {
     seenIds.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { alive: !!(fl & 2), boost: !!(fl & 4), stall: fl & 8 ? GRACE : 0, energy, pts, wins, place, ack });
     if (!predicting(p)) Object.assign(p, { x, z, dir });
   }
-  for (const id of [...world.players.keys()]) if (!seenIds.has(id)) removePlayer(id);
-  // own trail is local while turns wait for the host
-  for (const e of s.ev) if (e[0] === 't') { const p = world.players.get(e[1]); if (p && !predicting(p) && !hasCorner(p, e[2], e[3])) p.corners.push(e[2], e[3]); }
+  for (const id of [...world.players.keys()]) if (!seenIds.has(id)) sim.removePlayer(id);
+  const evs = s.ev ?? [];
+  // own trail is local while turns wait for the server
+  for (const e of evs) if (e[0] === 't') { const p = world.players.get(e[1]); if (p && !predicting(p) && !hasCorner(p, e[2], e[3])) p.corners.push(e[2], e[3]); }
   if (s.K) for (const [id, corners] of s.K) { const p = world.players.get(id); if (p && !predicting(p)) p.corners = corners; }
-  // a fresh round (count phase) brings derezzed trails back
-  if (s.ph === 'count') for (const v of cycles3d.values()) v.derez = 0;
-  playEvents(s.ev);
+  reviveOnCount();
+  playEvents(evs);
   snapAt = pacing.arrived();
 }
+// a fresh round (count phase) brings derezzed trails back
+function reviveOnCount() { if (world.phase === 'count') for (const v of cycles3d.values()) v.derez = 0; }
 function playEvents(evs) {
   const me = lobby.room?.me;
   for (const e of evs) {
     const p = world.players.get(e[1]);
-    if (e[0] === 't' && e[1] === me && isHostSim()) sfx.turn(); // guests hear their turn on keypress
-    else if (e[0] === 'x' && p) {
+    // own turn chirps on keypress (predictTurn), never on the server echo
+    if (e[0] === 'x' && p) {
       explode(e[2], e[3], p.color);
       const v = cycles3d.get(p.id); if (v) v.derez = 0.01;
       if (Math.hypot(e[2] - camLook.x, e[3] - camLook.z) < 60 || e[1] === me) sfx.crash(e[1] === me);
@@ -516,13 +271,13 @@ const ord = (n) => n + (['th', 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 
 
 const hasCorner = (p, x, z) => { const c = p.corners; for (let i = c.length - 2; i >= Math.max(0, c.length - 6); i -= 2) if (c[i] === x && c[i + 1] === z) return true; return false; };
 
-// Guest prediction > own cycle turns on keypress and rides locally until the host acks that turn
+// Guest prediction > own cycle turns on keypress and rides locally until the server acks that turn
 const PREDICT_MAX_MS = 1000; // give up on a lost ack, take the host's state
-const local = { turnLog: [], n: 0, boost: false, turnAt: 0 };
+const local = { turnLog: [], tn: 0, boost: false, turnAt: 0 };
 const snapAge = () => Math.min((performance.now() - snapAt) / 1000, pacing.cap(0.1));
 function predicting(p) {
-  return p.id === lobby.room?.me && !lobby.room.isHost && p.alive && world.phase === 'play'
-    && local.n > p.ack && performance.now() - local.turnAt < PREDICT_MAX_MS;
+  return p.id === lobby.room?.me && world.mode === 'match' && p.alive && world.phase === 'play'
+    && local.tn > p.ack && performance.now() - local.turnAt < PREDICT_MAX_MS;
 }
 // where the guest sees its own head right now: local state while predicting, else snapshot + travel since
 function shownHead(p) {
@@ -550,13 +305,12 @@ function localTurn(d) {
   if (world.mode !== 'match' || world.phase !== 'play') return;
   const room = lobby.room, me = world.players.get(room.me);
   if (!me?.alive) return;
-  if (room.isHost) { me.turns.push([d, -1]); return; }
   const cell = cellOf(...shownHead(me));
   if (cell < 0) return;
   predictTurn(me, d, cell);
-  local.turnLog.push([d, cell]); local.n++; local.turnAt = performance.now();
+  local.turnLog.push([d, cell]); local.tn++; local.turnAt = performance.now();
   if (local.turnLog.length > 8) local.turnLog.shift();
-  sendInput();
+  serverMatch.sendAction(turnInput());
 }
 addEventListener('keydown', (e) => {
   const id = keyId(e);
@@ -576,7 +330,8 @@ const pad = createTouchPad({
     else if (Math.abs(x) < 0.3) flickArmed = true;
   },
 });
-function sendInput() { lobby.room?.toHost({ g: 'i', b: local.boost ? 1 : 0, n: local.n, q: local.turnLog }); }
+// tn = turns pressed so far; key n is the server's input ack
+const turnInput = () => ({ b: local.boost ? 1 : 0, tn: local.tn, q: local.turnLog });
 
 // HUD > alive counter, energy, standings, banner, minimap
 const bigEl = document.getElementById('big');
@@ -620,34 +375,18 @@ function drawMap() {
   mg.globalAlpha = 1;
 }
 
-// Run engine > sim tick (worker)
-let sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > attract show steps the sim here; a match is stepped on the relay server, this page rides its own cycle ahead of it
+const isHostSim = () => world.mode === 'attract';
+let acc = 0;
 function simTick(dt) {
   local.boost = !!(keys.Space || keys.KeyW || keys.ArrowUp || pad.held.boost || pad.y > 0.5);
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') me.inBoost = local.boost;
-    const ps = [...world.players.values()];
-    for (const p of ps) if (p.bot) botThink(p, dt);
-    for (const p of ps) stepCycle(p, dt);
-    const ph = world.phase;
-    phases(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt; kfT -= dt;
-      if (sendT <= 0 || ph !== world.phase) {
-        sendT = 0.05;
-        const withKf = kfDirty || kfT <= 0;
-        if (withKf) { kfDirty = false; kfT = 1; }
-        room.send(snapshot(withKf));
-        playEvents(events); events = [];
-      }
-    } else { playEvents(events); events = []; }
-  } else if (world.mode === 'match' && room) {
+    for (acc += Math.min(dt, 0.25); acc >= STEP; acc -= STEP) sim.step();
+    reviveOnCount();
+    playEvents(sim.events); sim.events = [];
+  } else if (lobby.room) {
     rideOwn(dt);
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; sendInput(); }
+    serverMatch.tickInput(turnInput);
   }
 }
 startTicker(60, simTick);
@@ -659,7 +398,7 @@ let camYaw = 0, specIdx = 0, specT = 0;
 function loop() {
   const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
   const hostSim = isHostSim();
-  const age = hostSim ? 0 : snapAge();
+  for (const [id, v] of cycles3d) if (!world.players.has(id)) { scene.remove(v.g, v.trail); cycles3d.delete(id); }
   for (const p of world.players.values()) {
     let v = cycles3d.get(p.id);
     if (!v) { v = makeCycle(p); cycles3d.set(p.id, v); v.g.position.set(p.x, 0, p.z); }
@@ -735,7 +474,7 @@ function loop() {
   composer.render();
   requestAnimationFrame(loop);
 }
-startAttract();
+sim.startAttract();
 loop();
 
 addEventListener('resize', () => {

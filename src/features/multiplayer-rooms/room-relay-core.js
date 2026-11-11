@@ -41,13 +41,14 @@ export function createRelayCore({ maxSeats = MAX_SEATS, hostedGames = {} } = {})
       me: SERVER_PEER,
       get lobbyHost() { return room.host; },
       get players() { return publicPlayers(room); },
-      // data = JSON-able value, or Uint8Array sent as a binary frame; to = peer id / id list (default everyone); sticky = replayed to late joiners
+      // data = JSON-able value, or Uint8Array sent as a binary frame; to = peer id / id list (default everyone); sticky = replayed to late joiners; returns frame bytes
       send(data, { to = null, sticky = false } = {}) {
         const binary = data instanceof Uint8Array;
         const out = deliverFrame(SERVER_PEER, binary ? data : Buffer.from(JSON.stringify(data)));
         const targets = to == null ? room.players.values() : [].concat(to).map((id) => room.players.get(id));
         for (const p of targets) if (p) sendRaw(p.conn, out, binary);
         if (sticky && !binary) room.state = out;
+        return out.length;
       },
     };
   }

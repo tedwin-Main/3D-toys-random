@@ -30,6 +30,8 @@ Offline media tools (local only, outputs are committed to `src/media/`):
 
 - Blender: `/Applications/Blender.app/Contents/MacOS/Blender -b -P src/features/blender-scenes/<script>.py`
 - Remotion: `npm run render --prefix src/features/remotion-promos`
+- Aero reel music: `npm run music` (downloads curated 20 s reel, 60 s style and 120 s master slices; needs `brew install yt-dlp`); `npm run instagram:music` remuxes them without re-encoding video
+- Aero motion reels: `npm run instagram:motion -- [names...]` renders the reels from scratch in Remotion (posters + style kits, cut to the music beats) with curated music and recorded demo sound; pilot output in `src/features/instagram-posts/motion/`, `--promote` writes over the posting folders
 - Textures: `src/features/texture-generator/.venv/bin/python src/features/texture-generator/make-textures.py`
 
 ## Deploy

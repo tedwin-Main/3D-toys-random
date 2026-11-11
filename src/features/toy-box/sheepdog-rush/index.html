@@ -43,10 +43,9 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
-import { pickLeader } from '../common/pick-leader.js';
-import { axis, applyPresses } from '../common/guest-input.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createSheepdogSim, STEP, R_FIELD, GATE_W, WIN_N, SPEED, S_MAX, BARK_R, penAngle } from './sheepdog-sim.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
 import { createPrediction } from '../common/own-prediction.js';
@@ -73,7 +72,7 @@ sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 140 });
 scene.add(sun);
-const R_FIELD = 28, GATE_W = 4.4, PEN_D = 4.4, PEN_W = 6;
+const PEN_D = 4.4, PEN_W = 6;
 function canvasTex(w, h, draw) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   draw(c.getContext('2d'), w, h);
@@ -116,7 +115,6 @@ const postGeo = new THREE.BoxGeometry(0.22, 1.3, 0.22), railGeo = new THREE.BoxG
 const penGroup = new THREE.Group();
 scene.add(penGroup);
 let pens = [], penKey = '';
-const penAngle = (k, n) => (k / n) * Math.PI * 2 + 0.3;
 function rail(group, x0, z0, x1, z1, mat = woodMat) {
   const l = Math.hypot(x1 - x0, z1 - z0);
   for (const y of [0.45, 0.95]) { const r = new THREE.Mesh(railGeo, mat); r.scale.x = l; r.position.set((x0 + x1) / 2, y, (z0 + z1) / 2); r.rotation.y = -Math.atan2(z1 - z0, x1 - x0); r.castShadow = true; group.add(r); }
@@ -167,14 +165,6 @@ function buildPens(list) {
   // gate posts so each opening is clearly framed even where the ring step skipped them
   for (const p of pens) for (const s of [-1, 1]) { const th = p.a + s * p.half, post = new THREE.Mesh(postGeo, woodMat); post.position.set(Math.sin(th) * R_FIELD, 0.65, Math.cos(th) * R_FIELD); post.scale.y = 1.4; penGroup.add(post); }
 }
-// Run engine > which pen gate (if any) is at this field angle
-function gateAt(x, z) {
-  const n = pens.length;
-  if (!n) return -1;
-  const th = Math.atan2(x, z), k = ((Math.round((th - 0.3) / ((Math.PI * 2) / n)) % n) + n) % n, p = pens[k];
-  return Math.abs(Math.atan2(Math.sin(th - p.a), Math.cos(th - p.a))) < p.half ? k : -1;
-}
-
 // Players > border collies: black body, white chest + snout, ears, wagging tail, collar in player color, name tag
 function nameTag(nick, color) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
@@ -280,189 +270,9 @@ const sfx = {
   win() { [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, f, 0.22, 0.1, 'square', i * 0.11)); },
 };
 
-// Game > World
-const BOT_NAMES = ['Shep', 'Bess', 'Fly', 'Moss', 'Rex', 'Nell', 'Gyp', 'Jess', 'Cap', 'Floss', 'Bob', 'Meg', 'Tess', 'Sweep'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-const MATCH_T = 150, WIN_N = 30, SPEED = 8.5, DR = 0.55, FLEE_R = 6.5, S_MAX = 6, BARK_R = 9, BARK_CD = 1.8;
-const OVERTIME = 15; // s added once when the lead is tied at time-up
-const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, players: new Map(), sheep: [], winner: null };
-let events = [];
-const rng = Math.random;
-function addPlayer(id, nick, color, bot) {
-  const p = { id, nick, color, bot, pen: 99, x: 0, z: 0, vx: 0, vz: 0, face: 0, mx: 0, mz: 0, barkSeq: 0, lastBark: 0, barkCD: 0, barkT: 0, score: 0, skill: 0.55 + rng() * 0.4, aim: null, aimT: 0 };
-  world.players.set(id, p);
-  return p;
-}
-function removePlayer(id) { world.players.delete(id); const g = players3d.get(id); if (g) { scene.remove(g); players3d.delete(id); } }
-function clearPlayers() { for (const id of [...world.players.keys()]) removePlayer(id); }
-function spawnSheep(s) {
-  const a = rng() * Math.PI * 2, r = rng() * 9;
-  // golden fleece is rare and worth 3, so packs of dogs fight over it
-  Object.assign(s, { x: Math.sin(a) * r, z: Math.cos(a) * r, vx: 0, vz: 0, dead: 0, gold: rng() < 0.08, boost: 0, wa: rng() * 7, wt: rng() * 2, ws: 0.5 });
-}
-// match start shuffles pens (join order never fixes whose pen sits beside whose); roster changes keep current order
-function assignPens(shuffle = false) {
-  const ps = [...world.players.values()];
-  if (shuffle) shuffleInPlace(ps, rng); else ps.sort((a, b) => a.pen - b.pen);
-  ps.forEach((p, k) => (p.pen = k));
-  buildPens(ps);
-}
-function startMatch() {
-  assignPens(true);
-  const ps = [...world.players.values()], n = ps.length;
-  ps.forEach((p) => { const a = penAngle(p.pen, n); Object.assign(p, { x: Math.sin(a) * (R_FIELD - 4), z: Math.cos(a) * (R_FIELD - 4), vx: 0, vz: 0, face: a + Math.PI, score: 0, barkCD: 0, aim: null }); });
-  world.sheep = Array.from({ length: Math.min(50, Math.max(22, 16 + n * 3)) }, () => { const s = {}; spawnSheep(s); return s; });
-  Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, winner: null });
-}
-
-// Run engine > dogs: run, bark impulse on nearby sheep, stay inside the ring fence
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-function stepDog(p, dt) {
-  const frozen = world.phase !== 'play';
-  let mx = frozen ? 0 : p.mx, mz = frozen ? 0 : p.mz;
-  const ml = Math.hypot(mx, mz);
-  if (ml > 1) { mx /= ml; mz /= ml; }
-  const acc = 46 * dt;
-  p.vx += clamp(mx * SPEED - p.vx, -acc, acc);
-  p.vz += clamp(mz * SPEED - p.vz, -acc, acc);
-  if (ml > 0.1) p.face = Math.atan2(mx, mz);
-  p.x += p.vx * dt; p.z += p.vz * dt;
-  const r = Math.hypot(p.x, p.z);
-  if (r > R_FIELD - 0.7) { p.x *= (R_FIELD - 0.7) / r; p.z *= (R_FIELD - 0.7) / r; }
-  p.barkCD -= dt; p.barkT -= dt;
-  if (p.barkSeq !== p.lastBark) {
-    p.lastBark = p.barkSeq;
-    if (p.barkCD <= 0 && !frozen) {
-      p.barkCD = BARK_CD; p.barkT = 0.3;
-      for (const s of world.sheep) {
-        if (s.dead) continue;
-        const dx = s.x - p.x, dz = s.z - p.z, l = Math.hypot(dx, dz);
-        if (l < BARK_R && l > 1e-3) { const k = 4 + 9 * (1 - l / BARK_R); s.vx += (dx / l) * k; s.vz += (dz / l) * k; s.boost = 0.7; }
-      }
-      events.push(['b', p.id]);
-    }
-  }
-}
-function bumpDogs(ps) {
-  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
-    const a = ps[i], b = ps[j], dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz);
-    if (d > DR * 2 || d < 1e-4) continue;
-    const nx = dx / d, nz = dz / d, pen = (DR * 2 - d) / 2;
-    a.x -= nx * pen; a.z -= nz * pen; b.x += nx * pen; b.z += nz * pen;
-  }
-}
-
-// Run engine > flock: flee dogs, separate, loose cohesion, graze-wander, ring fence with gate openings into pens
-function stepSheep(s, dt, dogs) {
-  if (s.dead > 0) { s.dead -= dt; if (s.dead <= 0) { spawnSheep(s); events.push(['n', world.sheep.indexOf(s)]); } return; }
-  let ax = 0, az = 0, panic = 0, cx = 0, cz = 0, cn = 0;
-  for (const d of dogs) {
-    const dx = s.x - d.x, dz = s.z - d.z, l = Math.hypot(dx, dz);
-    if (l < FLEE_R && l > 1e-3) { const w = 1 - l / FLEE_R; ax += (dx / l) * w * 30; az += (dz / l) * w * 30; panic = Math.max(panic, w); }
-    // dogs are solid: sheep get shoved out of the way
-    if (l < 1.05 && l > 1e-3) { s.x = d.x + (dx / l) * 1.05; s.z = d.z + (dz / l) * 1.05; }
-  }
-  for (const o of world.sheep) {
-    if (o === s || o.dead) continue;
-    const dx = s.x - o.x, dz = s.z - o.z, l2 = dx * dx + dz * dz;
-    if (l2 > 49) continue;
-    cx += o.x; cz += o.z; cn++;
-    if (l2 < 1.69 && l2 > 1e-6) { const l = Math.sqrt(l2); ax += (dx / l) * (1.3 - l) * 16; az += (dz / l) * (1.3 - l) * 16; }
-  }
-  if (cn) { ax += (cx / cn - s.x) * 0.5; az += (cz / cn - s.z) * 0.5; }
-  if (panic < 0.05) {
-    s.wt -= dt;
-    if (s.wt <= 0) { s.wt = 1 + rng() * 3; s.wa = rng() * Math.PI * 2; s.ws = rng() < 0.4 ? 0 : 0.7; }
-    ax += (Math.sin(s.wa) * s.ws - s.vx) * 2; az += (Math.cos(s.wa) * s.ws - s.vz) * 2;
-  }
-  s.vx += ax * dt; s.vz += az * dt;
-  const damp = Math.exp(-dt * (panic > 0.05 ? 1.2 : 3));
-  s.vx *= damp; s.vz *= damp;
-  s.boost -= dt;
-  const sp = Math.hypot(s.vx, s.vz), max = s.boost > 0 ? 10 : S_MAX;
-  if (sp > max) { s.vx *= max / sp; s.vz *= max / sp; }
-  s.x += s.vx * dt; s.z += s.vz * dt;
-  const r = Math.hypot(s.x, s.z);
-  if (r < R_FIELD - 0.5) return;
-  const k = gateAt(s.x, s.z);
-  if (k >= 0) { if (r > R_FIELD + 1.6) penSheep(s, k); return; }
-  // off a gate: fence stops it (also catches sheep sliding sideways out of a gate mouth)
-  s.x *= (R_FIELD - 0.5) / r; s.z *= (R_FIELD - 0.5) / r;
-  const vr = (s.vx * s.x + s.vz * s.z) / (R_FIELD - 0.5);
-  if (vr > 0) { s.vx -= (vr * s.x) / (R_FIELD - 0.5); s.vz -= (vr * s.z) / (R_FIELD - 0.5); }
-}
-function penSheep(s, k) {
-  const owner = [...world.players.values()].find((p) => p.pen === k);
-  const pts = s.gold ? 3 : 1;
-  if (owner && world.phase === 'play') owner.score += pts;
-  events.push(['p', owner?.id ?? 0, +s.x.toFixed(1), +s.z.toFixed(1), s.gold ? 1 : 0]);
-  s.dead = 1.5; s.vx = s.vz = 0;
-}
-
-// Run engine > bots: pick a sheep near own gate, circle behind it, walk it in, bark when lined up
-function botThink(p, dt) {
-  const n = pens.length, a = penAngle(p.pen, n), gx = Math.sin(a) * (R_FIELD + 1), gz = Math.cos(a) * (R_FIELD + 1);
-  p.aimT -= dt;
-  let s = p.aim !== null ? world.sheep[p.aim] : null;
-  if (!s || s.dead || p.aimT <= 0) {
-    let best = -1, bc = Infinity;
-    world.sheep.forEach((q, i) => {
-      if (q.dead) return;
-      const c = Math.hypot(q.x - p.x, q.z - p.z) * 0.6 + Math.hypot(q.x - gx, q.z - gz) - (q.gold ? 10 : 0) + rng() * 4;
-      if (c < bc) { bc = c; best = i; }
-    });
-    p.aim = best < 0 ? null : best; p.aimT = 2 + rng() * 2;
-    s = p.aim !== null ? world.sheep[p.aim] : null;
-  }
-  if (!s) { p.mx = p.mz = 0; return; }
-  const sgx = gx - s.x, sgz = gz - s.z, sgl = Math.hypot(sgx, sgz) || 1, ux = sgx / sgl, uz = sgz / sgl;
-  const dx = p.x - s.x, dz = p.z - s.z, along = dx * ux + dz * uz;
-  let tx, tz, k = 1;
-  if (along > -1.5) {
-    // dog is between sheep and gate: swing wide around the side it is already on
-    const side = dx * -uz + dz * ux >= 0 ? 1 : -1;
-    tx = s.x - uz * side * 4.5 - ux * 2; tz = s.z + ux * side * 4.5 - uz * 2;
-  } else {
-    const hx = s.x - ux * 3.2, hz = s.z - uz * 3.2;
-    if (Math.hypot(p.x - hx, p.z - hz) > 1.6) { tx = hx; tz = hz; }
-    else { tx = s.x + ux * 2; tz = s.z + uz * 2; k = 0.45 + p.skill * 0.25; }
-    if (p.barkCD <= 0 && sgl < 13 && Math.hypot(dx, dz) < 4.5 && rng() < 0.03 * p.skill) p.barkSeq++;
-  }
-  const r = Math.hypot(tx, tz);
-  if (r > R_FIELD - 1) { tx *= (R_FIELD - 1) / r; tz *= (R_FIELD - 1) / r; }
-  const lx = tx - p.x, lz = tz - p.z, l = Math.hypot(lx, lz);
-  if (l > 1e-3) { const m = Math.min(1, l / 0.8) * k * (0.8 + p.skill * 0.2); p.mx = (lx / l) * m; p.mz = (lz / l) * m; } else p.mx = p.mz = 0;
-}
-
-// Game > Phases: countdown, play, final standings
-let lastBeep = 0;
-function phases(dt) {
-  const ps = [...world.players.values()];
-  world.t -= dt;
-  if (world.phase === 'count') {
-    if (Math.ceil(world.t) !== lastBeep && world.t > 0) { lastBeep = Math.ceil(world.t); events.push(['c', lastBeep]); }
-    if (world.t <= 0) { lastBeep = 0; events.push(['c', 0]); world.phase = 'play'; }
-  } else if (world.phase === 'play') {
-    world.left -= dt;
-    const { winner: top, tied } = pickLeader(ps, (p) => p.score);
-    // tied scoring lead at time-up: one overtime, then a draw (join order never breaks a tie)
-    if (world.left <= 0 && !top && tied[0]?.score > 0 && !world.overtime && world.mode === 'match') { world.overtime = true; world.left = OVERTIME; }
-    else if (world.left <= 0 || (top && top.score >= WIN_N)) {
-      world.winner = top?.id ?? null; world.overtime = false;
-      if (top) events.push(['w', top.id]);
-      world.phase = 'final'; world.t = world.mode === 'attract' ? 3 : 10;
-    }
-  } else if (world.phase === 'final' && world.t <= 0) {
-    if (world.mode === 'attract') startMatch();
-    else if (lobby.room?.isHost) lobby.backToLobby();
-  }
-}
-function startAttract() {
-  clearPlayers();
-  world.mode = 'attract';
-  for (let i = 0; i < 8; i++) addPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true);
-  startMatch();
-}
+// Game > World: rules live in sheepdog-sim.js; attract runs it here, a match mirrors the relay server's snapshots
+const sim = createSheepdogSim();
+const world = sim.world;
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -473,88 +283,64 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     room.on('data', onData);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost }) {
-    clearPlayers();
-    world.mode = 'match';
+  // the relay server runs the match; every page (lobby host too) plays as a guest
+  onStart({ bots }) {
+    sim.clearPlayers();
+    Object.assign(world, { mode: 'match', phase: 'count', t: 3.5, sheep: [] });
     ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = 'block'));
     document.getElementById('top').style.display = 'flex';
     syncTop();
-    if (!isHost) { world.phase = 'count'; world.t = 3.5; world.sheep = []; return; }
-    for (const p of lobby.room.players) addPlayer(p.id, p.nick, p.color, false);
-    for (let i = 0; i < bots; i++) addPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true);
-    startMatch();
+    serverMatch.start({ bots });
   },
   onLobby() {
+    serverMatch.stop();
     ['info', 'board', 'top'].forEach((id) => (document.getElementById(id).style.display = 'none'));
     big('');
-    startAttract();
+    sim.startAttract();
   },
 });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (world.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  let changed = false;
-  for (const p of [...world.players.values()]) if (!p.bot && !ids.has(p.id)) { removePlayer(p.id); changed = true; }
-  for (const p of players) if (!world.players.has(p.id)) {
-    // keep 14 seats: a late human takes over the lowest-scoring bot's pen and count
-    const bot = world.players.size >= 14 ? [...world.players.values()].filter((q) => q.bot).sort((a, b) => a.score - b.score)[0] : null;
-    const np = addPlayer(p.id, p.nick, p.color, false);
-    if (bot) { Object.assign(np, { x: bot.x, z: bot.z, score: bot.score }); removePlayer(bot.id); }
-    changed = true;
-  }
-  // pens follow the seat list, so any join/leave re-spaces them around the ring
-  if (changed) assignPens();
-}
+const serverMatch = createServerMatchClient(lobby);
 
-// Multiplayer > Net: guest input 20 Hz, host snapshots with events (dogs + packed flock)
-const remoteIn = new Map();
+// Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {
-  if (!d || d._lobby) return;
-  if (d.g === 'i' && lobby.room.isHost) remoteIn.set(from, d);
-  if (d.g === 's' && !lobby.room.isHost && from === lobby.room.host && world.mode === 'match') applySnap(d);
+  if (!d || d._lobby || !serverMatch.fromServer(from) || world.mode !== 'match') return;
+  if (d.g === 'done') serverMatch.finish();
+  else if (d.g === 's') applySnap(d);
 }
-const f1 = (v) => Math.round(v * 10) / 10, f2 = (v) => Math.round(v * 100) / 100;
 // Cloud Sync > nick + color ride in a name table, not every row
 const names = createNameSync();
-function snapshot() {
-  return names.stamp({
-    g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), win: world.winner, ev: events,
-    P: [...world.players.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), (p.bot ? 1 : 0) | (p.barkT > 0 ? 2 : 0), p.score, p.pen]),
-    S: world.sheep.flatMap((s) => [f1(s.x), f1(s.z), (s.gold ? 1 : 0) | (s.dead > 0 ? 2 : 0)]),
-  }, world.players.values());
-}
 // Multiplayer > Guest snapshot pacing: smoothing softens when snapshots arrive unevenly
 const pacing = createSnapPacing();
 let snapAt = 0;
 // Multiplayer > Guest prediction: own player moves on local input at once; events swapped out so it never queues host fx
 const pred = createPrediction({
-  step: (p, dt) => { const keep = events; events = []; stepDog(p, dt); events = keep; },
+  step: (p, dt) => { const keep = sim.events; sim.events = []; sim.stepDog(p, dt); sim.events = keep; },
   live: () => true,
   seed: (p) => { p.lastBark = p.barkSeq = 0; },
   angle: 'face',
 });
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, winner: s.win });
   const seen = new Set();
   for (const [id, x, z, vx, vz, face, fl, score, pen] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
-    const p = world.players.get(id) ?? addPlayer(id, ...names.name(id), !!(fl & 1));
+    const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1));
     Object.assign(p, { x, z, vx, vz, face, barkT: fl & 2 ? 0.1 : 0, score, pen });
     if (id === lobby.room.me) pred.correct(p);
   }
-  for (const id of [...world.players.keys()]) if (!seen.has(id)) removePlayer(id);
+  for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
   const n = s.S.length / 3;
   while (world.sheep.length < n) world.sheep.push({ x: 0, z: 0, vx: 0, vz: 0, dead: 0, gold: false });
   world.sheep.length = n;
   for (let i = 0; i < n; i++) Object.assign(world.sheep[i], { x: s.S[i * 3], z: s.S[i * 3 + 1], gold: !!(s.S[i * 3 + 2] & 1), dead: s.S[i * 3 + 2] & 2 ? 1 : 0 });
-  playEvents(s.ev);
+  playEvents(s.ev ?? []);
   snapAt = pacing.arrived();
 }
 function playEvents(evs) {
@@ -605,32 +391,21 @@ function hud(dt) {
   document.getElementById('board').innerHTML = r.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>🐑${p.score}</em></div>`).join('');
 }
 
-// Run engine > sim tick (worker)
-let sendT = 0;
-const isHostSim = () => world.mode === 'attract' || !!lobby.room?.isHost;
+// Run engine > sim tick (worker): attract steps the local sim; a match predicts my dog and streams input to the server
+let acc = 0;
+const isHostSim = () => world.mode === 'attract';
 function simTick(dt) {
   readInput();
-  const room = lobby.room;
   if (isHostSim()) {
-    const me = room && world.players.get(room.me);
-    if (me && world.mode === 'match') { Object.assign(me, { mx: local.x, mz: local.z }); applyPresses(me, { barkSeq: ['lastBark', local.barkSeq] }); }
-    for (const [id, inp] of remoteIn) { const p = world.players.get(id); if (p) { Object.assign(p, { mx: axis(inp.x), mz: axis(inp.z) }); applyPresses(p, { barkSeq: ['lastBark', inp.b] }); } }
-    const ps = [...world.players.values()];
-    if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, dt);
-    for (const p of ps) stepDog(p, dt);
-    bumpDogs(ps);
-    for (const s of world.sheep) stepSheep(s, dt, ps);
-    phases(dt);
-    if (world.mode === 'match' && room) {
-      sendT -= dt;
-      if (sendT <= 0) { sendT = 0.05; room.send(snapshot()); playEvents(events); events = []; }
-    } else { playEvents(events); events = []; }
-  } else if (world.mode === 'match' && room) {
-    pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z }, dt, 1 / 60);
-    if (world.phase === 'play') world.left -= dt;
-    sendT -= dt;
-    if (sendT <= 0) { sendT = 0.05; room.toHost({ g: 'i', x: +local.x.toFixed(2), z: +local.z.toFixed(2), b: local.barkSeq }); }
+    for (acc += dt; acc >= STEP; acc -= STEP) sim.step();
+    playEvents(sim.events); sim.events = [];
+    return;
   }
+  const room = lobby.room;
+  if (!room) return;
+  pred.tick(world.players.get(room.me), { mx: local.x, mz: local.z }, dt, STEP);
+  if (world.phase === 'play') world.left -= dt;
+  serverMatch.tickInput(() => ({ x: +local.x.toFixed(2), z: +local.z.toFixed(2), b: local.barkSeq }));
 }
 startTicker(60, simTick);
 
@@ -654,6 +429,7 @@ function loop() {
     }
     pen.flag.rotation.y = Math.sin(time * 3 + pen.a * 5) * 0.3;
   }
+  for (const [id, g] of players3d) if (!world.players.has(id)) { scene.remove(g); players3d.delete(id); }
   for (const p of world.players.values()) {
     let g = players3d.get(p.id);
     if (!g) { g = makeDog(p); players3d.set(p.id, g); g.position.set(p.x, 0, p.z); }
@@ -714,7 +490,7 @@ function loop() {
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
-startAttract();
+sim.startAttract();
 loop();
 
 addEventListener('resize', () => {

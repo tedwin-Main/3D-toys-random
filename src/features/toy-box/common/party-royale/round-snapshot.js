@@ -6,19 +6,7 @@ const STATUS_BITS = { [ACTIVE]: 0, [QUALIFIED]: 2, [OUT]: 4 };
 const f2 = (v) => Math.round(v * 100) / 100;
 const f1 = (v) => Math.round(v * 10) / 10;
 
-// Free-tier budgets per room. Relay egress: 400 KB/s ≈ 69 h of play a month on Render's 100 GB quota.
-// Relay frames: 960/s (32-player worst case, Render CPU peak 0.035 of 0.15).
-export const BUDGET = { relayBytes: 400e3, relayFrames: 960 };
-const SNAP_TICKS = [1, 2, 3, 4]; // 60 / 30 / 20 / 15 Hz
-
-/** ticks between snapshots to `guests` humans: the fastest rate inside both budgets (15 Hz floor) */
-export function snapEvery({ bytes, guests }) {
-  const fits = (ticks) => {
-    const hz = 60 / ticks;
-    return bytes * guests * hz <= BUDGET.relayBytes && guests * hz <= BUDGET.relayFrames;
-  };
-  return SNAP_TICKS.find(fits) ?? SNAP_TICKS.at(-1);
-}
+export { BUDGET, snapEvery } from '../server-run/relay-budget.js';
 
 /** byte estimate before the first snapshot of a round */
 // header + meta measured 70-80 B mid-round (capacity-test)

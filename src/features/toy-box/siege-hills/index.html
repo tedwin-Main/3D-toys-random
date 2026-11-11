@@ -53,7 +53,9 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
-import { reseatTurn } from '../common/turn-seats.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createSiegeGame } from './siege-rules.js';
+import { STEP, FLOOR, G, heightAt, launchPoint, velocity } from './siege-ballistics.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, sunset sky, sea, lights
@@ -87,7 +89,7 @@ scene.add(sea);
 }
 
 // Terrain > side-on strip: heights every STEP along x, extruded DEPTH along z; grass top, dirt face
-const STEP = 0.5, DEPTH = 7, FLOOR = -8, G = 20, MAX_SPEED = 31, BLAST = 2.7, CAT_R = 0.9;
+const DEPTH = 7;
 const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: false });
 const terrain = new THREE.Mesh(new THREE.BufferGeometry(), terrainMat);
 terrain.castShadow = terrain.receiveShadow = true;
@@ -118,51 +120,6 @@ function buildTerrain(H) {
   terrain.geometry.dispose();
   terrain.geometry = g;
 }
-const heightAt = (H, x) => { const f = x / STEP, i = Math.floor(f); if (i < 0) return H[0]; if (i >= H.length - 1) return H[H.length - 1]; return H[i] + (H[i + 1] - H[i]) * (f - i); };
-// host: fresh hills for a round, flat pads where catapults stand
-function genTerrain(W, spots) {
-  const n = Math.round(W / STEP) + 1, H = new Array(n);
-  const ph = [Math.random() * 9, Math.random() * 9, Math.random() * 9], amp = [3.2, 1.6, 0.6], fr = [0.07 + Math.random() * 0.03, 0.19, 0.5];
-  for (let i = 0; i < n; i++) {
-    const x = i * STEP;
-    let h = 6.5;
-    for (let k = 0; k < 3; k++) h += Math.sin(x * fr[k] + ph[k]) * amp[k];
-    // gentle drop into the sea at both ends
-    const edge = Math.min(x, W - x);
-    if (edge < 6) h -= (6 - edge) * 1.1;
-    H[i] = Math.max(1, h);
-  }
-  for (const sx of spots) { const i0 = Math.round(sx / STEP); const ph2 = Math.max(H[i0], 3.5); for (let d = -3; d <= 3; d++) { const i = i0 + d; if (H[i] != null) H[i] = ph2 + (H[i] - ph2) * (Math.abs(d) / 3) ** 2; } }
-  return H.map((h) => Math.round(h * 100) / 100);
-}
-// carve a round crater; returns new heights
-function crater(H, ix, iy, r) {
-  const out = H.slice(), i0 = Math.floor((ix - r) / STEP), i1 = Math.ceil((ix + r) / STEP);
-  for (let i = Math.max(0, i0); i <= Math.min(H.length - 1, i1); i++) {
-    const dx = i * STEP - ix;
-    if (Math.abs(dx) > r) continue;
-    const bottom = iy - Math.sqrt(r * r - dx * dx) * 0.8;
-    if (out[i] > bottom) out[i] = Math.max(FLOOR + 1, Math.round(bottom * 100) / 100);
-  }
-  return out;
-}
-
-// Shots > shared ballistic sim (host resolves, bots plan): wind is horizontal acceleration
-function simulate(x0, y0, vx, vy, wind, H, cats, shooter, W) {
-  const dt = 1 / 120;
-  let x = x0, y = y0, t = 0;
-  for (; t < 9; t += dt) {
-    vx += wind * dt; vy -= G * dt;
-    x += vx * dt; y += vy * dt;
-    if (x < -2 || x > W + 2) return { ix: x, iy: y, ft: t, off: true };
-    for (const c of cats) if (c.alive && (c.id !== shooter || t > 0.35) && Math.hypot(x - c.x, y - (c.y + 0.6)) < CAT_R) return { ix: x, iy: y, ft: t, direct: c.id };
-    if (y <= heightAt(H, x)) return { ix: x, iy: heightAt(H, x), ft: t };
-  }
-  return { ix: x, iy: y, ft: t, off: true };
-}
-const launchPoint = (c) => ({ x: c.x, y: c.y + 1.4 });
-const velocity = (a, p) => ({ vx: Math.cos(a) * p * MAX_SPEED, vy: Math.sin(a) * p * MAX_SPEED });
-
 // Catapults > meshes: wheeled base, throwing arm, player banner, name + HP tag
 function tagCanvas() { const c = document.createElement('canvas'); c.width = 256; c.height = 80; return c; }
 function drawTag(c, nick, color, hp) {
@@ -250,132 +207,23 @@ const sfx = {
   win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, f, 0.2, 0.07, 'square', i * 0.12)); },
 };
 
-// Game > rules: turn order over living catapults; blast damage falls off with distance; direct hit +25; tide rises after a few laps
-const BOT_NAMES = ['Trebuchet Tom', 'Rocky', 'Slinger', 'Big Bertha', 'Lobster', 'Hurl', 'Castle Cass', 'Pebbles', 'Boulder Bo', 'Fling', 'Mortimer', 'Duke', 'Ballista', 'Rampart'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0', '#00f5d4'];
-const INTRO = 2.5, ROUND_SHOW = 4, BLAST_SHOW = 1.4, TIDE_AFTER = 3, TIDE_STEP = 0.7;
+// Game > rules live in siege-rules.js: this page runs them for attract mode only, a match is run by the relay server
+const attract = createSiegeGame();
 let S = null;
-const rng = Math.random;
 const player = (id) => S.P.find((p) => p.id === id);
 const alive = () => S.P.filter((p) => p.alive);
-function newRound(rd) {
-  const n = S.P.length, W = 44 + n * 11;
-  // spread catapults with jitter, shuffled seats
-  const seats = S.P.map((_, i) => (W / n) * (i + 0.5) + (rng() - 0.5) * (W / n) * 0.35).sort(() => rng() - 0.5);
-  S.W = W;
-  S.H = genTerrain(W, seats);
-  S.P.forEach((p, i) => Object.assign(p, { x: Math.round(seats[i] * 100) / 100, hp: 100, alive: true }));
-  S.P.forEach((p) => (p.y = heightAt(S.H, p.x)));
-  // round 1 opens on a random seat; later rounds carry on the rotation so the last shooter never goes twice
-  const turn = rd === 1 ? Math.floor(rng() * n) : (S.turn + 1) % n;
-  Object.assign(S, { rd, ph: 'intro', tt: INTRO, water: 0, shots: 0, shot: null, turn, lap: 0 });
-  newWind();
-}
-function newWind() { S.wind = Math.round((rng() * 2 - 1) * (4 + S.rd) * 10) / 10; }
-function nextTurn() {
-  const n = S.P.length;
-  for (let k = 1; k <= n; k++) { const j = (S.turn + k) % n; if (S.P[j].alive) { if (j <= S.turn) S.lap++; S.turn = j; break; } }
-  // late in the round the tide rises a step each lap
-  if (S.lap >= TIDE_AFTER && S.turn === S.P.findIndex((p) => p.alive)) {
-    S.water = Math.round((S.water + TIDE_STEP) * 100) / 100;
-    for (const p of alive()) if (p.y < S.water + 0.3) { p.hp = 0; p.alive = false; }
-  }
-  newWind();
-  Object.assign(S, { ph: 'aim', tt: S.clock });
-  const p = S.P[S.turn];
-  if (p?.bot) p.think = 1 + rng() * 1.2;
-}
-// host: resolve a whole shot now; guests replay the arc from S.shot
-function fire(id, a, pw) {
-  const p = S.P[S.turn];
-  if (S.ph !== 'aim' || !p || p.id !== id || !p.alive || !Number.isFinite(a) || !Number.isFinite(pw)) return false;
-  pw = Math.max(0.15, Math.min(1, pw));
-  const lp = launchPoint(p), v = velocity(a, pw);
-  const r = simulate(lp.x, lp.y, v.vx, v.vy, S.wind, S.H, S.P, p.id, S.W);
-  const hits = [], kills = [];
-  if (!r.off) {
-    S.H = crater(S.H, r.ix, r.iy, BLAST * 0.85);
-    for (const c of alive()) {
-      const d = Math.hypot(c.x - r.ix, c.y + 0.5 - r.iy);
-      let dmg = d < BLAST ? Math.round(55 * (1 - d / BLAST) ** 0.7) : 0;
-      if (r.direct === c.id) dmg += 25;
-      if (!dmg) continue;
-      c.hp = Math.max(0, c.hp - dmg);
-      hits.push([c.id, dmg]);
-    }
-    // settle on the new ground, fall damage for long drops, sink below the tide
-    for (const c of alive()) {
-      const ny = heightAt(S.H, c.x);
-      if (c.y - ny > 2.2) { c.hp = Math.max(0, c.hp - 10); }
-      c.y = Math.round(ny * 100) / 100;
-      if (c.y < S.water + 0.3) c.hp = 0;
-      if (c.hp <= 0) { c.alive = false; kills.push(c.id); if (c.id !== p.id) p.score += 1; }
-    }
-  }
-  S.shots++;
-  S.shot = { n: S.shots, by: p.id, x0: lp.x, y0: lp.y, vx: v.vx, vy: v.vy, w: S.wind, ft: Math.round(r.ft * 1000) / 1000, ix: r.ix, iy: r.iy, off: !!r.off, hits, kills };
-  Object.assign(S, { ph: 'fly', tt: r.ft + BLAST_SHOW });
-  return true;
-}
-// bots: search angle x power against a chosen rival, wind included; skill blurs the pick
-function botAim(p) {
-  const foes = alive().filter((c) => c.id !== p.id);
-  if (!foes.length) return { a: Math.PI / 4, p: 0.5 };
-  const t = foes.sort((a, c) => Math.abs(a.x - p.x) * (0.6 + rng() * 0.8) - Math.abs(c.x - p.x) * (0.6 + rng() * 0.8))[0];
-  const dir = t.x > p.x ? 1 : -1, lp = launchPoint(p);
-  let best = null;
-  for (let deg = 20; deg <= 78; deg += 3) for (let pw = 0.3; pw <= 1.001; pw += 0.035) {
-    const a = dir > 0 ? (deg * Math.PI) / 180 : Math.PI - (deg * Math.PI) / 180, v = velocity(a, pw);
-    const r = simulate(lp.x, lp.y, v.vx, v.vy, S.wind, S.H, S.P, p.id, S.W);
-    if (r.direct === p.id) continue;
-    const miss = r.direct === t.id ? 0 : Math.hypot(r.ix - t.x, r.iy - t.y) + (Math.hypot(r.ix - p.x, r.iy - p.y) < BLAST * 1.2 ? 50 : 0);
-    if (!best || miss < best.miss) best = { a, p: pw, miss };
-  }
-  const blur = p.skill ?? 0.5;
-  return { a: best.a + (rng() - 0.5) * 0.14 * (1.2 - blur), p: best.p * (1 + (rng() - 0.5) * 0.14 * (1.2 - blur)) };
-}
-
-// Run engine > host tick: phases, bots, clock; publish on change
-let dirty = true;
-function hostTick(dt) {
-  if (!S) return;
-  const before = `${S.ph}|${S.turn}|${S.shots}|${S.P.length}|${S.rd}`;
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) { Object.assign(S, { ph: 'aim', tt: S.clock }); const p = S.P[S.turn]; if (p?.bot) p.think = 1 + rng(); }
-  else if (S.ph === 'aim') {
-    const p = S.P[S.turn];
-    // the tide can finish a round between shots
-    if (alive().length <= 1) endRound();
-    else if (!p || !p.alive) nextTurn();
-    else if (p.bot) { p.think -= dt; if (p.think <= 0) { const b = botAim(p); fire(p.id, b.a, b.p); } }
-    else if (S.tt <= 0) nextTurn();
-  } else if (S.ph === 'fly' && S.tt <= 0) {
-    if (alive().length <= 1) endRound(); else nextTurn();
-  } else if (S.ph === 'round' && S.tt <= 0) {
-    if (S.mode === 'attract') { newRound(1); }
-    else if (S.rd < S.rounds) newRound(S.rd + 1);
-    else Object.assign(S, { ph: 'final', tt: 12 });
-  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  if (before !== `${S.ph}|${S.turn}|${S.shots}|${S.P.length}|${S.rd}`) dirty = true;
-  if (dirty && S.mode === 'match' && lobby.room?.isHost) { sync.publish(S); dirty = false; }
-}
-function endRound() {
-  const w = alive()[0];
-  if (w) w.score += 3;
-  Object.assign(S, { ph: 'round', tt: ROUND_SHOW, winner: w?.id ?? null });
-}
-function newState(mode, P, rounds, clock) { S = { mode, P, rounds, clock, rd: 1, ph: 'intro', tt: INTRO, W: 60, H: [], water: 0, wind: 0, shots: 0, shot: null, turn: 0, lap: 0 }; newRound(1); }
-function startAttract() {
-  const P = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.4 }));
-  newState('attract', P, 1, 10);
-  S.tt = 1;
-  resetView();
+function startAttract() { attract.startAttract(); S = attract.state; resetView(); }
+// Run engine > attract tick: a new round redraws the hills
+function attractTick(dt) {
+  attract.tick(dt);
+  S = attract.state;
+  if (view && S.shots < view.shotN) resetView();
 }
 
 // Multiplayer > lobby + state sync (host publishes S, guests send shots)
 const sync = createTurnSync({
   onState(s) { if (started) applyState(s); },
-  onAction(from, a) { if (a.t === 'fire' && S?.mode === 'match' && fire(from, a.a, a.p)) dirty = true; },
+  onDone() { serverMatch.finish(); },
 });
 let started = false;
 const lobby = createLobby({
@@ -390,45 +238,24 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     started = true;
     showHud(true);
     syncTop();
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    const P = lobby.room.players.map((p) => ({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0 }));
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.35 + rng() * 0.55 });
-    newState('match', P, settings.rounds ?? 3, settings.clock ?? 20);
-    resetView();
-    dirty = true;
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { started = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); started = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   ['top', 'wind'].forEach((id) => (document.getElementById(id).style.display = on ? 'flex' : 'none'));
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S?.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id)), before = S.P;
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  // late joiner: waits out this round as a wreck, plays from the next one
-  for (const p of players) if (!player(p.id)) {
-    // keep 14 seats: a late human takes a knocked-out (else lowest-scoring) bot's seat
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.alive - c.alive || a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, x: -50, y: -50, hp: 0, alive: false });
-  }
-  const seat = reseatTurn(before, S.turn, S.P), midTurn = seat.left && (S.ph === 'aim' || S.ph === 'fly');
-  // shooter left mid-turn: park on the seat before the next one so nextTurn lands on it (not past it)
-  S.turn = midTurn ? (seat.turn - 1 + S.P.length) % Math.max(1, S.P.length) : seat.turn;
-  if (midTurn && S.ph === 'aim') nextTurn();
-  dirty = true;
-}
-
 // View > what is drawn lags state by one shot: terrain + HP update when the boulder lands
 let view = null;
 function resetView() { view = { H: S.H.slice(), hp: new Map(S.P.map((p) => [p.id, p.hp])), y: new Map(S.P.map((p) => [p.id, p.y])), shotN: S.shots, flyT: -1, rd: S.rd, water: S.water }; buildTerrain(view.H); }
@@ -544,9 +371,9 @@ function hud(dt) {
   document.getElementById('board').innerHTML = rows.map(({ p, i }) => { const hp = view?.hp.get(p.id) ?? p.hp; return `<div class="row ${p.id === me ? 'me' : ''} ${hp <= 0 ? 'dead' : ''}"><b>${i === S.turn && S.ph === 'aim' ? '▶' : ''}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><u><s style="width:${Math.max(0, hp)}%"></s></u><em>${p.score}</em></div>`; }).join('');
 }
 
-// Run engine > host / attract tick (worker); guests run the clock only
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S?.mode === 'attract' || lobby.room?.isHost) { if (S?.mode === 'attract' || started) hostTick(dt); }
+  if (S?.mode === 'attract') attractTick(dt);
   else if (S) S.tt -= dt;
 });
 

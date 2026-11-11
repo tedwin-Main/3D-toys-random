@@ -64,6 +64,8 @@ import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createAuctionGame, START_COINS, scoreOf } from './auction-rules.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, camera, velvet hall, stage with pedestal under a spotlight
@@ -205,100 +207,27 @@ const sfx = {
   tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
 };
 
-// Game > rules: sealed bids; treasure = highest unmatched bid wins and pays; cursed = all pay, lowest bid takes it
-const START_COINS = 40, INTRO = 2.5, SHOW_T = 2.4, BID_T = 15, RESULT_T = 4.5, FINAL_T = 12;
-const LOTS = { gem: ['Sky Gem', 4, 8], chalice: ['Royal Chalice', 8, 13], crown: ['Sun Crown', 13, 20], idol: ['Cursed Idol', -12, -4] };
-const BOT_NAMES = ['Baroness', 'Count Coin', 'Gilda', 'Sir Bidsalot', 'Madame Mint', 'Old Ledger', 'Rubyface', 'Duke Dollop', 'Lady Lux', 'Hammerhand', 'Magpie', 'Penny Pound', 'Viscount V', 'Goldtooth'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// Game > rules live in auction-rules.js: this page runs them for attract mode only, a match is run by the relay server (bids never reach a browser before the gavel)
 // S: { mode, ph, tt, rd, rounds, lot: { kind, name, v }, res: { bids: {id: bid}, win: [ids], unsold }, P: [{ id, nick, color, bot, coins, loot, lock, skill }] }
-let S = null;
-const rng = Math.random;
-const secret = new Map();
+const attract = createAuctionGame();
+let S = attract.state;
 const player = (id) => S.P.find((p) => p.id === id);
-const scoreOf = (p) => p.coins + p.loot;
-function newPlayer(id, nick, color, bot) { return { id, nick, color, bot, coins: START_COINS, loot: 0, lock: false, skill: 0.4 + rng() * 0.5, at: 0 }; }
-function newLot(rd, rounds) {
-  // last lot is always a crown; otherwise one in four is cursed
-  const kind = rd === rounds ? 'crown' : rng() < 0.25 ? 'idol' : ['gem', 'gem', 'chalice', 'chalice', 'crown'][Math.floor(rng() * 5)];
-  const [name, lo, hi] = LOTS[kind];
-  return { kind, name, v: lo + Math.floor(rng() * (hi - lo + 1)) };
-}
-function startLot(rd) {
-  secret.clear();
-  for (const p of S.P) p.lock = false;
-  Object.assign(S, { rd, ph: 'show', tt: SHOW_T, lot: newLot(rd, S.rounds), res: null });
-}
-// host: a (re)bid before the reveal; returns true when accepted
-function placeBid(id, v) {
-  const p = player(id);
-  if (!p || S.ph !== 'bid' || !Number.isInteger(v) || v < 0 || v > p.coins) return false;
-  secret.set(id, v); p.lock = true;
-  return true;
-}
-function resolveLot() {
-  const bids = {};
-  for (const p of S.P) bids[p.id] = secret.get(p.id) ?? 0;
-  const res = { bids, win: [], unsold: false };
-  if (S.lot.v > 0) {
-    // ties cancel: the highest bid nobody else made wins
-    const count = new Map();
-    for (const v of Object.values(bids)) count.set(v, (count.get(v) ?? 0) + 1);
-    const top = Math.max(-1, ...[...count].filter(([v, n]) => n === 1 && v > 0).map(([v]) => v));
-    const w = top > 0 && S.P.find((p) => bids[p.id] === top);
-    if (w) { w.coins -= top; w.loot += S.lot.v; res.win = [w.id]; } else res.unsold = true;
-  } else {
-    // curse: everyone pays what they bid, lowest bid (all tied) takes it
-    for (const p of S.P) p.coins -= bids[p.id];
-    const low = Math.min(...S.P.map((p) => bids[p.id]));
-    for (const p of S.P) if (bids[p.id] === low) { p.loot += S.lot.v; res.win.push(p.id); }
-  }
-  Object.assign(S, { ph: 'result', tt: RESULT_T, res });
-}
-// bots: treasure = bid a share of its value (odd numbers dodge ties); curse = pay a little to dodge
-function botBid(p) {
-  const v = S.lot.v;
-  let b;
-  if (v > 0) {
-    const want = v * (0.3 + p.skill * 0.45 + (rng() - 0.5) * 0.3);
-    b = rng() < 0.12 ? 0 : Math.round(want) + (rng() < 0.5 ? 1 : 0);
-  } else b = rng() < 0.25 ? 0 : 1 + Math.floor(rng() * Math.min(4, -v / 3));
-  return Math.max(0, Math.min(p.coins, b));
-}
-function botsThink() {
-  for (const p of S.P) if (p.bot && !p.lock && BID_T - S.tt >= p.at) placeBid(p.id, botBid(p));
-}
-
-// Run engine > host tick: phases, bots, publish when anything but the clock changed
 const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
-let lastSig = '', prevS = null;
-function hostTick(dt) {
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) startLot(1);
-  else if (S.ph === 'show' && S.tt <= 0) { Object.assign(S, { ph: 'bid', tt: BID_T }); for (const p of S.P) p.at = 1.5 + rng() * 9; }
-  else if (S.ph === 'bid') { botsThink(); if (S.tt <= 0 || S.P.every((p) => p.lock)) resolveLot(); }
-  else if (S.ph === 'result' && S.tt <= 0) {
-    if (S.rd < S.rounds) startLot(S.rd + 1);
-    else if (S.mode === 'attract') { for (const p of S.P) Object.assign(p, { coins: START_COINS, loot: 0 }); startLot(1); }
-    else Object.assign(S, { ph: 'final', tt: FINAL_T });
-  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  const s = sig();
-  if (s !== lastSig) {
-    lastSig = s;
-    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
-    onChange(prevS, S);
-    prevS = JSON.parse(s);
-  }
-}
-function startAttract() {
-  S = { mode: 'attract', ph: 'intro', tt: 1, rd: 1, rounds: 6, lot: null, res: null, P: [] };
-  for (let i = 0; i < 6; i++) S.P.push(newPlayer(-1 - i, BOT_NAMES[i], BOT_COLORS[i], true));
-  prevS = null; lastSig = '';
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
 }
 
 // Multiplayer > lobby + state sync (host publishes S without bids, guests send bids)
 const sync = createTurnSync({
   onState(s) { if (lobbyStarted) applyState(s); },
-  onAction(from, a) { if (a.t === 'bid' && S.mode === 'match') placeBid(from, a.v); },
+  onDone() { serverMatch.finish(); },
 });
 let lobbyStarted = false;
 const lobby = createLobby({
@@ -310,26 +239,19 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
-    room.on('host', (isHost) => {
-      syncTop();
-      // promoted mid-bid: the old host took the sealed bids with it, so everyone bids again
-      if (isHost && S?.mode === 'match' && S.ph === 'bid') { for (const p of S.P) p.lock = false; secret.clear(); S.tt = Math.max(S.tt, 8); }
-    });
+    room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     lobbyStarted = true;
     showHud(true);
     syncTop();
     myBid = 0;
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    S = { mode: 'match', ph: 'intro', tt: INTRO, rd: 1, rounds: settings.rounds ?? 8, lot: null, res: null, P: [] };
-    for (const p of lobby.room.players) S.P.push(newPlayer(p.id, p.nick, p.color, false));
-    for (let i = 0; i < bots; i++) S.P.push(newPlayer(-1 - i, `${BOT_NAMES[i]} 🤖`, BOT_COLORS[i], true));
-    prevS = null; lastSig = '';
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   document.getElementById('top').style.display = on ? 'flex' : 'none';
@@ -337,16 +259,6 @@ function showHud(on) {
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) {
-    // late joiner takes a bot's seat when full and starts fresh with the opening purse
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => scoreOf(a) - scoreOf(c))[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    S.P.push(newPlayer(p.id, p.nick, p.color, false));
-  }
-}
 function applyState(s) {
   const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
   S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
@@ -436,9 +348,9 @@ function hud(dt) {
   document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${showBids ? `bid ${S.res.bids[p.id]} · ` : S.ph === 'bid' ? (p.lock ? '✅ ' : '🤔 ') : ''}${scoreOf(p)}</em></div>`).join('');
 }
 
-// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  if (S.mode === 'attract') attractTick(dt);
   else S.tt -= dt;
 });
 

@@ -10,6 +10,8 @@ Checks every multiplayer toy against the rules of the genre or game it is based 
 
 `audit:live` starts the relay on `PORT` (default 5055) if nothing is listening there, and stops it when done.
 
+Every multiplayer game is server-run (`serverRun` in `genre-rules.js`) since 2026-11-11: the relay owns the bots, so the skill-edge test reports `no skill knob` (page skill writes never reach the server), and the audit's own human sits idle. Turn games then wait out that human's turn clock every turn, so give them a long `--secs` (one 120 s pass ended 0-1 matches per turn game) to reach the 10 matches seat fairness needs.
+
 ## Pass marks
 
 - **Rule check:** zero rule breaks, zero page errors, no NaN positions.

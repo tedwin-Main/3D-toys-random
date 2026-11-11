@@ -1,10 +1,11 @@
-// Builds reel MP4s and covers from raw takes: hook + title overlays, loop-back ending, demo audio, optional ducked BGM.
+// Builds reel MP4s and covers from raw takes: hook + title overlays, loop-back ending, demo audio, optional ducked aero music.
 
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { FPS, SAMPLE_RATE, VIDEO_ENC, AUDIO_ENC, MP4_FLAGS, ffmpeg } from './reel-format.js';
 import { BAR_Y } from './reel-overlays.js';
 
-const HOOK_SECS = 1.3, LOOP_FADE = 0.6, BGM_LEVEL = 0.4;
+const HOOK_SECS = 1.3, LOOP_FADE = 0.6, BGM_LEVEL = 0.5;
 const STEREO = `aresample=${SAMPLE_RATE},aformat=channel_layouts=stereo`;
 
 const audioInput = (rawAudio, start, secs) => (existsSync(rawAudio)
@@ -12,10 +13,10 @@ const audioInput = (rawAudio, start, secs) => (existsSync(rawAudio)
   : ['-f', 'lavfi', '-t', String(secs), '-i', `anullsrc=r=${SAMPLE_RATE}:cl=stereo`]);
 const stillInput = (png, secs) => ['-loop', '1', '-t', String(secs), '-i', png];
 
-// Single demo reel: demo sound only, or demo sound + BGM ducked under it and loudness-normalized
-export function buildDemoReel({ rawVideo, rawAudio, start, secs, hookPng, barPng, bgmWav, out }) {
-  const inputs = ['-ss', String(start), '-t', String(secs), '-i', rawVideo, ...stillInput(hookPng, secs), ...stillInput(barPng, secs), ...audioInput(rawAudio, start, secs), ...(bgmWav ? ['-i', bgmWav] : [])];
-  const graph = [...loopedVideoWithOverlays(secs), ...(bgmWav ? demoWithBgmAudio(secs) : demoOnlyAudio(secs))].join(';');
+// Single demo reel: demo sound only, or demo sound + aero music ducked under it and loudness-normalized
+export function buildDemoReel({ rawVideo, rawAudio, start, secs, hookPng, barPng, bgm, out }) {
+  const inputs = ['-ss', String(start), '-t', String(secs), '-i', rawVideo, ...stillInput(hookPng, secs), ...stillInput(barPng, secs), ...audioInput(rawAudio, start, secs), ...(bgm ? ['-i', bgm] : [])];
+  const graph = [...loopedVideoWithOverlays(secs), ...(bgm ? demoWithBgmAudio(secs) : demoOnlyAudio(secs))].join(';');
   ffmpeg([...inputs, '-filter_complex', graph, '-map', '[v]', '-map', '[a]', '-t', String(secs), ...VIDEO_ENC, ...AUDIO_ENC, ...MP4_FLAGS, out]);
 }
 
@@ -36,12 +37,31 @@ function demoOnlyAudio(secs) {
 }
 
 function demoWithBgmAudio(secs) {
+  return duckedMusicMix({ demo: '3:a', music: '4:a', secs, musicLevel: BGM_LEVEL });
+}
+
+// Demo sound on top, aero music ducked under it, loudness-normalized for Instagram
+function duckedMusicMix({ demo, music, secs, musicLevel }) {
   return [
-    `[3:a]${STEREO},apad,atrim=0:${secs},asplit[demo][key]`,
-    `[4:a]${STEREO},apad,atrim=0:${secs},volume=${BGM_LEVEL}[bgm]`,
+    `[${demo}]${STEREO},apad,atrim=0:${secs},asplit[demo][key]`,
+    `[${music}]${STEREO},loudnorm=I=-18:TP=-1.5:LRA=9,aresample=${SAMPLE_RATE},apad,atrim=0:${secs},volume=${musicLevel}[bgm]`,
     `[bgm][key]sidechaincompress=threshold=0.03:ratio=6:attack=15:release=350[ducked]`,
     `[demo][ducked]amix=inputs=2:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11,${STEREO},afade=t=in:d=0.1,afade=t=out:st=${secs - 0.5}:d=0.5[a]`,
   ];
+}
+
+// Remux a finished video with a curated music bed; video stream is copied, only audio is encoded.
+// Demo sound comes from the video's own track, or from a raw take window (demoAudio) for silent videos.
+export function addMusicToVideo({ video, bgm, out, secs, demoAudio, loopMusic = false, musicLevel = BGM_LEVEL }) {
+  const dur = secs ?? videoSecs(video);
+  const demoInput = demoAudio ? audioInput(demoAudio.rawAudio, demoAudio.start, dur) : [];
+  const inputs = ['-i', video, ...demoInput, ...(loopMusic ? ['-stream_loop', '-1'] : []), '-i', bgm];
+  const graph = duckedMusicMix({ demo: demoAudio ? '1:a' : '0:a', music: demoAudio ? '2:a' : '1:a', secs: dur, musicLevel }).join(';');
+  ffmpeg([...inputs, '-filter_complex', graph, '-map', '0:v', '-map', '[a]', '-t', String(dur), '-c:v', 'copy', ...AUDIO_ENC, ...MP4_FLAGS, out]);
+}
+
+function videoSecs(file) {
+  return Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file], { encoding: 'utf8' }).trim());
 }
 
 // Cover: one raw frame with hook and title baked in

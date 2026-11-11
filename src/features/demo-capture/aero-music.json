@@ -1,0 +1,792 @@
+{
+  "curated": true,
+  "updatedAt": "2026-11-11T13:53:21.228Z",
+  "reels": {
+    "dial-up-connect": {
+      "file": "dial-up-connect.m4a",
+      "id": "FqZaqPwEv64",
+      "title": "Windows 95",
+      "artist": "Che Mac",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=FqZaqPwEv64",
+      "why": "modem-era PC nostalgia"
+    },
+    "boot-sequence": {
+      "file": "boot-sequence.m4a",
+      "id": "FqZaqPwEv64",
+      "title": "Windows 95",
+      "artist": "Che Mac",
+      "start": 55,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=FqZaqPwEv64",
+      "why": "cold boot, warm synth"
+    },
+    "virtual-pet-egg": {
+      "file": "virtual-pet-egg.m4a",
+      "id": "P15Ldd_lSEM",
+      "title": "New Look (Wii U Mii Maker Lofi Mix)",
+      "artist": "Secret Potion",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=P15Ldd_lSEM",
+      "why": "cute menu loop"
+    },
+    "solitaire-win-cascade": {
+      "file": "solitaire-win-cascade.m4a",
+      "id": "7gnFwdzKELk",
+      "title": "Plaza",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=7gnFwdzKELk",
+      "why": "clean menu-game melody"
+    },
+    "maze-screensaver": {
+      "file": "maze-screensaver.m4a",
+      "id": "cru2zx5-wU0",
+      "title": "Traces",
+      "artist": "Infinity Frequencies",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=cru2zx5-wU0",
+      "why": "idle screensaver haze"
+    },
+    "desk-helper-assistant": {
+      "file": "desk-helper-assistant.m4a",
+      "id": "HXrLJBjIyjk",
+      "title": "2005 Toyota Corolla",
+      "artist": "hanahata",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=HXrLJBjIyjk",
+      "why": "jazzy office lounge"
+    },
+    "portal-homepage-1999": {
+      "file": "portal-homepage-1999.m4a",
+      "id": "SXPivtxMHlM",
+      "title": "Logging In",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=SXPivtxMHlM",
+      "why": "dial-up web portal"
+    },
+    "e-card-greeting": {
+      "file": "e-card-greeting.m4a",
+      "id": "ZOICf8notK8",
+      "title": "Morning Alarm",
+      "artist": "Tsundere Twintails",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=ZOICf8notK8",
+      "why": "cute Flash-card chime"
+    },
+    "luna-desktop": {
+      "file": "luna-desktop.m4a",
+      "id": "Scw_anb0oig",
+      "title": "A Brighter Age",
+      "artist": "Dreamfibre",
+      "start": 600,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Scw_anb0oig",
+      "why": "XP Bliss optimism"
+    },
+    "defrag-visualizer": {
+      "file": "defrag-visualizer.m4a",
+      "id": "FqZaqPwEv64",
+      "title": "Windows 95",
+      "artist": "Che Mac",
+      "start": 110,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=FqZaqPwEv64",
+      "why": "HDD activity pulse"
+    },
+    "multimedia-encyclopedia": {
+      "file": "multimedia-encyclopedia.m4a",
+      "id": "b12dBv7EDjU",
+      "title": "LEASE",
+      "artist": "Takeshi Abo",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=b12dBv7EDjU",
+      "why": "CD-ROM menu theme"
+    },
+    "pipes-screensaver": {
+      "file": "pipes-screensaver.m4a",
+      "id": "Scw_anb0oig",
+      "title": "A Brighter Age",
+      "artist": "Dreamfibre",
+      "start": 1200,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Scw_anb0oig",
+      "why": "endless idle ambience"
+    },
+    "screensaver-picker": {
+      "file": "screensaver-picker.m4a",
+      "id": "-zixU9SzOWQ",
+      "title": "fading",
+      "artist": ".diedlonely",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=-zixU9SzOWQ",
+      "why": "soft screensaver drift"
+    },
+    "aero-glass-desktop": {
+      "file": "aero-glass-desktop.m4a",
+      "id": "EImjDC-CFHc",
+      "title": "Frutiger Aero",
+      "artist": "temcandoanything",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=EImjDC-CFHc",
+      "why": "canonical Aero theme"
+    },
+    "click-wheel-player": {
+      "file": "click-wheel-player.m4a",
+      "id": "w869Avr_fXI",
+      "title": "Jerk It Out",
+      "artist": "Caesars",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=w869Avr_fXI",
+      "why": "iPod ad era"
+    },
+    "glossy-messenger": {
+      "file": "glossy-messenger.m4a",
+      "id": "SXPivtxMHlM",
+      "title": "Logging In",
+      "artist": "Xploshi",
+      "start": 55,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=SXPivtxMHlM",
+      "why": "sign-in chime warmth"
+    },
+    "cover-carousel": {
+      "file": "cover-carousel.m4a",
+      "id": "lWLNKSxvl1M",
+      "title": "Star Sky",
+      "artist": "Quill",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=lWLNKSxvl1M",
+      "why": "glossy album browsing"
+    },
+    "gel-button-maker": {
+      "file": "gel-button-maker.m4a",
+      "id": "QUDuBp2y9P4",
+      "title": "Helvetica Aqua Aero",
+      "artist": "temcandoanything",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=QUDuBp2y9P4",
+      "why": "bubble UI gloss"
+    },
+    "pda-today-screen": {
+      "file": "pda-today-screen.m4a",
+      "id": "b12dBv7EDjU",
+      "title": "LEASE",
+      "artist": "Takeshi Abo",
+      "start": 75,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=b12dBv7EDjU",
+      "why": "PDA menu calm"
+    },
+    "photo-gallery-viewer": {
+      "file": "photo-gallery-viewer.m4a",
+      "id": "Kcwq9NDb8m0",
+      "title": "Lotus Waters",
+      "artist": "Opunkt",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Kcwq9NDb8m0",
+      "why": "soft photo-library haze"
+    },
+    "weather-gadget": {
+      "file": "weather-gadget.m4a",
+      "id": "cbEFY8cWn90",
+      "title": "Clear Skies",
+      "artist": "PrismCorp Virtual Enterprises",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=cbEFY8cWn90",
+      "why": "sidebar weather optimism"
+    },
+    "aqua-gel-desktop": {
+      "file": "aqua-gel-desktop.m4a",
+      "id": "Nj9czfiYd2E",
+      "title": "Lemons",
+      "artist": "Quill",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Nj9czfiYd2E",
+      "why": "gel-button sparkle"
+    },
+    "media-player-visualizer": {
+      "file": "media-player-visualizer.m4a",
+      "id": "JrJNXQi4LlM",
+      "title": "Neon Noir",
+      "artist": "Sunset Drive",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=JrJNXQi4LlM",
+      "why": "visualizer night drive"
+    },
+    "dolphin-lagoon": {
+      "file": "dolphin-lagoon.m4a",
+      "id": "-5rAjOjTGtc",
+      "title": "Aquatic Ambience",
+      "artist": "David Wise",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=-5rAjOjTGtc",
+      "why": "dolphin wallpaper canon"
+    },
+    "underwater-reef": {
+      "file": "underwater-reef.m4a",
+      "id": "Zqa2mgjbOIM",
+      "title": "Dire, Dire Docks",
+      "artist": "Koji Kondo",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Zqa2mgjbOIM",
+      "why": "underwater level calm"
+    },
+    "aquarium-icon-dock": {
+      "file": "aquarium-icon-dock.m4a",
+      "id": "AuGQqkEy3DA",
+      "title": "mermaid's cave",
+      "artist": "Atenib",
+      "start": 15,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=AuGQqkEy3DA",
+      "why": "aquarium glass dream"
+    },
+    "soap-bubbles-screensaver": {
+      "file": "soap-bubbles-screensaver.m4a",
+      "id": "DP3rDP02lE0",
+      "title": "aquatic ambience",
+      "artist": "Scizzie",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=DP3rDP02lE0",
+      "why": "bubble screensaver drift"
+    },
+    "channel-menu": {
+      "file": "channel-menu.m4a",
+      "id": "M50_93MReFU",
+      "title": "Wii Menu Music",
+      "artist": "Nintendo",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=M50_93MReFU",
+      "why": "literal Wii channel grid"
+    },
+    "dvd-menu-2004": {
+      "file": "dvd-menu-2004.m4a",
+      "id": "RVv8LOb96Mc",
+      "title": "LittleBigPlanet — The Gardens",
+      "artist": "Sony",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=RVv8LOb96Mc",
+      "why": "looping DVD menu warmth"
+    },
+    "media-bar-xmb": {
+      "file": "media-bar-xmb.m4a",
+      "id": "f2mvXaqpUxY",
+      "title": "PS Vita Home Theme",
+      "artist": "Sony",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=f2mvXaqpUxY",
+      "why": "smooth console XMB scroll"
+    },
+    "media-center-menu": {
+      "file": "media-center-menu.m4a",
+      "id": "M50_93MReFU",
+      "title": "Wii Menu Music",
+      "artist": "Nintendo",
+      "start": 75,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=M50_93MReFU",
+      "why": "couch media centre loop"
+    },
+    "blade-dashboard": {
+      "file": "blade-dashboard.m4a",
+      "id": "4RaguYU_SQI",
+      "title": "Zen Garden (Xbox 360 Ambience)",
+      "artist": "ArpWire TV",
+      "start": 300,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=4RaguYU_SQI",
+      "why": "Xbox blades ambience"
+    },
+    "memory-card-manager": {
+      "file": "memory-card-manager.m4a",
+      "id": "9X3-DE6aEhM",
+      "title": "Photo Channel — SD Card Photo List",
+      "artist": "Nintendo",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=9X3-DE6aEhM",
+      "why": "memory card file browser"
+    },
+    "iridescent-cd-burner": {
+      "file": "iridescent-cd-burner.m4a",
+      "id": "Lgs9QUtWc3M",
+      "title": "Better Off Alone",
+      "artist": "Alice Deejay",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Lgs9QUtWc3M",
+      "why": "CD-burn trance"
+    },
+    "y2k-countdown": {
+      "file": "y2k-countdown.m4a",
+      "id": "y6120QOlsfU",
+      "title": "Sandstorm",
+      "artist": "Darude",
+      "start": 55,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=y6120QOlsfU",
+      "why": "millennium drop"
+    },
+    "wordart-studio": {
+      "file": "wordart-studio.m4a",
+      "id": "68ugkg9RePc",
+      "title": "Blue (Da Ba Dee)",
+      "artist": "Eiffel 65",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=68ugkg9RePc",
+      "why": "WordArt Eurodance"
+    },
+    "skinnable-mp3-player": {
+      "file": "skinnable-mp3-player.m4a",
+      "id": "K0HSD_i2DvA",
+      "title": "Around the World",
+      "artist": "Daft Punk",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=K0HSD_i2DvA",
+      "why": "MP3 player loop"
+    },
+    "flash-intro-2002": {
+      "file": "flash-intro-2002.m4a",
+      "id": "DvyCbevQbtI",
+      "title": "Children",
+      "artist": "Robert Miles",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=DvyCbevQbtI",
+      "why": "Flash intro dream"
+    },
+    "y2k-chrome-landing": {
+      "file": "y2k-chrome-landing.m4a",
+      "id": "efjc146v3hA",
+      "title": "Castles in the Sky",
+      "artist": "Ian Van Dahl",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=efjc146v3hA",
+      "why": "chrome optimism"
+    },
+    "translucent-gadgets": {
+      "file": "translucent-gadgets.m4a",
+      "id": "FQlAEiCb8m0",
+      "title": "Music Sounds Better With You",
+      "artist": "Stardust",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=FQlAEiCb8m0",
+      "why": "translucent candy plastic"
+    },
+    "spinning-text-screensaver": {
+      "file": "spinning-text-screensaver.m4a",
+      "id": "QFGMQZyvnmY",
+      "title": "9 PM (Till I Come)",
+      "artist": "ATB",
+      "start": 30,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=QFGMQZyvnmY",
+      "why": "spinning text trance"
+    },
+    "mcbling-page": {
+      "file": "mcbling-page.m4a",
+      "id": "LOZuxwVk7TU",
+      "title": "Toxic",
+      "artist": "Britney Spears",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=LOZuxwVk7TU",
+      "why": "2005 sparkle pop"
+    },
+    "flip-phone-ui": {
+      "file": "flip-phone-ui.m4a",
+      "id": "0J3vgcE5i2o",
+      "title": "Promiscuous",
+      "artist": "Nelly Furtado",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=0J3vgcE5i2o",
+      "why": "flip-phone club pop"
+    },
+    "throwback-profile-desktop": {
+      "file": "throwback-profile-desktop.m4a",
+      "id": "GxBSyx85Kp8",
+      "title": "Yeah!",
+      "artist": "Usher",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=GxBSyx85Kp8",
+      "why": "MySpace-era crunk pop"
+    },
+    "bubble-meadow": {
+      "file": "bubble-meadow.m4a",
+      "id": "BSqYgIHgqFI",
+      "title": "Stickerbush Symphony",
+      "artist": "David Wise",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=BSqYgIHgqFI",
+      "why": "green meadow wallpaper"
+    },
+    "eco-glass-globe": {
+      "file": "eco-glass-globe.m4a",
+      "id": "NZXzNk0dhQk",
+      "title": "Emerald Horizons",
+      "artist": "Dreamfibre",
+      "start": 600,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=NZXzNk0dhQk",
+      "why": "corporate eco glass"
+    },
+    "frutiger-eco-site": {
+      "file": "frutiger-eco-site.m4a",
+      "id": "toUlsqKCNqg",
+      "title": "Forest Interlude",
+      "artist": "David Wise",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=toUlsqKCNqg",
+      "why": "green energy website"
+    },
+    "metro-live-tiles": {
+      "file": "metro-live-tiles.m4a",
+      "id": "wlfxjNeViHk",
+      "title": "3DS Internet Settings Theme",
+      "artist": "Nintendo",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=wlfxjNeViHk",
+      "why": "flat tile menu"
+    },
+    "skeuo-notes-shelf": {
+      "file": "skeuo-notes-shelf.m4a",
+      "id": "wA0kyhw_1Xo",
+      "title": "Skeuomorphism",
+      "artist": "DJ Intranet",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=wA0kyhw_1Xo",
+      "why": "literal leather-and-wood lounge"
+    },
+    "airport-kiosk": {
+      "file": "airport-kiosk.m4a",
+      "id": "yi9xkK8rZl8",
+      "title": "Demo Booth",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=yi9xkK8rZl8",
+      "why": "kiosk demo optimism"
+    },
+    "plaza-avatars": {
+      "file": "plaza-avatars.m4a",
+      "id": "7gnFwdzKELk",
+      "title": "Plaza",
+      "artist": "Xploshi",
+      "start": 55,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=7gnFwdzKELk",
+      "why": "avatar plaza social"
+    },
+    "humanity-corporate-site": {
+      "file": "humanity-corporate-site.m4a",
+      "id": "SXPivtxMHlM",
+      "title": "Logging In",
+      "artist": "Xploshi",
+      "start": 75,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=SXPivtxMHlM",
+      "why": "smiling stock people"
+    },
+    "aurora-login-screen": {
+      "file": "aurora-login-screen.m4a",
+      "id": "-4c0G2sY-lQ",
+      "title": "Mesosphere",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=-4c0G2sY-lQ",
+      "why": "aurora login calm"
+    },
+    "glossy-space": {
+      "file": "glossy-space.m4a",
+      "id": "PNqYLWhKHGc",
+      "title": "The Descent",
+      "artist": "Infinity Frequencies",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=PNqYLWhKHGc",
+      "why": "wallpaper space drift"
+    },
+    "technozen-spa": {
+      "file": "technozen-spa.m4a",
+      "id": "m8fKw0QMXug",
+      "title": "June 2011 (3DS)",
+      "artist": "Nintendo eShop",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=m8fKw0QMXug",
+      "why": "spa-calm eShop"
+    },
+    "web2-beta-landing": {
+      "file": "web2-beta-landing.m4a",
+      "id": "u3rGy-LZ20M",
+      "title": "VECTOR HEART",
+      "artist": "Dreamthorne",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=u3rGy-LZ20M",
+      "why": "Web 2.0 beta energy"
+    },
+    "vector-swoosh-art": {
+      "file": "vector-swoosh-art.m4a",
+      "id": "u7lQEELRjJY",
+      "title": "Vectorheart — Formulas",
+      "artist": "vera",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=u7lQEELRjJY",
+      "why": "vector swoosh wallpaper"
+    },
+    "dark-aero-night": {
+      "file": "dark-aero-night.m4a",
+      "id": "8GW6sLrK40k",
+      "title": "Resonance",
+      "artist": "HOME",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=8GW6sLrK40k",
+      "why": "Aero after dark"
+    },
+    "glass-ribbons-screensaver": {
+      "file": "glass-ribbons-screensaver.m4a",
+      "id": "MV_3Dpw-BRY",
+      "title": "Nightcall",
+      "artist": "Kavinsky",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=MV_3Dpw-BRY",
+      "why": "hypnotic ribbon night"
+    },
+    "rooftop-runner": {
+      "file": "rooftop-runner.m4a",
+      "id": "B0I9M86BnF4",
+      "title": "Rooftop Run (Day)",
+      "artist": "Sonic Unleashed",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=B0I9M86BnF4",
+      "why": "white rooftop sprint"
+    },
+    "runner-route-planner": {
+      "file": "runner-route-planner.m4a",
+      "id": "5WcyVvWZJU4",
+      "title": "Escape From the City",
+      "artist": "Sonic Adventure 2",
+      "start": 5,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=5WcyVvWZJU4",
+      "why": "route-planning speed"
+    },
+    "courier-network-hud": {
+      "file": "courier-network-hud.m4a",
+      "id": "wy9r2qeouiQ",
+      "title": "Turbo Killer",
+      "artist": "Carpenter Brut",
+      "start": 10,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=wy9r2qeouiQ",
+      "why": "courier HUD pulse"
+    },
+    "glass-tower-skyline": {
+      "file": "glass-tower-skyline.m4a",
+      "id": "ND-4SmGaGyU",
+      "title": "Ocean Drive",
+      "artist": "Miami Nights 1984",
+      "start": 20,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=ND-4SmGaGyU",
+      "why": "glass avenue glide"
+    },
+    "skyline-ambient-synth": {
+      "file": "skyline-ambient-synth.m4a",
+      "id": "Scw_anb0oig",
+      "title": "A Brighter Age",
+      "artist": "Dreamfibre",
+      "start": 1800,
+      "secs": 20,
+      "url": "https://www.youtube.com/watch?v=Scw_anb0oig",
+      "why": "live skyline ambience"
+    }
+  },
+  "styles": {
+    "core": {
+      "file": "style-core.m4a",
+      "id": "EImjDC-CFHc",
+      "title": "Frutiger Aero",
+      "artist": "temcandoanything",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=EImjDC-CFHc"
+    },
+    "eco": {
+      "file": "style-eco.m4a",
+      "id": "BSqYgIHgqFI",
+      "title": "Stickerbush Symphony",
+      "artist": "David Wise",
+      "start": 20,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=BSqYgIHgqFI"
+    },
+    "dark": {
+      "file": "style-dark.m4a",
+      "id": "8GW6sLrK40k",
+      "title": "Resonance",
+      "artist": "HOME",
+      "start": 10,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=8GW6sLrK40k"
+    },
+    "aquatic": {
+      "file": "style-aquatic.m4a",
+      "id": "-5rAjOjTGtc",
+      "title": "Aquatic Ambience",
+      "artist": "David Wise",
+      "start": 10,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=-5rAjOjTGtc"
+    },
+    "humanity": {
+      "file": "style-humanity.m4a",
+      "id": "7gnFwdzKELk",
+      "title": "Plaza",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=7gnFwdzKELk"
+    },
+    "technozen": {
+      "file": "style-technozen.m4a",
+      "id": "m8fKw0QMXug",
+      "title": "June 2011 (3DS)",
+      "artist": "Nintendo eShop",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=m8fKw0QMXug"
+    },
+    "space": {
+      "file": "style-space.m4a",
+      "id": "-4c0G2sY-lQ",
+      "title": "Mesosphere",
+      "artist": "Xploshi",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=-4c0G2sY-lQ"
+    },
+    "metro": {
+      "file": "style-metro.m4a",
+      "id": "wlfxjNeViHk",
+      "title": "3DS Internet Settings Theme",
+      "artist": "Nintendo",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=wlfxjNeViHk"
+    },
+    "glasscity": {
+      "file": "style-glasscity.m4a",
+      "id": "ND-4SmGaGyU",
+      "title": "Ocean Drive",
+      "artist": "Miami Nights 1984",
+      "start": 20,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=ND-4SmGaGyU"
+    },
+    "console": {
+      "file": "style-console.m4a",
+      "id": "M50_93MReFU",
+      "title": "Wii Menu Music",
+      "artist": "Nintendo",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=M50_93MReFU"
+    },
+    "y2k": {
+      "file": "style-y2k.m4a",
+      "id": "Lgs9QUtWc3M",
+      "title": "Better Off Alone",
+      "artist": "Alice Deejay",
+      "start": 20,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=Lgs9QUtWc3M"
+    },
+    "mcbling": {
+      "file": "style-mcbling.m4a",
+      "id": "LOZuxwVk7TU",
+      "title": "Toxic",
+      "artist": "Britney Spears",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=LOZuxwVk7TU"
+    },
+    "vectorheart": {
+      "file": "style-vectorheart.m4a",
+      "id": "u3rGy-LZ20M",
+      "title": "VECTOR HEART",
+      "artist": "Dreamthorne",
+      "start": 10,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=u3rGy-LZ20M"
+    },
+    "skeuo": {
+      "file": "style-skeuo.m4a",
+      "id": "wA0kyhw_1Xo",
+      "title": "Skeuomorphism",
+      "artist": "DJ Intranet",
+      "start": 20,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=wA0kyhw_1Xo"
+    },
+    "retro": {
+      "file": "style-retro.m4a",
+      "id": "FqZaqPwEv64",
+      "title": "Windows 95",
+      "artist": "Che Mac",
+      "start": 5,
+      "secs": 60,
+      "url": "https://www.youtube.com/watch?v=FqZaqPwEv64"
+    }
+  },
+  "master": {
+    "file": "master.m4a",
+    "id": "Scw_anb0oig",
+    "title": "A Brighter Age",
+    "artist": "Dreamfibre",
+    "start": 600,
+    "secs": 120,
+    "url": "https://www.youtube.com/watch?v=Scw_anb0oig"
+  }
+}

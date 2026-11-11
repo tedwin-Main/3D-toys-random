@@ -2,6 +2,7 @@
 
 import { buildTrackData, W, NS } from './kart-track.js';
 import { createNameSync } from '../common/snapshot-names.js';
+import { createChangedOnly } from '../common/server-run/changed-only.js';
 
 export const STEP = 1 / 60;
 export const LAPS = 3;
@@ -12,12 +13,14 @@ const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac
 const ATTRACT_BOTS = 8, ATTRACT_SEED = 3, MT_SHORT = 0.7, MT_LONG = 1.6;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const f2 = (v) => Math.round(v * 100) / 100;
+const f1 = (v) => Math.round(v * 10) / 10;
 const rng = Math.random;
 
 /** onEnd(): results timer ran out in a match (host goes back to the lobby) */
 export function createKartSim({ onEnd = () => {} } = {}) {
   const world = { mode: 'attract', phase: 'race', t: 0, raceT: 0, karts: new Map(), bananas: [], shells: [], order: [], seed: null };
   const names = createNameSync();
+  const slowFields = createChangedOnly();
   let track = null, lastBeep = 0;
   const sim = { world, events: [], get track() { return track; } };
   const emit = (e) => sim.events.push(e);
@@ -229,6 +232,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
   // Game > match: humans then bots on the room's seeded circuit (relay host)
   sim.startMatch = ({ seed, humans, bots }) => {
     sim.clearKarts();
+    slowFields.reset();
     world.mode = 'match';
     sim.loadTrack(seed);
     for (const h of humans.slice(0, MAX_KARTS)) sim.addKart(h.id, h.nick, h.color, false);
@@ -240,6 +244,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     const ids = new Set(humans.map((h) => h.id));
     for (const p of [...world.karts.values()]) if (!p.bot && !ids.has(p.id)) sim.removeKart(p.id);
     for (const h of humans) if (!world.karts.has(h.id)) joinLate(h);
+    slowFields.reset(); // a late joiner gets every slow field in its first snapshot
   };
   function joinLate(h) {
     let from = null;
@@ -267,15 +272,23 @@ export function createKartSim({ onEnd = () => {} } = {}) {
     phases(STEP);
   };
 
-  // Multiplayer > snapshot (JSON): rows per kart, box / banana / shell state, events since the last one
+  // Multiplayer > snapshot (JSON): fast row per kart every time; slow rows, circuit, boxes and bananas only when they change; shells / events only when present
+  // velocity, steer, boost and spin at one decimal: they only feed extrapolation and visuals, and keep a full race frame inside the 30 Hz byte budget
+  const fastRow = (p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f1(p.vx), f1(p.vz), f1(p.steer), p.idx, f1(p.boost), f1(p.spin)];
+  const slowRow = (p) => [p.id, p.lap, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), p.item, p.place, f2(p.finishT)];
   sim.snapshot = () => {
-    const snap = names.stamp({
-      g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), seed: world.seed, ord: world.order, ev: sim.events,
-      K: [...world.karts.values()].map((p) => [p.id, f2(p.x), f2(p.z), f2(p.h), f2(p.vx), f2(p.vz), f2(p.steer), p.lap, p.idx, (p.bot ? 1 : 0) | (p.finished ? 2 : 0) | (p.half ? 4 : 0), f2(p.boost), p.item, p.place, f2(p.finishT), f2(p.spin), Math.round(p.prog)]),
+    const karts = [...world.karts.values()];
+    const { seed, ord, Bx, Ba, ...slowRows } = slowFields.pick({
+      seed: world.seed, ord: world.order,
       Bx: track.boxes.map((b) => (b.t > 0 ? 1 : 0)),
       Ba: world.bananas.map((b) => [f2(b.x), f2(b.z)]),
-      Sh: world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.h)]),
-    }, world.karts.values());
+      ...Object.fromEntries(karts.map((p) => [`k${p.id}`, slowRow(p)])),
+    });
+    const snap = names.stamp({ g: 's', ph: world.phase, t: f2(world.t), rt: f2(world.raceT), K: karts.map(fastRow), seed, ord, Bx, Ba }, karts);
+    const S = Object.values(slowRows);
+    if (S.length) snap.S = S;
+    if (world.shells.length) snap.Sh = world.shells.map((s) => [f2(s.x), f2(s.z), f2(s.h)]);
+    if (sim.events.length) snap.ev = sim.events;
     sim.events = [];
     return snap;
   };

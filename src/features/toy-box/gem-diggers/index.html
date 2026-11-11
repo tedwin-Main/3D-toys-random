@@ -48,10 +48,10 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
-import { reseatTurn } from '../common/turn-seats.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createGemGame, gemsLeft, GEM_PTS, BOMB_PTS } from './gem-rules.js';
 import { createGameAudio } from '../common/game-audio.js';
 
 // Scene > Renderer, sky, sun, island under the field
@@ -196,143 +196,28 @@ const sfx = {
   tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
 };
 
-// Game > rules: seeded hidden field; gem = +3 + dig again, bomb = -2, empty = hint + turn passes; ends when every gem is out
-const INTRO = 2.5, FINAL_T = 12, GEM_PTS = 3, BOMB_PTS = -2, GEM_FRAC = 0.14, BOMB_FRAC = 0.12;
-const BOT_NAMES = ['Digby', 'Pickaxe Pat', 'Molely', 'Rocky', 'Gemma', 'Shovelina', 'Burrow', 'Nugget', 'Quartz', 'Spade', 'Tunnel Tim', 'Ore-lando', 'Pebbles', 'Drillbit'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
-// S: { mode, ph, tt, clock, n, seed, rev: [null | { k: 'g'|'b'|'e', nb, ng, by }], turn, last: { i, k, by, mv }, mv, P: [{ id, nick, color, bot, score, gems, skill }] }
-let S = null;
-const rng = Math.random;
+// Game > rules live in gem-rules.js: this page runs them for attract mode only, a match is run by the relay server (what lies under a tile reaches a browser only once it is dug)
+// S: { mode, ph, tt, clock, n, field, gems, rev: [null | { k: 'g'|'b'|'e', nb, ng, by }], turn, last: { i, k, by, mv }, mv, P: [{ id, nick, color, bot, score, gems, skill }] }
+const attract = createGemGame();
+let S = attract.state;
 const player = (id) => S.P.find((p) => p.id === id);
-function mulberry(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-const sizeFor = (n) => (n <= 4 ? 8 : n <= 8 ? 10 : 12);
-function neighbors(i, n) {
-  const x = i % n, y = Math.floor(i / n), out = [];
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < n && ny < n) out.push(ny * n + nx); }
-  return out;
-}
-// hidden layout from the seed: any tab (and a promoted host) rebuilds the same field
-let layoutKey = '', layout = [];
-function getLayout() {
-  const key = `${S.seed}|${S.n}`;
-  if (key === layoutKey) return layout;
-  const r = mulberry(S.seed), N = S.n * S.n, order = [...Array(N).keys()];
-  for (let i = N - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-  const gems = Math.round(N * GEM_FRAC), bombs = Math.round(N * BOMB_FRAC);
-  layout = new Array(N).fill('e');
-  order.slice(0, gems).forEach((i) => (layout[i] = 'g'));
-  order.slice(gems, gems + bombs).forEach((i) => (layout[i] = 'b'));
-  layoutKey = key;
-  return layout;
-}
-const gemsTotal = () => getLayout().filter((k) => k === 'g').length;
-const gemsLeft = () => gemsTotal() - S.rev.filter((c) => c?.k === 'g').length;
-function cellInfo(i) {
-  const L = getLayout(), nbs = neighbors(i, S.n);
-  return { k: L[i], nb: nbs.filter((j) => L[j] === 'b').length, ng: nbs.filter((j) => L[j] === 'g').length };
-}
-function newMatchState(mode, P, clock) {
-  const n = sizeFor(P.length);
-  return { mode, ph: 'intro', tt: INTRO, clock, n, seed: 1 + Math.floor(rng() * 2 ** 30), rev: new Array(n * n).fill(null), turn: 0, last: null, mv: 0, P };
-}
-// host: one dig by the player whose turn it is; returns false when not allowed
-function dig(id, i) {
-  const p = S.P[S.turn];
-  if (S.ph !== 'play' || !p || p.id !== id || !Number.isInteger(i) || i < 0 || i >= S.rev.length || S.rev[i]) return false;
-  const c = cellInfo(i);
-  S.rev[i] = { ...c, by: id };
-  S.mv++;
-  S.last = { i, k: c.k, by: id, mv: S.mv };
-  if (c.k === 'g') { p.score += GEM_PTS; p.gems++; }
-  else if (c.k === 'b') p.score += BOMB_PTS;
-  else if (!c.nb && !c.ng) {
-    // open meadow: flood out to the next hint numbers (never uncovers gems or bombs)
-    const stack = [i];
-    while (stack.length) {
-      for (const j of neighbors(stack.pop(), S.n)) {
-        if (S.rev[j]) continue;
-        const cj = cellInfo(j);
-        if (cj.k !== 'e') continue;
-        S.rev[j] = { ...cj, by: id };
-        if (!cj.nb && !cj.ng) stack.push(j);
-      }
-    }
-  }
-  if (gemsLeft() === 0) { Object.assign(S, { ph: 'final', tt: FINAL_T }); return true; }
-  // gem keeps the shovel; anything else passes it on
-  if (c.k !== 'g') S.turn = (S.turn + 1) % S.P.length;
-  startTurn();
-  return true;
-}
-function startTurn() { S.tt = S.clock; const p = S.P[S.turn]; if (p) p.think = 0.9 + rng() * 1.3; }
-// bots: estimate gem / bomb odds from the hint numbers around each hidden tile, dig the best expected value
-function estimate() {
-  const L = S.rev, n = S.n, hidden = [];
-  for (let i = 0; i < L.length; i++) if (!L[i]) hidden.push(i);
-  const bombsLeft = Math.round(n * n * BOMB_FRAC) - L.filter((c) => c?.k === 'b').length;
-  const gB = Math.max(0, bombsLeft) / Math.max(1, hidden.length), gG = gemsLeft() / Math.max(1, hidden.length);
-  return hidden.map((i) => {
-    let pb = null, pg = null, sure0 = false, sureG = false, cnt = 0, sb = 0, sg = 0;
-    for (const j of neighbors(i, n)) {
-      const c = L[j];
-      if (!c || c.k !== 'e') continue;
-      const hn = neighbors(j, n).filter((q) => !L[q]);
-      const remB = c.nb - neighbors(j, n).filter((q) => L[q]?.k === 'b').length, remG = c.ng - neighbors(j, n).filter((q) => L[q]?.k === 'g').length;
-      const b = remB / hn.length, gg = remG / hn.length;
-      if (remB === 0 && remG === 0) sure0 = true;
-      if (b === 0 && gg === 1) sureG = true;
-      sb += b; sg += gg; cnt++;
-    }
-    if (cnt) { pb = sb / cnt; pg = sg / cnt; } else { pb = gB; pg = gG; }
-    if (sureG) { pb = 0; pg = 1; }
-    if (sure0) { pb = 0; pg = 0; }
-    return { i, v: pg * GEM_PTS - pb * -BOMB_PTS - (1 - pg - pb) * 0.4 };
-  });
-}
-function botMove(p) {
-  const opts = estimate().map((o) => ({ ...o, v: o.v + (rng() - 0.5) * (1.2 - p.skill) * 2 }));
-  return opts.sort((a, b) => b.v - a.v)[0]?.i;
-}
-// shot clock ran out: a random hidden tile, so waiting never beats choosing
-function autoDig() {
-  const hidden = S.rev.map((c, i) => (c ? -1 : i)).filter((i) => i >= 0);
-  dig(S.P[S.turn].id, hidden[Math.floor(rng() * hidden.length)]);
-}
-
-// Run engine > host tick: intro, bot turns, shot clock; publish when anything but the clock changed
 const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
-let lastSig = '', prevS = null;
-function hostTick(dt) {
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) { S.ph = 'play'; S.turn = 0; startTurn(); }
-  else if (S.ph === 'play') {
-    const p = S.P[S.turn];
-    if (!p) { S.turn = 0; startTurn(); }
-    else if (p.bot) { p.think -= dt; if (p.think <= 0) dig(p.id, botMove(p)); }
-    else if (S.tt <= 0) autoDig();
-  } else if (S.ph === 'final' && S.tt <= 0) {
-    if (S.mode === 'attract') startAttract();
-    else if (lobby.room?.isHost) lobby.backToLobby();
-  }
-  const s = sig();
-  if (s !== lastSig) {
-    lastSig = s;
-    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
-    onChange(prevS, S);
-    prevS = JSON.parse(s);
-  }
-}
-function startAttract() {
-  const P = [0, 1, 2, 3].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.4 + rng() * 0.5 }));
-  S = newMatchState('attract', P, 15);
-  S.tt = 1;
-  prevS = null; lastSig = '';
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  if (S !== attract.state) prevS = null;
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
 }
 
 // Multiplayer > lobby + state sync (host publishes S, guests send digs)
 const sync = createTurnSync({
   onState(s) { if (lobbyStarted) applyState(s); },
-  onAction(from, a) { if (a.t === 'dig' && S.mode === 'match') dig(from, a.i); },
+  onDone() { serverMatch.finish(); },
 });
 let lobbyStarted = false;
 const lobby = createLobby({
@@ -344,24 +229,18 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
     room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     lobbyStarted = true;
     showHud(true);
     syncTop();
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    const P = [];
-    for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, gems: 0, skill: 0.35 + rng() * 0.55 });
-    // shuffle seats so the host doesn't always dig first (Minesweeper Flags picks the starter at random)
-    shuffleInPlace(P, rng);
-    S = newMatchState('match', P, settings.clock ?? 15);
-    prevS = null; lastSig = '';
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   document.getElementById('top').style.display = on ? 'flex' : 'none';
@@ -369,19 +248,6 @@ function showHud(on) {
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id)), before = S.P;
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) {
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, gems: 0, skill: 0 });
-  }
-  // keep the shovel with whoever had it (or the next seat if they left)
-  const seat = reseatTurn(before, S.turn, S.P);
-  S.turn = seat.turn;
-  if (seat.left) startTurn();
-}
 function applyState(s) {
   const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
   S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
@@ -389,7 +255,7 @@ function applyState(s) {
 }
 function onChange(prev, cur) {
   const me = lobby.room?.me, match = cur.mode === 'match';
-  if (`${cur.seed}|${cur.n}` !== fieldKey) { fieldKey = `${cur.seed}|${cur.n}`; buildField(cur.n); }
+  if (`${cur.field}|${cur.n}` !== fieldKey) { fieldKey = `${cur.field}|${cur.n}`; buildField(cur.n); }
   if (cur.last && cur.last.mv !== prev?.last?.mv) {
     const t = tiles[cur.last.i], who = cur.P.find((p) => p.id === cur.last.by);
     if (t) {
@@ -428,7 +294,7 @@ function hud(dt) {
   if (S.mode !== 'match') return;
   flashT -= dt;
   const me = player(lobby.room?.me), up = S.P[S.turn], clock = Math.ceil(Math.max(0, S.tt));
-  if (S.ph === 'intro') big(`<small>${S.n}×${S.n} meadow · ${gemsTotal()} gems hidden</small>Gem Diggers`);
+  if (S.ph === 'intro') big(`<small>${S.n}×${S.n} meadow · ${S.gems} gems hidden</small>Gem Diggers`);
   else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; big(`<small>richest digger with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
   else if (flashT <= 0) big('');
   turnEl.innerHTML = S.ph !== 'play' ? (S.ph === 'final' ? '🏁 all gems found' : '⛏️ get ready') : up?.id === me?.id ? `<b>Your dig</b> · ${clock}s` : `${esc(up?.nick ?? '')} is digging${up?.bot ? '' : ` · ${clock}s`}`;
@@ -437,15 +303,15 @@ function hud(dt) {
   hudT -= dt;
   if (hudT > 0) return;
   hudT = 0.15;
-  document.getElementById('roundName').textContent = `💎 ${gemsLeft()} of ${gemsTotal()} left`;
+  document.getElementById('roundName').textContent = `💎 ${gemsLeft(S)} of ${S.gems} left`;
   document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--gem)">${me.score}</b> · ${me.gems} gems` : 'Watching';
   const rows = [...S.P].sort((a, c) => c.score - a.score);
   document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''} ${p === up && S.ph === 'play' ? 'turn' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${p === up && S.ph === 'play' ? '⛏️ ' : ''}${esc(p.nick)}</span><em>${p.score}</em></div>`).join('');
 }
 
-// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  if (S.mode === 'attract') attractTick(dt);
   else S.tt -= dt;
 });
 

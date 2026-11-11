@@ -3,14 +3,7 @@
 import { DT } from './course-colliders.js';
 import { stepBean } from './bean-physics.js';
 
-// up to a typical full room (12-14 friends) every input goes out at once
-const EVERY_TICK_GUESTS = 14;
-
-/**
- * Ticks per guest input bundle. Relay CPU grows with message count, not bytes. Live on Render, 14 humans + 18 bots:
- * every tick confirm p50 51 / p95 74 ms at 72-83 ms/s CPU; every 2 ticks p50 64 / p95 117 ms at 58-65 ms/s (free limit 150).
- */
-export const inputEvery = (guests) => (guests <= EVERY_TICK_GUESTS ? 1 : 2);
+export { inputEvery } from '../server-run/relay-budget.js';
 const HISTORY = 300;
 // drain window 0.2 s: a jitter spike's backlog leaves within ~0.4 s (0.5 s windows held it ~1 s; simulated Render-like link: mean wait 12.8 > 8.8 ms)
 const QUEUE_PRIME = 2, QUEUE_MAX = 12, DRAIN_WINDOW = 12, STANDING_PCT = 0.1;

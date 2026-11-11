@@ -1,7 +1,7 @@
 // Picks the liveliest clip window in a raw demo take by scoring sound energy and on-screen motion.
 
 import { existsSync } from 'node:fs';
-import { ffmpeg } from './reel-format.js';
+import { decodePcm, ffmpeg } from './reel-format.js';
 
 const BIN_SECS = 0.5;
 const AUDIO_WEIGHT = 0.6, MOTION_WEIGHT = 0.4;
@@ -16,8 +16,7 @@ export function pickHighlightStart({ rawVideo, rawAudio, totalSecs, clipSecs, mi
 
 function loudnessPerBin(file, bins) {
   const rate = 8000;
-  const pcm = ffmpeg(['-i', file, '-ac', '1', '-ar', String(rate), '-f', 's16le', '-']);
-  const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1);
+  const samples = decodePcm(file, rate);
   const per = rate * BIN_SECS;
   return Array.from({ length: bins }, (_, b) => {
     let sum = 0;

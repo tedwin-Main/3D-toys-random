@@ -339,26 +339,32 @@ const pred = createPrediction({
   merge: (p, host) => { Object.assign(p, { lap: host.lap, half: host.half, boost: host.boost, spin: host.spin }); p.h = blendAngle(p.h, host.h, 0.2); },
   angle: 'h',
 });
+// fast rows arrive in every snapshot; slow rows, circuit, boxes and bananas only when changed (missing = unchanged)
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
-  if (sim.loadTrack(s.seed)) showTrack();
-  Object.assign(world, { phase: s.ph, t: s.t, raceT: s.rt, order: s.ord });
+  if (s.seed != null && sim.loadTrack(s.seed)) showTrack();
+  Object.assign(world, { phase: s.ph, t: s.t, raceT: s.rt, order: s.ord ?? world.order });
   const seen = new Set();
-  for (const a of s.K) {
-    const [id, x, z, h, vx, vz, steer, lap, idx, fl, boost, item, place, finishT, spin, prog] = a;
+  for (const [id, x, z, h, vx, vz, steer, idx, boost, spin] of s.K) {
     seen.add(id);
     if (!world.karts.has(id) && !names.name(id)) continue;
-    const p = world.karts.get(id) ?? sim.addKart(id, ...names.name(id), !!(fl & 1));
-    Object.assign(p, { x, z, h, vx, vz, steer, lap, idx, finished: !!(fl & 2), half: !!(fl & 4), boost, item, place, finishT, spin, prog });
-    if (id === lobby.room.me) pred.correct(p);
+    const p = world.karts.get(id) ?? sim.addKart(id, ...names.name(id), id < 0);
     const fx = Math.sin(h), fz = Math.cos(h);
-    p.vf = vx * fx + vz * fz; p.vl = vx * fz - vz * fx;
+    Object.assign(p, { x, z, h, vx, vz, steer, idx, boost, spin, vf: vx * fx + vz * fz, vl: vx * fz - vz * fx });
   }
+  for (const [id, lap, fl, item, place, finishT] of s.S ?? []) {
+    const p = world.karts.get(id);
+    // prog only ranks the HUD list here: the server's place decides it
+    if (p) Object.assign(p, { lap, bot: !!(fl & 1), finished: !!(fl & 2), half: !!(fl & 4), item, place, finishT, prog: -place });
+  }
+  const me = world.karts.get(lobby.room.me);
+  if (me) pred.correct(me);
   for (const id of [...world.karts.keys()]) if (!seen.has(id)) sim.removeKart(id);
-  s.Bx.forEach((t, i) => { if (track.boxes[i]) track.boxes[i].t = t ? 1 : 0; });
-  world.bananas = s.Ba.map(([x, z]) => ({ x, z }));
-  world.shells = s.Sh.map(([x, z, h]) => ({ x, z, h }));
-  playEvents(s.ev);
+  s.Bx?.forEach((t, i) => { if (track.boxes[i]) track.boxes[i].t = t ? 1 : 0; });
+  if (s.Ba) world.bananas = s.Ba.map(([x, z]) => ({ x, z }));
+  world.shells = (s.Sh ?? []).map(([x, z, h]) => ({ x, z, h }));
+  playEvents(s.ev ?? []);
   snapAt = pacing.arrived();
 }
 function playEvents(evs) {

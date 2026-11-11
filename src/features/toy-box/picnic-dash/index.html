@@ -54,9 +54,10 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
-import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
+import { createServerMatchClient } from '../common/server-run/server-match-client.js';
+import { createPicnicGame, DIRS } from './picnic-rules.js';
 import { keyId } from '../common/key-state.js';
 import { createGameAudio } from '../common/game-audio.js';
 
@@ -171,158 +172,27 @@ const sfx = {
   tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
 };
 
-// Game > rules: secret steps, simultaneous resolve (same target or swap = bounce, into a stander = bounce), fruit on arrival
-const INTRO = 2.5, PLAN_T = 7, MOVE_T = 1.5, FINAL_T = 12;
-const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [0, 0]];
-const BOT_NAMES = ['Hopper', 'Clover', 'Nibbles', 'Thumper', 'Biscuit', 'Muffin', 'Sprout', 'Pip', 'Waffles', 'Cocoa', 'Peanut', 'Tofu', 'Maple', 'Bun Bun'];
-const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
+// Game > rules live in picnic-rules.js: this page runs them for attract mode only, a match is run by the relay server (planned steps never reach a browser before the hop)
 // S: { mode, ph, tt, turn, turns, n, trees: [i], fruit: [{ i, v, id }], fid, P: [{ id, nick, color, bot, score, at, lock, from, want (revealed step), bounced, ate, think, skill }] }
-let S = null;
-const rng = Math.random;
-const secret = new Map();
+const attract = createPicnicGame();
+let S = attract.state;
 const player = (id) => S.P.find((p) => p.id === id);
-const sizeFor = (n) => (n <= 6 ? 9 : 11);
-function step(i, d, n, trees) {
-  const [dx, dz] = DIRS[d], x = (i % n) + dx, z = Math.floor(i / n) + dz;
-  if (x < 0 || z < 0 || x >= n || z >= n) return i;
-  const j = z * n + x;
-  return trees.includes(j) ? i : j;
-}
-// pure resolve so it can be checked on its own: at {id: cell}, dirs {id: d} -> {id: cell}
-function resolveMoves(at, dirs, n, trees) {
-  const ids = Object.keys(at), to = {};
-  for (const id of ids) to[id] = step(at[id], dirs[id] ?? 4, n, trees);
-  for (let changed = true; changed;) {
-    changed = false;
-    const claim = new Map();
-    for (const id of ids) claim.set(to[id], [...(claim.get(to[id]) ?? []), id]);
-    for (const id of ids) {
-      if (to[id] === at[id]) continue;
-      const crowd = claim.get(to[id]).length > 1;
-      // swap: both want each other's square
-      const swap = ids.some((o) => o !== id && to[o] === at[id] && at[o] === to[id]);
-      if (crowd || swap) { to[id] = at[id]; changed = true; }
-    }
-  }
-  return to;
-}
-function spawnFruit() {
-  const want = Math.max(4, Math.ceil(S.P.length * 0.8));
-  const busy = new Set([...S.trees, ...S.P.map((p) => p.at), ...S.fruit.map((f) => f.i)]);
-  const free = [...Array(S.n * S.n).keys()].filter((i) => !busy.has(i));
-  while (S.fruit.length < want && free.length) {
-    const i = free.splice(Math.floor(rng() * free.length), 1)[0];
-    S.fruit.push({ i, v: rng() < 0.2 ? 3 : 1, id: ++S.fid });
-  }
-}
-function newMatchState(mode, P, turns) {
-  const n = sizeFor(P.length);
-  // spawns evenly spaced round the edge from a random start; seats drawn by lot so join order never decides who starts in a corner
-  const ring = [];
-  for (let k = 0; k < n - 1; k++) ring.push(k);
-  for (let k = 0; k < n - 1; k++) ring.push(n - 1 + k * n);
-  for (let k = 0; k < n - 1; k++) ring.push(n * n - 1 - k);
-  for (let k = 0; k < n - 1; k++) ring.push((n - 1 - k) * n);
-  const off = Math.floor(rng() * ring.length), seats = shuffleInPlace([...P.keys()], rng);
-  P.forEach((p, k) => Object.assign(p, { at: ring[(off + Math.floor((seats[k] * ring.length) / P.length)) % ring.length], lock: false, from: null, bounced: false }));
-  // trees scattered but never cutting the meadow apart
-  let trees = [];
-  for (let tries = 0; tries < 40; tries++) {
-    const spawns = new Set(P.map((p) => p.at));
-    trees = [...Array(n * n).keys()].filter((i) => !spawns.has(i) && rng() < 0.08);
-    if (connected(n, trees)) break;
-  }
-  const s = { mode, ph: 'intro', tt: INTRO, turn: 0, turns, n, trees, fruit: [], fid: 0, P };
-  S = s;
-  spawnFruit();
-  return s;
-}
-function connected(n, trees) {
-  const block = new Set(trees), start = [...Array(n * n).keys()].find((i) => !block.has(i)), seen = new Set([start]), q = [start];
-  while (q.length) { const i = q.shift(); for (let d = 0; d < 4; d++) { const j = step(i, d, n, trees); if (!seen.has(j)) { seen.add(j); q.push(j); } } }
-  return seen.size === n * n - block.size;
-}
-function plan(id, d) {
-  const p = player(id);
-  if (!p || S.ph !== 'plan' || !Number.isInteger(d) || d < 0 || d > 4) return false;
-  secret.set(id, d); p.lock = true;
-  return true;
-}
-function startPlan() {
-  secret.clear();
-  for (const p of S.P) { p.lock = false; p.think = 0.8 + rng() * 3.5; }
-  Object.assign(S, { ph: 'plan', tt: PLAN_T, turn: S.turn + 1 });
-}
-function resolveTurn() {
-  const at = {}, dirs = {};
-  for (const p of S.P) { at[p.id] = p.at; dirs[p.id] = secret.get(p.id) ?? 4; }
-  const to = resolveMoves(at, dirs, S.n, S.trees);
-  for (const p of S.P) {
-    const wanted = step(p.at, dirs[p.id], S.n, S.trees);
-    Object.assign(p, { from: p.at, at: to[p.id], want: dirs[p.id], bounced: wanted !== p.at && to[p.id] === p.at });
-    const k = S.fruit.findIndex((f) => f.i === p.at);
-    if (k >= 0) { p.score += S.fruit[k].v; p.ate = S.fruit[k].id; S.fruit.splice(k, 1); } else p.ate = 0;
-  }
-  spawnFruit();
-  Object.assign(S, { ph: 'move', tt: MOVE_T });
-}
-// bots: walk the shortest path to the best nearby fruit they can reach first, a little randomness on top
-function bfs(from) {
-  const dist = new Map([[from, 0]]), first = new Map(), q = [from];
-  while (q.length) {
-    const i = q.shift();
-    for (let d = 0; d < 4; d++) { const j = step(i, d, S.n, S.trees); if (dist.has(j)) continue; dist.set(j, dist.get(i) + 1); first.set(j, i === from ? d : first.get(i)); q.push(j); }
-  }
-  return { dist, first };
-}
-function botDir(p) {
-  // skill = focus: weak bots often hop at random
-  if (rng() > 0.2 + p.skill * 0.8) return Math.floor(rng() * 5);
-  const mine = bfs(p.at), others = S.P.filter((q) => q !== p).map((q) => bfs(q.at).dist);
-  let best = null;
-  for (const f of S.fruit) {
-    const d = mine.dist.get(f.i);
-    if (d == null) continue;
-    const rival = Math.min(99, ...others.map((o) => o.get(f.i) ?? 99));
-    const score = f.v / (d + 0.5) * (rival < d ? 0.35 : rival === d ? 0.7 : 1);
-    if (!best || score > best.score) best = { f, score };
-  }
-  return best ? mine.first.get(best.f.i) ?? 4 : 4;
-}
-
-// Run engine > host tick: plan (bots decide), resolve, move animation, publish when anything but the clock changed
-const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
-let lastSig = '', prevS = null;
-function hostTick(dt) {
-  S.tt -= dt;
-  if (S.ph === 'intro' && S.tt <= 0) startPlan();
-  else if (S.ph === 'plan') {
-    for (const p of S.P) if (p.bot && !p.lock && (p.think -= dt) <= 0) plan(p.id, botDir(p));
-    if (S.tt <= 0 || S.P.every((p) => p.lock)) resolveTurn();
-  } else if (S.ph === 'move' && S.tt <= 0) {
-    if (S.turn < S.turns) startPlan();
-    else if (S.mode === 'attract') { const P = S.P.map((p) => ({ ...p, score: 0 })); newMatchState('attract', P, S.turns); S.tt = 1; }
-    else Object.assign(S, { ph: 'final', tt: FINAL_T });
-  } else if (S.ph === 'final' && S.tt <= 0 && lobby.room?.isHost) lobby.backToLobby();
-  const s = sig();
-  if (s !== lastSig) {
-    lastSig = s;
-    if (S.mode === 'match' && lobby.room?.isHost) sync.publish(S);
-    onChange(prevS, S);
-    prevS = JSON.parse(s);
-  }
-}
-function startAttract() {
-  const P = [0, 1, 2, 3, 4].map((i) => ({ id: -1 - i, nick: BOT_NAMES[i], color: BOT_COLORS[i], bot: true, score: 0, skill: 0.5 + rng() * 0.4 }));
-  newMatchState('attract', P, 14);
-  S.tt = 1;
-  prevS = null; lastSig = '';
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' ? undefined : v));
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
 }
 
 // Multiplayer > lobby + state sync (host publishes S without planned steps, guests send steps)
 const sync = createTurnSync({
   onState(s) { if (lobbyStarted) applyState(s); },
-  onAction(from, a) { if (a.t === 'step' && S.mode === 'match') plan(from, a.d); },
+  onDone() { serverMatch.finish(); },
 });
 let lobbyStarted = false;
 const lobby = createLobby({
@@ -334,44 +204,24 @@ const lobby = createLobby({
   onJoin(room) {
     document.getElementById('code').textContent = room.code;
     sync.attach(room);
-    room.on('roster', onRoster);
-    room.on('host', (isHost) => {
-      syncTop();
-      // promoted mid-plan: the old host took the planned steps, so everyone plans again
-      if (isHost && S?.mode === 'match' && S.ph === 'plan') { for (const p of S.P) { p.lock = false; p.think = 0.8 + rng() * 2; } secret.clear(); S.tt = PLAN_T; }
-    });
+    room.on('host', syncTop);
   },
-  onStart({ bots, isHost, settings }) {
+  onStart({ bots, seed, settings }) {
     lobbyStarted = true;
     showHud(true);
     syncTop();
-    if (!isHost) { if (sync.state) applyState(sync.state); return; }
-    const P = [];
-    for (const p of lobby.room.players) P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, skill: 0 });
-    for (let i = 0; i < bots; i++) P.push({ id: -1 - i, nick: `${BOT_NAMES[i]} 🤖`, color: BOT_COLORS[i], bot: true, score: 0, skill: 0.4 + rng() * 0.5 });
-    newMatchState('match', P, settings.turns ?? 20);
-    prevS = null; lastSig = '';
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
   },
-  onLobby() { lobbyStarted = false; showHud(false); big(''); startAttract(); },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); big(''); startAttract(); },
 });
+const serverMatch = createServerMatchClient(lobby);
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   document.getElementById('top').style.display = on ? 'flex' : 'none';
 }
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
-function onRoster(players) {
-  if (S.mode !== 'match' || !lobby.room.isHost) return;
-  const ids = new Set(players.map((p) => p.id));
-  S.P = S.P.filter((p) => p.bot || ids.has(p.id));
-  for (const p of players) if (!player(p.id)) {
-    if (S.P.length >= 14) { const bot = S.P.filter((q) => q.bot).sort((a, c) => a.score - c.score)[0]; if (bot) S.P.splice(S.P.indexOf(bot), 1); }
-    // late joiner pops up on a free square
-    const busy = new Set([...S.trees, ...S.P.map((q) => q.at), ...S.fruit.map((f) => f.i)]);
-    const free = [...Array(S.n * S.n).keys()].filter((i) => !busy.has(i));
-    S.P.push({ id: p.id, nick: p.nick, color: p.color, bot: false, score: 0, skill: 0, at: free[Math.floor(rng() * free.length)], lock: false, from: null, bounced: false });
-  }
-}
 function applyState(s) {
   const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
   S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
@@ -444,9 +294,9 @@ function hud(dt) {
   document.getElementById('board').innerHTML = rows.map((p, i) => `<div class="row ${p.id === lobby.room?.me ? 'me' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${esc(p.nick)}</span><em>${S.ph === 'plan' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.score}</em></div>`).join('');
 }
 
-// Run engine > host / attract sim tick (worker keeps a background host tab ticking)
+// Run engine > attract rules tick; in a match only the clock between server states runs here
 startTicker(20, (dt) => {
-  if (S.mode === 'attract' || (lobby.room?.isHost && lobbyStarted)) hostTick(dt);
+  if (S.mode === 'attract') attractTick(dt);
   else S.tt -= dt;
 });
 

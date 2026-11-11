@@ -312,6 +312,7 @@ const pred = createPrediction({
   angle: 'h',
 });
 function applySnap(s) {
+  serverMatch.onSnapshot(s);
   names.read(s);
   Object.assign(world, { phase: s.ph, t: s.t, clock: s.ck, score: s.sc, over: !!s.ov });
   const [x, y, z, vx, vy, vz] = s.B;

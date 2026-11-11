@@ -28,15 +28,15 @@ const warpScript = (k) => `(() => {
   window.requestAnimationFrame = (f) => setTimeout(() => f(performance.now()), 200);
 })();`;
 
-// Peek: appended inside the page's module so it reads module-scope state; turn-based hosts get bot brains (host0)
+// Peek: appended inside the page's module so it reads module-scope state; the audit's own human (host0) is left out of the tallies
+// serverRun games: bots live on the relay, so page skill writes never reach them and the audit human sits idle (turn clocks play for it)
 const peekScript = (c) => `;window.__restart=()=>lobby.restart();window.__peek=()=>{const m=(v)=>v instanceof Map?[...v.values()]:v;let S_,W_;try{S_=typeof S!=='undefined'?S:null}catch{}try{W_=typeof world!=='undefined'?world:null}catch{}
 try{${c.pre ?? ''}}catch{}
 const w=W_||{};let P=[];try{P=${c.list ? `m(${c.list})` : '(S_&&S_.P)||m(w.players)||m(w.tanks)'}||[]}catch{}
 for(const p of P)if(!p.bot){p.bot=true;p.host0=true;}
 const nh=P.filter(q=>!q.host0),star=${STAR}!==null&&nh.length?Math.max(...nh.map(q=>q.id)):null;
 for(const p of P)if('skill' in p||p.host0)p.skill=star===null?0.75:p.id===star?${STAR}:${REST};
-let hp='';try{hp=typeof H!=='undefined'&&H&&H.phase||''}catch{}
-const ph=(S_&&(S_.ph||S_.phase))||w.phase||hp;
+let ph='';try{ph=${c.phase ?? '(S_&&(S_.ph||S_.phase))||w.phase'}||''}catch{}
 const key=${c.score ? "'custom'" : "['score','pts','total','kills','pops','wins','tiles','goals'].find(k=>P.length&&typeof P[0][k]==='number')"};
 const val=(p)=>${c.score ?? 'p[key]'};
 let viol='';try{viol=${c.inv ?? "''"}}catch(e){viol='inv error '+e.message}
@@ -105,7 +105,7 @@ function seatFairness(matches) {
 }
 
 // Skill edge: the 0.95 bot's share of match wins among non-host seats; ties split
-function skillEdge(matches, bar = 2) {
+function skillEdge(matches, bar = 2, serverRun = false) {
   let wins = 0;
   for (const m of matches) {
     const seats = m.host.map((h, i) => (h ? -1 : i)).filter((i) => i >= 0), v = seats.map((i) => m.sc[i]), top = Math.max(...v);
@@ -113,7 +113,7 @@ function skillEdge(matches, bar = 2) {
     if (s >= 0 && v[s] === top) wins += 1 / k;
   }
   const n = matches.length, p0 = 1 / matches[0].host.filter((h) => !h).length, z = (wins - n * p0) / Math.sqrt(n * p0 * (1 - p0));
-  const skill = !matches[0].knob ? 'no skill knob' : n < 10 ? 'few matches' : wins / n >= bar * p0 && z >= 2.33 ? 'PASS' : 'FAIL';
+  const skill = !matches[0].knob || serverRun ? 'no skill knob' : n < 10 ? 'few matches' : wins / n >= bar * p0 && z >= 2.33 ? 'PASS' : 'FAIL';
   return { starShare: +(wins / n).toFixed(2), bar, fairShare: +p0.toFixed(2), starZ: +z.toFixed(2), skill };
 }
 
@@ -127,7 +127,7 @@ async function auditGame(browser, game) {
   const errors = [...new Set(pages.flatMap((p) => p.errors))].slice(0, 3);
   await Promise.all(pages.map((p) => p.close()));
   const res = { game, rule: rule.rule, ref: rule.ref, matches: matches.length, violations: viols, errors, nan: runs.some((r) => r.nan) };
-  if (matches.length) Object.assign(res, STAR === null ? seatFairness(matches) : skillEdge(matches, rule.edge));
+  if (matches.length) Object.assign(res, STAR === null ? seatFairness(matches) : skillEdge(matches, rule.edge, rule.serverRun));
   res.ruleCheck = Object.keys(viols).length || errors.length || res.nan ? 'FAIL' : 'PASS';
   return res;
 }
