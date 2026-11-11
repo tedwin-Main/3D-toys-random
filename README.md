@@ -7,12 +7,9 @@ src/features/toy-box/            Three.js toys + party games (gallery at /3d-toy
 src/features/multiplayer-rooms/  room relay websocket, toy-only server, load + capacity tests
 src/features/studio-server/      one-port server + gallery asset list (gallery at /)
 src/features/demo-gallery/       one-prompt frontier-model demos
-src/features/demo-capture/       Playwright posters, clips, Instagram reels
-src/features/blender-scenes/     Blender scripts
-src/features/remotion-promos/    Remotion promo video (own package)
+src/features/poster-capture/     Playwright gallery posters + headless QA
 src/features/texture-generator/  Python texture maker
-src/features/instagram-posts/    Instagram reels + captions (gitignored)
-src/media/                       rendered media served at /media/
+src/media/                       posters, stills, models served at /media/
 ```
 
 ## Run
@@ -26,13 +23,10 @@ npm run capacity-test  # relay CPU (incl. server-run rounds) / bandwidth / confi
 npm run capture # studio posters + QA (Playwright, local only)
 ```
 
-Offline media tools (local only, outputs are committed to `src/media/`):
+Offline tools (local only):
 
-- Blender: `/Applications/Blender.app/Contents/MacOS/Blender -b -P src/features/blender-scenes/<script>.py`
-- Remotion: `npm run render --prefix src/features/remotion-promos`
-- Aero reel music: `npm run music` (downloads curated 20 s reel, 60 s style and 120 s master slices; needs `brew install yt-dlp`); `npm run instagram:music` remuxes them without re-encoding video
-- Aero motion reels: `npm run instagram:motion -- [names...]` renders the reels from scratch in Remotion (posters + style kits, cut to the music beats) with curated music and recorded demo sound; pilot output in `src/features/instagram-posts/motion/`, `--promote` writes over the posting folders
 - Textures: `src/features/texture-generator/.venv/bin/python src/features/texture-generator/make-textures.py`
+- Video, Instagram reels, Remotion promos, Blender turntables: moved to [Instagram_Reels/3d-toys-reels](../Instagram_Reels/3d-toys-reels)
 
 ## Deploy
 

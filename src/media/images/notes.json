@@ -23,10 +23,5 @@
     "title": "Shaded Relief Map",
     "about": "The same island rendered as a cartographic relief map: hypsometric colour ramp from deep sea to snow, north-west hillshade from the height gradient, and contour lines on land.",
     "prompt": "Turn a heightmap into a shaded relief map in Python: hypsometric colour ramp (deep water, shallows, sand, grass, forest, rock, snow), a hillshade from slope and aspect lit from the north-west, and subtle contour lines."
-  },
-  "demo-reel.gif": {
-    "title": "Demo Reel GIF",
-    "about": "The demo reel at 3x speed as a palette-optimised GIF (palettegen + paletteuse) for READMEs and chat embeds.",
-    "prompt": "Convert the demo reel MP4 into a small looping GIF with ffmpeg: speed it up 3x, 10 fps, 480 px wide, generated palette with Bayer dithering."
   }
 }

@@ -2,8 +2,5 @@ node_modules
 .DS_Store
 .env*
 src/features/texture-generator/.venv/
-src/features/demo-capture/.capture/
-src/features/remotion-promos/out/
+src/features/poster-capture/.capture/
 .install-*.log
-src/features/demo-capture/.instagram-capture/
-src/features/instagram-posts/

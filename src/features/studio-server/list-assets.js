@@ -5,7 +5,6 @@ import { extname, join, basename } from 'node:path';
 import { SIMS } from '../toy-box/common/toy-list.js';
 
 const MODEL = ['.glb', '.gltf'];
-const VIDEO = ['.mp4', '.webm', '.mov'];
 const IMAGE = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'];
 
 // Studio > Tabs: order = tab order; group splits tab rows (live / rendered)
@@ -26,9 +25,7 @@ export const CATEGORIES = [
     { id: 'skeuo', label: 'Skeuomorphism' }, { id: 'retro', label: '90s Desktop & Web' },
   ] },
   { id: 'models', label: '3D Models', group: 'rendered', exts: MODEL },
-  { id: 'blender-renders', label: 'Blender', group: 'rendered', exts: [...VIDEO, ...IMAGE] },
-  { id: 'remotion-videos', label: 'Remotion', group: 'rendered', exts: VIDEO },
-  { id: 'videos', label: 'Videos', group: 'rendered', exts: VIDEO },
+  { id: 'blender-renders', label: 'Blender', group: 'rendered', exts: IMAGE },
   { id: 'images', label: 'Images', group: 'rendered', exts: IMAGE },
 ];
 
@@ -43,7 +40,7 @@ export const TABS = [
     { id: '2000s', label: '2000s', styles: ['y2k', 'mcbling', 'vectorheart', 'skeuo', 'console'] },
     { id: '90s', label: '90s', styles: ['retro'] },
   ] },
-  { id: 'rendered', label: 'Rendered', cats: ['models', 'blender-renders', 'remotion-videos', 'videos', 'images'] },
+  { id: 'rendered', label: 'Rendered', cats: ['models', 'blender-renders', 'images'] },
 ];
 
 // Studio > Tech dropdown: detected from source (meta tags stripped so prose never counts); css = nothing else matched
@@ -64,10 +61,9 @@ export const STACKS = [
   { id: 'svg', label: 'SVG', group: 'Web APIs', re: /<svg[\s>]|createElementNS/ },
   { id: 'css', label: 'HTML + CSS only', group: 'Web APIs' },
   { id: 'blender', label: 'Blender', group: 'Pipelines' },
-  { id: 'remotion', label: 'Remotion', group: 'Pipelines' },
   { id: 'gltf', label: 'glTF model', group: 'Pipelines' },
 ];
-const MEDIA_STACK = { 'blender-renders': ['blender'], 'remotion-videos': ['remotion', 'react'], models: ['gltf'] };
+const MEDIA_STACK = { 'blender-renders': ['blender'], models: ['gltf'] };
 export function stackOf(src) {
   const text = src.replace(/<meta[^>]*>/gi, '');
   const hit = STACKS.filter((s) => s.re?.test(text)).map((s) => s.id);
@@ -94,7 +90,7 @@ const SIM_PROMPTS = {
   'marble-run': 'Build a perpetual marble run with Rapier physics in one HTML file: screw lift, banked helix, vortex funnel, and a xylophone staircase that plays notes as marbles hit it. Add a ride-along camera.',
 };
 
-const kindOf = (ext) => (MODEL.includes(ext) ? 'model' : VIDEO.includes(ext) ? 'video' : 'image');
+const kindOf = (ext) => (MODEL.includes(ext) ? 'model' : 'image');
 // my-chair_v2.glb becomes "My Chair V2"
 const titleOf = (file) => basename(file, extname(file)).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 const meta = (html, name) => html.match(new RegExp(`<meta name="${name}" content="([^"]*)"`, 'i'))?.[1] ?? '';
@@ -140,7 +136,7 @@ async function listMedia(mediaRoot) {
     const names = new Set(files);
     // Studio > Card + viewer info: notes.json maps filename to { about, prompt }
     const notes = JSON.parse(await readFile(join(dir, 'notes.json'), 'utf8').catch(() => '{}'));
-    // same-basename image next to model or video = its poster, not its own card
+    // same-basename image next to model = its poster, not its own card
     const posterFor = (f) => ['.png', '.jpg', '.jpeg', '.webp'].map((e) => basename(f, extname(f)) + e).find((p) => names.has(p) && p !== f);
     const posters = new Set(files.filter((f) => !IMAGE.includes(extname(f).toLowerCase())).map(posterFor).filter(Boolean));
     for (const f of files) {

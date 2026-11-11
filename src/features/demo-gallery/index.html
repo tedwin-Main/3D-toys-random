@@ -48,7 +48,7 @@
   .card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; color: inherit; text-decoration: none; transition: transform 0.2s, border-color 0.2s; cursor: pointer; }
   .card:hover, .card:focus-visible { transform: translateY(-3px); border-color: var(--accent); outline: none; }
   .preview { aspect-ratio: 16 / 10; position: relative; display: grid; place-items: center; font-size: 56px; overflow: hidden; background: radial-gradient(circle at 50% 40%, #2a2f40, #12141b 70%); }
-  .preview > img, .preview > video, .preview > model-viewer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
+  .preview > img, .preview > model-viewer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
   .preview > iframe { position: absolute; inset: 0; width: 200%; height: 200%; transform: scale(0.5); transform-origin: 0 0; border: 0; pointer-events: none; }
   .preview > model-viewer { --poster-color: transparent; pointer-events: none; }
   .preview .num { position: absolute; left: 12px; top: 10px; z-index: 2; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(0, 0, 0, 0.5); color: #fff; }
@@ -71,7 +71,7 @@
   body.playing #viewer { display: block; }
   #stage { position: absolute; inset: 0; display: grid; place-items: center; }
   #stage > model-viewer, #stage > iframe { width: 100%; height: 100%; border: 0; --poster-color: transparent; }
-  #stage > video, #stage > img { max-width: 100%; max-height: 100%; object-fit: contain; outline: none; }
+  #stage > img { max-width: 100%; max-height: 100%; object-fit: contain; outline: none; }
   #nav { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 14px; background: var(--pill); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3); transition: opacity 0.4s, transform 0.3s; z-index: 5; max-width: calc(100% - 32px); }
   #nav.dim { opacity: 0.28; }
   #nav.dim:hover { opacity: 1; }
@@ -105,7 +105,7 @@
 <section id="home">
   <header>
     <h1>Render <span>Studio</span></h1>
-    <p>One-prompt frontier-model tests and generated media in one place: shaders, 3D scenes, physics simulations, motion, Blender renders, Remotion video. <span class="count" id="count"></span>. Each card has a short explanation and the <b>prompt</b> that produced it. Hover to preview, click to open; in the viewer <b>[</b> / <b>]</b> flip, <b>i</b> info, <b>Esc</b> back.</p>
+    <p>One-prompt frontier-model tests and generated media in one place: shaders, 3D scenes, physics simulations, motion, Blender renders, 3D models. <span class="count" id="count"></span>. Each card has a short explanation and the <b>prompt</b> that produced it. Hover to preview, click to open; in the viewer <b>[</b> / <b>]</b> flip, <b>i</b> info, <b>Esc</b> back.</p>
     <a class="xlink" href="/3d-toys/">3D Toy Box ↗</a>
   </header>
   <nav id="filters"></nav>
@@ -134,9 +134,9 @@
 const $ = (id) => document.getElementById(id);
 const stage = $('stage'), nav = $('nav'), menu = $('menu'), tab = $('tab'), info = $('info');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const ICON = { model: '🧊', video: '🎬', image: '🖼️', page: '✨', link: '🧸' };
+const ICON = { model: '🧊', image: '🖼️', page: '✨', link: '🧸' };
 const CHIP = { scenes: 'Scenes', generative: 'Generative', apps: 'Apps', models: 'Models' };
-const HINT = { models: '.glb / .gltf', 'blender-renders': '.mp4 / .png', 'remotion-videos': '.mp4', videos: '.mp4 / .webm / .mov', images: '.png / .jpg / .webp' };
+const HINT = { models: '.glb / .gltf', 'blender-renders': '.png', images: '.png / .jpg / .webp' };
 const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`);
 
 let CATS = [], TABS = [], STACKS = [], ASSETS = [], list = [], filter = 'all', tech = '', current = null, sig = '';
@@ -236,7 +236,6 @@ function card(a) {
   else el.href = `#a=${encodeURIComponent(a.id)}`;
   const still = a.poster ? `<img src="${a.poster}" alt="" loading="lazy">`
     : a.kind === 'image' ? `<img src="${a.url}" alt="" loading="lazy">`
-    : a.kind === 'video' ? `<video src="${a.url}#t=0.5" preload="metadata" muted playsinline></video>`
     : '';
   const tags = a.kind === 'page' ? a.tags.slice(0, 4)
     : a.kind === 'link' ? ['3D Toy Box', 'needs :5055']
@@ -258,7 +257,6 @@ function card(a) {
     if (a.kind === 'image' || a.kind === 'link') return;
     timer = setTimeout(() => {
       if (a.kind === 'page') live = Object.assign(document.createElement('iframe'), { src: a.url, tabIndex: -1 });
-      else if (a.kind === 'video') live = Object.assign(document.createElement('video'), { src: a.url, muted: true, loop: true, playsInline: true, autoplay: true });
       else {
         live = Object.assign(document.createElement('model-viewer'), { src: a.url, autoRotate: true, autoRotateDelay: 0, rotationPerSecond: '40deg' });
         live.setAttribute('environment-image', 'neutral');
@@ -315,8 +313,6 @@ function mount(a) {
   } else if (a.kind === 'model') {
     el = document.createElement('model-viewer');
     for (const [k, v] of Object.entries({ src: a.url, 'camera-controls': '', 'auto-rotate': '', 'shadow-intensity': '1', 'environment-image': 'neutral', autoplay: '', 'touch-action': 'pan-y', alt: a.title })) el.setAttribute(k, v);
-  } else if (a.kind === 'video') {
-    el = Object.assign(document.createElement('video'), { src: a.url, controls: true, autoplay: true, loop: true, playsInline: true });
   } else {
     el = Object.assign(document.createElement('img'), { src: a.url, alt: a.title });
   }
@@ -356,7 +352,7 @@ function route() {
   if (i < 0) {
     current = null;
     document.body.classList.remove('playing');
-    // empty stage so video audio + WebGL stop
+    // empty stage so iframe audio + WebGL stop
     stage.replaceChildren();
     document.title = 'Render Studio';
     return;
