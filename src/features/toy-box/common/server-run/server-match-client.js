@@ -29,13 +29,14 @@ export function createServerMatchClient(lobby, { now = () => performance.now() }
     fromServer: (from) => from === SERVER_PEER,
     // server says the match is over: the lobby host takes the room back to the lobby
     finish() { if (lobby.room?.isHost) lobby.backToLobby(); },
-    // call once per sim tick; sends the input built by makeInput() at the input rate for the room size
+    // call once per sim tick; sends the input built by makeInput() at the input rate for the room size, true when it went out
     tickInput(makeInput) {
       const room = lobby.room;
-      if (!room || ++tickNo % inputEvery(room.players.length)) return;
+      if (!room || ++tickNo % inputEvery(room.players.length)) return false;
       seq = (seq + 1) % INPUT_SEQ_WRAP;
       sentAt.set(seq, now());
       room.send({ g: 'i', n: seq, ...makeInput() }, { to: SERVER_PEER });
+      return true;
     },
     // one-off input outside the tickInput rate (a golf shot, a cycle turn); key n is taken by the acked input seq, so data must not carry it
     sendAction(data) { lobby.room?.send({ g: 'i', ...data }, { to: SERVER_PEER }); },

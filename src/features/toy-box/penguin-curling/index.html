@@ -43,7 +43,7 @@
 <div id="board" class="card"></div>
 <div id="big"></div>
 <div id="power" class="card"><div id="powerFill"></div></div>
-<div id="hint" class="card">On <b>your throw</b>: <b>A/D</b> aim · hold <b>Space</b> to charge, release to belly-slide · while sliding: hold <b>Space</b> to sweep (go farther), <b>A/D</b> to lean · pass the blue line, stop closest to the 🐟</div>
+<div id="hint" class="card">On <b>your throw</b>: <b>A/D</b> aim · tap <b>Space</b> to charge, tap again to belly-slide · while sliding: hold <b>Space</b> to sweep (go farther), <b>A/D</b> to lean · pass the blue line, stop closest to the 🐟</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -198,14 +198,35 @@ function makePenguin(p) {
   return g;
 }
 
-// Players > own aim arrow: flat arrow on the ice, length = charge
+// Players > own aim arrow: dark outline + bright fill + pulsing tip ring so it reads on sunlit ice; length = charge
+// starts ahead of the thrower so the penguin body never hides the low-charge arrow
+const AIM_BASE = 1.5, AIM_MIN = 2.6, AIM_GROW = 3.0;
 const arrow = new THREE.Group();
+const aimLook = { shaft: null, shaftEdge: null, head: null, headEdge: null, tip: null, tipMat: null, fill: null };
 {
-  const sh = new THREE.Shape();
-  sh.moveTo(-0.12, 0); sh.lineTo(0.12, 0); sh.lineTo(0.12, 1); sh.lineTo(0.35, 1); sh.lineTo(0, 1.5); sh.lineTo(-0.35, 1); sh.lineTo(-0.12, 1); sh.closePath();
-  const m = new THREE.Mesh(new THREE.ShapeGeometry(sh).rotateX(Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3a86ff, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }));
-  m.position.z = 0.6; m.position.y = 0.02;
-  arrow.add(m); arrow.visible = false;
+  const mat = (o) => new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, depthWrite: false, toneMapped: false, ...o });
+  aimLook.fill = mat({ color: 0x3a86ff });
+  const edge = mat({ color: 0x0a1a2f, opacity: 0.55 });
+  aimLook.tipMat = mat({ color: 0xffffff, opacity: 0.25 });
+  const shaftGeo = new THREE.PlaneGeometry(0.4, 1).rotateX(-Math.PI / 2).translate(0, 0, 0.5);
+  const headShape = new THREE.Shape();
+  headShape.moveTo(-0.52, 0); headShape.lineTo(0.52, 0); headShape.lineTo(0, 0.7); headShape.closePath();
+  const headGeo = new THREE.ShapeGeometry(headShape).rotateX(Math.PI / 2);
+  aimLook.shaft = new THREE.Mesh(shaftGeo, aimLook.fill);
+  aimLook.shaftEdge = new THREE.Mesh(shaftGeo, edge);
+  aimLook.head = new THREE.Mesh(headGeo, aimLook.fill);
+  aimLook.headEdge = new THREE.Mesh(headGeo, edge);
+  aimLook.tip = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.34, 24).rotateX(-Math.PI / 2), aimLook.tipMat);
+  aimLook.shaft.position.set(0, 0.032, AIM_BASE);
+  aimLook.shaftEdge.position.set(0, 0.02, AIM_BASE);
+  aimLook.shaftEdge.scale.x = 1.45;
+  aimLook.head.position.set(0, 0.032, AIM_BASE + AIM_MIN);
+  aimLook.headEdge.position.set(0, 0.02, AIM_BASE + AIM_MIN);
+  aimLook.headEdge.scale.set(1.16, 1, 1.16);
+  aimLook.tip.position.set(0, 0.044, AIM_BASE + AIM_MIN);
+  arrow.add(aimLook.shaftEdge, aimLook.shaft, aimLook.headEdge, aimLook.head, aimLook.tip);
+  arrow.children.forEach((m, k) => (m.renderOrder = 3 + k));
+  arrow.visible = false;
 }
 scene.add(arrow);
 
@@ -255,7 +276,7 @@ const rng = Math.random; // cosmetic only: spray, camera shake
 // Multiplayer > Lobby
 const lobby = createLobby({
   game: 'penguin-curling', title: 'Penguin Curling', emoji: '🐧', accent: '#7fd1ff',
-  blurb: 'Curling, one penguin at a time. Aim, charge, belly-slide down the ice and stop closest to the fish. Stopped penguins stay put: guard the house or knock rivals out. Sweep to glide farther, lean to curl. Last place throws last.',
+  blurb: 'Curling, one penguin at a time. Aim, tap to charge, tap again to belly-slide down the ice and stop closest to the fish. Stopped penguins stay put: guard the house or knock rivals out. Sweep to glide farther, lean to curl. Last place throws last.',
   maxBots: 13, defaultBots: 5, minPlayers: 2,
   note: `Up to 14 penguins per room (humans + bots). One throw each per round, ${ROUNDS} rounds (3 in a full room), rings score 5/3/2/1, closest to the fish +2.`,
   onJoin(room) {
@@ -330,12 +351,16 @@ function playEvents(evs) {
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-// Input > keyboard + phone joystick + SLIDE button (hold to charge, hold again to sweep)
-const keys = trackKeys(), local = { x: 0, held: false };
+// Input > keyboard + phone joystick + SLIDE button (tap to start the charge, tap again to throw, hold to sweep)
+const keys = trackKeys(), local = { x: 0, held: false, taps: 0 };
+const SLIDE_KEYS = ['Space', 'KeyW', 'ArrowUp'];
+const canCharge = () => world.mode === 'match' && world.phase === 'aim' && world.turn === lobby.room?.me;
 addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+  if (!e.repeat && SLIDE_KEYS.includes(e.code) && canCharge()) local.taps++;
 });
 const pad = createTouchPad({ buttons: [{ id: 'slide', label: 'SLIDE', color: 'rgba(58, 134, 255, 0.75)' }], onStart: gameAudio.unlock });
+pad.onPress('slide', () => { if (canCharge()) local.taps++; });
 function readInput() {
   local.x = clamp((keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + pad.x, -1, 1);
   local.held = !!(keys.Space || keys.KeyW || keys.ArrowUp || pad.held.slide);
@@ -357,7 +382,7 @@ function hud(dt) {
   else if (ph === 'final') { const top = world.players.get(world.winner); big(`<small>final · back to lobby in ${secs}s</small>${top ? `🏆 ${esc(top.nick)}` : 'Draw!'}`); }
   else if (flashT <= 0) big('');
   const t = ph === 'count' ? `🐧 round ${world.round} of ${world.rounds}${hammer ? ` · ${hammer === me ? 'you have' : `${hammer.nick} has`} the last throw` : ''}`
-    : ph === 'aim' ? (myTurn ? `your throw ${nth} · hold SLIDE to charge, release to go · ${secs}s` : `🐧 ${tp?.nick ?? ''} throws ${nth} · ${secs}s`)
+    : ph === 'aim' ? (myTurn ? `your throw ${nth} · tap SLIDE to charge, tap again to go · ${secs}s` : `🐧 ${tp?.nick ?? ''} throws ${nth} · ${secs}s`)
     : ph === 'slide' || ph === 'rest' ? (me?.launched && !me.out && mySp > 0.3 ? '🧹 hold SLIDE to sweep farther · steer to lean' : `${tp?.nick ?? ''} sliding… ${nth}`)
     : ph === 'score' ? '🎯 round scores' : '🏁 final standings';
   if (t !== phaseText) { phaseText = t; phaseEl.textContent = t; }
@@ -383,11 +408,11 @@ function inputMatters() {
   return !!me && !me.out && (world.turn === me.id || Math.hypot(me.vx, me.vz) > SLIDING_SPEED);
 }
 function sendInput() {
-  const input = { x: +local.x.toFixed(2), h: local.held ? 1 : 0 }, key = `${input.x}|${input.h}`;
+  const input = () => ({ x: +local.x.toFixed(2), h: local.held ? 1 : 0, t: local.taps }), now = input(), key = `${now.x}|${now.h}|${now.t}`;
   // one more message after going idle or changing keys, so the server never keeps a stale SLIDE hold
   if (!inputMatters() && key === sentInput) return;
-  sentInput = key;
-  serverMatch.tickInput(() => input);
+  // inputEvery() skips some ticks: only remember the key once the message really went out
+  if (serverMatch.tickInput(input)) sentInput = key;
 }
 function simTick(dt) {
   readInput();
@@ -438,10 +463,14 @@ function loop() {
   const me = world.players.get(meId), tp = world.players.get(world.turn), tg = tp && players3d.get(tp.id);
   arrow.visible = !!(tg && world.phase === 'aim' && !tp.launched);
   if (arrow.visible) {
+    const len = AIM_MIN + tp.pow * AIM_GROW, tipZ = AIM_BASE + len;
     arrow.position.set(tg.position.x, 0, tg.position.z);
     arrow.rotation.y = Math.atan2(Math.sin(tp.aim), -Math.cos(tp.aim));
-    arrow.scale.set(1, 1, 1.4 + tp.pow * 3.5);
-    arrow.children[0].material.color.setHSL(0.36 - tp.pow * 0.36, 0.9, 0.55);
+    aimLook.shaft.scale.z = aimLook.shaftEdge.scale.z = len;
+    aimLook.head.position.z = aimLook.headEdge.position.z = tipZ;
+    aimLook.tip.position.z = tipZ + 0.24;
+    aimLook.fill.color.setHSL(0.36 - tp.pow * 0.36, 1, 0.54);
+    aimLook.tipMat.opacity = tp.charging ? 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(time * 9)) : 0.22;
   }
   sweepT -= dt;
   if (me?.sweep && sweepT <= 0) { sweepT = 0.13; sfx.sweep(); }

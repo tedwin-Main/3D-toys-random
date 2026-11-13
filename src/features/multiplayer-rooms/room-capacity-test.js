@@ -41,8 +41,8 @@ const CLASSIC_STICK = {
   'hex-drop': (x, z, seq) => ({ x, z, j: pressCount(seq) }),
   'floor-is-lava': (x, z, seq) => ({ x, z, j: pressCount(seq) }),
   'splat-turf': (x, z, seq) => ({ x, z, b: pressCount(seq) }),
-  // steer on the stick, SLIDE held for 2 s then released for 2 s (worst case: every human sends every tick)
-  'penguin-curling': (x, z, seq) => ({ x, h: pressCount(seq) % 2 }),
+  // steer on the stick, SLIDE tapped every 2 s (charge, then throw) and held half the time to sweep
+  'penguin-curling': (x, z, seq) => ({ x, h: pressCount(seq) % 2, t: pressCount(seq) }),
   // every human tries a putt every tick (far above real play: one message per putt); only the one on turn counts
   'mini-golf': (x, z, seq) => ({ shot: [+(x * 3).toFixed(2), 0.5], q: seq }),
   // a turn every 0.5 s (left / right in turn), boost held 2 s on, 2 s off

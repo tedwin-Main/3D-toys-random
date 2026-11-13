@@ -1,6 +1,6 @@
 // Runs Penguin Curling rules (throw order, aim + charge, belly-slide physics, sweeping, knocks, ring scoring, bots) with no rendering, for page attract mode and the relay server host.
 
-import { axis } from '../common/guest-input.js';
+import { axis, applyPresses } from '../common/guest-input.js';
 import { pickLeader } from '../common/pick-leader.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createChangedOnly } from '../common/server-run/changed-only.js';
@@ -14,11 +14,13 @@ export const ROUNDS = 8;
 /** penguin still on the move: its player can sweep and lean */
 export const SLIDING_SPEED = 0.3;
 const AIM_T = 10, PR = 0.5, FR = 4.5, FR_SWEEP = 2.9, VMIN = 5, VMAX = 22, LEAN = 1.8, WAIT_Z = 3.6;
+// charge meter rises and falls this fast: a slow tap-tap sweep, not a reflex hold
+const CHARGE_RATE = 0.7;
 const CLOSEST_BONUS = 2, MAX_PENGUINS = 14, ATTRACT_BOTS = 8, ATTRACT_ROUNDS = 2;
 const BOT_NAMES = ['Pingu', 'Waddles', 'Flipper', 'Tux', 'Mumble', 'Pebble', 'Iceberg', 'Snowy', 'Kowalski', 'Rico', 'Chilly', 'Frosty', 'Sardine', 'Puddles'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const THROW_PHASES = ['count', 'aim', 'slide', 'rest'];
-const BEHIND_HACK = { vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, armed: false, charging: false, launched: false, out: false, hog: false, sweep: false, plan: null };
+const BEHIND_HACK = { vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, held: false, charging: false, launched: false, out: false, hog: false, sweep: false, plan: null };
 const f2 = (v) => Math.round(v * 100) / 100;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 // charge meter sweeps up and back down
@@ -44,7 +46,7 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
 
   // Game > World
   sim.addPlayer = (id, nick, color, bot) => {
-    const p = { id, nick, color, bot, x: 0, z: 0, ax: 0, score: 0, last: 0, skill: 0.35 + rng() * 0.55, ...BEHIND_HACK };
+    const p = { id, nick, color, bot, x: 0, z: 0, ax: 0, score: 0, last: 0, skill: 0.35 + rng() * 0.55, shotSeq: 0, lastShot: 0, pendingTaps: 0, ...BEHIND_HACK };
     world.players.set(id, p);
     return p;
   };
@@ -76,7 +78,7 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
     do world.ti++; while (world.ti < world.order.length && !world.players.has(world.order[world.ti]));
     if (world.ti >= world.order.length) { world.turn = null; scoreRound(); return; }
     const p = world.players.get(world.order[world.ti]);
-    Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, armed: false, charging: false, plan: null });
+    Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, aim: 0, pow: 0, chT: 0, charging: false, plan: null });
     world.turn = p.id;
     bench();
     world.phase = 'aim'; world.t = AIM_T;
@@ -105,14 +107,16 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
   }
 
   function aimAndCharge(p, dt) {
-    if (world.phase !== 'aim' || p.id !== world.turn) return;
+    if (world.phase !== 'aim' || p.id !== world.turn) { p.pendingTaps = 0; return; }
     p.aim = clamp(p.aim + p.ax * 0.7 * dt, -0.4, 0.4);
-    // must let go once per round so a key held from last round can't fire instantly
-    if (!p.held) p.armed = true;
-    if (p.held && p.armed && !p.charging) { p.charging = true; p.chT = 0; }
+    // tap once to start the meter, tap again to launch at that charge; taps made off-turn never carry over
+    if (p.pendingTaps > 0) {
+      p.pendingTaps--;
+      if (p.charging) { launch(p); return; }
+      p.charging = true; p.chT = 0; p.pow = 0;
+    }
     if (!p.charging) return;
-    p.chT += dt; p.pow = tri(p.chT * 0.85);
-    if (!p.held) launch(p);
+    p.chT += dt; p.pow = tri(p.chT * CHARGE_RATE);
   }
 
   function hitRinkEdges(p) {
@@ -190,12 +194,14 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
   }
 
   function botAim(p) {
-    if (world.phase !== 'aim' || p.id !== world.turn) { p.held = false; p.ax = 0; return; }
+    if (world.phase !== 'aim' || p.id !== world.turn) { p.ax = 0; return; }
     p.plan ??= { at: AIM_T - 1 - rng() * 1.6, tx: world.hx, tz: world.hz, want: null };
     const plan = p.plan;
     if (plan.want === null && world.t <= plan.at + 0.8) planThrow(p, plan);
     p.ax = clamp((Math.atan2(plan.tx - p.x, -(plan.tz - p.z)) - p.aim) * 6, -1, 1);
-    p.held = world.t <= plan.at && !(p.charging && Math.abs(p.pow - plan.want) < 0.025);
+    // tap 1 starts the meter at plan.at, tap 2 fires once it reaches the wanted charge
+    if (!p.charging) { if (world.t <= plan.at) p.shotSeq++; }
+    else if (Math.abs(p.pow - plan.want) < 0.03) p.shotSeq++;
   }
 
   function botSlide(p) {
@@ -309,17 +315,25 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
     for (const h of humans) if (!world.players.has(h.id)) joinLate(h);
     slowFields.reset();
   };
-  // Multiplayer > guest input { x: steer, h: SLIDE held }
+  // Multiplayer > guest input { x: steer, h: SLIDE held (sweep), t: SLIDE tap counter (tap 1 charges, tap 2 throws) }
   sim.applyInput = (id, input) => {
     const p = world.players.get(id);
     if (!p || p.bot) return;
     p.ax = axis(input.x); p.held = !!input.h;
+    applyPresses(p, { shotSeq: ['lastShot', input.t] });
   };
 
   // Run engine > one fixed step for every penguin
   sim.step = () => {
     const ps = everyone();
     for (const p of ps) if (p.bot) botThink(p);
+    // new SLIDE taps become one pending tap per step, so a fast double tap still reads as two
+    for (const p of ps) {
+      const taps = p.shotSeq - p.lastShot;
+      if (taps <= 0) continue;
+      p.pendingTaps = Math.min(2, p.pendingTaps + taps);
+      p.lastShot = p.shotSeq;
+    }
     for (const p of ps) stepPlayer(p, STEP);
     collide(ps);
     phases(STEP);

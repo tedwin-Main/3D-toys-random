@@ -360,18 +360,22 @@ test('splat-turf: a late joiner gets the grid keyframe and palette at once, reus
   assert.deepEqual(slots, Array.from({ length: 14 }, (_, k) => k + 1), 'slots 1..14, one each');
 });
 
-test('penguin-curling: only the thrower can launch; hold then release SLIDE sends the penguin down the ice', () => {
+test('penguin-curling: only the thrower can launch; tap SLIDE to charge, tap again to throw', () => {
   const { host, guests, run, toServer, lastSnap } = room('penguin-curling');
-  const LAUNCHED = 2;
+  const LAUNCHED = 2, CHARGING = 8;
   toServer(host, { g: 'run', bots: 0, seed: 7 });
   for (let t = 0; t < 600 && lastSnap(host)?.ph !== 'aim'; t++) run(1);
   const humans = [host, ...guests], thrower = humans.find((p) => p.id === lastSnap(host).tu), waiting = humans.find((p) => p !== thrower);
   const row = (p) => lastSnap(host).P.find((r) => r[0] === p.id);
-  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 0 });
+  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 0, t: 0 });
   run(2);
-  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 1 });
+  // first tap starts the meter but never launches by itself
+  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 0, t: 1 });
   run(30);
-  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 0 });
+  assert.ok(row(thrower)[7] & CHARGING, 'thrower charging');
+  assert.equal(row(thrower)[7] & LAUNCHED, 0, 'no launch on the first tap');
+  // second tap fires at the charge on the bar
+  for (const p of [thrower, waiting]) toServer(p, { g: 'i', x: 0, h: 0, t: 2 });
   run(3);
   assert.ok(row(thrower)[7] & LAUNCHED, 'thrower launched');
   assert.ok(row(thrower)[4] < -1, 'sliding toward the house');
