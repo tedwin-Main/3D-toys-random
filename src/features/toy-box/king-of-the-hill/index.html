@@ -39,7 +39,7 @@
 <div id="zone" class="card"></div>
 <div id="board" class="card"></div>
 <div id="big"></div>
-<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> shove dash · stand in the glowing ring to score (alone = full points) · knock rivals off the island</div>
+<div id="hint" class="card"><b>WASD / arrows</b> run · <b>Space</b> shove dash · stand in the glowing ring to score (it fits only half of you; alone = full points) · knock rivals off the island</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 
 <script type="importmap">
@@ -119,16 +119,17 @@ for (let k = 0; k < 14; k++) {
   scene.add(cl);
 }
 
-// Zone > glowing ring, light beam, floating crown; next-spot ghost ring
+// Zone > glowing ring, light beam, floating crown; next-spot ghost ring (sized by sizeZone: the ring holds half the knights)
+const RING_W = 0.25;
 const zoneGroup = new THREE.Group();
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
-const zoneRing = new THREE.Mesh(new THREE.RingGeometry(ZONE_R - 0.35, ZONE_R, 64).rotateX(-Math.PI / 2), ringMat);
+const zoneRing = new THREE.Mesh(undefined, ringMat);
 zoneRing.position.y = 0.2;
 const fillMat = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.16, side: THREE.DoubleSide });
-const zoneFill = new THREE.Mesh(new THREE.CircleGeometry(ZONE_R - 0.35, 48).rotateX(-Math.PI / 2), fillMat);
+const zoneFill = new THREE.Mesh(undefined, fillMat);
 zoneFill.position.y = 0.18;
 const beamMat = new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false });
-const beam = new THREE.Mesh(new THREE.CylinderGeometry(ZONE_R, ZONE_R, 14, 48, 1, true), beamMat);
+const beam = new THREE.Mesh(undefined, beamMat);
 beam.position.y = 7;
 const crown = new THREE.Group();
 {
@@ -142,9 +143,21 @@ const crown = new THREE.Group();
 crown.position.y = 5;
 zoneGroup.add(zoneRing, zoneFill, beam, crown);
 scene.add(zoneGroup);
-const ghost = new THREE.Mesh(new THREE.RingGeometry(ZONE_R - 0.25, ZONE_R, 64).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
+const ghost = new THREE.Mesh(undefined, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, side: THREE.DoubleSide }));
 ghost.position.y = 0.21; ghost.visible = false;
 scene.add(ghost);
+// rebuild ring meshes at the scoring radius: scaling would thin the ring line along with it
+let shownZoneR = 0;
+function sizeZone(r) {
+  if (Math.abs(r - shownZoneR) < 0.01) return;
+  shownZoneR = r;
+  const flat = (geo) => geo.rotateX(-Math.PI / 2);
+  const set = (mesh, geo) => { mesh.geometry.dispose(); mesh.geometry = geo; };
+  set(zoneRing, flat(new THREE.RingGeometry(r - RING_W, r, 64)));
+  set(zoneFill, flat(new THREE.CircleGeometry(r - RING_W, 48)));
+  set(beam, new THREE.CylinderGeometry(r, r, 14, 48, 1, true));
+  set(ghost, flat(new THREE.RingGeometry(r - RING_W, r, 64)));
+}
 
 // Players > knight blobs: round body, visor, plume in player color, mini crown on the holder, name tag
 function nameTag(nick, color) {
@@ -220,7 +233,7 @@ const rng = Math.random;
 // Multiplayer > Lobby
 const lobby = createLobby({
   game: 'crown-keep', title: 'Crown Keep', emoji: '👑', accent: '#ffd23f',
-  blurb: 'A glowing crown ring hops between hilltops. Stand in it to score: alone you earn full points, a crowd splits them. Shove-dash rivals off the floating island.',
+  blurb: 'A glowing crown ring hops between hilltops. Stand in it to score: it fits only half of you, alone you earn full points, a crowd splits them. Shove-dash rivals off the floating island.',
   maxBots: 13, defaultBots: 5, minPlayers: 2,
   note: `Up to 14 knights per room (humans + bots). First to ${WIN_PTS} points or most after 2½ minutes.`,
   onJoin(room) {
@@ -269,7 +282,7 @@ const pred = createPrediction({
 function applySnap(s) {
   serverMatch.onSnapshot(s);
   names.read(s);
-  Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, zone: s.z, next: s.nz, hopT: s.ht, hold: s.h, crowd: s.n, winner: s.win });
+  Object.assign(world, { phase: s.ph, t: s.t, left: s.lf, zone: s.z, next: s.nz, zoneR: s.zr, hopT: s.ht, hold: s.h, crowd: s.n, winner: s.win });
   const seen = new Set();
   for (const [id, x, y, z, vx, vz, face, fl, pts, falls] of s.P) {
     seen.add(id);
@@ -384,6 +397,7 @@ function loop() {
   }
   // zone: slide to the current spot, color by holder, ghost ring warns of the next hop
   const [zx, zz] = ZONES[world.zone];
+  sizeZone(world.zoneR);
   zonePos.set(zx, 0, zz);
   if (zoneGroup.position.distanceTo(zonePos) > 30) zoneGroup.position.copy(zonePos);
   zoneGroup.position.lerp(zonePos, 1 - Math.exp(-dt * 6));

@@ -25,7 +25,7 @@ export const GAME_RULES = {
   'hex-drop-survival': { serverRun: true, rule: 'last one standing ends the round', ref: 'https://en.wikipedia.org/wiki/Fall_Guys', inv: lastStandingEndsRound('round') },
   'jar-guess': { serverRun: true, rule: 'closest guess ranks first, ties share a place', ref: 'https://en.wikipedia.org/wiki/Ranking#Standard_competition_ranking_(%221224%22_ranking)', inv: noNegative('score') },
   'kart-race-online': { serverRun: true, list: 'world.karts', score: '-p.place', end: 'end', rule: 'each kart gets a distinct finishing place', ref: 'https://www.mariowiki.com/Item_Box', inv: `ph==='end'?(()=>{const pl=P.filter(p=>p.bot).map(p=>p.place).sort((a,b)=>a-b);return new Set(pl).size===pl.length?'':'dup places '+pl})():''` },
-  'king-of-the-hill': { serverRun: true, rule: 'ring points split by everyone inside; never negative', ref: 'https://en.wikipedia.org/wiki/King_of_the_Hill_(game)', inv: noNegative('pts') },
+  'king-of-the-hill': { serverRun: true, rule: 'ring holds half the knights; points split by everyone inside; never negative', ref: 'https://en.wikipedia.org/wiki/King_of_the_Hill_(game)', inv: noNegative('pts') },
   'lava-rise-climb': { serverRun: true, score: '-p.place', rule: 'final places are exactly 1..N', ref: 'https://en.wikipedia.org/wiki/King_of_the_Hill_(game)', inv: `ph==='final'?${placesAre1toN}:''` },
   'light-cycle-arena': { serverRun: true, edge: 1.5, rule: 'last cycle riding ends the round', ref: 'https://ossblog.org/armagetron-advanced-tron-clone-3d', inv: lastStandingEndsRound('round') },
   'lucky-low': { serverRun: true,

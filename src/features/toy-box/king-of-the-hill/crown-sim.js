@@ -6,25 +6,38 @@ import { shuffleInPlace } from '../common/seat-shuffle.js';
 import { createNameSync } from '../common/snapshot-names.js';
 
 export const STEP = 1 / 60;
+// ZONE_R = hilltop radius (the scoring ring sits on it, sized by zoneRadius)
 export const R_ISLE = 22, ZONE_R = 4.2, WIN_PTS = 60, SPEED = 7.2;
 // ring spots: summit in the middle, six hilltops around it
 export const ZONES = [[0, 0], ...Array.from({ length: 6 }, (_, k) => { const a = (k / 6) * Math.PI * 2 + 0.5; return [Math.cos(a) * 12.5, Math.sin(a) * 12.5]; })];
 const MATCH_T = 150, HOP_T = 18, PR = 0.78, MAX_PLAYERS = 14, ATTRACT_BOTS = 8;
 const OVERTIME = 15; // s added once when the lead is tied at time-up
+// ring radius that holds n knights (centres inside, packed edge to edge) = PR × (circle-packing ratio − 1); index = n
+const PACK_R = [0, 0, 1, 1.1547, 1.4142, 1.7013, 2, 2, 2.3048].map((k) => k * PR);
+const MIN_ZONE_R = PR * 0.9; // smaller hides the ring under its one holder
+const ZONE_EASE = 2; // 1/s: ring grows / shrinks smoothly when knights join or leave
 const BOT_NAMES = ['Sir Bonk', 'Dame Wobble', 'Lancelot', 'Gawain', 'Percy', 'Morgana', 'Tristan', 'Bedivere', 'Galahad', 'Elaine', 'Kay', 'Mordred', 'Isolde', 'Merlin'];
 const BOT_COLORS = ['#9b5de5', '#00bbf9', '#00f5d4', '#f15bb5', '#fee440', '#8ac926', '#ff924c', '#6a4c93', '#e76f51', '#2a9d8f', '#b5179e', '#577590', '#ef476f', '#06d6a0'];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const f2 = (v) => Math.round(v * 100) / 100;
 const rng = Math.random;
 
+/** Scoring ring radius for `count` knights: holds half of them (at least 1), so the rest must shove their way in. */
+export function zoneRadius(count) {
+  let fits = clamp(Math.floor(count / 2), 1, PACK_R.length - 2);
+  if (PACK_R[fits + 1] === PACK_R[fits]) fits--; // 7 pack as tight as 6 (hexagon + centre), so 6 alone can't be exact: hold 5
+  // halfway between the ring that holds `fits` and the one that holds one more
+  return Math.max(MIN_ZONE_R, (PACK_R[fits] + PACK_R[fits + 1]) / 2);
+}
+
 /** onEnd(): final standings timer ran out (host goes back to the lobby) */
 export function createCrownSim({ onEnd = () => {} } = {}) {
   const names = createNameSync();
   // Game > World
-  const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, zone: 0, next: 1, hopT: HOP_T, hold: 0, crowd: 0, players: new Map(), winner: null };
+  const world = { mode: 'attract', phase: 'count', t: 3, left: MATCH_T, zone: 0, next: 1, zoneR: zoneRadius(ATTRACT_BOTS), hopT: HOP_T, hold: 0, crowd: 0, players: new Map(), winner: null };
   let events = [], lastBeep = 0;
   function addPlayer(id, nick, color, bot) {
-    const p = { id, nick, color, bot, x: 0, y: 0, z: 0, vx: 0, vz: 0, vy: 0, face: 0, fall: 0, stun: 0, dashT: 0, dashCD: 0, mx: 0, mz: 0, dashSeq: 0, lastDash: 0, pts: 0, falls: 0, skill: 0.6 + rng() * 0.35, wander: rng() * 6, lastWhole: 0 };
+    const p = { id, nick, color, bot, x: 0, y: 0, z: 0, vx: 0, vz: 0, vy: 0, face: 0, fall: 0, stun: 0, dashT: 0, dashCD: 0, mx: 0, mz: 0, dashSeq: 0, lastDash: 0, pts: 0, falls: 0, skill: 0.6 + rng() * 0.35, lastWhole: 0 };
     world.players.set(id, p);
     return p;
   }
@@ -38,7 +51,7 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
     const ps = [...world.players.values()], off = rng() * Math.PI * 2, zone = Math.floor(rng() * ZONES.length);
     shuffleInPlace(ps, rng);
     ps.forEach((p, k) => { edgeSpawn(p, off + (k / ps.length) * Math.PI * 2); p.pts = 0; p.falls = 0; p.lastWhole = 0; });
-    Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, zone, next: pickNext(zone), hopT: HOP_T, hold: 0, crowd: 0, winner: null });
+    Object.assign(world, { phase: 'count', t: world.mode === 'attract' ? 1.5 : 3.5, left: world.mode === 'attract' ? 60 : MATCH_T, zone, next: pickNext(zone), zoneR: zoneRadius(ps.length), hopT: HOP_T, hold: 0, crowd: 0, winner: null });
   }
 
   // Run engine > movement, shove dash, island edge falls + respawn
@@ -91,14 +104,14 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
     }
   }
 
-  // Run engine > bots: walk to the ring, shove rivals out of it, stay off the cliff edge
-  function botThink(p, dt) {
+  // Run engine > bots: walk to the ring centre, shove rivals away from it, stay off the cliff edge
+  function botThink(p) {
     if (p.fall) return;
     const [zx, zz] = ZONES[world.zone], ps = [...world.players.values()];
     let tx = zx - p.x, tz = zz - p.z;
     const dz = Math.hypot(tx, tz);
-    const rivals = ps.filter((q) => q !== p && !q.fall && Math.hypot(q.x - zx, q.z - zz) < ZONE_R + 2);
-    if (dz < ZONE_R + 3 && rivals.length) {
+    const rivals = ps.filter((q) => q !== p && !q.fall && Math.hypot(q.x - zx, q.z - zz) < world.zoneR + 2);
+    if (dz < world.zoneR + 3 && rivals.length) {
       let best = null, bd = Infinity;
       for (const q of rivals) { const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; } }
       // line up on the far side of the rival so the shove points outward from the ring center
@@ -106,9 +119,6 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
       const ax = best.x - (ox / ol) * 1.2, az = best.z - (oz / ol) * 1.2;
       tx = (bd > 2.6 ? ax : best.x) - p.x; tz = (bd > 2.6 ? az : best.z) - p.z;
       if (bd < 3.4 && p.dashCD <= 0 && rng() < p.skill * 0.12) p.dashSeq++;
-    } else if (dz < ZONE_R - 1.5) {
-      p.wander += dt * 1.3;
-      tx = Math.cos(p.wander) * 0.4; tz = Math.sin(p.wander) * 0.4;
     }
     const r = Math.hypot(p.x, p.z);
     if (r > R_ISLE - 4) { tx -= (p.x / r) * (r - (R_ISLE - 4)) * 1.5; tz -= (p.z / r) * (r - (R_ISLE - 4)) * 1.5; }
@@ -126,7 +136,7 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
     } else if (world.phase === 'play') {
       world.left -= dt; world.hopT -= dt;
       const [zx, zz] = ZONES[world.zone];
-      const inside = ps.filter((p) => !p.fall && Math.hypot(p.x - zx, p.z - zz) < ZONE_R);
+      const inside = ps.filter((p) => !p.fall && Math.hypot(p.x - zx, p.z - zz) < world.zoneR);
       world.hold = inside.length === 1 ? inside[0].id : 0;
       world.crowd = inside.length;
       // 1 pt/s shared by everyone in the ring: alone scores full rate, a crowd splits it
@@ -188,9 +198,10 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
   // Run engine > one fixed step for every knight
   function step() {
     const ps = [...world.players.values()];
-    for (const p of ps) if (p.bot) botThink(p, STEP);
+    for (const p of ps) if (p.bot) botThink(p);
     for (const p of ps) stepPlayer(p, STEP);
     bump(ps);
+    world.zoneR += (zoneRadius(ps.length) - world.zoneR) * Math.min(1, STEP * ZONE_EASE);
     phases(STEP);
   }
   // Multiplayer > snapshot (JSON): one row per knight, events since the last one
@@ -198,7 +209,7 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
   function snapshot() {
     const ps = [...world.players.values()];
     const snap = names.stamp({
-      g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), z: world.zone, nz: world.next, ht: f2(world.hopT), h: world.hold, n: world.crowd, win: world.winner,
+      g: 's', ph: world.phase, t: f2(world.t), lf: f2(world.left), z: world.zone, nz: world.next, zr: f2(world.zoneR), ht: f2(world.hopT), h: world.hold, n: world.crowd, win: world.winner,
       P: ps.map((p) => [p.id, f2(p.x), f2(p.y), f2(p.z), f2(p.vx), f2(p.vz), f2(p.face), knightFlags(p), f2(p.pts), p.falls]),
     }, ps);
     if (events.length) snap.ev = events;
