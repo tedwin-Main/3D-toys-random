@@ -43,7 +43,7 @@ test('405 on GET, 400 on bad json or invalid body', async () => {
 
 test('413 on oversized body', async () => {
   const route = createFeedbackRoute({ token: 't', repo: 'o/r', toys: TOYS, fetch: stubFetch().fetch });
-  assert.equal((await post(route, { ...BODY, message: 'x'.repeat(9000) })).status, 413);
+  assert.equal((await post(route, { ...BODY, message: 'x'.repeat(13000) })).status, 413);
 });
 
 test('files issue with token, labels, toy title', async () => {
@@ -91,4 +91,24 @@ test('rate limiter frees slots after window', () => {
   assert.equal(limiter.allow('a'), false);
   t = 1001;
   assert.equal(limiter.allow('a'), true);
+});
+
+test('key log rides in its own fenced section, trimmed, fence-proof', async () => {
+  const { fetch, calls } = stubFetch();
+  const route = createFeedbackRoute({ token: 't', repo: 'o/r', toys: TOYS, fetch });
+  const keys = 'toy: drift-kart-racing · layout: w a s d\n    812 down   KeyA "a"\n```\n@octocat';
+  assert.equal((await post(route, { ...BODY, device: { ua: 'UA', keys: keys + 'x'.repeat(3000) } })).status, 201);
+  const { body } = JSON.parse(calls[0].init.body);
+  const section = body.slice(body.indexOf('<summary>Recent game keys</summary>'));
+  assert.match(section, /```text\ntoy: drift-kart-racing · layout: w a s d\n {4}812 down {3}KeyA "a"\n'''\n@octocat/);
+  assert.equal((section.match(/```/g) ?? []).length, 2, 'one fence, opened and closed');
+  assert.ok(section.length < 1800, 'keys capped');
+  assert.doesNotMatch(body.slice(0, body.indexOf('Recent game keys')), /\| keys \|/, 'not in device table');
+});
+
+test('no key section when the player never played a game', async () => {
+  const { fetch, calls } = stubFetch();
+  const route = createFeedbackRoute({ token: 't', repo: 'o/r', toys: TOYS, fetch });
+  await post(route, { ...BODY, device: { ua: 'UA', keys: '' } });
+  assert.doesNotMatch(JSON.parse(calls[0].init.body).body, /Recent game keys/);
 });

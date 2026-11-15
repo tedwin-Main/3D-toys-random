@@ -2,7 +2,7 @@
 
 import { GENERAL_TOY, buildIssue, validateFeedback } from './feedback-issue.js';
 
-const MAX_BODY_BYTES = 8 * 1024;
+const MAX_BODY_BYTES = 12 * 1024; // 2000-char message in CJK (~6 KB) + key log + device facts
 const MINUTE = 60_000;
 const WINDOWS = [
   { ms: 10 * MINUTE, max: 3 },

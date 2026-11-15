@@ -13,7 +13,7 @@ test('accepts valid feedback, trims text, keeps known device keys only', () => {
   assert.equal(r.spam, false);
   assert.equal(r.data.message, 'hi');
   assert.equal(r.data.name, 'Ted');
-  assert.deepEqual(Object.keys(r.data.device), ['ua', 'screen', 'viewport', 'touch', 'lang']);
+  assert.deepEqual(Object.keys(r.data.device), ['ua', 'screen', 'viewport', 'touch', 'lang', 'keys']);
 });
 
 test('accepts general toy', () => {

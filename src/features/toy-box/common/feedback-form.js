@@ -1,5 +1,7 @@
 // Mounts the Toy Box feedback dialog: stars, category, toy picker, message, posts to /3d-toys/feedback.
 
+import { readKeyReport } from './key-diagnostics.js';
+
 const CATEGORIES = [['bug', '🐞 Bug'], ['idea', '💡 Idea'], ['praise', '🎉 Praise'], ['other', '💬 Other']];
 const MAX_MESSAGE = 2000;
 const TOAST_MS = 3000;
@@ -75,6 +77,8 @@ function deviceInfo() {
     viewport: `${innerWidth}x${innerHeight}`,
     touch: String(navigator.maxTouchPoints > 0),
     lang: navigator.language,
+    // last game's key events: tells "key never reached the page" from "page got it, game ignored it"
+    keys: readKeyReport(),
   };
 }
 

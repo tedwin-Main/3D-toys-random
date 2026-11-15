@@ -3,7 +3,9 @@
 export const CATEGORIES = { bug: 'Bug', idea: 'Idea', praise: 'Praise', other: 'Other' };
 const CATEGORY_LABELS = { bug: 'bug', idea: 'enhancement', praise: 'praise' };
 export const GENERAL_TOY = 'general';
-const LIMITS = { message: 2000, name: 60, email: 120, device: 300 };
+const LIMITS = { message: 2000, name: 60, email: 120 };
+// device facts from the browser; keys = recent game key log, one event per line
+const DEVICE_LIMITS = { ua: 300, screen: 300, viewport: 300, touch: 300, lang: 300, keys: 1600 };
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const text = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -31,7 +33,7 @@ export function validateFeedback(body, toyDirs) {
       message,
       name: text(body.name, LIMITS.name),
       email,
-      device: Object.fromEntries(['ua', 'screen', 'viewport', 'touch', 'lang'].map((k) => [k, text(String(device[k] ?? ''), LIMITS.device)])),
+      device: Object.fromEntries(Object.entries(DEVICE_LIMITS).map(([k, max]) => [k, text(String(device[k] ?? ''), max)])),
     },
   };
 }
@@ -43,6 +45,13 @@ function escapeMarkdown(s) {
 const escapeCell = (s) => escapeMarkdown(s).replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
 const stars = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
 const quote = (s) => escapeMarkdown(s).split('\n').map((line) => `> ${line}`).join('\n');
+// backticks dropped so the text can't close its code fence; mentions and HTML are inert inside one
+const fenced = (s) => ['```text', s.replace(/`/g, "'"), '```'].join('\n');
+
+function keysSection(keys) {
+  if (!keys) return [];
+  return ['<details><summary>Recent game keys</summary>', '', fenced(keys), '', '</details>', ''];
+}
 
 // Feedback > issue: title, markdown body, labels
 export function buildIssue(data, toyTitle) {
@@ -55,7 +64,8 @@ export function buildIssue(data, toyTitle) {
     ['Name', data.name || '_anonymous_'],
     ['Contact', data.email || '_none_'],
   ];
-  const deviceRows = Object.entries(data.device).filter(([, v]) => v).map(([k, v]) => `| ${k} | ${escapeCell(v)} |`);
+  const { keys, ...device } = data.device;
+  const deviceRows = Object.entries(device).filter(([, v]) => v).map(([k, v]) => `| ${k} | ${escapeCell(v)} |`);
   const body = [
     '| Field | Value |',
     '| --- | --- |',
@@ -72,6 +82,7 @@ export function buildIssue(data, toyTitle) {
     '',
     '</details>',
     '',
+    ...keysSection(keys),
     '_Sent from the 3D Toy Box feedback form._',
   ].join('\n');
   const labels = ['feedback', CATEGORY_LABELS[data.category]].filter(Boolean);

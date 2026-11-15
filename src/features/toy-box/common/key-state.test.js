@@ -22,7 +22,7 @@ test('keyId: non-letters fall back to physical code', () => {
 });
 
 test('trackKeys: hold, release, blur, ignore typing', () => {
-  const t = fakeWindow(), keys = trackKeys({}, t);
+  const t = fakeWindow(), keys = trackKeys({}, t, null);
   t.dispatch(ev('keydown', 'KeyQ', 'a'));
   assert.equal(keys.KeyA, true);
   t.dispatch(ev('keyup', 'KeyQ', 'å')); // Option pressed mid-hold changes key text
@@ -32,4 +32,16 @@ test('trackKeys: hold, release, blur, ignore typing', () => {
   assert.equal(keys.KeyW, false);
   t.dispatch(ev('keydown', 'KeyD', 'd', 'INPUT'));
   assert.equal(keys.KeyD, undefined);
+});
+
+test('trackKeys: logs first press, release and blur; typing stays private; repeats skipped', () => {
+  const t = fakeWindow(), seen = [];
+  trackKeys({}, t, { record: (kind, e) => seen.push([kind, e?.code]) });
+  t.dispatch(ev('keydown', 'KeyA', 'a'));
+  t.dispatch({ ...ev('keydown', 'KeyA', 'a'), repeat: true });
+  t.dispatch(ev('keyup', 'KeyA', 'a'));
+  t.dispatch(ev('keydown', 'KeyD', 'd', 'INPUT'));
+  t.dispatch(ev('keyup', 'KeyD', 'd', 'INPUT'));
+  t.dispatch({ type: 'blur' });
+  assert.deepEqual(seen, [['down', 'KeyA'], ['up', 'KeyA'], ['typing', 'KeyD'], ['blur', undefined]]);
 });
