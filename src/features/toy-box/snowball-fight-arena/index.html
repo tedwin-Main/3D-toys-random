@@ -55,6 +55,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { createSnowballSim, STEP, R_ARENA, WALLS, WALL_H, wallH, SPEED, G, MAX_AMMO, CD, RANGE, MATCH, HITS, FREEZE_T } from './snowball-sim.js';
@@ -259,6 +260,8 @@ const lobby = createLobby({
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: world.phase, players: world.players }), confirmMs: () => serverMatch.stats.confirmMs });
 
 // Multiplayer > Net: guests send move + aim + throw queue (seq numbered); everything in a match comes from the relay server
 function onData(d, from) {

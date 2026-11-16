@@ -52,6 +52,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createSnapPacing } from '../common/snap-pacing.js';
@@ -184,7 +185,6 @@ const sfx = {
 // Game > World: rules run in light-cycles-sim.js; this page steps it for the attract show and draws the relay server's match
 const sim = createCycleSim();
 const world = sim.world;
-if (/[?&]debug\b/.test(location.search)) window.__lightCycles = { world, grid: sim.grid };
 
 // Multiplayer > Lobby
 const lobby = createLobby({
@@ -215,6 +215,8 @@ const lobby = createLobby({
   },
 });
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: world.phase, players: world.players, extra: { round: world.round } }), confirmMs: () => serverMatch.stats.confirmMs });
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 

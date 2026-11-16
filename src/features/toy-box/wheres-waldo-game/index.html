@@ -92,6 +92,7 @@
 
 <script type="module">
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { SERVER_PEER } from '../common/relay-wire.js';
 import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { makeRng, WORLD_W, WORLD_H, VIEW_W, VIEW_H, SPRITE_W, SPRITE_H, clampCamera, SKIN, HAIR, INK, WALDO, THEME_IDS, THEMES, getTheme, makeTargetLook, generateScene, stampTarget } from './waldo-scene.js';
@@ -1735,6 +1736,8 @@ const lobby = createLobby({
   onLobby() { serverMatch.stop(); attract(); },
 });
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: ui.view?.phase, players: ui.view?.players }), confirmMs: () => serverMatch.stats.confirmMs });
 
 syncMute();
 attract();

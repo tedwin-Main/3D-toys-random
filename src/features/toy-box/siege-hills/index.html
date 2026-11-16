@@ -51,6 +51,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createTurnSync } from '../common/turn-sync.js';
 import { createServerMatchClient } from '../common/server-run/server-match-client.js';
@@ -250,6 +251,8 @@ const lobby = createLobby({
   onLobby() { serverMatch.stop(); started = false; showHud(false); big(''); startAttract(); },
 });
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: S.ph, players: S.P }), confirmMs: () => serverMatch.stats.confirmMs });
 function showHud(on) {
   ['info', 'board'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
   ['top', 'wind'].forEach((id) => (document.getElementById(id).style.display = on ? 'flex' : 'none'));

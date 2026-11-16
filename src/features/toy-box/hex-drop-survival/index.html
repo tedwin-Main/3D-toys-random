@@ -49,6 +49,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { createHexSim, STEP, S, LAYERS, PER_FLOOR, OUT_Y, FALL_DELAY, ROUNDS, SPEED, GRAV } from './hex-sim.js';
@@ -196,6 +197,8 @@ const lobby = createLobby({
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: world.phase, players: world.players, extra: { round: world.round } }), confirmMs: () => serverMatch.stats.confirmMs });
 
 // Multiplayer > Net: everything in a match comes from the relay server (bean rows, triggered tiles, tile keyframes)
 function onData(d, from) {

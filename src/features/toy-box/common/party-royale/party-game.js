@@ -1,6 +1,7 @@
 // Boots a party royale page: lobby (up to 32 beans), attract mode, guest loop against the relay-run host, HUD and show flow.
 
 import { createLobby } from '../room-lobby.js';
+import { exposeGameDebug } from '../debug-probe.js';
 import { startTicker } from '../room-client.js';
 import { IS_PREVIEW, isWarming, previewSeconds } from '../preview-mode.js';
 import { INTRO, ACTIVE, QUALIFIED } from './round-sim.js';
@@ -101,6 +102,13 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
       if (isHost()) lobby.room.send({ g: 'stop' }, { to: SERVER_PEER });
       hud.big(''); hud.results(null); startAttract();
     },
+  });
+
+  // Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+  exposeGameDebug({
+    lobby,
+    read: () => { const sim = viewSim(); return { phase: sim?.phase, players: sim?.list, extra: { mode: game.mode, round: game.lastMsg?.id ?? roundId, keep: sim?.keep } }; },
+    confirmMs: () => game.guest?.stats.confirmMs,
   });
 
   function joinRound(msg) {

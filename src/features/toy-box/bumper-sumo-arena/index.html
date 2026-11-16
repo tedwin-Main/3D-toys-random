@@ -43,6 +43,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createServerMatchClient } from '../common/server-run/server-match-client.js';
 import { createSumoSim, STEP, R0 } from './sumo-sim.js';
@@ -265,6 +266,8 @@ function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.r
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: world.phase, players: world.players, extra: { ring: world.ring, round: world.round } }), confirmMs: () => serverMatch.stats.confirmMs });
 
 // Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {

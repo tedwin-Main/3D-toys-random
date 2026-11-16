@@ -48,6 +48,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { createGameAudio } from '../common/game-audio.js';
 import { keyId, trackKeys } from '../common/key-state.js';
 import { SERVER_PEER } from '../common/relay-wire.js';
@@ -241,6 +242,8 @@ const lobby = createLobby({
   },
 });
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: state.mode, players: [], extra: { blocks: board.cells.size, placed: Object.fromEntries(board.placed) } }), confirmMs: () => serverMatch.stats.confirmMs });
 const toServer = (data) => lobby.room?.send(data, { to: SERVER_PEER });
 function syncTop() { const h = !!lobby.room?.isHost; ['lobbyBtn', 'clearBtn', 'saveBtn', 'loadBtn'].forEach((id) => (document.getElementById(id).style.display = h ? '' : 'none')); }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();

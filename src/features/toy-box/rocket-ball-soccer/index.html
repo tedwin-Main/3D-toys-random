@@ -48,6 +48,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { createLobby } from '../common/room-lobby.js';
+import { exposeGameDebug } from '../common/debug-probe.js';
 import { startTicker } from '../common/room-client.js';
 import { createNameSync } from '../common/snapshot-names.js';
 import { createTurboSim, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, TEAM } from './turbo-sim.js';
@@ -291,6 +292,8 @@ const lobby = createLobby({
 function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
 document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
 const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: world.phase, players: world.players, extra: { ball: world.ball, score: world.score, clock: world.clock } }), confirmMs: () => serverMatch.stats.confirmMs });
 
 // Multiplayer > Net: everything in a match comes from the relay server
 function onData(d, from) {
