@@ -47,17 +47,17 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createCrownSim, STEP, R_ISLE, ZONE_R, ZONES, WIN_PTS, SPEED } from './crown-sim.js';
-import { createNameSync } from '../common/snapshot-names.js';
-import { createSnapPacing } from '../common/snap-pacing.js';
-import { createPrediction } from '../common/own-prediction.js';
-import { createTouchPad } from '../common/touch-joystick.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { trackKeys } from '../common/key-state.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createCrownSim, STEP, R_ISLE, ZONE_R, ZONES, WIN_PTS, SPEED } from './crown-sim.ts';
+import { createNameSync } from '../common/snapshot-names.ts';
+import { createSnapPacing } from '../common/snap-pacing.ts';
+import { createPrediction } from '../common/own-prediction.ts';
+import { createTouchPad } from '../common/touch-joystick.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { trackKeys } from '../common/key-state.ts';
 
 // Scene > Renderer, sky, floating grass island, cliffs, sea, hill mounds under each ring spot
 const renderer = new THREE.WebGLRenderer({ antialias: true });

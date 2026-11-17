@@ -1,0 +1,18 @@
+{
+  // Loose on purpose: 3d-toys is ported JS (browser + Node); strict typing is opt-in per file.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

@@ -25,7 +25,7 @@ npm run capture # studio posters + QA (Playwright, local only)
 
 Offline tools (local only):
 
-- Textures: `src/features/texture-generator/.venv/bin/python src/features/texture-generator/make-textures.py`
+- Textures: `node src/features/texture-generator/make-textures.ts [outDir]` (default `src/media/images`)
 - Video, Instagram reels, Remotion promos, Blender turntables: moved to [Instagram_Reels/3d-toys-reels](../Instagram_Reels/3d-toys-reels)
 
 ## Deploy

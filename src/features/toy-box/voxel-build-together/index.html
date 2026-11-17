@@ -47,13 +47,13 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { keyId, trackKeys } from '../common/key-state.js';
-import { SERVER_PEER } from '../common/relay-wire.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { GX, GZ, MAX_BLOCKS, OPS_PER_MESSAGE, unkey, inBounds, isValidOp, createBuildBoard } from './build-board.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { keyId, trackKeys } from '../common/key-state.ts';
+import { SERVER_PEER } from '../common/relay-wire.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { GX, GZ, MAX_BLOCKS, OPS_PER_MESSAGE, unkey, inBounds, isValidOp, createBuildBoard } from './build-board.ts';
 
 // Scene > Renderer, camera, sky, lights, grass plate with grid
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: false });

@@ -47,16 +47,16 @@
 <script type="module">
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createNameSync } from '../common/snapshot-names.js';
-import { createTurboSim, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, TEAM } from './turbo-sim.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createSnapPacing } from '../common/snap-pacing.js';
-import { createPrediction, blendAngle } from '../common/own-prediction.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { keyId, trackKeys } from '../common/key-state.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createNameSync } from '../common/snapshot-names.ts';
+import { createTurboSim, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, TEAM } from './turbo-sim.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createSnapPacing } from '../common/snap-pacing.ts';
+import { createPrediction, blendAngle } from '../common/own-prediction.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { keyId, trackKeys } from '../common/key-state.ts';
 
 // Scene > Renderer, night stadium, floodlights
 const renderer = new THREE.WebGLRenderer({ antialias: true });

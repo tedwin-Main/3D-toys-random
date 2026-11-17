@@ -61,13 +61,13 @@
 </script>
 <script type="module">
 import * as THREE from 'three';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createTurnSync } from '../common/turn-sync.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createAuctionGame, START_COINS, scoreOf } from './auction-rules.js';
-import { createGameAudio } from '../common/game-audio.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createTurnSync } from '../common/turn-sync.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createAuctionGame, START_COINS, scoreOf } from './auction-rules.ts';
+import { createGameAudio } from '../common/game-audio.ts';
 
 // Scene > Renderer, camera, velvet hall, stage with pedestal under a spotlight
 const renderer = new THREE.WebGLRenderer({ antialias: true });

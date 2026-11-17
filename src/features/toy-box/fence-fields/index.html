@@ -45,13 +45,13 @@
 <script type="module">
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createTurnSync } from '../common/turn-sync.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createFenceGame, fieldGrid } from './fence-rules.js';
-import { createGameAudio } from '../common/game-audio.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createTurnSync } from '../common/turn-sync.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createFenceGame, fieldGrid } from './fence-rules.ts';
+import { createGameAudio } from '../common/game-audio.ts';
 
 // Scene > Renderer, camera, sky, sun, meadow
 const renderer = new THREE.WebGLRenderer({ antialias: true });

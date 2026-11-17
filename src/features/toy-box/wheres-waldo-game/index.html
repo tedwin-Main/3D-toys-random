@@ -91,12 +91,12 @@
 <div class="final" id="final"><div class="final-card"><h1>Final</h1><ol class="standings" id="standings"></ol><div class="final-btns" id="finalBtns"><button id="toLobby">Lobby</button><button class="primary" id="again">Play again</button></div><p class="hint" id="finalWait">Waiting for the host…</p></div></div>
 
 <script type="module">
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { SERVER_PEER } from '../common/relay-wire.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { makeRng, WORLD_W, WORLD_H, VIEW_W, VIEW_H, SPRITE_W, SPRITE_H, clampCamera, SKIN, HAIR, INK, WALDO, THEME_IDS, THEMES, getTheme, makeTargetLook, generateScene, stampTarget } from './waldo-scene.js';
-import { ROUND_MS, WRONG_GRACE, validatePlacement } from './waldo-rounds.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { SERVER_PEER } from '../common/relay-wire.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { makeRng, WORLD_W, WORLD_H, VIEW_W, VIEW_H, SPRITE_W, SPRITE_H, clampCamera, SKIN, HAIR, INK, WALDO, THEME_IDS, THEMES, getTheme, makeTargetLook, generateScene, stampTarget } from './waldo-scene.ts';
+import { ROUND_MS, WRONG_GRACE, validatePlacement } from './waldo-rounds.ts';
 
 // Core > draw-sprites: procedural people, props, ground, night wash
 function hexToRgb(hex) {

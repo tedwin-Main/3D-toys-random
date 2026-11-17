@@ -1,6 +1,5 @@
 node_modules
 .DS_Store
 .env*
-src/features/texture-generator/.venv/
 src/features/poster-capture/.capture/
 .install-*.log

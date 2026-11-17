@@ -63,16 +63,16 @@
 <script type="module">
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createNameSync } from '../common/snapshot-names.js';
-import { createSnapPacing } from '../common/snap-pacing.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { keyId } from '../common/key-state.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { HOLES, T, R, SLOPE, solid, clamp, millAngle, tileAt, parseHole } from './golf-course.js';
-import { createGolfSim, STEP, totalStrokes as score } from './mini-golf-sim.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createNameSync } from '../common/snapshot-names.ts';
+import { createSnapPacing } from '../common/snap-pacing.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { keyId } from '../common/key-state.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { HOLES, T, R, SLOPE, solid, clamp, millAngle, tileAt, parseHole } from './golf-course.ts';
+import { createGolfSim, STEP, totalStrokes as score } from './mini-golf-sim.ts';
 
 // Scene > Renderer, camera, sky, lights, sea far below the floating holes
 const renderer = new THREE.WebGLRenderer({ antialias: true });

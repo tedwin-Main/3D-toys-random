@@ -51,16 +51,16 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createNameSync } from '../common/snapshot-names.js';
-import { createSnapPacing } from '../common/snap-pacing.js';
-import { createTouchPad } from '../common/touch-joystick.js';
-import { keyId, trackKeys } from '../common/key-state.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createCycleSim, STEP, A, HALF, ROUNDS, SPEED, BOOST, DIRS, GRACE, cellOf, cellCenter } from './light-cycles-sim.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createNameSync } from '../common/snapshot-names.ts';
+import { createSnapPacing } from '../common/snap-pacing.ts';
+import { createTouchPad } from '../common/touch-joystick.ts';
+import { keyId, trackKeys } from '../common/key-state.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createCycleSim, STEP, A, HALF, ROUNDS, SPEED, BOOST, DIRS, GRACE, cellOf, cellCenter } from './light-cycles-sim.ts';
 
 // Scene > Renderer + bloom, neon grid floor, arena walls
 const renderer = new THREE.WebGLRenderer({ antialias: true });

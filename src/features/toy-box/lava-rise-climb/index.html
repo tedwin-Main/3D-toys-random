@@ -43,16 +43,16 @@
 <script type="module">
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { createLobby } from '../common/room-lobby.js';
-import { exposeGameDebug } from '../common/debug-probe.js';
-import { startTicker } from '../common/room-client.js';
-import { createServerMatchClient } from '../common/server-run/server-match-client.js';
-import { createLavaSim, buildTowerLayout, squash, STEP, PILLAR_R, PH, G, LAVA_DELAY, lavaRate, platX, platZ } from './lava-sim.js';
-import { createNameSync } from '../common/snapshot-names.js';
-import { createSnapPacing } from '../common/snap-pacing.js';
-import { createPrediction } from '../common/own-prediction.js';
-import { createGameAudio } from '../common/game-audio.js';
-import { trackKeys } from '../common/key-state.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { createLavaSim, buildTowerLayout, squash, STEP, PILLAR_R, PH, G, LAVA_DELAY, lavaRate, platX, platZ } from './lava-sim.ts';
+import { createNameSync } from '../common/snapshot-names.ts';
+import { createSnapPacing } from '../common/snap-pacing.ts';
+import { createPrediction } from '../common/own-prediction.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+import { trackKeys } from '../common/key-state.ts';
 
 // Scene > Renderer, hot sky, lava glow light
 const renderer = new THREE.WebGLRenderer({ antialias: true });
