@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Memphis Poster Maker</title>
+<meta name="category" content="aero" />
+<meta name="style" content="memphis" />
+<meta name="order" content="61" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="SVG, generative layout, seeded RNG, SVG patterns, Memphis design" />
+<meta name="description" content="A generator for 80s Memphis-style posters: loud flat colour blocks with hard offset shadows, squiggles, zigzags, dotted and striped fills, half circles, triangles and terrazzo confetti, all arranged around a chunky headline. Click the poster or press Space for a new layout, pick one of four palettes, and save the result as an SVG file. Hard because random shapes turn to mush fast: pieces are dealt onto a jittered grid so they spread out, each gets a pattern or flat fill from the palette with its shadow in a contrasting ink, and one seeded random stream drives everything so the same seed always rebuilds the same poster."/>
+<meta name="prompt" content="Make an 80s Memphis-design poster generator as one HTML file using SVG: a portrait poster filled with flat colour shapes that have hard offset black shadows (circles, half circles, triangles, rounded bars, squiggles, zigzags, rings), SVG pattern fills for dots, stripes and grid, terrazzo confetti scattered behind, and a chunky rotated headline. Deal shapes onto a jittered grid from a seeded random generator so layouts are spread out and reproducible, show the seed, reshuffle on click or Space, offer four palettes, let shapes bob gently, and add a button that downloads the poster as an SVG file." />
+<style>
+:root { --paper: #fdf6e3; --ink: #151515; }
+html, body { margin: 0; height: 100%; }
+body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #e9e2cf; background-image: radial-gradient(#d3cab2 1.5px, transparent 1.5px); background-size: 18px 18px; font: 700 13px/1 'Trebuchet MS', 'Segoe UI', sans-serif; color: var(--ink); overflow: hidden; }
+#poster { height: min(78vh, 118vw); aspect-ratio: 3 / 4; background: var(--paper); border: 4px solid var(--ink); box-shadow: 12px 12px 0 var(--ink); cursor: pointer; display: block; }
+.bob { animation: bob var(--period) ease-in-out var(--delay) infinite alternate; transform-box: fill-box; transform-origin: center; }
+@keyframes bob { from { transform: translate(0, 0) rotate(0deg); } to { transform: translate(var(--dx), var(--dy)) rotate(var(--turn)); } }
+#toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 0 12px; }
+#toolbar button { font: inherit; text-transform: uppercase; letter-spacing: 0.08em; padding: 9px 13px; border: 3px solid var(--ink); background: #fff; color: var(--ink); box-shadow: 4px 4px 0 var(--ink); cursor: pointer; }
+#toolbar button:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
+#swatches { display: flex; gap: 10px; }
+.swatch { width: 34px; height: 34px; padding: 0 !important; }
+.swatch.on { outline: 3px solid var(--ink); outline-offset: 3px; }
+#seed { font-family: 'Courier New', monospace; letter-spacing: 0.06em; }
+@media (prefers-reduced-motion: reduce) { .bob { animation: none; } }
+</style>
+</head>
+<body>
+<svg id="poster" viewBox="0 0 600 800" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Generated Memphis poster"></svg>
+<div id="toolbar">
+  <button id="shuffle" type="button">Shuffle</button>
+  <span id="swatches"></span>
+  <button id="save" type="button">Save SVG</button>
+  <span id="seed"></span>
+</div>
+<script type="module">
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const POSTER = { width: 600, height: 800 };
+const INK = '#151515';
+const SHADOW_OFFSET = 9;
+const PALETTES = [
+  { paper: '#fdf6e3', colours: ['#ff5c8a', '#ffd23f', '#29c7c1', '#5b5bd6', '#ff8a3d'] },
+  { paper: '#f4f1ff', colours: ['#ff3f8e', '#04e2b7', '#ffe600', '#7a4dff', '#ff7b54'] },
+  { paper: '#fff0f3', colours: ['#00a6a6', '#f49f0a', '#ef476f', '#3a86ff', '#bde0fe'] },
+  { paper: '#eafff5', colours: ['#f72585', '#4cc9f0', '#ffca3a', '#8ac926', '#6a4c93'] },
+];
+const HEADLINES = ['RADICAL', 'TOTALLY', 'GROOVE', 'FRESH', 'POP!', 'ZIGZAG', 'WOW', 'BOLD'];
+const GRID = { columns: 4, rows: 5 };
+
+// RNG: mulberry32, one stream per poster so seed rebuilds same layout
+function createRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), state | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const poster = document.getElementById('poster');
+const state = { seed: 1985, paletteIndex: 0 };
+let random = createRandom(state.seed);
+const between = (low, high) => low + random() * (high - low);
+const pick = (items) => items[Math.floor(random() * items.length)];
+
+function svgNode(tag, attributes = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  node.append(...children);
+  return node;
+}
+
+// Patterns: one dot, stripe, grid tile per palette colour
+function buildPatterns(colours) {
+  const defs = svgNode('defs');
+  colours.forEach((colour, index) => {
+    defs.append(
+      svgNode('pattern', { id: `dots-${index}`, width: 14, height: 14, patternUnits: 'userSpaceOnUse' }, [
+        svgNode('rect', { width: 14, height: 14, fill: colour }), svgNode('circle', { cx: 7, cy: 7, r: 2.6, fill: INK }),
+      ]),
+      svgNode('pattern', { id: `stripes-${index}`, width: 12, height: 12, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, [
+        svgNode('rect', { width: 12, height: 12, fill: colour }), svgNode('rect', { width: 5, height: 12, fill: INK }),
+      ]),
+      svgNode('pattern', { id: `grid-${index}`, width: 16, height: 16, patternUnits: 'userSpaceOnUse' }, [
+        svgNode('rect', { width: 16, height: 16, fill: colour }), svgNode('path', { d: 'M0 0H16M0 0V16', stroke: INK, 'stroke-width': 3, fill: 'none' }),
+      ]),
+    );
+  });
+  return defs;
+}
+
+function pickFill(colours) {
+  const index = Math.floor(random() * colours.length);
+  const kind = pick(['flat', 'flat', 'flat', 'dots', 'stripes', 'grid']);
+  return kind === 'flat' ? colours[index] : `url(#${kind}-${index})`;
+}
+
+function wavePath(length, amplitude, waves, sharp) {
+  const step = length / (waves * 2);
+  let path = `M${-length / 2} 0`;
+  for (let i = 0; i < waves * 2; i++) {
+    const x = -length / 2 + step * (i + 1);
+    const peak = i % 2 ? amplitude : -amplitude;
+    path += sharp ? ` L${x - step / 2} ${peak} L${x} 0` : ` Q${x - step / 2} ${peak * 2} ${x} 0`;
+  }
+  return path;
+}
+
+// Shapes: each returns geometry around origin; solid = filled, else stroked line
+const SHAPES = {
+  circle: (size) => ({ tag: 'circle', attributes: { r: size * 0.42 }, solid: true }),
+  halfCircle: (size) => ({ tag: 'path', attributes: { d: `M${-size / 2} 0A${size / 2} ${size / 2} 0 0 1 ${size / 2} 0Z` }, solid: true }),
+  triangle: (size) => ({ tag: 'path', attributes: { d: `M0 ${-size * 0.48}L${size * 0.5} ${size * 0.42}L${-size * 0.5} ${size * 0.42}Z` }, solid: true }),
+  bar: (size) => ({ tag: 'rect', attributes: { x: -size * 0.55, y: -size * 0.16, width: size * 1.1, height: size * 0.32, rx: size * 0.16 }, solid: true }),
+  block: (size) => ({ tag: 'rect', attributes: { x: -size * 0.4, y: -size * 0.4, width: size * 0.8, height: size * 0.8 }, solid: true }),
+  ring: (size) => ({ tag: 'circle', attributes: { r: size * 0.34, 'stroke-width': size * 0.14 }, solid: false }),
+  squiggle: (size) => ({ tag: 'path', attributes: { d: wavePath(size * 1.2, size * 0.13, 3, false), 'stroke-width': size * 0.1 }, solid: false }),
+  zigzag: (size) => ({ tag: 'path', attributes: { d: wavePath(size * 1.2, size * 0.2, 3, true), 'stroke-width': size * 0.09 }, solid: false }),
+};
+
+function drawShape(colours) {
+  const size = between(90, 170);
+  const { tag, attributes, solid } = SHAPES[pick(Object.keys(SHAPES))](size);
+  const paint = solid
+    ? { fill: pickFill(colours), stroke: INK, 'stroke-width': 4, 'stroke-linejoin': 'round' }
+    : { fill: 'none', stroke: pick(colours), 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  const shadowPaint = solid ? { fill: INK, stroke: INK, 'stroke-width': 4 } : { fill: 'none', stroke: INK, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+  const shadow = svgNode(tag, { ...attributes, ...shadowPaint, transform: `translate(${SHADOW_OFFSET} ${SHADOW_OFFSET})` });
+  return svgNode('g', { transform: `rotate(${Math.round(between(-40, 40))})` }, [shadow, svgNode(tag, { ...attributes, ...paint })]);
+}
+
+// Layout: jittered grid cells, shuffled, so shapes spread instead of clumping
+function dealCells(count) {
+  const cells = [];
+  for (let row = 0; row < GRID.rows; row++) for (let column = 0; column < GRID.columns; column++) cells.push({ column, row });
+  for (let i = cells.length - 1; i > 0; i--) {
+    const swap = Math.floor(random() * (i + 1));
+    [cells[i], cells[swap]] = [cells[swap], cells[i]];
+  }
+  const cellWidth = POSTER.width / GRID.columns;
+  const cellHeight = POSTER.height / GRID.rows;
+  return cells.slice(0, count).map(({ column, row }) => ({
+    x: (column + between(0.25, 0.75)) * cellWidth,
+    y: (row + between(0.25, 0.75)) * cellHeight,
+  }));
+}
+
+function bobbing(node) {
+  const wrapper = svgNode('g', { class: 'bob' }, [node]);
+  wrapper.style.setProperty('--dx', `${between(-8, 8).toFixed(1)}px`);
+  wrapper.style.setProperty('--dy', `${between(-10, 10).toFixed(1)}px`);
+  wrapper.style.setProperty('--turn', `${between(-6, 6).toFixed(1)}deg`);
+  wrapper.style.setProperty('--period', `${between(2.4, 5).toFixed(2)}s`);
+  wrapper.style.setProperty('--delay', `${-between(0, 4).toFixed(2)}s`);
+  return wrapper;
+}
+
+function drawConfetti(colours) {
+  const confetti = svgNode('g');
+  for (let i = 0; i < 70; i++) {
+    const width = between(6, 20);
+    confetti.append(svgNode('rect', {
+      x: between(0, POSTER.width), y: between(0, POSTER.height), width, height: between(4, 9), rx: 2,
+      fill: random() < 0.25 ? INK : pick(colours), transform: `rotate(${Math.round(between(0, 180))} ${POSTER.width / 2} ${POSTER.height / 2})`,
+    }));
+  }
+  return confetti;
+}
+
+function drawHeadline(colours) {
+  const word = pick(HEADLINES);
+  const fontSize = Math.min(150, 760 / word.length);
+  const text = { x: 0, y: 0, 'text-anchor': 'middle', 'dominant-baseline': 'middle', 'font-family': "'Arial Black', Impact, sans-serif", 'font-weight': 900, 'font-size': fontSize, 'stroke-linejoin': 'round' };
+  const shadow = svgNode('text', { ...text, fill: INK, stroke: INK, 'stroke-width': 10, transform: `translate(${SHADOW_OFFSET} ${SHADOW_OFFSET})` });
+  const face = svgNode('text', { ...text, fill: pick(colours), stroke: INK, 'stroke-width': 5, 'paint-order': 'stroke' });
+  shadow.textContent = face.textContent = word;
+  const y = between(POSTER.height * 0.3, POSTER.height * 0.7);
+  return svgNode('g', { transform: `translate(${POSTER.width / 2} ${y}) rotate(${Math.round(between(-12, 12))})` }, [shadow, face]);
+}
+
+function render() {
+  const { paper, colours } = PALETTES[state.paletteIndex];
+  random = createRandom(state.seed);
+  const shapes = dealCells(Math.round(between(11, 15))).map(({ x, y }) => svgNode('g', { transform: `translate(${x.toFixed(1)} ${y.toFixed(1)})` }, [bobbing(drawShape(colours))]));
+  poster.replaceChildren(
+    buildPatterns(colours),
+    svgNode('rect', { width: POSTER.width, height: POSTER.height, fill: paper }),
+    drawConfetti(colours),
+    ...shapes,
+    drawHeadline(colours),
+  );
+  document.getElementById('seed').textContent = `seed ${state.seed}`;
+  document.documentElement.style.setProperty('--paper', paper);
+}
+
+function shuffle() {
+  state.seed = Math.floor(Math.random() * 90000) + 10000;
+  render();
+}
+
+function buildSwatches() {
+  const buttons = PALETTES.map((palette, index) => {
+    const button = Object.assign(document.createElement('button'), { type: 'button', className: 'swatch', title: `Palette ${index + 1}` });
+    button.style.background = `conic-gradient(${palette.colours.map((colour, i) => `${colour} ${i * 72}deg ${(i + 1) * 72}deg`).join(', ')})`;
+    button.onclick = () => { state.paletteIndex = index; markSwatch(buttons); render(); };
+    return button;
+  });
+  document.getElementById('swatches').append(...buttons);
+  markSwatch(buttons);
+}
+const markSwatch = (buttons) => buttons.forEach((button, index) => button.classList.toggle('on', index === state.paletteIndex));
+
+function saveSvg() {
+  const copy = poster.cloneNode(true);
+  copy.removeAttribute('id');
+  copy.setAttribute('width', POSTER.width);
+  copy.setAttribute('height', POSTER.height);
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
+  Object.assign(document.createElement('a'), { href: url, download: `memphis-poster-${state.seed}.svg` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+poster.onclick = shuffle;
+document.getElementById('shuffle').onclick = shuffle;
+document.getElementById('save').onclick = saveSvg;
+addEventListener('keydown', (event) => { if (event.code === 'Space') { event.preventDefault(); shuffle(); } });
+buildSwatches();
+render();
+</script>
+</body>
+</html>

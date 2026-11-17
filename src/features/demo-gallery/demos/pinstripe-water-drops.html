@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pinstripe Water Drops</title>
+<meta name="category" content="aero" />
+<meta name="style" content="aqua" />
+<meta name="order" content="65" />
+<meta name="capture" content="4500" />
+<meta name="tags" content="Canvas 2D, refraction lens, droplet merging, gel buttons, pinstripes" />
+<meta name="description" content="The early-2000s liquid look: a pinstriped panel with candy gel buttons and a glossy scrollbar, seen through a sheet of glass that keeps fogging up with water. Tiny drops condense, swell, swallow their neighbours and then run down the glass leaving a beaded trail, and every drop works as a little lens that flips and magnifies the buttons behind it. Click to spray more water, or wipe the glass clean. Hard because each drop redraws a clipped, inverted, enlarged slice of the scene underneath, while dozens of drops grow, merge by combined area and slide at speeds that depend on their size."/>
+<meta name="prompt" content="Make an early-2000s liquid-interface scene in one HTML file with Canvas 2D: a pinstripe backdrop holding glossy gel pill buttons and a gel scrollbar, covered by glass where water droplets condense, grow, merge when they touch (conserving area), and slide down once heavy enough, leaving trails of small beads. Render each drop as a lens that shows the backdrop inverted and magnified, with a dark rim, soft drop shadow and a specular highlight. Clicking sprays a burst of drops, and a gel Wipe button clears the glass." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe6ee; }
+canvas { display: block; cursor: pointer; }
+#wipe { position: fixed; right: 20px; bottom: 20px; padding: 9px 22px; border-radius: 999px; border: 1px solid #2b6fc4; background: linear-gradient(#bfe2ff 0%, #5fb0ff 48%, #2a86ea 52%, #7fd0ff 100%); color: #06305e; font: 700 13px/1 'Lucida Grande', 'Segoe UI', sans-serif; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6); box-shadow: 0 2px 6px rgba(0, 40, 90, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8); cursor: pointer; }
+#wipe:active { filter: brightness(0.9); }
+</style>
+</head>
+<body>
+<canvas id="glass" aria-label="Glass panel with water droplets over gel buttons"></canvas>
+<button id="wipe" type="button">Wipe glass</button>
+<script type="module">
+const MAX_DROPS = 170;
+const SLIDE_RADIUS = 17;
+const LENS_ZOOM = 1.9;
+const GEL_COLOURS = [['#bfe2ff', '#5fb0ff', '#2a86ea', '#7fd0ff'], ['#ffd0d0', '#ff7a7a', '#e33b3b', '#ff9c8a'], ['#fff0b8', '#ffd24a', '#f0a81c', '#ffe27a'], ['#d2f5c4', '#7fdc5c', '#3fb52e', '#a6ec86'], ['#f1f3f6', '#c9ced6', '#a4abb6', '#d9dde3']];
+const GEL_LABELS = ['Open', 'Save', 'Burn', 'Sync', 'Share', 'Eject', 'Print', 'Tune'];
+
+const canvas = document.getElementById('glass');
+const ctx = canvas.getContext('2d');
+const backdrop = document.createElement('canvas');
+const view = { width: 0, height: 0, pixelRatio: 1 };
+let drops = [];
+
+// Backdrop: drawn once per resize; drops sample it as lens image
+function drawPinstripes(paint) {
+  paint.fillStyle = '#eef2f7';
+  paint.fillRect(0, 0, view.width, view.height);
+  paint.fillStyle = '#dde4ec';
+  for (let y = 0; y < view.height; y += 4) paint.fillRect(0, y, view.width, 2);
+}
+
+function drawGelPill(paint, x, y, width, height, colours, label) {
+  const gel = paint.createLinearGradient(0, y, 0, y + height);
+  gel.addColorStop(0, colours[0]);
+  gel.addColorStop(0.48, colours[1]);
+  gel.addColorStop(0.52, colours[2]);
+  gel.addColorStop(1, colours[3]);
+  paint.shadowColor = 'rgba(20, 40, 80, 0.35)';
+  paint.shadowBlur = 8;
+  paint.shadowOffsetY = 3;
+  paint.fillStyle = gel;
+  paint.beginPath();
+  paint.roundRect(x, y, width, height, height / 2);
+  paint.fill();
+  paint.shadowColor = 'transparent';
+  paint.fillStyle = 'rgba(255, 255, 255, 0.55)';
+  paint.beginPath();
+  paint.roundRect(x + height * 0.3, y + 2, width - height * 0.6, height * 0.36, height * 0.2);
+  paint.fill();
+  if (!label) return;
+  paint.fillStyle = 'rgba(10, 30, 60, 0.85)';
+  paint.font = `700 ${Math.round(height * 0.42)}px "Lucida Grande", "Segoe UI", sans-serif`;
+  paint.textAlign = 'center';
+  paint.textBaseline = 'middle';
+  paint.fillText(label, x + width / 2, y + height * 0.56);
+}
+
+function drawBackdrop() {
+  const paint = backdrop.getContext('2d');
+  paint.setTransform(view.pixelRatio, 0, 0, view.pixelRatio, 0, 0);
+  drawPinstripes(paint);
+  const columns = Math.max(2, Math.floor(view.width / 210));
+  const pillWidth = Math.min(170, (view.width - 120) / columns - 24);
+  const rows = Math.max(3, Math.floor(view.height / 96));
+  for (let row = 0; row < rows; row++) {
+    for (let column = 0; column < columns; column++) {
+      const index = row * columns + column;
+      const x = 50 + column * ((view.width - 130) / columns) + (row % 2) * 26;
+      drawGelPill(paint, x, 46 + row * ((view.height - 80) / rows), pillWidth, 46, GEL_COLOURS[index % GEL_COLOURS.length], GEL_LABELS[index % GEL_LABELS.length]);
+    }
+  }
+  paint.save();
+  paint.translate(view.width - 34, 40);
+  paint.rotate(Math.PI / 2);
+  drawGelPill(paint, 0, 0, view.height * 0.42, 18, GEL_COLOURS[0], '');
+  paint.restore();
+}
+
+const createDrop = (x, y, radius) => ({ x, y, radius, speed: 0, wobble: Math.random() * Math.PI * 2 });
+
+function condense() {
+  if (drops.length < MAX_DROPS && Math.random() < 0.5) drops.push(createDrop(Math.random() * view.width, Math.random() * view.height, 2 + Math.random() * 4));
+}
+
+function spray(x, y) {
+  for (let i = 0; i < 14; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const reach = Math.random() * 90;
+    drops.push(createDrop(x + Math.cos(angle) * reach, y + Math.sin(angle) * reach, 4 + Math.random() * 12));
+  }
+}
+
+// Motion: small drops cling and swell; heavy ones run and shed beads
+function moveDrop(drop, dt) {
+  drop.radius += dt * 0.35;
+  if (drop.radius < SLIDE_RADIUS) return;
+  drop.speed = Math.min(520, drop.speed + (drop.radius - SLIDE_RADIUS + 4) * 26 * dt);
+  drop.y += drop.speed * dt;
+  drop.x += Math.sin(drop.y * 0.045 + drop.wobble) * 22 * dt;
+  if (Math.random() < dt * 9 && drops.length < MAX_DROPS + 40) {
+    drops.push(createDrop(drop.x + (Math.random() - 0.5) * 5, drop.y - drop.radius, 1.5 + Math.random() * 2.5));
+    drop.radius *= 0.985;
+  }
+}
+
+// Merge: bigger drop absorbs smaller, radius from summed area
+function mergeTouchingDrops() {
+  drops.sort((a, b) => b.radius - a.radius);
+  for (let i = 0; i < drops.length; i++) {
+    const big = drops[i];
+    if (!big.radius) continue;
+    for (let j = i + 1; j < drops.length; j++) {
+      const small = drops[j];
+      if (!small.radius || Math.hypot(big.x - small.x, big.y - small.y) > big.radius + small.radius * 0.4) continue;
+      big.radius = Math.sqrt(big.radius ** 2 + small.radius ** 2);
+      small.radius = 0;
+    }
+  }
+  drops = drops.filter((drop) => drop.radius && drop.y - drop.radius < view.height);
+}
+
+function drawLens(drop) {
+  const { x, y, radius } = drop;
+  const stretch = 1 + Math.min(0.35, drop.speed / 900);
+  // shadow: plain offset ellipse; canvas shadowBlur per drop halves frame rate
+  ctx.fillStyle = 'rgba(20, 40, 70, 0.2)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + radius * 0.2, radius * 1.04, radius * stretch * 1.04, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius, radius * stretch, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#eef2f7';
+  ctx.fill();
+  ctx.clip();
+  // inverted, magnified slice of backdrop centred on drop; copies only patch lens can see
+  const span = radius * stretch;
+  const reach = span / LENS_ZOOM;
+  const scale = view.pixelRatio;
+  ctx.translate(x, y);
+  ctx.scale(-1, -1);
+  ctx.drawImage(backdrop, (x - reach) * scale, (y - reach) * scale, reach * 2 * scale, reach * 2 * scale, -span, -span, span * 2, span * 2);
+  ctx.restore();
+  const rim = ctx.createRadialGradient(x, y, radius * 0.45, x, y, radius * stretch);
+  rim.addColorStop(0, 'rgba(255, 255, 255, 0)');
+  rim.addColorStop(1, 'rgba(15, 45, 85, 0.5)');
+  ctx.fillStyle = rim;
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius, radius * stretch, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.beginPath();
+  ctx.ellipse(x - radius * 0.32, y - radius * 0.4, radius * 0.24, radius * 0.14, -0.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawGlass() {
+  ctx.drawImage(backdrop, 0, 0, view.width, view.height);
+  for (const drop of drops) drawLens(drop);
+  const sheen = ctx.createLinearGradient(0, 0, view.width, view.height);
+  sheen.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
+  sheen.addColorStop(0.35, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = sheen;
+  ctx.fillRect(0, 0, view.width, view.height);
+}
+
+function resize() {
+  view.width = innerWidth;
+  view.height = innerHeight;
+  view.pixelRatio = Math.min(devicePixelRatio, 2);
+  for (const surface of [canvas, backdrop]) {
+    surface.width = Math.round(view.width * view.pixelRatio);
+    surface.height = Math.round(view.height * view.pixelRatio);
+  }
+  canvas.style.width = `${view.width}px`;
+  canvas.style.height = `${view.height}px`;
+  ctx.setTransform(view.pixelRatio, 0, 0, view.pixelRatio, 0, 0);
+  drawBackdrop();
+}
+
+// First frame: glass already wet so poster and first look are not empty
+function seedDrops() {
+  for (let i = 0; i < 90; i++) drops.push(createDrop(Math.random() * view.width, Math.random() * view.height, 3 + Math.random() ** 2 * 20));
+}
+
+canvas.addEventListener('pointerdown', (event) => spray(event.clientX, event.clientY));
+document.getElementById('wipe').onclick = () => { drops = []; };
+addEventListener('resize', resize);
+resize();
+seedDrops();
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  condense();
+  for (const drop of drops) moveDrop(drop, dt);
+  mergeTouchingDrops();
+  drawGlass();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

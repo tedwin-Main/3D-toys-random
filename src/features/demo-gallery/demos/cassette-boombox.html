@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cassette Boombox</title>
+<meta name="category" content="aero" />
+<meta name="style" content="cassette" />
+<meta name="order" content="62" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="Canvas 2D, Web Audio, step sequencer, AnalyserNode, VU meters" />
+<meta name="description" content="An 80s boombox that really plays: press Play and a synth-pop loop made entirely in the browser starts up, the cassette reels turn as tape moves from one to the other, the VU needles swing, the ten-band LED equaliser jumps and the speaker cones thump with the kick. Flip the tape for a different tune on side B, and shape the sound with bass, mid and treble sliders. Hard because nothing is recorded: drums, bass and arpeggio are synthesised note by note on a look-ahead scheduler so timing stays tight, and every meter reads the live signal through analyser nodes, with a silent attract mode driving the same meters before the first click."/>
+<meta name="prompt" content="Build an 80s boombox in one HTML file with Canvas 2D and Web Audio, no samples: draw a silver body with handle, two speakers whose cones pulse, a cassette window with two reels that change size as tape transfers, twin VU needle meters, a ten-band LED graphic equaliser and a three-digit tape counter. Play starts a procedurally synthesised synth-pop loop (kick, snare, hats, saw bass, square arpeggio) scheduled ahead on the audio clock; Flip switches to a second tune for side B and mirrors the tape position; bass, mid, treble and volume sliders drive shelf and peaking filters. Meters must read the real signal via AnalyserNodes, and animate from a fake signal in an attract mode before the user presses Play." />
+<style>
+:root { --case: #1b1b22; --key: #e8e4d8; --accent: #ff4d3a; }
+html, body { margin: 0; height: 100%; }
+body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: linear-gradient(#2a2233, #120e18); color: #f1ede2; font: 700 12px/1 'Trebuchet MS', 'Segoe UI', sans-serif; overflow: hidden; }
+canvas { display: block; }
+#deck { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 16px; padding: 0 12px; }
+#deck button { font: inherit; letter-spacing: 0.1em; text-transform: uppercase; min-width: 86px; padding: 11px 12px; border: 0; border-radius: 4px; background: linear-gradient(#f7f4ea, #c9c4b4); color: #1b1b22; box-shadow: 0 4px 0 #6d695d, 0 6px 10px rgba(0, 0, 0, 0.5); cursor: pointer; }
+#deck button:active, #deck button.down { transform: translateY(3px); box-shadow: 0 1px 0 #6d695d; }
+#deck button.down { background: linear-gradient(#ff7a66, #e23a28); color: #fff; }
+#deck label { display: flex; flex-direction: column; align-items: center; gap: 6px; letter-spacing: 0.1em; text-transform: uppercase; font-size: 10px; color: #b9b3a3; }
+#deck input { width: 84px; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<canvas id="boombox" aria-label="Boombox with cassette reels, meters and equaliser"></canvas>
+<div id="deck">
+  <button id="play" type="button">▶ Play</button>
+  <button id="flip" type="button">⇄ Flip</button>
+  <label>Bass<input id="bass" type="range" min="-12" max="12" value="4" /></label>
+  <label>Mid<input id="mid" type="range" min="-12" max="12" value="0" /></label>
+  <label>Treble<input id="treble" type="range" min="-12" max="12" value="2" /></label>
+  <label>Volume<input id="volume" type="range" min="0" max="100" value="70" /></label>
+</div>
+<script type="module">
+const VIEW = { width: 1000, height: 600 };
+const BAND_COUNT = 10;
+const LED_ROWS = 9;
+const BPM = 114;
+const STEP_SECONDS = 60 / BPM / 4;
+const STEPS_PER_BAR = 16;
+const SCHEDULE_AHEAD_SECONDS = 0.12;
+const SIDE_SECONDS = 120;
+const REEL = { leftX: 425, rightX: 575, y: 414, full: 60, empty: 28 };
+
+// Tunes: chords as midi notes, drums as step lists inside one bar
+const SIDES = {
+  A: {
+    chords: [[57, 60, 64], [53, 57, 60], [60, 64, 67], [55, 59, 62]],
+    arp: [0, 1, 2, 1, 0, 2, 1, 2],
+    kick: [0, 4, 8, 12], snare: [4, 12], openHat: [2, 6, 10, 14],
+  },
+  B: {
+    chords: [[62, 65, 69], [58, 62, 65], [53, 57, 60], [60, 64, 67]],
+    arp: [2, 1, 0, 1, 2, 0, 2, 1],
+    kick: [0, 6, 8, 11], snare: [4, 12, 15], openHat: [6, 14],
+  },
+};
+const midiToHz = (midi) => 440 * 2 ** ((midi - 69) / 12);
+
+const canvas = document.getElementById('boombox');
+const ctx = canvas.getContext('2d');
+const controls = Object.fromEntries(['play', 'flip', 'bass', 'mid', 'treble', 'volume'].map((id) => [id, document.getElementById(id)]));
+const deck = { playing: false, side: 'A', progress: 0.18, reelAngle: 0, step: 0, nextStepTime: 0, timer: 0 };
+const meters = { bands: new Array(BAND_COUNT).fill(0), left: 0, right: 0, kick: 0 };
+let audio = null;
+
+// Audio graph: voices > tone stack > analysers > speakers
+function createAudio() {
+  const context = new AudioContext();
+  const input = context.createGain();
+  const bass = Object.assign(context.createBiquadFilter(), { type: 'lowshelf' });
+  const mid = Object.assign(context.createBiquadFilter(), { type: 'peaking' });
+  const treble = Object.assign(context.createBiquadFilter(), { type: 'highshelf' });
+  bass.frequency.value = 180;
+  mid.frequency.value = 1100;
+  treble.frequency.value = 4200;
+  const volume = context.createGain();
+  const spectrum = Object.assign(context.createAnalyser(), { fftSize: 1024, smoothingTimeConstant: 0.6 });
+  const splitter = context.createChannelSplitter(2);
+  const channels = [0, 1].map((index) => {
+    const analyser = Object.assign(context.createAnalyser(), { fftSize: 256 });
+    splitter.connect(analyser, index);
+    return analyser;
+  });
+  input.connect(bass).connect(mid).connect(treble).connect(volume);
+  volume.connect(spectrum);
+  volume.connect(splitter);
+  volume.connect(context.destination);
+  return { context, input, bass, mid, treble, volume, spectrum, channels, noise: createNoiseBuffer(context), spectrumData: new Uint8Array(spectrum.frequencyBinCount), waveData: new Uint8Array(256) };
+}
+
+function createNoiseBuffer(context) {
+  const buffer = context.createBuffer(1, context.sampleRate, context.sampleRate);
+  const samples = buffer.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
+function applyToneControls() {
+  if (!audio) return;
+  audio.bass.gain.value = Number(controls.bass.value);
+  audio.mid.gain.value = Number(controls.mid.value);
+  audio.treble.gain.value = Number(controls.treble.value);
+  audio.volume.gain.value = (Number(controls.volume.value) / 100) ** 2;
+}
+
+// Voice: source > filter > decaying gain > panner
+function shapeVoice(source, { time, duration, gain, filterType, cutoff, pan = 0 }) {
+  const { context, input } = audio;
+  const filter = Object.assign(context.createBiquadFilter(), { type: filterType });
+  filter.frequency.value = cutoff;
+  const envelope = context.createGain();
+  envelope.gain.setValueAtTime(gain, time);
+  envelope.gain.exponentialRampToValueAtTime(0.001, time + duration);
+  const panner = context.createStereoPanner();
+  panner.pan.value = pan;
+  source.connect(filter).connect(envelope).connect(panner).connect(input);
+  source.start(time);
+  source.stop(time + duration + 0.02);
+}
+
+function playTone(waveform, midi, voice) {
+  const oscillator = Object.assign(audio.context.createOscillator(), { type: waveform });
+  oscillator.frequency.value = midiToHz(midi);
+  shapeVoice(oscillator, { filterType: 'lowpass', ...voice });
+}
+
+function playNoise(voice) {
+  const source = audio.context.createBufferSource();
+  source.buffer = audio.noise;
+  shapeVoice(source, voice);
+}
+
+function playKick(time) {
+  const oscillator = audio.context.createOscillator();
+  oscillator.frequency.setValueAtTime(150, time);
+  oscillator.frequency.exponentialRampToValueAtTime(42, time + 0.14);
+  shapeVoice(oscillator, { time, duration: 0.24, gain: 0.95, filterType: 'lowpass', cutoff: 900 });
+}
+
+function playStep(step, time) {
+  const tune = SIDES[deck.side];
+  const beat = step % STEPS_PER_BAR;
+  const chord = tune.chords[Math.floor(step / STEPS_PER_BAR) % tune.chords.length];
+  if (tune.kick.includes(beat)) playKick(time);
+  if (tune.snare.includes(beat)) playNoise({ time, duration: 0.17, gain: 0.5, filterType: 'bandpass', cutoff: 1900 });
+  if (beat % 2 === 0) playNoise({ time, duration: tune.openHat.includes(beat) ? 0.14 : 0.04, gain: 0.16, filterType: 'highpass', cutoff: 7500, pan: 0.3 });
+  if (beat % 2 === 0) playTone('sawtooth', chord[0] - 24 + (beat % 4 === 2 ? 12 : 0), { time, duration: 0.2, gain: 0.34, cutoff: 520 });
+  const arpNote = chord[tune.arp[beat % tune.arp.length]] + (beat >= 8 ? 12 : 0);
+  playTone('square', arpNote, { time, duration: 0.16, gain: 0.1, cutoff: 2600, pan: beat % 2 ? 0.7 : -0.7 });
+}
+
+// Scheduler: queue steps slightly ahead on audio clock so timer jitter never shows
+function scheduleSteps() {
+  while (deck.nextStepTime < audio.context.currentTime + SCHEDULE_AHEAD_SECONDS) {
+    playStep(deck.step, deck.nextStepTime);
+    deck.nextStepTime += STEP_SECONDS;
+    deck.step++;
+  }
+}
+
+function startPlayback() {
+  audio ??= createAudio();
+  applyToneControls();
+  audio.context.resume();
+  deck.nextStepTime = audio.context.currentTime + 0.06;
+  deck.timer = setInterval(scheduleSteps, 25);
+  deck.playing = true;
+}
+
+function stopPlayback() {
+  clearInterval(deck.timer);
+  audio.context.suspend();
+  deck.playing = false;
+}
+
+function togglePlayback() {
+  if (deck.playing) stopPlayback(); else startPlayback();
+  controls.play.classList.toggle('down', deck.playing);
+  controls.play.textContent = deck.playing ? '■ Stop' : '▶ Play';
+}
+
+function flipTape() {
+  deck.side = deck.side === 'A' ? 'B' : 'A';
+  deck.progress = 1 - deck.progress;
+  deck.step = 0;
+}
+
+// Meters: live signal while playing, fake signal in attract mode
+function readLiveLevels() {
+  const { spectrum, spectrumData, channels, waveData } = audio;
+  spectrum.getByteFrequencyData(spectrumData);
+  const bands = meters.bands.map((_, band) => {
+    const from = Math.floor(2 ** (band * 0.78));
+    const to = Math.max(from + 1, Math.floor(2 ** ((band + 1) * 0.78)));
+    let peak = 0;
+    for (let bin = from; bin < to; bin++) peak = Math.max(peak, spectrumData[bin]);
+    return peak / 255;
+  });
+  const [left, right] = channels.map((analyser) => {
+    analyser.getByteTimeDomainData(waveData);
+    let sum = 0;
+    for (const sample of waveData) sum += ((sample - 128) / 128) ** 2;
+    return Math.min(1, Math.sqrt(sum / waveData.length) * 3.2);
+  });
+  return { bands, left, right, kick: bands[1] };
+}
+
+function readAttractLevels(seconds) {
+  const pulse = Math.max(0, 1 - ((seconds * BPM) / 60 % 1) * 2.4);
+  const bands = meters.bands.map((_, band) => Math.max(0, 0.34 + 0.3 * Math.sin(seconds * (1.7 + band * 0.43) + band) + (band < 3 ? pulse * 0.35 : 0)));
+  return { bands, left: 0.4 + 0.25 * Math.sin(seconds * 2.3) + pulse * 0.2, right: 0.4 + 0.25 * Math.sin(seconds * 2.9 + 1) + pulse * 0.2, kick: pulse };
+}
+
+// Ballistics: jump up fast, fall back slow
+function updateMeters(seconds, dt) {
+  const target = deck.playing ? readLiveLevels() : readAttractLevels(seconds);
+  const settle = (current, next) => (next > current ? next : Math.max(next, current - dt * 1.6));
+  meters.bands = meters.bands.map((level, band) => settle(level, target.bands[band]));
+  meters.left = settle(meters.left, target.left);
+  meters.right = settle(meters.right, target.right);
+  meters.kick = settle(meters.kick, target.kick);
+}
+
+function advanceTape(dt) {
+  deck.progress += dt / SIDE_SECONDS;
+  deck.reelAngle += dt * 2.4;
+  if (deck.progress >= 1) flipTape();
+}
+
+function roundedRect(x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, width, height, radius);
+}
+
+function drawBody() {
+  ctx.lineWidth = 16;
+  ctx.strokeStyle = '#3a3a44';
+  roundedRect(230, 22, 540, 120, 26);
+  ctx.stroke();
+  const silver = ctx.createLinearGradient(0, 80, 0, 590);
+  silver.addColorStop(0, '#e4e6ea');
+  silver.addColorStop(0.5, '#b7bac1');
+  silver.addColorStop(1, '#8c8f97');
+  ctx.fillStyle = silver;
+  roundedRect(20, 80, 960, 505, 22);
+  ctx.fill();
+  ctx.fillStyle = '#1b1b22';
+  roundedRect(338, 104, 324, 432, 10);
+  ctx.fill();
+  ctx.fillStyle = '#ff4d3a';
+  ctx.fillRect(20, 548, 960, 6);
+}
+
+function drawSpeaker(x, y, radius, thump) {
+  ctx.fillStyle = '#17171c';
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#d8dade';
+  ctx.lineWidth = 7;
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  for (let ring = 1; ring <= 9; ring++) {
+    ctx.strokeStyle = `rgba(210, 214, 222, ${0.12 + ring * 0.02})`;
+    ctx.beginPath();
+    ctx.arc(x, y, (radius - 10) * (ring / 9) * (1 + thump * 0.035), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const cone = ctx.createRadialGradient(x - 10, y - 12, 4, x, y, 44 + thump * 8);
+  cone.addColorStop(0, '#8d919c');
+  cone.addColorStop(1, '#22232a');
+  ctx.fillStyle = cone;
+  ctx.beginPath();
+  ctx.arc(x, y, 40 + thump * 7, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawEqualiser(x, y, width, height) {
+  ctx.fillStyle = '#0a0a0e';
+  roundedRect(x, y, width, height, 6);
+  ctx.fill();
+  const cellWidth = (width - 20) / BAND_COUNT;
+  const cellHeight = (height - 16) / LED_ROWS;
+  meters.bands.forEach((level, band) => {
+    const lit = Math.round(Math.min(1, level) * LED_ROWS);
+    for (let row = 0; row < LED_ROWS; row++) {
+      const on = row < lit;
+      const hue = row >= LED_ROWS - 2 ? 4 : row >= LED_ROWS - 4 ? 44 : 140;
+      ctx.fillStyle = on ? `hsl(${hue} 95% 56%)` : `hsl(${hue} 40% 12%)`;
+      ctx.fillRect(x + 10 + band * cellWidth + 2, y + height - 8 - (row + 1) * cellHeight + 2, cellWidth - 4, cellHeight - 3);
+    }
+  });
+}
+
+function drawVuMeter(x, y, width, height, level, label) {
+  ctx.fillStyle = '#f3e9c6';
+  roundedRect(x, y, width, height, 5);
+  ctx.fill();
+  const pivot = { x: x + width / 2, y: y + height + 18 };
+  const sweep = 0.78;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(pivot.x, pivot.y, height + 4, -Math.PI / 2 - sweep, -Math.PI / 2 + sweep * 0.45);
+  ctx.stroke();
+  ctx.strokeStyle = '#d42a1c';
+  ctx.beginPath();
+  ctx.arc(pivot.x, pivot.y, height + 4, -Math.PI / 2 + sweep * 0.45, -Math.PI / 2 + sweep);
+  ctx.stroke();
+  ctx.save();
+  roundedRect(x, y, width, height, 5);
+  ctx.clip();
+  const angle = -Math.PI / 2 - sweep + Math.min(1, level) * sweep * 2;
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(pivot.x, pivot.y);
+  ctx.lineTo(pivot.x + Math.cos(angle) * (height + 12), pivot.y + Math.sin(angle) * (height + 12));
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = '#333';
+  ctx.font = '700 11px "Trebuchet MS", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, x + 7, y + height - 7);
+}
+
+function drawReel(x, y, tapeRadius, angle) {
+  ctx.fillStyle = '#3b2415';
+  ctx.beginPath();
+  ctx.arc(x, y, tapeRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f2f0ea';
+  ctx.beginPath();
+  ctx.arc(x, y, 22, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1b1b22';
+  for (let tooth = 0; tooth < 6; tooth++) {
+    const toothAngle = angle + (tooth * Math.PI) / 3;
+    ctx.beginPath();
+    ctx.arc(x + Math.cos(toothAngle) * 13, y + Math.sin(toothAngle) * 13, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, 6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawCassette() {
+  ctx.fillStyle = '#2a2a33';
+  roundedRect(352, 308, 296, 168, 8);
+  ctx.fill();
+  ctx.fillStyle = '#f6efd9';
+  roundedRect(364, 318, 272, 40, 4);
+  ctx.fill();
+  ctx.fillStyle = '#ff4d3a';
+  ctx.fillRect(364, 348, 272, 5);
+  ctx.fillStyle = '#1b1b22';
+  ctx.font = '900 20px "Arial Black", Impact, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(`MIX TAPE · SIDE ${deck.side}`, 374, 342);
+  ctx.fillStyle = '#0d0d12';
+  roundedRect(372, 364, 256, 100, 6);
+  ctx.fill();
+  const supply = REEL.full - (REEL.full - REEL.empty) * deck.progress;
+  const takeUp = REEL.empty + (REEL.full - REEL.empty) * deck.progress;
+  ctx.save();
+  roundedRect(372, 364, 256, 100, 6);
+  ctx.clip();
+  drawReel(REEL.leftX, REEL.y, supply, deck.reelAngle * (REEL.full / supply));
+  drawReel(REEL.rightX, REEL.y, takeUp, deck.reelAngle * (REEL.full / takeUp));
+  ctx.restore();
+}
+
+function drawCounter() {
+  ctx.fillStyle = '#0a0a0e';
+  roundedRect(352, 488, 296, 36, 5);
+  ctx.fill();
+  ctx.font = '700 20px "Courier New", monospace';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffb347';
+  ctx.fillText(String(Math.floor(deck.progress * 999)).padStart(3, '0'), 364, 513);
+  ctx.textAlign = 'right';
+  const blinkOn = deck.playing || Math.floor(performance.now() / 500) % 2 === 0;
+  ctx.fillStyle = deck.playing ? '#5dff8a' : blinkOn ? '#ff4d3a' : '#3a1410';
+  ctx.fillText(deck.playing ? '▶ PLAY' : 'PRESS PLAY', 636, 513);
+}
+
+function drawBoombox() {
+  ctx.clearRect(0, 0, VIEW.width, VIEW.height);
+  drawBody();
+  drawSpeaker(180, 330, 138, meters.kick);
+  drawSpeaker(820, 330, 138, meters.kick);
+  drawEqualiser(352, 116, 296, 104);
+  drawVuMeter(352, 232, 142, 62, meters.left, 'L');
+  drawVuMeter(506, 232, 142, 62, meters.right, 'R');
+  drawCassette();
+  drawCounter();
+}
+
+function resize() {
+  const scale = Math.min((innerWidth - 24) / VIEW.width, (innerHeight - 130) / VIEW.height);
+  const pixelRatio = Math.min(devicePixelRatio, 2);
+  canvas.style.width = `${VIEW.width * scale}px`;
+  canvas.style.height = `${VIEW.height * scale}px`;
+  canvas.width = Math.round(VIEW.width * scale * pixelRatio);
+  canvas.height = Math.round(VIEW.height * scale * pixelRatio);
+  ctx.setTransform(scale * pixelRatio, 0, 0, scale * pixelRatio, 0, 0);
+}
+
+controls.play.onclick = togglePlayback;
+controls.flip.onclick = flipTape;
+for (const id of ['bass', 'mid', 'treble', 'volume']) controls[id].oninput = applyToneControls;
+addEventListener('keydown', (event) => { if (event.code === 'Space' && event.target === document.body) { event.preventDefault(); togglePlayback(); } });
+addEventListener('resize', resize);
+resize();
+
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  updateMeters(now / 1000, dt);
+  advanceTape(dt);
+  drawBoombox();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

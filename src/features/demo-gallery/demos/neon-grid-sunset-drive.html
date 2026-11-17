@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Neon Grid Sunset Drive</title>
+<meta name="category" content="aero" />
+<meta name="style" content="outrun" />
+<meta name="order" content="60" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="three.js, synthwave, shader sun, wireframe terrain, endless scroll" />
+<meta name="description" content="An endless 80s synthwave drive: a glowing grid road rushes under the camera toward a striped sunset, with wireframe ridges on both sides, palm silhouettes whipping past and a slow starfield above. Move the mouse or hold the arrow keys to drift across the lanes, drag the slider for speed, and switch between two neon palettes. Hard because the scroll has to be seamless: the grid, ridges and palms all wrap on the same travel distance, the ridge heights come from a periodic noise so the loop seam never shows, and the sun stripes are cut in a fragment shader so they stay crisp at any size."/>
+<meta name="prompt" content="Build an endless 80s synthwave drive in three.js, one HTML file: a neon grid floor scrolling toward the camera, a big sunset sun with horizontal stripe cut-outs drawn in a fragment shader, wireframe mountain ridges either side of a flat road whose heights tile seamlessly, palm tree silhouettes passing by, a starfield, fog toward the horizon and a CSS scanline overlay. Mouse or arrow keys sway the camera across lanes with a little roll, a slider sets speed, and a button swaps between a magenta-cyan and an amber-teal palette." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #07010f; }
+canvas { display: block; touch-action: none; }
+#scan { position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.22) 2px 3px); mix-blend-mode: multiply; }
+#vignette { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.6) 100%); }
+#panel { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 14px; border: 1px solid var(--line, #ff3fa4); border-radius: 4px; background: rgba(10, 2, 24, 0.7); color: #fff; font: 700 12px/1 'Courier New', monospace; letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; box-shadow: 0 0 18px var(--glow, rgba(255, 63, 164, 0.5)); }
+#panel input { width: 120px; accent-color: var(--line, #ff3fa4); }
+#panel button { border: 1px solid var(--line, #ff3fa4); background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; padding: 6px 10px; border-radius: 3px; cursor: pointer; }
+#panel button:hover { background: var(--line, #ff3fa4); color: #07010f; }
+#speedo { min-width: 74px; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { #hint { display: none; } }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+<div id="scan"></div>
+<div id="vignette"></div>
+<div id="panel">
+  <span id="hint">mouse / arrows steer</span>
+  <label for="speed">speed</label>
+  <input id="speed" type="range" min="10" max="120" value="48" />
+  <span id="speedo"></span>
+  <button id="palette" type="button">palette</button>
+</div>
+<script type="module">
+import * as THREE from 'three';
+
+const PALETTES = [
+  { name: 'magenta', sky: 0x07010f, fog: 0x2a0a4a, grid: 0xff3fa4, ridge: 0x35e8ff, sunTop: 0xffe14d, sunBottom: 0xff2e88, palm: 0x12001f, glow: 'rgba(255, 63, 164, 0.5)' },
+  { name: 'amber', sky: 0x020a12, fog: 0x0a2c3a, grid: 0x2ff5c8, ridge: 0xffa53d, sunTop: 0xfff3b0, sunBottom: 0xff6a1f, palm: 0x00141a, glow: 'rgba(47, 245, 200, 0.5)' },
+];
+const CELL = 4;
+const ROAD_HALF_WIDTH = 10;
+const TILE_LENGTH = 160;
+const TILE_WIDTH = 240;
+const TILE_COUNT = 3;
+const COLUMNS = TILE_WIDTH / CELL;
+const ROWS = TILE_LENGTH / CELL;
+const PALM_SPACING = 20;
+const MAX_LANE_OFFSET = 6.5;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 900);
+camera.position.set(0, 2.6, 0);
+
+// Height field: periodic along travel axis so both tiles join without seam
+function ridgeHeight(x, z) {
+  const side = Math.max(0, Math.abs(x) - ROAD_HALF_WIDTH);
+  if (!side) return 0;
+  const phase = (z / TILE_LENGTH) * Math.PI * 2;
+  const rolling = Math.sin(phase * 3 + x * 0.21) + Math.sin(phase * 5 - x * 0.13) * 0.6 + Math.sin(phase * 2 + x * 0.05) * 1.3;
+  return Math.min(1, side / 26) * (5 + Math.abs(rolling) * 7 + side * 0.09);
+}
+
+function buildHeightField() {
+  const geometry = new THREE.PlaneGeometry(TILE_WIDTH, TILE_LENGTH, COLUMNS, ROWS);
+  geometry.rotateX(-Math.PI / 2);
+  const position = geometry.attributes.position;
+  for (let i = 0; i < position.count; i++) position.setY(i, ridgeHeight(position.getX(i), position.getZ(i) + TILE_LENGTH / 2));
+  return geometry;
+}
+
+// Grid lines: square cells only, no triangle diagonals
+function buildGridLines(heightField) {
+  const indices = [];
+  const vertexAt = (column, row) => row * (COLUMNS + 1) + column;
+  for (let row = 0; row <= ROWS; row++) {
+    for (let column = 0; column <= COLUMNS; column++) {
+      if (column < COLUMNS) indices.push(vertexAt(column, row), vertexAt(column + 1, row));
+      if (row < ROWS) indices.push(vertexAt(column, row), vertexAt(column, row + 1));
+    }
+  }
+  return new THREE.BufferGeometry().setAttribute('position', heightField.attributes.position).setIndex(indices);
+}
+
+// Tile: black skin just under lines so far ridges hide behind near ones
+const gridMaterial = new THREE.LineBasicMaterial();
+const skinMaterial = new THREE.MeshBasicMaterial({ color: 0x05000c });
+const heightField = buildHeightField();
+const gridLines = buildGridLines(heightField);
+const tiles = Array.from({ length: TILE_COUNT }, () => {
+  const skin = new THREE.Mesh(heightField, skinMaterial);
+  skin.position.y = -0.06;
+  const tile = new THREE.Group();
+  tile.add(skin, new THREE.LineSegments(gridLines, gridMaterial));
+  scene.add(tile);
+  return tile;
+});
+
+// Sun: stripes cut in shader, gaps widen toward bottom
+const sunMaterial = new THREE.ShaderMaterial({
+  transparent: true,
+  fog: false,
+  uniforms: { top: { value: new THREE.Color() }, bottom: { value: new THREE.Color() }, time: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform vec3 top; uniform vec3 bottom; uniform float time; varying vec2 vUv;
+    void main() {
+      float radius = distance(vUv, vec2(0.5));
+      float disc = 1.0 - smoothstep(0.42, 0.425, radius);
+      float halo = smoothstep(0.5, 0.36, radius) * 0.35;
+      float band = fract(vUv.y * 13.0 - time * 0.12);
+      float gapWidth = mix(0.62, 0.0, smoothstep(0.08, 0.56, vUv.y));
+      float stripe = smoothstep(gapWidth, gapWidth + 0.04, band);
+      vec3 colour = mix(bottom, top, smoothstep(0.1, 0.9, vUv.y));
+      gl_FragColor = vec4(colour, max(disc * stripe, halo * (1.0 - disc)));
+    }`,
+});
+const sun = new THREE.Mesh(new THREE.PlaneGeometry(290, 290), sunMaterial);
+sun.position.set(0, 62, -640);
+// drawn after stars so none show through disc
+sun.renderOrder = 1;
+scene.add(sun);
+
+function buildStars() {
+  const points = [];
+  for (let i = 0; i < 700; i++) {
+    const angle = Math.random() * Math.PI;
+    const lift = 0.08 + Math.random() * 0.9;
+    points.push(Math.cos(angle) * 420 * (1 - lift * 0.4), lift * 300, -Math.sin(angle) * 380 - 20);
+  }
+  const geometry = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  return new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xffffff, size: 1.3, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.85, depthWrite: false }));
+}
+const stars = buildStars();
+scene.add(stars);
+
+// Palm: flat silhouette drawn once to canvas, shared by every sprite
+function drawPalmTexture() {
+  const canvas = Object.assign(document.createElement('canvas'), { width: 256, height: 512 });
+  const ctx = canvas.getContext('2d');
+  ctx.strokeStyle = ctx.fillStyle = '#fff';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 11;
+  ctx.beginPath();
+  ctx.moveTo(120, 510);
+  ctx.quadraticCurveTo(104, 300, 134, 150);
+  ctx.stroke();
+  for (let frond = 0; frond < 9; frond++) {
+    const angle = -Math.PI * 0.08 - (frond / 8) * Math.PI * 0.84;
+    const reach = 108 + (frond % 3) * 10;
+    const tipX = 134 + Math.cos(angle) * reach;
+    const tipY = 150 + Math.sin(angle) * reach * 0.55 + 46;
+    ctx.beginPath();
+    ctx.moveTo(134, 150);
+    ctx.quadraticCurveTo(134 + Math.cos(angle) * reach * 0.6, 150 + Math.sin(angle) * reach - 18, tipX, tipY);
+    ctx.quadraticCurveTo(134 + Math.cos(angle) * reach * 0.5, 150 + Math.sin(angle) * reach * 0.5 + 6, 134, 150);
+    ctx.fill();
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
+const palmMaterial = new THREE.SpriteMaterial({ map: drawPalmTexture(), fog: true });
+const palms = [];
+const PALM_LOOP = TILE_LENGTH * 2;
+for (let i = 0; i < PALM_LOOP / PALM_SPACING; i++) {
+  for (const side of [-1, 1]) {
+    const palm = new THREE.Sprite(palmMaterial);
+    palm.scale.set(7, 14, 1);
+    palm.userData = { side, slot: i };
+    palms.push(palm);
+    scene.add(palm);
+  }
+}
+
+let paletteIndex = 0;
+function applyPalette() {
+  const palette = PALETTES[paletteIndex];
+  scene.background = new THREE.Color(palette.sky);
+  scene.fog = new THREE.Fog(palette.fog, 60, 300);
+  gridMaterial.color.set(palette.grid);
+  sunMaterial.uniforms.top.value.set(palette.sunTop);
+  sunMaterial.uniforms.bottom.value.set(palette.sunBottom);
+  palmMaterial.color.set(palette.palm);
+  const cssColour = `#${new THREE.Color(palette.grid).getHexString()}`;
+  document.documentElement.style.setProperty('--line', cssColour);
+  document.documentElement.style.setProperty('--glow', palette.glow);
+}
+applyPalette();
+document.getElementById('palette').onclick = () => { paletteIndex = (paletteIndex + 1) % PALETTES.length; applyPalette(); };
+
+// Steering: pointer sets target lane; arrow keys push it
+const steering = { target: 0, lane: 0, keys: 0 };
+addEventListener('pointermove', (event) => { steering.target = (event.clientX / innerWidth - 0.5) * 2 * MAX_LANE_OFFSET; });
+const keyDirection = (code) => (code === 'ArrowLeft' ? -1 : code === 'ArrowRight' ? 1 : 0);
+addEventListener('keydown', (event) => { if (keyDirection(event.code)) steering.keys = keyDirection(event.code); });
+addEventListener('keyup', (event) => { if (keyDirection(event.code) === steering.keys) steering.keys = 0; });
+
+function steer(dt) {
+  steering.target = THREE.MathUtils.clamp(steering.target + steering.keys * 14 * dt, -MAX_LANE_OFFSET, MAX_LANE_OFFSET);
+  const previous = steering.lane;
+  steering.lane += (steering.target - steering.lane) * Math.min(1, dt * 3.5);
+  camera.position.x = steering.lane;
+  camera.rotation.set(-0.02, 0, -(steering.lane - previous) / Math.max(dt, 0.001) * 0.004);
+}
+
+function placeScenery(travelled) {
+  const offset = travelled % TILE_LENGTH;
+  tiles.forEach((tile, index) => { tile.position.z = offset - TILE_LENGTH / 2 - index * TILE_LENGTH; });
+  for (const palm of palms) {
+    const z = ((palm.userData.slot * PALM_SPACING + travelled) % PALM_LOOP) - PALM_LOOP + 8;
+    palm.position.set(palm.userData.side * (ROAD_HALF_WIDTH + 1.5), 7, z);
+  }
+}
+
+const speedInput = document.getElementById('speed');
+const speedo = document.getElementById('speedo');
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+let travelled = 0;
+let last = performance.now();
+renderer.setAnimationLoop((now) => {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  const speed = Number(speedInput.value);
+  travelled += speed * dt;
+  steer(dt);
+  placeScenery(travelled);
+  sunMaterial.uniforms.time.value = now / 1000;
+  stars.rotation.y = Math.sin(now / 40000) * 0.05;
+  speedo.textContent = `${Math.round(speed * 3.2)} km/h`;
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Citrus Splash</title>
+<meta name="category" content="aero" />
+<meta name="style" content="fresh" />
+<meta name="order" content="68" />
+<meta name="capture" content="3600" />
+<meta name="tags" content="Canvas 2D, spring water surface, particles, buoyancy, procedural fruit" />
+<meta name="description" content="The fresh-and-clean advert look of the late 2000s: fruit slices drop into crystal-clear water, punch a splash out of the surface, send ripples racing to both edges and then bob back up among rising bubbles and shifting bands of light. Click anywhere to drop a slice there and choose between lime, orange, lemon and kiwi. Hard because the water is simulated: the surface is a row of springs that pass motion to their neighbours, each slice pushes the columns it lands on, throws droplets with real arcs, and floats with buoyancy and drag so it settles instead of bouncing forever."/>
+<meta name="prompt" content="Make a late-2000s 'fresh splash' advert scene in one HTML file with Canvas 2D: fruit slices (lime, orange, lemon, kiwi, drawn procedurally with rind, pith, segments or seeds) fall into clear aqua water. Simulate the surface as a row of spring columns that spread waves to neighbours; on impact displace the columns, throw splash droplets on ballistic arcs and release bubbles; slices then float with buoyancy and drag. Add drifting underwater light bands, a glossy white-to-aqua backdrop, click-to-drop at the pointer, a fruit picker, and automatic drops so it never sits still." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #eafcff; }
+canvas { display: block; cursor: pointer; }
+#picker { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); display: flex; gap: 10px; padding: 8px 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.9); background: linear-gradient(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.35)); backdrop-filter: blur(10px); box-shadow: 0 6px 20px rgba(0, 120, 160, 0.25), inset 0 1px 0 #fff; }
+#picker button { font: 700 12px/1 'Segoe UI', 'Trebuchet MS', sans-serif; color: #0b4a5e; padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(0, 110, 150, 0.35); background: linear-gradient(#ffffff, #d9f6ff 50%, #bfeeff 52%, #e9fbff); cursor: pointer; }
+#picker button.on { color: #fff; border-color: #1a8f3c; background: linear-gradient(#b9f27a, #5ccf3a 50%, #37b024 52%, #7fe05a); text-shadow: 0 1px 1px rgba(0, 70, 0, 0.5); }
+</style>
+</head>
+<body>
+<canvas id="tank" aria-label="Fruit slices splashing into clear water"></canvas>
+<div id="picker"></div>
+<script type="module">
+const FRUITS = {
+  lime: { label: 'Lime', rind: '#3f9b1f', flesh: '#b8e35a', pith: '#f1fbd2', segments: 9 },
+  orange: { label: 'Orange', rind: '#f08a12', flesh: '#ffb238', pith: '#fff1d0', segments: 10 },
+  lemon: { label: 'Lemon', rind: '#f2cf1d', flesh: '#fbe96a', pith: '#fffbe0', segments: 8 },
+  kiwi: { label: 'Kiwi', rind: '#7a5a2a', flesh: '#8fcf3a', pith: '#f3f7d8', segments: 0 },
+};
+const COLUMN_WIDTH = 8;
+const WATER_LINE = 0.52;
+const GRAVITY = 1500;
+const MAX_SLICES = 9;
+const ENTRY_SPEED_KEPT = 0.35;
+const SPRING = { stiffness: 38, damping: 2.2, spread: 0.24 };
+
+const canvas = document.getElementById('tank');
+const ctx = canvas.getContext('2d');
+const view = { width: 0, height: 0, waterY: 0 };
+let columns = [];
+let slices = [];
+let droplets = [];
+let bubbles = [];
+let chosenFruit = 'lime';
+
+const columnAt = (x) => columns[Math.max(0, Math.min(columns.length - 1, Math.round(x / COLUMN_WIDTH)))];
+const surfaceAt = (x) => view.waterY + columnAt(x).height;
+
+// Water: each column a damped spring; neighbours pull each other level
+function stepWater(dt) {
+  for (const column of columns) {
+    column.velocity += (-SPRING.stiffness * column.height - SPRING.damping * column.velocity) * dt;
+    column.height += column.velocity * dt;
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < columns.length; i++) {
+      for (const neighbour of [columns[i - 1], columns[i + 1]]) {
+        if (neighbour) neighbour.velocity += SPRING.spread * (columns[i].height - neighbour.height);
+      }
+    }
+  }
+}
+
+function disturbWater(x, radius, push) {
+  for (let offset = -radius; offset <= radius; offset += COLUMN_WIDTH) {
+    columnAt(x + offset).velocity += push * Math.cos((offset / radius) * Math.PI * 0.5);
+  }
+}
+
+function dropSlice(x, fruit = chosenFruit) {
+  slices.push({ x, y: -60, velocityY: 120, fruit: FRUITS[fruit], radius: 34 + Math.random() * 16, spin: Math.random() * Math.PI * 2, spinRate: (Math.random() - 0.5) * 5, tilt: Math.random() * Math.PI, tiltRate: 1 + Math.random() * 2, wet: false });
+  if (slices.length > MAX_SLICES) slices.shift();
+}
+
+function splash(slice) {
+  disturbWater(slice.x, slice.radius * 1.6, slice.velocityY * 0.55);
+  for (let i = 0; i < 26; i++) {
+    const side = Math.random() - 0.5;
+    droplets.push({ x: slice.x + side * slice.radius * 2, y: view.waterY, velocityX: side * 620, velocityY: -(260 + Math.random() * 520), radius: 2 + Math.random() * 5 });
+  }
+  for (let i = 0; i < 14; i++) bubbles.push({ x: slice.x + (Math.random() - 0.5) * slice.radius * 2, y: view.waterY + 20 + Math.random() * 90, radius: 2 + Math.random() * 6, rise: 50 + Math.random() * 90, wobble: Math.random() * Math.PI * 2 });
+}
+
+// Slice: free fall in air; buoyancy + drag once wet
+function moveSlice(slice, dt) {
+  const depth = slice.y - surfaceAt(slice.x);
+  if (!slice.wet && depth > 0) {
+    slice.wet = true;
+    splash(slice);
+    slice.velocityY *= ENTRY_SPEED_KEPT;
+  }
+  const buoyancy = depth > -slice.radius * 0.2 ? -(depth + slice.radius * 0.2) * 60 - slice.velocityY * 9 : 0;
+  slice.velocityY += (GRAVITY * (slice.wet ? 0.35 : 1) + buoyancy) * dt;
+  slice.y += slice.velocityY * dt;
+  const drag = slice.wet ? Math.exp(-dt * 1.4) : 1;
+  slice.spinRate *= drag;
+  slice.tiltRate *= drag;
+  slice.spin += slice.spinRate * dt;
+  slice.tilt += slice.tiltRate * dt;
+}
+
+function moveDroplets(dt) {
+  for (const droplet of droplets) {
+    droplet.velocityY += GRAVITY * dt;
+    droplet.x += droplet.velocityX * dt;
+    droplet.y += droplet.velocityY * dt;
+  }
+  droplets = droplets.filter((droplet) => droplet.velocityY < 0 || droplet.y < surfaceAt(droplet.x));
+}
+
+function moveBubbles(dt) {
+  for (const bubble of bubbles) {
+    bubble.y -= bubble.rise * dt;
+    bubble.x += Math.sin(bubble.y * 0.05 + bubble.wobble) * 20 * dt;
+  }
+  bubbles = bubbles.filter((bubble) => bubble.y > surfaceAt(bubble.x) + bubble.radius);
+}
+
+function drawBackdrop() {
+  const wall = ctx.createLinearGradient(0, 0, 0, view.height);
+  wall.addColorStop(0, '#ffffff');
+  wall.addColorStop(WATER_LINE, '#d8f8ff');
+  wall.addColorStop(1, '#7fe3f2');
+  ctx.fillStyle = wall;
+  ctx.fillRect(0, 0, view.width, view.height);
+  const shine = ctx.createRadialGradient(view.width * 0.5, view.height * 0.18, 10, view.width * 0.5, view.height * 0.18, view.width * 0.5);
+  shine.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+  shine.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = shine;
+  ctx.fillRect(0, 0, view.width, view.height);
+}
+
+function traceWaterBody() {
+  ctx.beginPath();
+  ctx.moveTo(0, view.height);
+  columns.forEach((column, index) => ctx.lineTo(index * COLUMN_WIDTH, view.waterY + column.height));
+  ctx.lineTo(view.width, view.height);
+  ctx.closePath();
+}
+
+// Light bands: slanted pale strokes drifting sideways, clipped to water
+function drawLightBands(seconds) {
+  ctx.save();
+  traceWaterBody();
+  ctx.clip();
+  ctx.lineWidth = 26;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+  for (let band = -2; band < view.width / 110 + 2; band++) {
+    const x = band * 110 + ((seconds * 22) % 110) + Math.sin(seconds * 0.7 + band) * 16;
+    ctx.beginPath();
+    ctx.moveTo(x, view.waterY - 30);
+    ctx.lineTo(x - 150, view.height);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawWater(seconds) {
+  const water = ctx.createLinearGradient(0, view.waterY, 0, view.height);
+  water.addColorStop(0, 'rgba(120, 232, 245, 0.55)');
+  water.addColorStop(1, 'rgba(0, 150, 200, 0.7)');
+  traceWaterBody();
+  ctx.fillStyle = water;
+  ctx.fill();
+  drawLightBands(seconds);
+  ctx.beginPath();
+  columns.forEach((column, index) => ctx.lineTo(index * COLUMN_WIDTH, view.waterY + column.height));
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.stroke();
+}
+
+function drawSegments(fruit, radius) {
+  ctx.strokeStyle = fruit.pith;
+  ctx.lineWidth = radius * 0.05;
+  for (let segment = 0; segment < fruit.segments; segment++) {
+    const angle = (segment / fruit.segments) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(angle) * radius * 0.8, Math.sin(angle) * radius * 0.8);
+    ctx.stroke();
+  }
+}
+
+function drawSeeds(fruit, radius) {
+  ctx.fillStyle = fruit.pith;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * 0.24, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1d1a12';
+  for (let seed = 0; seed < 22; seed++) {
+    const angle = (seed / 22) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(angle) * radius * 0.44, Math.sin(angle) * radius * 0.44, radius * 0.05, radius * 0.025, angle, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Tilt squashes disc on one axis so flat slice reads as tumbling in 3D
+function drawSlice(slice) {
+  const { fruit, radius } = slice;
+  ctx.save();
+  ctx.translate(slice.x, slice.y);
+  ctx.rotate(slice.spin);
+  ctx.scale(1, 0.35 + 0.65 * Math.abs(Math.cos(slice.tilt)));
+  for (const [scale, colour] of [[1, fruit.rind], [0.9, fruit.pith], [0.82, fruit.flesh]]) {
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * scale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (fruit.segments) drawSegments(fruit, radius); else drawSeeds(fruit, radius);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  ctx.beginPath();
+  ctx.ellipse(-radius * 0.3, -radius * 0.35, radius * 0.4, radius * 0.18, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBead(x, y, radius, fill) {
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function draw(seconds) {
+  drawBackdrop();
+  for (const slice of slices) if (!slice.wet) drawSlice(slice);
+  for (const slice of slices) if (slice.wet) drawSlice(slice);
+  drawWater(seconds);
+  for (const bubble of bubbles) drawBead(bubble.x, bubble.y, bubble.radius, 'rgba(255, 255, 255, 0.22)');
+  for (const droplet of droplets) drawBead(droplet.x, droplet.y, droplet.radius, 'rgba(150, 235, 250, 0.75)');
+}
+
+function resize() {
+  const pixelRatio = Math.min(devicePixelRatio, 2);
+  view.width = innerWidth;
+  view.height = innerHeight;
+  view.waterY = view.height * WATER_LINE;
+  canvas.width = Math.round(view.width * pixelRatio);
+  canvas.height = Math.round(view.height * pixelRatio);
+  canvas.style.width = `${view.width}px`;
+  canvas.style.height = `${view.height}px`;
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  columns = Array.from({ length: Math.ceil(view.width / COLUMN_WIDTH) + 1 }, () => ({ height: 0, velocity: 0 }));
+}
+
+function buildPicker() {
+  const buttons = Object.entries(FRUITS).map(([id, fruit]) => {
+    const button = Object.assign(document.createElement('button'), { type: 'button', textContent: fruit.label });
+    button.onclick = () => { chosenFruit = id; buttons.forEach((other) => other.classList.toggle('on', other === button)); };
+    return button;
+  });
+  document.getElementById('picker').append(...buttons);
+  buttons[0].classList.add('on');
+}
+
+canvas.addEventListener('pointerdown', (event) => dropSlice(event.clientX));
+addEventListener('resize', resize);
+resize();
+buildPicker();
+
+const fruitIds = Object.keys(FRUITS);
+let nextAutoDrop = 0.2;
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  const seconds = now / 1000;
+  last = now;
+  if (seconds > nextAutoDrop) {
+    dropSlice(view.width * (0.15 + Math.random() * 0.7), fruitIds[Math.floor(Math.random() * fruitIds.length)]);
+    nextAutoDrop = seconds + 0.9 + Math.random() * 1.2;
+  }
+  stepWater(dt);
+  for (const slice of slices) moveSlice(slice, dt);
+  moveDroplets(dt);
+  moveBubbles(dt);
+  draw(seconds);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

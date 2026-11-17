@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Light Streak Wallpaper</title>
+<meta name="category" content="aero" />
+<meta name="style" content="abstract" />
+<meta name="order" content="66" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="Canvas 2D, additive blending, bezier curves, bokeh, seeded RNG" />
+<meta name="description" content="The abstract tech wallpaper that shipped on every late-2000s laptop and phone: bundles of glowing light streaks sweep across a dark blue gradient, crossing in bright knots, with soft out-of-focus discs floating in front and a star-shaped glint where the light is strongest. The streaks sway slowly on their own; click for a new composition and drag the slider to shift the whole colour scheme. Hard because the glow is built, not blurred: each streak is a bundle of thin curves drawn many times with additive blending so overlaps brighten naturally, and one seeded random stream keeps a composition stable while it animates."/>
+<meta name="prompt" content="Create a late-2000s abstract tech wallpaper in one HTML file with Canvas 2D: bundles of thin glowing bezier light streaks sweeping across a dark-to-bright gradient, drawn with additive blending so crossings bloom, plus drifting bokeh discs and a four-point lens glint at the brightest spot. Generate the composition from a seeded random generator, sway the curves slowly over time, reshuffle on click or Space, and add a hue slider that recolours everything." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #020611; }
+canvas { display: block; cursor: pointer; }
+#panel { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 9px 16px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.4); background: linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.06) 50%, rgba(255, 255, 255, 0.14)); backdrop-filter: blur(12px); color: #fff; font: 600 12px/1 'Segoe UI', 'Trebuchet MS', sans-serif; white-space: nowrap; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 8px 24px rgba(0, 0, 0, 0.4); }
+#panel input { width: 130px; accent-color: #8fe3ff; }
+#panel button { font: inherit; color: #06243f; padding: 7px 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.8); background: linear-gradient(#f4fbff, #9fd8ff 50%, #6cbdf5 52%, #b5e6ff); cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="wallpaper" aria-label="Animated light streak wallpaper"></canvas>
+<div id="panel">
+  <button id="shuffle" type="button">New streaks</button>
+  <label for="hue">Hue</label>
+  <input id="hue" type="range" min="0" max="360" value="195" />
+</div>
+<script type="module">
+const BUNDLE_COUNT = 5;
+const BOKEH_COUNT = 26;
+const SEGMENTS = 46;
+
+// RNG: mulberry32 so each seed rebuilds same composition
+function createRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), state | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const canvas = document.getElementById('wallpaper');
+const ctx = canvas.getContext('2d');
+const hueInput = document.getElementById('hue');
+const view = { width: 0, height: 0 };
+let scene = { bundles: [], bokeh: [] };
+
+// Bundle: one guide curve in 0..1 space, strands fan out around it
+function createBundle(random) {
+  const edgeY = () => 0.1 + random() * 0.8;
+  return {
+    points: [[-0.1, edgeY()], [0.2 + random() * 0.2, random() * 1.2 - 0.1], [0.6 + random() * 0.2, random() * 1.2 - 0.1], [1.1, edgeY()]],
+    sway: [0, 1, 2, 3].map(() => ({ phase: random() * Math.PI * 2, rate: 0.12 + random() * 0.25, reach: 0.02 + random() * 0.07 })),
+    strands: Array.from({ length: 9 + Math.floor(random() * 8) }, () => ({ offset: (random() - 0.5) * 0.16, twist: random() * Math.PI * 2, width: 0.6 + random() * 2.2, alpha: 0.05 + random() * 0.12 })),
+    hueShift: (random() - 0.5) * 70,
+  };
+}
+
+function createBokeh(random) {
+  return { x: random(), y: random(), radius: 12 + random() ** 2 * 70, drift: 0.004 + random() * 0.012, phase: random() * Math.PI * 2, alpha: 0.03 + random() * 0.09, hueShift: (random() - 0.5) * 90 };
+}
+
+function buildScene(seed) {
+  const random = createRandom(seed);
+  scene = {
+    bundles: Array.from({ length: BUNDLE_COUNT }, () => createBundle(random)),
+    bokeh: Array.from({ length: BOKEH_COUNT }, () => createBokeh(random)),
+  };
+}
+
+function swayedPoints(bundle, seconds) {
+  return bundle.points.map(([x, y], index) => {
+    const { phase, rate, reach } = bundle.sway[index];
+    return [x, y + Math.sin(seconds * rate + phase) * reach];
+  });
+}
+
+function bezierPoint([p0, p1, p2, p3], t) {
+  const u = 1 - t;
+  const weights = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+  return [0, 1].map((axis) => weights[0] * p0[axis] + weights[1] * p1[axis] + weights[2] * p2[axis] + weights[3] * p3[axis]);
+}
+
+// Strand: guide curve pushed sideways; push pinches to zero at both ends
+function traceStrand(points, strand, seconds) {
+  ctx.beginPath();
+  for (let step = 0; step <= SEGMENTS; step++) {
+    const t = step / SEGMENTS;
+    const [x, y] = bezierPoint(points, t);
+    const spread = Math.sin(t * Math.PI) * strand.offset * (1 + 0.5 * Math.sin(t * 5 + strand.twist + seconds * 0.3));
+    ctx.lineTo(x * view.width, (y + spread) * view.height);
+  }
+}
+
+function drawBundle(bundle, seconds, baseHue) {
+  const points = swayedPoints(bundle, seconds);
+  const hue = baseHue + bundle.hueShift;
+  for (const strand of bundle.strands) {
+    traceStrand(points, strand, seconds);
+    ctx.lineWidth = strand.width * 7;
+    ctx.strokeStyle = `hsla(${hue}, 100%, 60%, ${strand.alpha * 0.22})`;
+    ctx.stroke();
+    ctx.lineWidth = strand.width;
+    ctx.strokeStyle = `hsla(${hue + 15}, 100%, 82%, ${strand.alpha * 2.2})`;
+    ctx.stroke();
+  }
+}
+
+function drawBokeh(disc, seconds, baseHue) {
+  const x = ((disc.x + seconds * disc.drift) % 1.2 - 0.1) * view.width;
+  const y = (disc.y + Math.sin(seconds * 0.2 + disc.phase) * 0.03) * view.height;
+  const glow = ctx.createRadialGradient(x, y, disc.radius * 0.55, x, y, disc.radius);
+  const colour = `hsla(${baseHue + disc.hueShift}, 100%, 75%,`;
+  glow.addColorStop(0, `${colour} ${disc.alpha})`);
+  glow.addColorStop(0.86, `${colour} ${disc.alpha * 1.7})`);
+  glow.addColorStop(1, `${colour} 0)`);
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(x, y, disc.radius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Glint: four-point star on first bundle, where light reads strongest
+function drawGlint(seconds, baseHue) {
+  const [x, y] = bezierPoint(swayedPoints(scene.bundles[0], seconds), 0.62);
+  const size = Math.min(view.width, view.height) * (0.16 + 0.03 * Math.sin(seconds * 1.3));
+  ctx.save();
+  ctx.translate(x * view.width, y * view.height);
+  for (const [scaleX, scaleY] of [[1, 0.035], [0.035, 1], [0.3, 0.3]]) {
+    const ray = ctx.createRadialGradient(0, 0, 0, 0, 0, size);
+    ray.addColorStop(0, `hsla(${baseHue}, 100%, 96%, 0.9)`);
+    ray.addColorStop(1, `hsla(${baseHue}, 100%, 70%, 0)`);
+    ctx.save();
+    ctx.scale(scaleX, scaleY);
+    ctx.fillStyle = ray;
+    ctx.beginPath();
+    ctx.arc(0, 0, size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawBackground(baseHue) {
+  const sky = ctx.createLinearGradient(0, 0, view.width * 0.4, view.height);
+  sky.addColorStop(0, `hsl(${baseHue + 30}, 80%, 5%)`);
+  sky.addColorStop(0.6, `hsl(${baseHue + 10}, 85%, 16%)`);
+  sky.addColorStop(1, `hsl(${baseHue - 10}, 90%, 34%)`);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, view.width, view.height);
+}
+
+function draw(seconds) {
+  const baseHue = Number(hueInput.value);
+  drawBackground(baseHue);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  for (const bundle of scene.bundles) drawBundle(bundle, seconds, baseHue);
+  for (const disc of scene.bokeh) drawBokeh(disc, seconds, baseHue);
+  drawGlint(seconds, baseHue);
+}
+
+function resize() {
+  const pixelRatio = Math.min(devicePixelRatio, 2);
+  view.width = innerWidth;
+  view.height = innerHeight;
+  canvas.width = Math.round(view.width * pixelRatio);
+  canvas.height = Math.round(view.height * pixelRatio);
+  canvas.style.width = `${view.width}px`;
+  canvas.style.height = `${view.height}px`;
+  ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+}
+
+const shuffle = () => buildScene(Math.floor(Math.random() * 1e9));
+canvas.onclick = shuffle;
+document.getElementById('shuffle').onclick = shuffle;
+addEventListener('keydown', (event) => { if (event.code === 'Space') { event.preventDefault(); shuffle(); } });
+addEventListener('resize', resize);
+resize();
+buildScene(2008);
+
+function frame(now) {
+  draw(now / 1000);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

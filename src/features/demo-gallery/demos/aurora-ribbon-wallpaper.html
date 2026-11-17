@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aurora Ribbon Wallpaper</title>
+<meta name="category" content="aero" />
+<meta name="style" content="aurora" />
+<meta name="order" content="64" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="WebGL, GLSL, fragment shader, value noise, aurora curtains" />
+<meta name="description" content="A living desktop wallpaper in the soft aurora style of late-2000s operating systems: silky ribbons of light drift across a deep gradient, each one a glowing curtain with a crisp lower edge that fades upward, with fine dust twinkling in front. Move the pointer and the ribbons bend toward it, pick one of four colour moods, and slow the flow down or speed it up. Hard because it is all one fragment shader: every pixel sums five noise-warped curtains with an asymmetric falloff, adds vertical ray streaks so the light looks like hanging fabric, and blends additively without washing out to white."/>
+<meta name="prompt" content="Write a full-screen WebGL fragment shader wallpaper in the late-2000s aurora style, one HTML file, no libraries: five soft light ribbons flowing horizontally over a deep vertical gradient, each a curtain with a sharp lower edge and a long upward fade, warped by value noise and streaked with fine vertical rays, plus twinkling dust. The pointer should bend nearby ribbons toward it. Add four colour presets as glossy pill buttons and a speed slider, and tone-map so overlapping ribbons never clip to white." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #020814; }
+canvas { display: block; width: 100%; height: 100%; }
+#panel { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.45); background: linear-gradient(rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.08) 48%, rgba(255, 255, 255, 0.16)); backdrop-filter: blur(14px); color: #fff; font: 600 12px/1 'Segoe UI', 'Trebuchet MS', sans-serif; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5); white-space: nowrap; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+#panel button { width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.7); cursor: pointer; box-shadow: inset 0 9px 8px -4px rgba(255, 255, 255, 0.75), 0 2px 5px rgba(0, 0, 0, 0.4); }
+#panel button.on { outline: 2px solid #fff; outline-offset: 2px; }
+#panel input { width: 110px; accent-color: #9be8ff; }
+</style>
+</head>
+<body>
+<canvas id="wallpaper"></canvas>
+<div id="panel">
+  <span id="presets" style="display: flex; gap: 8px"></span>
+  <label for="speed">Flow</label>
+  <input id="speed" type="range" min="0" max="200" value="80" />
+</div>
+<script type="module">
+// Presets: three ribbon tints, then sky top and bottom
+const PRESETS = [
+  { name: 'Lagoon', ribbons: ['#2ef2c2', '#3aa8ff', '#b46bff'], sky: ['#031028', '#0a3f6e'] },
+  { name: 'Meadow', ribbons: ['#b6ff3c', '#2ee6a0', '#22b8ff'], sky: ['#02160f', '#0b5a4c'] },
+  { name: 'Sunrise', ribbons: ['#ffb347', '#ff5fa2', '#8a6bff'], sky: ['#160a2a', '#6a2a6e'] },
+  { name: 'Glacier', ribbons: ['#e8fbff', '#7fd8ff', '#4a7dff'], sky: ['#041226', '#1d5f9a'] },
+];
+const VERTEX_SOURCE = 'attribute vec2 corner; void main() { gl_Position = vec4(corner, 0.0, 1.0); }';
+const FRAGMENT_SOURCE = `
+precision highp float;
+uniform vec2 resolution; uniform float flow; uniform vec2 pointer;
+uniform vec3 tintA; uniform vec3 tintB; uniform vec3 tintC; uniform vec3 skyTop; uniform vec3 skyBottom;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 cell = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(cell), hash(cell + vec2(1, 0)), f.x), mix(hash(cell + vec2(0, 1)), hash(cell + vec2(1, 1)), f.x), f.y);
+}
+float fbm(vec2 p) { return noise(p) * 0.6 + noise(p * 2.1 + 7.0) * 0.3 + noise(p * 4.3 + 19.0) * 0.1; }
+
+// Curtain: sharp lower edge, long fade upward, fine vertical rays
+float curtain(vec2 uv, float index) {
+  float phase = index * 1.7;
+  float centre = 0.26 + index * 0.115
+    + 0.11 * sin(uv.x * (1.3 + index * 0.35) + flow * (0.5 + index * 0.08) + phase)
+    + 0.16 * (fbm(vec2(uv.x * 1.4 + flow * 0.12 + phase, index * 3.1)) - 0.5);
+  float pull = exp(-pow((uv.x - pointer.x) * 2.6, 2.0));
+  centre += (pointer.y - centre) * pull * 0.55;
+  float height = uv.y - centre;
+  float body = height > 0.0 ? exp(-height * (8.5 - index * 0.6)) : exp(height * 16.0);
+  float rays = 0.4 + 0.6 * noise(vec2(uv.x * 46.0 + phase * 9.0, flow * 0.35 + index));
+  float breathing = 0.65 + 0.35 * sin(flow * 0.4 + phase * 2.0 + uv.x * 2.0);
+  return body * rays * breathing;
+}
+
+float dust(vec2 uv) {
+  vec2 grid = uv * vec2(70.0, 40.0);
+  vec2 cell = floor(grid);
+  float seed = hash(cell);
+  float spark = smoothstep(0.09, 0.0, length(fract(grid) - 0.5 - (vec2(hash(cell + 3.0), hash(cell + 9.0)) - 0.5) * 0.7));
+  return spark * step(0.93, seed) * (0.5 + 0.5 * sin(flow * 2.0 + seed * 40.0));
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / resolution;
+  uv.x *= resolution.x / resolution.y;
+  vec3 colour = mix(skyBottom, skyTop, smoothstep(0.0, 1.0, uv.y));
+  for (int i = 0; i < 5; i++) {
+    float index = float(i);
+    float blend = index / 4.0;
+    vec3 tint = blend < 0.5 ? mix(tintA, tintB, blend * 2.0) : mix(tintB, tintC, blend * 2.0 - 1.0);
+    colour += tint * curtain(uv, index) * 0.8;
+  }
+  colour += vec3(0.8, 0.95, 1.0) * dust(uv) * 0.7;
+  colour = 1.0 - exp(-colour * 1.35);
+  float vignette = smoothstep(1.25, 0.35, length(gl_FragCoord.xy / resolution - 0.5));
+  gl_FragColor = vec4(colour * mix(0.72, 1.0, vignette), 1.0);
+}`;
+
+const canvas = document.getElementById('wallpaper');
+const gl = canvas.getContext('webgl', { antialias: false });
+
+function compileShader(type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
+  return shader;
+}
+
+function createProgram() {
+  const program = gl.createProgram();
+  gl.attachShader(program, compileShader(gl.VERTEX_SHADER, VERTEX_SOURCE));
+  gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, FRAGMENT_SOURCE));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  return program;
+}
+
+// One oversized triangle covers screen
+function bindFullScreenTriangle(program) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const corner = gl.getAttribLocation(program, 'corner');
+  gl.enableVertexAttribArray(corner);
+  gl.vertexAttribPointer(corner, 2, gl.FLOAT, false, 0, 0);
+}
+
+const program = createProgram();
+bindFullScreenTriangle(program);
+const uniform = Object.fromEntries(['resolution', 'flow', 'pointer', 'tintA', 'tintB', 'tintC', 'skyTop', 'skyBottom'].map((name) => [name, gl.getUniformLocation(program, name)]));
+const hexToRgb = (hex) => [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16) / 255);
+
+function applyPreset(preset) {
+  gl.uniform3fv(uniform.tintA, hexToRgb(preset.ribbons[0]));
+  gl.uniform3fv(uniform.tintB, hexToRgb(preset.ribbons[1]));
+  gl.uniform3fv(uniform.tintC, hexToRgb(preset.ribbons[2]));
+  gl.uniform3fv(uniform.skyTop, hexToRgb(preset.sky[0]));
+  gl.uniform3fv(uniform.skyBottom, hexToRgb(preset.sky[1]));
+}
+
+function buildPresetButtons() {
+  const buttons = PRESETS.map((preset) => {
+    const button = Object.assign(document.createElement('button'), { type: 'button', title: preset.name });
+    button.setAttribute('aria-label', preset.name);
+    button.style.background = `linear-gradient(135deg, ${preset.ribbons.join(', ')})`;
+    button.onclick = () => { applyPreset(preset); buttons.forEach((other) => other.classList.toggle('on', other === button)); };
+    return button;
+  });
+  document.getElementById('presets').append(...buttons);
+  buttons[0].click();
+}
+
+// Pointer: eased so ribbons lean instead of snapping; rests off-screen until first move
+const pointer = { x: 0.5, y: -2, targetX: 0.5, targetY: -2 };
+addEventListener('pointermove', (event) => {
+  pointer.targetX = (event.clientX / innerHeight);
+  pointer.targetY = 1 - event.clientY / innerHeight;
+});
+
+function resize() {
+  const pixelRatio = Math.min(devicePixelRatio, 1.5);
+  canvas.width = Math.round(innerWidth * pixelRatio);
+  canvas.height = Math.round(innerHeight * pixelRatio);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.uniform2f(uniform.resolution, canvas.width, canvas.height);
+}
+addEventListener('resize', resize);
+resize();
+buildPresetButtons();
+
+const speedInput = document.getElementById('speed');
+let flow = 0;
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  flow += dt * (Number(speedInput.value) / 100);
+  pointer.x += (pointer.targetX - pointer.x) * Math.min(1, dt * 3);
+  pointer.y += (pointer.targetY - pointer.y) * Math.min(1, dt * 3);
+  gl.uniform1f(uniform.flow, flow);
+  gl.uniform2f(uniform.pointer, pointer.x, pointer.y);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

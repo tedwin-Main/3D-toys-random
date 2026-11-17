@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bright Tertiary Wallpaper</title>
+<meta name="category" content="aero" />
+<meta name="style" content="tertiary" />
+<meta name="order" content="69" />
+<meta name="capture" content="2500" />
+<meta name="tags" content="SVG, generative layout, seeded RNG, layered transparency, parallax" />
+<meta name="description" content="The loud, cheerful vector style of late-2000s gadget boxes and music-player ads: overlapping see-through ribbons, rings, chevron arrows and halftone dot bursts in lime, orange, magenta and cyan on clean white. The layers sit at different depths and slide past each other as the pointer moves. Click or press Space for a new arrangement, switch palettes, and save the artwork as an SVG file. Hard because pure randomness looks like noise: ribbons are swept from one corner so the composition has a direction, colours multiply where shapes overlap to make the in-between tones, and one seeded random stream makes every layout repeatable."/>
+<meta name="prompt" content="Generate a late-2000s bright-tertiary vector wallpaper as one HTML file using SVG: on white, layer large translucent ribbons sweeping from one corner, rings, rounded chevron arrows and halftone dot bursts in lime, orange, magenta and cyan, blended with multiply so overlaps create new tones. Drive the layout from a seeded random generator, give each shape a depth and shift layers with pointer parallax, reshuffle on click or Space, offer three palettes, and include a button that downloads the SVG." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+#art { display: block; width: 100%; height: 100%; cursor: pointer; }
+#art .layer { transition: transform 0.25s ease-out; mix-blend-mode: multiply; }
+#toolbar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.85); border: 1px solid #d5dbe2; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16); font: 700 12px/1 'Segoe UI', 'Trebuchet MS', sans-serif; white-space: nowrap; }
+#toolbar button { font: inherit; color: #233; padding: 8px 14px; border-radius: 999px; border: 1px solid #c3cad3; background: linear-gradient(#fff, #e9eef3); cursor: pointer; }
+#swatches { display: flex; gap: 8px; }
+.swatch { width: 30px; height: 30px; padding: 0 !important; border-radius: 50% !important; }
+.swatch.on { outline: 2px solid #233; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<svg id="art" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Generated bright tertiary wallpaper"></svg>
+<div id="toolbar">
+  <button id="shuffle" type="button">Shuffle</button>
+  <span id="swatches"></span>
+  <button id="save" type="button">Save SVG</button>
+</div>
+<script type="module">
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ART = { width: 1600, height: 1000 };
+const PALETTES = [
+  ['#b6e61d', '#ff8a00', '#ff2f92', '#00b8f0'],
+  ['#d4f000', '#ff5a1f', '#c21fff', '#00d6c3'],
+  ['#8ee000', '#ffc400', '#ff3d5a', '#2f7bff'],
+];
+const PARALLAX_PIXELS = 46;
+
+// RNG: mulberry32 so each seed rebuilds same artwork
+function createRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = Math.imul(state ^ (state >>> 15), state | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const art = document.getElementById('art');
+const state = { seed: 2009, paletteIndex: 0 };
+let random = createRandom(state.seed);
+const between = (low, high) => low + random() * (high - low);
+const pick = (items) => items[Math.floor(random() * items.length)];
+
+function svgNode(tag, attributes = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+  node.append(...children);
+  return node;
+}
+
+// Ribbon: fat band swept from left edge to right; two curves form its sides
+function drawRibbon(colour) {
+  const startY = between(-100, ART.height);
+  const endY = between(-100, ART.height);
+  const thickness = between(90, 260);
+  const bendA = between(-380, 380);
+  const bendB = between(-380, 380);
+  const side = (shift) => `C ${ART.width * 0.33} ${startY + bendA + shift}, ${ART.width * 0.66} ${endY + bendB + shift}, `;
+  const path = `M -50 ${startY} ${side(0)}${ART.width + 50} ${endY} L ${ART.width + 50} ${endY + thickness * 0.6} `
+    + `C ${ART.width * 0.66} ${endY + bendB + thickness}, ${ART.width * 0.33} ${startY + bendA + thickness}, -50 ${startY + thickness} Z`;
+  return svgNode('path', { d: path, fill: colour, opacity: between(0.55, 0.85).toFixed(2) });
+}
+
+function drawRing(colour) {
+  const radius = between(50, 210);
+  return svgNode('circle', { cx: between(0, ART.width), cy: between(0, ART.height), r: radius, fill: 'none', stroke: colour, 'stroke-width': radius * between(0.12, 0.4), opacity: 0.8 });
+}
+
+function drawChevrons(colour) {
+  const size = between(40, 110);
+  const group = svgNode('g', { transform: `translate(${between(100, ART.width - 100)} ${between(100, ART.height - 100)}) rotate(${pick([0, -30, 30, 180])})`, opacity: 0.9 });
+  for (let step = 0; step < 3; step++) {
+    group.append(svgNode('path', { d: `M ${step * size * 0.7} ${-size} l ${size * 0.8} ${size} l ${-size * 0.8} ${size}`, fill: 'none', stroke: colour, 'stroke-width': size * 0.3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', opacity: 1 - step * 0.28 }));
+  }
+  return group;
+}
+
+// Dot burst: halftone disc, dots shrink toward rim
+function drawDotBurst(colour) {
+  const rings = Math.round(between(5, 9));
+  const spacing = between(16, 26);
+  const group = svgNode('g', { transform: `translate(${between(0, ART.width)} ${between(0, ART.height)})`, fill: colour, opacity: 0.85 });
+  for (let row = -rings; row <= rings; row++) {
+    for (let column = -rings; column <= rings; column++) {
+      const distance = Math.hypot(row, column) / rings;
+      if (distance <= 1) group.append(svgNode('circle', { cx: column * spacing, cy: row * spacing, r: (spacing * 0.42 * (1 - distance * 0.85)).toFixed(1) }));
+    }
+  }
+  return group;
+}
+
+// Layer: wrapper carries depth; parallax reads it from data attribute
+const layer = (shape, depth) => svgNode('g', { class: 'layer', 'data-depth': depth.toFixed(2) }, [shape]);
+
+function render() {
+  const colours = PALETTES[state.paletteIndex];
+  random = createRandom(state.seed);
+  const recipe = [[drawRibbon, 5, 0.2], [drawRing, 5, 0.5], [drawDotBurst, 4, 0.75], [drawChevrons, 4, 1]];
+  // colours dealt in turn from random start so no single hue takes over
+  let turn = Math.floor(random() * colours.length);
+  const layers = recipe.flatMap(([drawShape, count, depth]) => Array.from({ length: count }, () => layer(drawShape(colours[turn++ % colours.length]), depth * between(0.7, 1.1))));
+  art.replaceChildren(svgNode('rect', { width: ART.width, height: ART.height, fill: '#ffffff' }), ...layers);
+}
+
+function applyParallax(event) {
+  const offsetX = (event.clientX / innerWidth - 0.5) * PARALLAX_PIXELS;
+  const offsetY = (event.clientY / innerHeight - 0.5) * PARALLAX_PIXELS;
+  for (const node of art.querySelectorAll('.layer')) {
+    const depth = Number(node.dataset.depth);
+    node.style.transform = `translate(${(offsetX * depth).toFixed(1)}px, ${(offsetY * depth).toFixed(1)}px)`;
+  }
+}
+
+function shuffle() {
+  state.seed = Math.floor(Math.random() * 90000) + 10000;
+  render();
+}
+
+function buildSwatches() {
+  const buttons = PALETTES.map((palette, index) => {
+    const button = Object.assign(document.createElement('button'), { type: 'button', className: 'swatch', title: `Palette ${index + 1}` });
+    button.style.background = `conic-gradient(${palette.map((colour, i) => `${colour} ${i * 90}deg ${(i + 1) * 90}deg`).join(', ')})`;
+    button.onclick = () => { state.paletteIndex = index; buttons.forEach((other) => other.classList.toggle('on', other === button)); render(); };
+    return button;
+  });
+  document.getElementById('swatches').append(...buttons);
+  buttons[0].classList.add('on');
+}
+
+function saveSvg() {
+  const copy = art.cloneNode(true);
+  copy.removeAttribute('id');
+  copy.setAttribute('width', ART.width);
+  copy.setAttribute('height', ART.height);
+  for (const node of copy.querySelectorAll('.layer')) node.setAttribute('style', 'mix-blend-mode: multiply');
+  const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
+  Object.assign(document.createElement('a'), { href: url, download: `bright-tertiary-${state.seed}.svg` }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+art.onclick = shuffle;
+document.getElementById('shuffle').onclick = shuffle;
+document.getElementById('save').onclick = saveSvg;
+addEventListener('pointermove', applyParallax);
+addEventListener('keydown', (event) => { if (event.code === 'Space') { event.preventDefault(); shuffle(); } });
+buildSwatches();
+render();
+</script>
+</body>
+</html>
