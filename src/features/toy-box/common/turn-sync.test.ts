@@ -1,4 +1,4 @@
-// Tests turn-sync against a server-run match: server-only states, actions to the server, cleared state, match end, version restart on a new room.
+// Tests turn-sync against a server-run match: server-only states and private views, actions to the server, cleared state, match end, version restart on a new room.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createTurnSync } from './turn-sync.ts';
@@ -16,12 +16,12 @@ function fakeRoom() {
 }
 
 function setup() {
-  const got = [];
+  const got = [], views = [];
   let doneCount = 0;
-  const sync = createTurnSync({ onState: (s) => got.push(s), onDone: () => doneCount++ });
+  const sync = createTurnSync({ onState: (s) => got.push(s), onPrivate: (v) => views.push(v), onDone: () => doneCount++ });
   const room = fakeRoom();
   sync.attach(room);
-  return { got, sync, room, doneCount: () => doneCount };
+  return { got, views, sync, room, doneCount: () => doneCount };
 }
 
 test('states count only from the server; replayed versions are dropped', () => {
@@ -70,4 +70,29 @@ test('joining another room restarts the version count', () => {
   assert.equal(sync.state, null);
   next.deliver({ g: 'T', v: 1, s: 'new room' }, SERVER_PEER);
   assert.deepEqual(got, ['old room', 'new room']);
+});
+
+test('private views count only from the server; same version ok, older dropped', () => {
+  const { views, sync, room } = setup();
+  room.deliver({ g: 'Y', v: 5, s: 'spoof' }, 3);
+  room.deliver({ g: 'Y', v: 2, s: 'dice A' }, SERVER_PEER);
+  room.deliver({ g: 'Y', v: 2, s: 'dice B' }, SERVER_PEER);
+  room.deliver({ g: 'Y', v: 1, s: 'stale' }, SERVER_PEER);
+  room.deliver({ g: 'Y', v: 'x', s: 'bad' }, SERVER_PEER);
+  assert.deepEqual(views, ['dice A', 'dice B']);
+  assert.equal(sync.mine, 'dice B');
+});
+
+test('match end and a new room clear the private view', () => {
+  const { sync, room } = setup();
+  room.deliver({ g: 'T', v: 1, s: 'play' }, SERVER_PEER);
+  room.deliver({ g: 'Y', v: 1, s: 'hand' }, SERVER_PEER);
+  room.deliver({ g: 'T', v: 2, s: null }, SERVER_PEER);
+  assert.equal(sync.mine, null);
+  room.deliver({ g: 'Y', v: 2, s: 'hand' }, SERVER_PEER);
+  const next = fakeRoom();
+  sync.attach(next);
+  assert.equal(sync.mine, null);
+  next.deliver({ g: 'Y', v: 1, s: 'new hand' }, SERVER_PEER);
+  assert.equal(sync.mine, 'new hand');
 });

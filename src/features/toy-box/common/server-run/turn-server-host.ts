@@ -9,18 +9,36 @@ const secretSeed = () => Math.floor(Math.random() * 2 ** 31);
  * room: server view of the relay room ({ lobbyHost, players, send(data, { to, sticky }) => frame bytes }).
  * createGame({ onEnd }) => { startMatch({ seed, humans, bots, settings }), act(id, action), syncRoster(humans), tick(dt), state }
  * act / syncRoster / tick return true when the public state changed. state holds no secret picks: those stay inside the game module.
+ * viewFor(id) (optional): that seat's own secret (dice, hand, boats); sent only to them as { g: 'Y', v, s } whenever it changes.
  * Lobby host sends { g: 'run', bots, settings } / { g: 'stop' }; players send { g: 'A', q: seq, a: action }; match end sends { g: 'done' }.
  * States go out sticky as { g: 'T', v, s }; s = null once the match is over, so a late joiner never draws a finished match.
  */
 export function createTurnServerHost(room, { createGame }) {
   const lastActionSeq = new Map();
+  // last private view JSON sent per seat: unchanged views stay off the wire
+  const sentViews = new Map();
   // counts up for the life of the room: guests drop v <= the last one they saw
   let game = null, version = 0, lastMs = null;
 
-  const publish = () => room.send({ g: 'T', v: ++version, s: game?.state ?? null }, { sticky: true });
+  // private views ride the current public version; never sticky, never to anyone but their seat
+  function sendViews() {
+    if (!game?.viewFor) return;
+    for (const p of room.players) {
+      const view = game.viewFor(p.id) ?? null, key = JSON.stringify(view);
+      if (sentViews.get(p.id) === key) continue;
+      sentViews.set(p.id, key);
+      room.send({ g: 'Y', v: version, s: view }, { to: p.id });
+    }
+  }
+
+  function publish() {
+    room.send({ g: 'T', v: ++version, s: game?.state ?? null }, { sticky: true });
+    sendViews();
+  }
 
   function run({ bots, settings }) {
     game = createGame({ onEnd: finish });
+    sentViews.clear();
     game.startMatch({ seed: secretSeed(), humans: room.players, bots: Math.max(0, Math.floor(Number(bots)) || 0), settings: settings ?? {} });
     lastMs = null;
     publish();
@@ -29,6 +47,7 @@ export function createTurnServerHost(room, { createGame }) {
   function stop() {
     if (!game) return;
     game = null;
+    sentViews.clear();
     publish();
   }
 
@@ -47,6 +66,7 @@ export function createTurnServerHost(room, { createGame }) {
   function act(from, data) {
     if (!game || isReplay(from, Number(data.q))) return;
     if (game.act(from, data.a ?? {})) publish();
+    else sendViews();
   }
 
   return {
@@ -62,7 +82,9 @@ export function createTurnServerHost(room, { createGame }) {
     onRoster() {
       const here = new Set(room.players.map((p) => p.id));
       for (const id of [...lastActionSeq.keys()]) if (!here.has(id)) lastActionSeq.delete(id);
+      for (const id of [...sentViews.keys()]) if (!here.has(id)) sentViews.delete(id);
       if (game?.syncRoster(room.players)) publish();
+      else sendViews();
     },
     tick(nowMs) {
       if (!game) return;
@@ -70,8 +92,9 @@ export function createTurnServerHost(room, { createGame }) {
       const elapsedMs = nowMs - lastMs;
       if (elapsedMs < TICK_MS) return;
       lastMs = nowMs;
-      // may end the match (finish clears game)
+      // may end the match (finish clears game); a private view may change on its own (new hand dealt mid-phase)
       if (game.tick(Math.min(elapsedMs, MAX_TICK_MS) / 1000) && game) publish();
+      else sendViews();
     },
     close() { game = null; },
   };

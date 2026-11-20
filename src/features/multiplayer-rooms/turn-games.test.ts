@@ -1,4 +1,4 @@
-// Tests turn and secret-pick room games the relay runs: lobby-host control, states on change, human actions, hidden picks, late joiners, two matches in one room.
+// Tests turn and secret-pick room games the relay runs: lobby-host control, states on change, human actions, hidden picks, private per-seat views, late joiners, two matches in one room.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,9 +13,10 @@ const MATCH_TICK_CAP = 10 * 60 * 30; // 30 min of game time
  * ready(state, id): the human `id` may act now; action(state, id): what they send
  * acted(state, id): the action landed
  * secret(state): picks that must stay hidden until the reveal, when the game has them ('' = none showing)
+ * privateOf(view, id): games with a per-seat view; '' when the view seat `id` got holds only its own secret
  */
 // action(state, id): the move a seated player sends when ready(state, id)
-type TurnSpec = { settings; ready: (s, id) => boolean; action: (s, id) => unknown; acted: (s, id) => boolean; secret? };
+type TurnSpec = { settings; ready: (s, id) => boolean; action: (s, id) => unknown; acted: (s, id) => boolean; secret?; privateOf? };
 const turnSpecs = (specs: Record<string, TurnSpec>) => specs;
 
 const GAMES = turnSpecs({
@@ -95,7 +96,7 @@ function room(game) {
   return { core, host, guest, run, runUntil, toServer, act, start };
 }
 
-for (const [game, { settings, ready, action, acted, secret }] of Object.entries(GAMES)) {
+for (const [game, { settings, ready, action, acted, secret, privateOf }] of Object.entries(GAMES)) {
   test(`${game}: only the lobby host starts it; first state reaches everyone from the server at once`, () => {
     const { host, guest, toServer, start } = room(game);
     toServer(guest, { g: 'run', bots: 2, seed: 7, settings });
@@ -135,6 +136,20 @@ for (const [game, { settings, ready, action, acted, secret }] of Object.entries(
     assert.equal(leaked, '', 'secret picks stay off the wire');
     assert.equal(host.state(), null, 'state cleared for late joiners');
     assert.ok(!core.rooms.values().next().value.server.running);
+  });
+
+  if (privateOf) test(`${game}: each seat's private view comes from the server to that seat only`, () => {
+    const { host, guest, run, runUntil, start } = room(game);
+    start(2, settings);
+    assert.ok(runUntil(() => [host, guest].every((p) => p.data('Y').some((m) => m.data.s))), 'both seats get a view');
+    run(300);
+    for (const p of [host, guest]) {
+      for (const m of p.data('Y')) {
+        assert.equal(m.from, SERVER_PEER);
+        assert.equal(privateOf(m.data.s, p.id), '', `seat ${p.id} view`);
+      }
+      assert.ok(p.data('Y').every((m, i, all) => i === 0 || JSON.stringify(m.data.s) !== JSON.stringify(all[i - 1].data.s)), 'unchanged views stay off the wire');
+    }
   });
 
   test(`${game}: a late joiner gets the state at once and a seat; a leaver loses theirs`, () => {
