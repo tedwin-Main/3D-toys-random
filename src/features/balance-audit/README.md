@@ -37,6 +37,7 @@ Each rule in `genre-rules.ts` has a `ref`. Every source below was fetched and st
 | pair-pond | a match keeps the pair and gives another turn | [Concentration](https://en.wikipedia.org/wiki/Concentration_(card_game)) |
 | bridge-isles | first chain joining your two sides wins; no draws; pie rule | [Hex](https://en.wikipedia.org/wiki/Hex_(board_game)) |
 | fib-dice | a challenged bid that holds costs the caller a die, else the bidder | [Liar's dice](https://en.wikipedia.org/wiki/Liar%27s_dice) |
+| basket-draft | everyone keeps one card in secret, reveals together, passes the rest | [Card drafting](https://en.wikipedia.org/wiki/Draft_(board_games)) |
 | lucky-low | lowest unique pick wins | [Unique bid auction](https://en.wikipedia.org/wiki/Unique_bid_auction) |
 | tank-battle-maze | self-kill costs one frag (Doom Deathmatch 2.0) | [Deathmatch](https://en.wikipedia.org/wiki/Deathmatch_(video_games)) |
 | light-cycle-arena | hitting any wall is out; last rider wins | [Armagetron](https://ossblog.org/armagetron-advanced-tron-clone-3d) |

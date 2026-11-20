@@ -15,6 +15,7 @@ const noNegative = (field) => `P.some(p=>p.${field}<0)?'negative ${field}':''`;
 export const GAME_RULES = {
   'balloon-battle': { serverRun: true, rule: 'pops never negative', ref: 'https://www.fatherly.com/entertainment/stomp-the-balloon-game', inv: noNegative('pops') },
   'bank-or-bust': { serverRun: true, score: 'p.total', rule: 'one 1 busts the round, double 1 wipes the total; totals never negative', ref: 'https://en.wikipedia.org/wiki/Pig_(dice_game)', inv: noNegative('total') },
+  'basket-draft': { serverRun: true, rule: 'every card of a round is in one hand, on one tableau or back on the pile; hands in a round stay equal', ref: 'https://en.wikipedia.org/wiki/Draft_(board_games)', inv: `(()=>{const r=P.filter(p=>p.in),n=S_.deck+r.reduce((a,p)=>a+p.hand+p.tab.length,0);return S_.rd&&n!==S_.total?'cards '+n+' of '+S_.total:new Set(r.map(p=>p.hand)).size>1?'uneven hands':''})()` },
   'bomb-tag-arena': { serverRun: true, edge: 1.5,
     rule: 'bomb holders 1..alive-1 while fuse burns; round ends at ≤1 alive', ref: 'https://en.wikipedia.org/wiki/Hot_potato_(game)',
     inv: `ph==='play'?(()=>{const al=P.filter(p=>p.alive),h=al.filter(p=>p.bomb).length;return al.length>1&&(h<1||h>al.length-1)?'bombs '+h+'/'+al.length:''})():${lastStandingEndsRound('round')}`,

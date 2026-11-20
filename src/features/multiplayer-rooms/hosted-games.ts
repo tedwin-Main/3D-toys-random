@@ -21,6 +21,7 @@ import { createSiegeGame } from '../toy-box/siege-hills/siege-rules.ts';
 import { createPondGame } from '../toy-box/pair-pond/pond-rules.ts';
 import { createBridgeGame } from '../toy-box/bridge-isles/bridge-rules.ts';
 import { createFibGame } from '../toy-box/fib-dice/fib-rules.ts';
+import { createBasketGame } from '../toy-box/basket-draft/basket-rules.ts';
 import { createKartSim } from '../toy-box/kart-race-online/kart-sim.ts';
 import { createTurboSim } from '../toy-box/rocket-ball-soccer/turbo-sim.ts';
 import { createSumoSim } from '../toy-box/bumper-sumo-arena/sumo-sim.ts';
@@ -69,5 +70,6 @@ export const hostedGames = {
   'pair-pond': (room) => createTurnServerHost(room, { createGame: createPondGame }),
   'bridge-isles': (room) => createTurnServerHost(room, { createGame: createBridgeGame }),
   'fib-dice': (room) => createTurnServerHost(room, { createGame: createFibGame }),
+  'basket-draft': (room) => createTurnServerHost(room, { createGame: createBasketGame }),
   ...Object.fromEntries(Object.keys(ROUNDS).map((roundId) => [roundId, (room) => createPartyServerHost(room, { roundId })])),
 };

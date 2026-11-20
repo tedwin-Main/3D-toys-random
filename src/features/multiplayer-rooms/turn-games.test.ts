@@ -95,6 +95,14 @@ const GAMES = turnSpecs({
     secret: (s) => (s.ph !== 'reveal' && s.ph !== 'final' && (s.res || /"dice"|"cups"/.test(JSON.stringify(s))) ? 'dice on the wire before the reveal' : ''),
     privateOf: (v, id) => (v && (v.id !== id || !Array.isArray(v.dice)) ? `view of seat ${v.id}` : ''),
   },
+  'basket-draft': {
+    settings: { clock: 10 },
+    ready: (s, id) => s.ph === 'pick' && !!s.P.find((p) => p.id === id && p.in && !p.lock),
+    action: () => ({ t: 'pick', i: 0 }),
+    acted: (s, id) => !!s.P.find((p) => p.id === id)?.lock,
+    secret: (s) => (/"hands?":\[/.test(JSON.stringify(s)) || (s.ph === 'pick' && s.P.some((p) => p.pick)) ? 'hands or picks on the wire' : ''),
+    privateOf: (v, id) => (v && (v.id !== id || !Array.isArray(v.hand)) ? `view of seat ${v.id}` : ''),
+  },
 });
 
 function join(core, game, room = '') {
