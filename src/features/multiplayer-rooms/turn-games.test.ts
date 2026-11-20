@@ -12,13 +12,13 @@ const TICK_MS = 100;
 const MATCH_TICK_CAP = 10 * 60 * 30; // 30 min of game time
 /**
  * settings: lobby settings for the shortest match
- * ready(state, id): the human `id` may act now; action(state, id): what they send
+ * ready(state, id): the human `id` may act now; action(state, id, view): what they send (view = that seat's latest private view)
  * acted(state, id): the action landed
  * secret(state): picks that must stay hidden until the reveal, when the game has them ('' = none showing)
  * privateOf(view, id): games with a per-seat view; '' when the view seat `id` got holds only its own secret
  */
 // action(state, id): the move a seated player sends when ready(state, id)
-type TurnSpec = { settings; ready: (s, id) => boolean; action: (s, id) => unknown; acted: (s, id) => boolean; secret?; privateOf? };
+type TurnSpec = { settings; ready: (s, id) => boolean; action: (s, id, view?) => unknown; acted: (s, id) => boolean; secret?; privateOf? };
 const turnSpecs = (specs: Record<string, TurnSpec>) => specs;
 
 const GAMES = turnSpecs({
@@ -103,6 +103,17 @@ const GAMES = turnSpecs({
     secret: (s) => (/"hands?":\[/.test(JSON.stringify(s)) || (s.ph === 'pick' && s.P.some((p) => p.pick)) ? 'hands or picks on the wire' : ''),
     privateOf: (v, id) => (v && (v.id !== id || !Array.isArray(v.hand)) ? `view of seat ${v.id}` : ''),
   },
+  'fog-fleet': {
+    settings: { rounds: 8, clock: 10 },
+    ready: (s, id) => s.ph === 'aim' && !!s.P.find((p) => p.id === id && !p.lock),
+    action: (s, id, view) => {
+      const own = new Set(view.boats.flat()), shots = s.P.find((p) => p.id === id).shots;
+      return { t: 'aim', cells: [...s.sea].flatMap((c, i) => (c === '.' && !own.has(i) ? [i] : [])).slice(0, shots) };
+    },
+    acted: (s, id) => !!s.P.find((p) => p.id === id)?.lock,
+    secret: (s) => (/"boats"|"aim":|"cells":\[\d/.test(JSON.stringify({ ...s, sunk: [] })) ? 'boats or aims on the wire' : ''),
+    privateOf: (v, id) => (v && (v.id !== id || !Array.isArray(v.boats)) ? `view of seat ${v.id}` : ''),
+  },
 });
 
 function join(core, game, room = '') {
@@ -146,10 +157,11 @@ for (const [game, { settings, ready, action, acted, secret, privateOf }] of Obje
     start(2, settings);
     assert.ok(runUntil(() => ready(host.state(), guest.id)), 'guest gets a turn');
     const before = host.data('T').length;
-    act(guest, action(host.state(), guest.id));
+    const view = () => guest.data('Y').at(-1)?.data.s;
+    act(guest, action(host.state(), guest.id, view()));
     assert.ok(acted(host.state(), guest.id), 'action applied');
     assert.equal(host.data('T').length, before + 1, 'one state per action');
-    toServer(guest, { g: 'A', q: 1, a: action(host.state(), guest.id) });
+    toServer(guest, { g: 'A', q: 1, a: action(host.state(), guest.id, view()) });
     assert.equal(host.data('T').length, before + 1, 'replay dropped');
   });
 

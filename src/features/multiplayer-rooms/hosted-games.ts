@@ -1,4 +1,4 @@
-// Lists games whose host runs on the relay server (party royale rounds, the full show, kart, turbo ball, bumper sumo, hot potato, crown keep, chair scramble, balloon battle, sheepdog rush, snowball brawl, tank brawl, cannon cove, hex drop, splat turf, penguin curling, mini golf, light cycles, floor is lava, block party, waldo hunt, and the turn games: bank or bust, lucky low, jar guess, treasure auction, picnic dash, fence fields, gem diggers, siege hills, pair pond, bridge isles, fib dice), keyed by room game name.
+// Lists games whose host runs on the relay server (party royale rounds, the full show, kart, turbo ball, bumper sumo, hot potato, crown keep, chair scramble, balloon battle, sheepdog rush, snowball brawl, tank brawl, cannon cove, hex drop, splat turf, penguin curling, mini golf, light cycles, floor is lava, block party, waldo hunt, and the turn games: bank or bust, lucky low, jar guess, treasure auction, picnic dash, fence fields, gem diggers, siege hills, pair pond, bridge isles, fib dice, basket draft, fog fleet), keyed by room game name.
 
 import { ROUNDS } from '../toy-box/common/party-royale/show-director.ts';
 import { createPartyServerHost } from '../toy-box/common/party-royale/party-server-host.ts';
@@ -22,6 +22,7 @@ import { createPondGame } from '../toy-box/pair-pond/pond-rules.ts';
 import { createBridgeGame } from '../toy-box/bridge-isles/bridge-rules.ts';
 import { createFibGame } from '../toy-box/fib-dice/fib-rules.ts';
 import { createBasketGame } from '../toy-box/basket-draft/basket-rules.ts';
+import { createFleetGame } from '../toy-box/fog-fleet/fleet-rules.ts';
 import { createKartSim } from '../toy-box/kart-race-online/kart-sim.ts';
 import { createTurboSim } from '../toy-box/rocket-ball-soccer/turbo-sim.ts';
 import { createSumoSim } from '../toy-box/bumper-sumo-arena/sumo-sim.ts';
@@ -71,5 +72,6 @@ export const hostedGames = {
   'bridge-isles': (room) => createTurnServerHost(room, { createGame: createBridgeGame }),
   'fib-dice': (room) => createTurnServerHost(room, { createGame: createFibGame }),
   'basket-draft': (room) => createTurnServerHost(room, { createGame: createBasketGame }),
+  'fog-fleet': (room) => createTurnServerHost(room, { createGame: createFleetGame }),
   ...Object.fromEntries(Object.keys(ROUNDS).map((roundId) => [roundId, (room) => createPartyServerHost(room, { roundId })])),
 };

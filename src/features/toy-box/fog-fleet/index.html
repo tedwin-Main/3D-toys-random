@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Fog Fleet</title>
+<style>
+  :root { --ink: #fff; --card: rgba(6, 14, 30, 0.74); --lamp: #ffd86b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #050b18; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.92; max-width: 260px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 190px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  #board .row.me span { color: var(--lamp); font-weight: 800; }
+  #board .row.out { opacity: 0.55; }
+  #turn { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 16px; font-weight: 800; display: none; white-space: nowrap; }
+  #big { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(26px, 6vw, 58px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.45); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.9; max-width: 290px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--lamp); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 1150px) { #hint { display: none; } }
+  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } #board { top: 150px; font-size: 11.5px; min-width: 150px; } }
+</style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="turn" class="card"></div>
+<div id="big"></div>
+<div id="hint" class="card">Every fleet hides on the same foggy sea. Each round tap <b>one target per boat still afloat</b> (arrow keys + Enter work too); all shots land together. Hit +1, sink +2, still afloat at the end +5. Your own boats glow gold and can't be targeted.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createTurnSync } from '../common/turn-sync.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { esc, boardHtml, createBanner } from '../common/turn-page-kit.ts';
+import { createFleetGame } from './fleet-rules.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+
+const C = 1.1, DROP = 0.7;
+
+// Scene > Renderer, night sea, moonlight, fog bank, lighthouse
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050b18);
+scene.fog = new THREE.Fog(0x0a1830, 20, 60);
+const camera = new THREE.PerspectiveCamera(44, innerWidth / innerHeight, 0.1, 200);
+scene.add(new THREE.HemisphereLight(0x9cb8ff, 0x061022, 0.9));
+const moon = new THREE.DirectionalLight(0xcfe0ff, 1.1);
+moon.position.set(-8, 16, -6);
+scene.add(moon);
+const waterMat = new THREE.MeshStandardMaterial({ color: 0x0b2440, roughness: 0.35, metalness: 0.2 });
+const water = new THREE.Mesh(new THREE.CircleGeometry(80, 48).rotateX(-Math.PI / 2), waterMat);
+water.position.y = -0.12;
+scene.add(water);
+const lighthouse = new THREE.Group();
+{
+  const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.7, 4, 14), new THREE.MeshStandardMaterial({ color: 0xf2f2f2 }));
+  tower.position.y = 2;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.56, 0.6, 0.7, 14), new THREE.MeshStandardMaterial({ color: 0xd8423a }));
+  band.position.y = 1.6;
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 10), new THREE.MeshBasicMaterial({ color: 0xffe9a8 }));
+  lamp.position.y = 4.3;
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1.4, 0), new THREE.MeshStandardMaterial({ color: 0x3a3f4a, flatShading: true }));
+  rock.scale.y = 0.4;
+  lighthouse.add(rock, tower, band, lamp);
+}
+const beam = new THREE.Mesh(new THREE.ConeGeometry(2.4, 26, 24, 1, true).rotateZ(Math.PI / 2).translate(13, 0, 0), new THREE.MeshBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.045, depthWrite: false, side: THREE.DoubleSide }));
+beam.position.y = 4.3;
+lighthouse.add(beam);
+scene.add(lighthouse);
+// drifting fog puffs over the sea
+const fogTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), grad = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(200,215,240,0.5)'); grad.addColorStop(1, 'rgba(200,215,240,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+const puffs = Array.from({ length: 14 }, (_, k) => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: fogTex, transparent: true, depthWrite: false, opacity: 0.35 }));
+  s.scale.set(7, 3.5, 1);
+  s.userData = { a: (k / 14) * Math.PI * 2, r: 3 + (k % 5) * 2, sp: 0.03 + (k % 3) * 0.02 };
+  scene.add(s);
+  return s;
+});
+
+// Sea grid > one instanced tile per cell, colored by what the volleys revealed
+let n = 0, tiles = null, half = 0;
+const tileColor = { open: new THREE.Color(0x1b4a74), mine: new THREE.Color(0x6a5a1e), miss: new THREE.Color(0x0e2035), sunk: new THREE.Color(0x22140e) };
+const _c = new THREE.Color(), _m = new THREE.Matrix4();
+const cellPos = (i) => ({ x: (i % n) * C - half, z: Math.floor(i / n) * C - half });
+function buildSea(side) {
+  if (tiles) { scene.remove(tiles); tiles.geometry.dispose(); }
+  n = side; half = ((n - 1) * C) / 2;
+  tiles = new THREE.InstancedMesh(new THREE.BoxGeometry(C * 0.92, 0.1, C * 0.92), new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.1 }), n * n);
+  for (let i = 0; i < n * n; i++) { const { x, z } = cellPos(i); tiles.setMatrixAt(i, _m.makeTranslation(x, 0, z)); tiles.setColorAt(i, tileColor.open); }
+  scene.add(tiles);
+  for (const mk of markers.values()) scene.remove(mk.g);
+  markers.clear();
+  lighthouse.position.set(-half - 3.2, 0, -half - 3.2);
+  puffs.forEach((p) => (p.userData.r = half * 0.4 + (p.userData.r % 7)));
+}
+
+// Markers > splash ring for a miss, burning buoy in the owner's color for a hit, wreck for a sunk boat; each drops in with its shell
+const markers = new Map();
+const flameGeo = new THREE.ConeGeometry(0.2, 0.6, 8), flameMat = new THREE.MeshBasicMaterial({ color: 0xff8a2a });
+const ringGeo = new THREE.RingGeometry(0.22, 0.32, 20).rotateX(-Math.PI / 2), splashMat = new THREE.MeshBasicMaterial({ color: 0xbfe0ff, transparent: true, opacity: 0.7 });
+function makeMarker(kind, color) {
+  const g = new THREE.Group();
+  if (kind === 'o') g.add(new THREE.Mesh(ringGeo, splashMat));
+  else {
+    const buoy = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.32, 10), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: kind === 'x' ? 0.35 : 0.08 }));
+    buoy.position.y = 0.18;
+    g.add(buoy);
+    if (kind === 'x') { const f = new THREE.Mesh(flameGeo, flameMat); f.position.y = 0.6; g.add(f); g.userData.flame = f; }
+    else { const mast = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.06), new THREE.MeshStandardMaterial({ color: 0x2a1b14 })); mast.position.y = 0.4; mast.rotation.z = 0.5; g.add(mast); }
+  }
+  scene.add(g);
+  return g;
+}
+const shells = [];
+const shellGeo = new THREE.SphereGeometry(0.14, 10, 8), shellMat = new THREE.MeshBasicMaterial({ color: 0xffe2a0 });
+function syncMarkers(sea, of, drop) {
+  for (let i = 0; i < sea.length; i++) {
+    const kind = sea[i], mk = markers.get(i);
+    if (kind === '.') { if (mk) { scene.remove(mk.g); markers.delete(i); } continue; }
+    if (mk?.kind === kind) continue;
+    if (mk) scene.remove(mk.g);
+    const owner = S.P.find((p) => p.id === of[i]), g = makeMarker(kind, owner?.color ?? '#888888'), { x, z } = cellPos(i);
+    g.position.set(x, 0.05, z);
+    const wait = drop && !mk ? DROP : 0;
+    g.scale.setScalar(wait ? 0.001 : 1);
+    markers.set(i, { g, kind, t: -wait });
+    if (wait) { const s = new THREE.Mesh(shellGeo, shellMat); s.userData = { x, z, t: 0 }; scene.add(s); shells.push(s); }
+  }
+}
+
+// Own fleet > gold hulls on my cells (private view only); aim marks on my picks
+const fleet3d = new THREE.Group();
+scene.add(fleet3d);
+let fleetKey = '';
+const hullMat = new THREE.MeshStandardMaterial({ color: 0xd9b24a, roughness: 0.4, metalness: 0.3, emissive: 0x5a4210, emissiveIntensity: 0.4 });
+function buildFleet(boats) {
+  const key = `${n}|${JSON.stringify(boats)}`;
+  if (key === fleetKey) return;
+  fleetKey = key;
+  fleet3d.clear();
+  for (const cells of boats) {
+    const a = cellPos(cells[0]), b = cellPos(cells.at(-1)), len = cells.length * C - 0.3;
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.28, len), hullMat);
+    hull.position.set((a.x + b.x) / 2, 0.2, (a.z + b.z) / 2);
+    if (a.z === b.z) hull.rotation.y = Math.PI / 2;
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.24, 0.5), new THREE.MeshStandardMaterial({ color: 0xf5ecd0 }));
+    cabin.position.y = 0.24;
+    hull.add(cabin);
+    fleet3d.add(hull);
+  }
+}
+const aimMat = new THREE.MeshBasicMaterial({ color: 0xff4d4d, transparent: true, opacity: 0.95, depthTest: false });
+const aimGeo = new THREE.RingGeometry(0.3, 0.42, 4, 1).rotateX(-Math.PI / 2).rotateY(Math.PI / 4);
+const aims3d = Array.from({ length: 3 }, () => { const m = new THREE.Mesh(aimGeo, aimMat); m.renderOrder = 4; m.visible = false; scene.add(m); return m; });
+const cursor3d = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.52, 4, 1).rotateX(-Math.PI / 2).rotateY(Math.PI / 4), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, depthTest: false }));
+cursor3d.renderOrder = 4;
+scene.add(cursor3d);
+
+// Audio > boom on each hit, plop on a miss, sink rumble, aim click
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  aim() { tone(900, 700, 0.05, 0.05, 'square'); },
+  boom(me) { noise(0.35, me ? 0.22 : 0.12, 900, 120); tone(110, 50, 0.3, me ? 0.12 : 0.06, 'sine'); },
+  plop() { noise(0.12, 0.06, 3000, 800); },
+  sink() { tone(160, 60, 0.9, 0.1, 'sawtooth'); noise(0.8, 0.1, 600, 100); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules live in fleet-rules.ts: this page runs them for attract mode only; in a match the relay server keeps every fleet and sends this tab its own alone
+// S: { mode, ph, tt, clock, rd, cap, n, fleet, sea, of, sunk, volley: [{ i, by, of }], P: [{ id, nick, color, bot, score, lock, afloat, left, shots, skill }] }
+const attract = createFleetGame();
+let S = attract.state, mine = null, sel = [];
+const player = (id) => S.P.find((p) => p.id === id);
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'at' ? undefined : v));
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; mine = null; sel = []; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  if (S !== attract.state) prevS = null;
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
+}
+
+// Multiplayer > lobby + state sync (server publishes the sea without boats, and this seat's own fleet + aim privately)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onPrivate(view) { if (view?.rd !== mine?.rd) sel = [...(view?.aim ?? [])]; mine = view; },
+  onDone() { serverMatch.finish(); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'fog-fleet', title: 'Fog Fleet', emoji: '⚓', accent: '#ffd86b',
+  blurb: 'Every fleet hides on one foggy sea. Each round everyone secretly aims one shot per boat still afloat, then all the shells land at once. Hits and sinks score; a fleet still afloat at the end earns a bonus.',
+  maxBots: 13, defaultBots: 4, minPlayers: 2,
+  note: 'Up to 14 captains (humans + bots). The sea grows with the room (9×9 for two, 15×15 for fourteen). Fleets: 3 boats up to 8 players, 2 beyond.',
+  settings: [
+    { key: 'clock', label: 'Aim clock', options: [[10, '10 s'], [15, '15 s'], [25, '25 s']], value: 15 },
+    { key: 'rounds', label: 'Round cap', options: [[20, '20'], [30, '30'], [40, '40']], value: 30 },
+  ],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, seed, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
+    mine = sync.mine; sel = [...(mine?.aim ?? [])];
+  },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); banner.clear(); startAttract(); },
+});
+const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: S.ph, players: S.P }), confirmMs: () => serverMatch.stats.confirmMs });
+function showHud(on) {
+  ['info', 'board', 'turn'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (cur.n !== n || !prev || prev.sea.length !== cur.sea.length || (prev.rd > cur.rd)) { buildSea(cur.n); syncMarkers(cur.sea, cur.of, false); }
+  const volley = cur.ph === 'fire' && prev?.ph !== 'fire';
+  syncMarkers(cur.sea, cur.of, volley);
+  if (!volley) return;
+  const hits = cur.volley.filter((v) => v.of !== null), mineHit = hits.filter((v) => v.by.includes(me)).length, onMe = hits.filter((v) => v.of === me).length;
+  setTimeout(() => { for (const v of cur.volley) v.of === null ? sfx.plop() : sfx.boom(v.by.includes(me) || v.of === me); }, DROP * 1000);
+  const sunkNow = cur.sunk.slice(prev?.sunk.length ?? 0);
+  if (sunkNow.length) setTimeout(sfx.sink, DROP * 1000 + 250);
+  if (!match) return;
+  const mySinks = sunkNow.filter((b) => b.cells.some((i) => cur.volley.some((v) => v.i === i && v.by.includes(me)))).length;
+  const lost = sunkNow.filter((b) => b.of === me).length;
+  const line = [mineHit && `💥 ${mineHit} hit${mineHit > 1 ? 's' : ''}`, mySinks && `☠️ sank ${mySinks}`, onMe && `🔥 you took ${onMe}`, lost && `⚓ lost ${lost} boat${lost > 1 ? 's' : ''}`].filter(Boolean).join(' · ');
+  if (line) setTimeout(() => banner.flash(`<small>round ${cur.rd}</small>${line}`, 2), DROP * 1000);
+}
+
+// Input > tap open cells to set targets (one per boat afloat; a further tap swaps out the oldest), or arrow keys + Enter / Space
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let hoverI = -1, cursorI = -1;
+const ownSet = () => new Set((mine?.boats ?? []).flat());
+const canAim = () => S.mode === 'match' && S.ph === 'aim' && !!player(lobby.room?.me);
+const aimable = (i) => i >= 0 && i < n * n && S.sea[i] === '.' && !ownSet().has(i);
+function pickCell(e) {
+  if (!tiles) return -1;
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObject(tiles, false)[0];
+  return hit ? hit.instanceId : -1;
+}
+function toggle(i) {
+  if (!canAim() || !aimable(i)) return;
+  const shots = player(lobby.room.me).shots;
+  if (sel.includes(i)) sel = sel.filter((c) => c !== i);
+  else { sel = [...sel, i]; while (sel.length > shots) sel.shift(); }
+  sfx.aim();
+  sync.act({ t: 'aim', cells: sel });
+}
+addEventListener('pointermove', (e) => { hoverI = canAim() ? pickCell(e) : -1; });
+addEventListener('pointerdown', (e) => { if (e.target === renderer.domElement) toggle(pickCell(e)); });
+addEventListener('keydown', (e) => {
+  if (!canAim() || !n) return;
+  const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+  if (step) {
+    e.preventDefault();
+    if (cursorI < 0) cursorI = Math.floor((n * n) / 2);
+    else { const c = Math.max(0, Math.min(n - 1, (cursorI % n) + step[0])), r = Math.max(0, Math.min(n - 1, Math.floor(cursorI / n) + step[1])); cursorI = r * n + c; }
+  } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(cursorI); }
+});
+
+// HUD > aim line, scoreboard, banners
+const banner = createBanner(document.getElementById('big')), turnEl = document.getElementById('turn');
+let lastClock = 0, hudT = 0;
+function hud(dt) {
+  if (S.mode !== 'match') return;
+  const flashing = banner.tick(dt);
+  const me = player(lobby.room?.me), clock = Math.ceil(Math.max(0, S.tt)), waiting = S.P.filter((p) => !p.lock).length;
+  if (S.ph === 'intro') banner.set(`<small>${S.n}×${S.n} sea · ${S.fleet.length} boats each</small>Fog Fleet`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; banner.set(`<small>admiral of the fog with ${w?.score ?? 0}</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (!flashing) banner.set('');
+  turnEl.innerHTML = S.ph === 'aim' ? (me ? (me.lock ? `✅ salvo set · ${waiting ? `${waiting} aiming` : 'firing'} · ${clock}s` : `<b>Aim ${sel.length}/${me.shots}</b>${me.afloat ? '' : ' (ghost shot)'} · ${clock}s`) : `${waiting} aiming · ${clock}s`) : S.ph === 'fire' ? '💥 shells away' : S.ph === 'final' ? '🏁 fog lifts' : '⚓ fleets hiding';
+  if (canAim() && !me.lock && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final scores' : `Round ${S.rd || 1} of ${S.cap}`;
+  document.getElementById('roundMeta').innerHTML = me ? `Score <b style="color:var(--lamp)">${me.score}</b> · ⛵ ${me.afloat} afloat · 🎯 ${me.shots} shot${me.shots > 1 ? 's' : ''}` : 'Watching';
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  document.getElementById('board').innerHTML = boardHtml(rows, { me: lobby.room?.me, cls: (p) => (p.afloat ? '' : 'out'), right: (p) => `${S.ph === 'aim' ? (p.lock ? '✅ ' : '🤔 ') : ''}${p.afloat ? '⛵'.repeat(p.afloat) : '☠️'} ${p.score}` });
+}
+
+// Run engine > attract rules tick; in a match only the clock between server states runs here
+startTicker(20, (dt) => {
+  if (S.mode === 'attract') attractTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: tiles tint by state, shells fall on the volley, flames flicker, the lighthouse sweeps
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 16, 12), camLook = new THREE.Vector3(), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const own = ownSet(), match = S.mode === 'match';
+  if (tiles) {
+    for (let i = 0; i < n * n; i++) {
+      const k = S.sea[i];
+      _c.copy(k === 'o' ? tileColor.miss : k === '#' ? tileColor.sunk : own.has(i) && match ? tileColor.mine : tileColor.open);
+      if (k === 'x') _c.lerp(tileColor.sunk, 0.4);
+      if (k === '.' && (i === hoverI || (i === cursorI && canAim())) && aimable(i)) _c.offsetHSL(0, 0, 0.12);
+      tiles.setColorAt(i, _c);
+    }
+    tiles.instanceColor.needsUpdate = true;
+  }
+  buildFleet(match ? mine?.boats ?? [] : []);
+  const showSel = canAim() ? sel.filter((i) => S.sea[i] === '.') : [];
+  aims3d.forEach((m, k) => {
+    m.visible = k < showSel.length;
+    if (m.visible) { const { x, z } = cellPos(showSel[k]); m.position.set(x, 0.12, z); m.scale.setScalar(1 + Math.sin(time * 6) * 0.08); }
+  });
+  cursor3d.visible = canAim() && cursorI >= 0;
+  if (cursor3d.visible) { const { x, z } = cellPos(cursorI); cursor3d.position.set(x, 0.11, z); }
+  for (const mk of markers.values()) {
+    mk.t += dt;
+    if (mk.t >= 0) mk.g.scale.setScalar(Math.min(1, 0.3 + mk.t * 4) * (mk.kind === 'o' ? 1 + Math.max(0, 0.6 - mk.t) : 1));
+    if (mk.g.userData.flame) mk.g.userData.flame.scale.set(1, 0.8 + Math.sin(time * 14 + mk.g.position.x * 3) * 0.25, 1);
+  }
+  for (let k = shells.length - 1; k >= 0; k--) {
+    const s = shells[k], u = s.userData;
+    u.t += dt;
+    const f = Math.min(1, u.t / DROP);
+    s.position.set(u.x - (1 - f) * 3, 0.2 + (1 - f * f) * 9, u.z - (1 - f) * 2);
+    if (f >= 1) { scene.remove(s); shells.splice(k, 1); }
+  }
+  beam.rotation.y = time * (S.ph === 'fire' ? 2.4 : 0.5);
+  puffs.forEach((p) => { const d = p.userData; d.a += d.sp * dt; p.position.set(Math.cos(d.a) * d.r, 0.8, Math.sin(d.a) * d.r * 0.8); });
+  hud(dt);
+  // camera fits the sea to the screen width and height through the lens; portrait looks more top-down with thin margins
+  const tall = camera.aspect < 1, tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const fitW = (n * C + (tall ? 1.2 : 5)) / 2 / (tan * camera.aspect), fitH = (n * C + 4) / 2 / tan, dist = Math.max(10, fitW, fitH * (tall ? 0.6 : 1.05));
+  camPos.lerp(_v.set(0, dist * (tall ? 0.95 : 0.82), dist * (tall ? 0.3 : 0.55)), 1 - Math.exp(-dt * 3));
+  camLook.set(0, 0, tall ? 0 : 0.6);
+  scene.fog.near = dist * 1.2; scene.fog.far = dist * 2.8;
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+onChange(null, S);
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
