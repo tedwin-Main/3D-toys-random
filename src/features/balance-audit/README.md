@@ -34,6 +34,7 @@ Each rule in `genre-rules.ts` has a `ref`. Every source below was fetched and st
 | musical-chairs-party | one chair fewer than players | [Musical chairs](https://en.wikipedia.org/wiki/Musical_chairs) |
 | treasure-auction | tied bids cancel | [Sealed bid with cancellation](https://gamesushi.github.io/quartz/Auctions/Sealed-Bid-with-Cancellation) |
 | fence-fields | closing a box scores a point and gives another move | [Dots and boxes](https://en.wikipedia.org/wiki/Dots_and_boxes) |
+| pair-pond | a match keeps the pair and gives another turn | [Concentration](https://en.wikipedia.org/wiki/Concentration_(card_game)) |
 | lucky-low | lowest unique pick wins | [Unique bid auction](https://en.wikipedia.org/wiki/Unique_bid_auction) |
 | tank-battle-maze | self-kill costs one frag (Doom Deathmatch 2.0) | [Deathmatch](https://en.wikipedia.org/wiki/Deathmatch_(video_games)) |
 | light-cycle-arena | hitting any wall is out; last rider wins | [Armagetron](https://ossblog.org/armagetron-advanced-tron-clone-3d) |

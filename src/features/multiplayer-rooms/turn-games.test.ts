@@ -72,6 +72,13 @@ const GAMES = turnSpecs({
     action: () => ({ t: 'fire', a: Math.PI / 4, p: 0.6 }),
     acted: (s, id) => s.shot?.by === id,
   },
+  'pair-pond': {
+    settings: { clock: 10 },
+    ready: (s, id) => s.ph === 'play' && s.P[s.turn]?.id === id && !s.up.length,
+    action: (s) => ({ t: 'flip', i: s.claim.indexOf(null) }),
+    acted: (s) => s.up.length === 1,
+    secret: (s) => (s.up.some((u) => s.claim[u.i]) || /"faces"/.test(JSON.stringify(s)) ? 'pad faces on the wire' : ''),
+  },
 });
 
 function join(core, game, room = '') {

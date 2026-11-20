@@ -1,4 +1,4 @@
-// Lists games whose host runs on the relay server (party royale rounds, the full show, kart, turbo ball, bumper sumo, hot potato, crown keep, chair scramble, balloon battle, sheepdog rush, snowball brawl, tank brawl, cannon cove, hex drop, splat turf, penguin curling, mini golf, light cycles, floor is lava, block party, waldo hunt, and the turn games: bank or bust, lucky low, jar guess, treasure auction, picnic dash, fence fields, gem diggers, siege hills), keyed by room game name.
+// Lists games whose host runs on the relay server (party royale rounds, the full show, kart, turbo ball, bumper sumo, hot potato, crown keep, chair scramble, balloon battle, sheepdog rush, snowball brawl, tank brawl, cannon cove, hex drop, splat turf, penguin curling, mini golf, light cycles, floor is lava, block party, waldo hunt, and the turn games: bank or bust, lucky low, jar guess, treasure auction, picnic dash, fence fields, gem diggers, siege hills, pair pond), keyed by room game name.
 
 import { ROUNDS } from '../toy-box/common/party-royale/show-director.ts';
 import { createPartyServerHost } from '../toy-box/common/party-royale/party-server-host.ts';
@@ -18,6 +18,7 @@ import { createPicnicGame } from '../toy-box/picnic-dash/picnic-rules.ts';
 import { createFenceGame } from '../toy-box/fence-fields/fence-rules.ts';
 import { createGemGame } from '../toy-box/gem-diggers/gem-rules.ts';
 import { createSiegeGame } from '../toy-box/siege-hills/siege-rules.ts';
+import { createPondGame } from '../toy-box/pair-pond/pond-rules.ts';
 import { createKartSim } from '../toy-box/kart-race-online/kart-sim.ts';
 import { createTurboSim } from '../toy-box/rocket-ball-soccer/turbo-sim.ts';
 import { createSumoSim } from '../toy-box/bumper-sumo-arena/sumo-sim.ts';
@@ -63,5 +64,6 @@ export const hostedGames = {
   'fence-fields': (room) => createTurnServerHost(room, { createGame: createFenceGame }),
   'gem-diggers': (room) => createTurnServerHost(room, { createGame: createGemGame }),
   'siege-hills': (room) => createTurnServerHost(room, { createGame: createSiegeGame }),
+  'pair-pond': (room) => createTurnServerHost(room, { createGame: createPondGame }),
   ...Object.fromEntries(Object.keys(ROUNDS).map((roundId) => [roundId, (room) => createPartyServerHost(room, { roundId })])),
 };
