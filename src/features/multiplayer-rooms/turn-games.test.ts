@@ -6,6 +6,7 @@ import { createRelayCore } from './room-relay-core.ts';
 import { hostedGames } from './hosted-games.ts';
 import { encodeSend, decodeFrame, SERVER_PEER } from '../toy-box/common/relay-wire.ts';
 import { moverOf } from '../toy-box/bridge-isles/bridge-rules.ts';
+import { minRaise } from '../toy-box/fib-dice/fib-bids.ts';
 
 const TICK_MS = 100;
 const MATCH_TICK_CAP = 10 * 60 * 30; // 30 min of game time
@@ -85,6 +86,14 @@ const GAMES = turnSpecs({
     ready: (s, id) => s.ph === 'play' && moverOf(s)?.id === id,
     action: (s) => ({ t: 'stone', i: s.B.indexOf('0') }),
     acted: (s, id) => s.last?.by === id,
+  },
+  'fib-dice': {
+    settings: { rounds: 6, clock: 10 },
+    ready: (s, id) => s.ph === 'bid' && s.P[s.turn]?.id === id,
+    action: (s) => ({ t: 'bid', ...minRaise(s.bid, s.P.reduce((a, p) => a + p.score, 0)) }),
+    acted: (s, id) => s.bid?.by === id,
+    secret: (s) => (s.ph !== 'reveal' && s.ph !== 'final' && (s.res || /"dice"|"cups"/.test(JSON.stringify(s))) ? 'dice on the wire before the reveal' : ''),
+    privateOf: (v, id) => (v && (v.id !== id || !Array.isArray(v.dice)) ? `view of seat ${v.id}` : ''),
   },
 });
 

@@ -36,10 +36,10 @@ export function emojiTexture(emoji: string, { bg = '', fg = '#fff', size = 128 }
 
 /**
  * Scoreboard html. rows: players in display order; me: own id; turnId: seat to highlight;
- * right(p): html for the right column; mark(p): prefix before the nick.
+ * right(p): html for the right column; mark(p): prefix before the nick; cls(p): extra row class.
  */
-export function boardHtml(rows, { me, turnId = null, right, mark = (_p) => '' }) {
-  return rows.map((p, i) => `<div class="row ${p.id === me ? 'me' : ''} ${p.id === turnId ? 'turn' : ''}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${mark(p)}${esc(p.nick)}</span><em>${right(p)}</em></div>`).join('');
+export function boardHtml(rows, { me, turnId = null, right, mark = (_p) => '', cls = (_p) => '' }) {
+  return rows.map((p, i) => `<div class="row ${p.id === me ? 'me' : ''} ${p.id === turnId ? 'turn' : ''} ${cls(p)}"><b>${i + 1}</b><i style="background:${p.color}"></i><span>${mark(p)}${esc(p.nick)}</span><em>${right(p)}</em></div>`).join('');
 }
 
 /** big center banner: set(html) shows steady text, flash(html, secs) holds a one-off line; tick(dt) true while a flash is up */

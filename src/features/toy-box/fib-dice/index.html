@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Fib Dice</title>
+<style>
+  :root { --ink: #fff; --card: rgba(26, 14, 34, 0.76); --fib: #ffc94a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1026; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.9; max-width: 250px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 190px; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; letter-spacing: -1px; color: var(--fib); min-width: 50px; text-align: right; }
+  #board .row.me span { color: var(--fib); font-weight: 800; }
+  #board .row.turn { background: rgba(255, 255, 255, 0.12); border-radius: 6px; }
+  #board .row.out { opacity: 0.4; }
+  #turn { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 16px; font-weight: 800; display: none; white-space: nowrap; }
+  #big { position: fixed; top: 34%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(26px, 6vw, 58px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.45); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #pad { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); padding: 10px; display: none; width: min(520px, calc(100% - 20px)); text-align: center; }
+  #pad .cup { display: flex; gap: 6px; justify-content: center; margin-bottom: 8px; font-size: 13px; align-items: center; }
+  #pad .cup img { width: 30px; height: 30px; }
+  #pad .ctl { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  #pad button { font: inherit; font-weight: 900; border: 0; border-radius: 11px; cursor: pointer; }
+  #pad .step { width: 38px; height: 44px; font-size: 22px; background: #3a2a4c; color: #fff; }
+  #pad #nOut { min-width: 44px; font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  #pad .face { width: 44px; height: 44px; padding: 3px; background: #f4ecdc; }
+  #pad .face img { width: 100%; height: 100%; display: block; }
+  #pad .face.on { outline: 3px solid var(--fib); outline-offset: 1px; }
+  #pad .face:disabled, #pad .go:disabled { opacity: 0.35; cursor: default; }
+  #pad .go { height: 44px; padding: 0 16px; font-size: 17px; background: var(--fib); color: #2a1440; }
+  #pad .go.fib { background: #ff5d73; color: #fff; }
+  #pad .s { font-size: 12.5px; opacity: 0.85; margin-top: 7px; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.88; max-width: 290px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: var(--fib); }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 1100px) { #hint { display: none; } }
+  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } #board { top: 150px; font-size: 11.5px; min-width: 150px; } #pad .face { width: 38px; height: 38px; } #pad .go { padding: 0 12px; } }
+</style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="turn" class="card"></div>
+<div id="big"></div>
+<div id="pad" class="card">
+  <div class="cup" id="myCup"></div>
+  <div class="ctl">
+    <button class="step" id="nDown">−</button><span id="nOut">1</span><button class="step" id="nUp">+</button>
+    <span id="faces"></span>
+    <button class="go" id="bidBtn">Bid</button><button class="go fib" id="fibBtn">Fib!</button>
+  </div>
+  <div class="s" id="padS"></div>
+</div>
+<div id="hint" class="card">Everyone shakes a cup in secret. Bid how many dice <b>on the whole table</b> show a face; <b>★ stars are wild</b>. Raise the count, or the face at the same count, or call <b>Fib!</b>: cups lift, and whoever was wrong loses a die. Keys: ↑↓ count, 2–6 face, Enter bid, F fib.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createTurnSync } from '../common/turn-sync.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { esc, nameTag, boardHtml, createBanner } from '../common/turn-page-kit.ts';
+import { createFibGame, diceOnTable } from './fib-rules.ts';
+import { isRaise, minRaise, FACES } from './fib-bids.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+
+// Dice > canvas faces: pips 2..6, a gold wild star for 1
+const PIPS = { 2: [[0.28, 0.28], [0.72, 0.72]], 3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]], 4: [[0.28, 0.28], [0.72, 0.28], [0.28, 0.72], [0.72, 0.72]], 5: [[0.26, 0.26], [0.74, 0.26], [0.5, 0.5], [0.26, 0.74], [0.74, 0.74]], 6: [[0.28, 0.24], [0.72, 0.24], [0.28, 0.5], [0.72, 0.5], [0.28, 0.76], [0.72, 0.76]] };
+const faceCanvas = {};
+function drawFace(v) {
+  if (faceCanvas[v]) return faceCanvas[v];
+  const c = document.createElement('canvas'); c.width = c.height = 96;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f7efdf'; g.fillRect(0, 0, 96, 96);
+  if (v === 1) { g.fillStyle = '#e6a400'; g.font = '900 70px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('★', 48, 52); }
+  else { g.fillStyle = '#2a1440'; for (const [x, y] of PIPS[v]) { g.beginPath(); g.arc(x * 96, y * 96, 9, 0, Math.PI * 2); g.fill(); } }
+  return (faceCanvas[v] = c);
+}
+const faceUrl = (v) => drawFace(v).toDataURL();
+const faceMat = {};
+const matFor = (v) => (faceMat[v] ??= (() => { const t = new THREE.CanvasTexture(drawFace(v)); t.colorSpace = THREE.SRGBColorSpace; return new THREE.MeshStandardMaterial({ map: t, roughness: 0.35 }); })());
+// BoxGeometry faces: +x, -x, +y (top), -y, +z, -z; opposite faces sum to 7
+const SIDES = { 1: [2, 3], 6: [2, 3], 2: [1, 3], 5: [1, 3], 3: [1, 2], 4: [1, 2] };
+const dieMats = (v) => { const [a, b] = SIDES[v]; return [a, 7 - a, v, 7 - v, b, 7 - b].map(matFor); };
+const dieGeo = new RoundedBoxGeometry(0.34, 0.34, 0.34, 3, 0.06);
+
+// Scene > Renderer, night garden: round wooden table, paper lanterns
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1026);
+scene.fog = new THREE.Fog(0x1a1026, 18, 45);
+const camera = new THREE.PerspectiveCamera(44, innerWidth / innerHeight, 0.1, 120);
+scene.add(new THREE.HemisphereLight(0x9a88ff, 0x2a1810, 0.55));
+const lamp = new THREE.PointLight(0xffc27a, 60, 30, 1.6);
+lamp.position.set(0, 6, 0);
+lamp.castShadow = true;
+scene.add(lamp);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x24301f, roughness: 1 }));
+ground.position.y = -1.1;
+ground.receiveShadow = true;
+scene.add(ground);
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x8a5a34, roughness: 0.7 });
+const table = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.2, 64), tableMat);
+table.position.y = -0.1;
+table.receiveShadow = true;
+scene.add(table);
+const feltMat = new THREE.MeshStandardMaterial({ color: 0x3b6b4a, roughness: 0.9 });
+const felt = new THREE.Mesh(new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2), feltMat);
+felt.position.y = 0.005;
+felt.receiveShadow = true;
+scene.add(felt);
+const lanterns = [];
+for (let k = 0; k < 7; k++) {
+  const a = (k / 7) * Math.PI * 2, m = new THREE.Mesh(new THREE.SphereGeometry(0.35, 14, 10), new THREE.MeshBasicMaterial({ color: [0xff8a5c, 0xffc94a, 0xff5d73][k % 3] }));
+  m.position.set(Math.cos(a) * 8, 4.4 + (k % 2) * 0.6, Math.sin(a) * 8);
+  scene.add(m);
+  lanterns.push(m);
+}
+
+// Bid sign > floating card over the table: "n × face"
+const signCanvas = document.createElement('canvas'); signCanvas.width = 256; signCanvas.height = 128;
+const signTex = new THREE.CanvasTexture(signCanvas); signTex.colorSpace = THREE.SRGBColorSpace;
+const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: signTex, transparent: true, depthWrite: false }));
+sign.scale.set(1.9, 0.95, 1);
+sign.position.set(0, 2.1, 0);
+scene.add(sign);
+let signKey = '';
+function drawSign(bid, color) {
+  const key = bid ? `${bid.n}|${bid.f}|${color}` : '';
+  if (key === signKey) return;
+  signKey = key;
+  const g = signCanvas.getContext('2d');
+  g.clearRect(0, 0, 256, 128);
+  sign.visible = !!bid;
+  if (!bid) return;
+  g.fillStyle = 'rgba(26,14,34,0.88)'; g.beginPath(); g.roundRect(8, 8, 240, 112, 26); g.fill();
+  g.strokeStyle = color; g.lineWidth = 6; g.stroke();
+  g.fillStyle = '#fff'; g.font = '900 64px ui-rounded, system-ui'; g.textAlign = 'right'; g.textBaseline = 'middle';
+  g.fillText(`${bid.n}×`, 136, 68);
+  g.drawImage(drawFace(bid.f), 150, 26, 76, 76);
+  signTex.needsUpdate = true;
+}
+
+// Seats > cup, player and their dice around the table; my seat is always nearest the camera
+const seats3d = new Map();
+let tableR = 3;
+function makeSeat(p) {
+  const g = new THREE.Group();
+  const cupMat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.55 });
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.52, 0.75, 22, 1, true), cupMat);
+  const cap = new THREE.Mesh(new THREE.CircleGeometry(0.42, 22).rotateX(-Math.PI / 2), cupMat); cap.position.y = 0.375;
+  const cupG = new THREE.Group(); cupG.add(cup, cap); cup.castShadow = true;
+  cupMat.side = THREE.DoubleSide;
+  const body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.45, 6, 12), mat); torso.position.y = 0.1;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 10), new THREE.MeshStandardMaterial({ color: 0xffdcb8 })); head.position.y = 0.72;
+  body.add(torso, head);
+  const tag = nameTag(p.nick, p.color, 'rgba(26,14,34,0.82)'); tag.position.y = 1.4; body.add(tag);
+  body.userData.tag = tag;
+  const dice = new THREE.Group();
+  g.add(cupG, body, dice);
+  scene.add(g);
+  return { g, cupG, cupMat, body, dice, diceKey: '', lift: 0, color: p.color };
+}
+function setDice(seat, values, hot) {
+  const key = `${values.join('')}|${hot ?? ''}`;
+  if (key === seat.diceKey) return;
+  seat.diceKey = key;
+  seat.dice.clear();
+  values.forEach((v, k) => {
+    const d = new THREE.Mesh(dieGeo, dieMats(v));
+    const col = k % 3, row = Math.floor(k / 3);
+    d.position.set((col - 1) * 0.38 + (row ? 0.19 : 0), 0.17, row * 0.38 - 0.1);
+    d.rotation.y = (k * 1.3) % 0.6 - 0.3;
+    d.castShadow = true;
+    d.userData.hot = hot != null && (v === hot || v === 1);
+    seat.dice.add(d);
+  });
+}
+
+// Audio > cup rattle, bid tap, fib sting, lose-a-die thunk, turn ping
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  rattle() { for (let k = 0; k < 6; k++) noise(0.04, 0.05, 2600, 900, k * 0.06); },
+  bid(me) { tone(560, 700, 0.08, me ? 0.08 : 0.05, 'triangle'); },
+  fib() { tone(880, 440, 0.3, 0.09, 'sawtooth'); },
+  lose(me) { tone(me ? 200 : 300, me ? 90 : 160, 0.35, 0.08, 'triangle'); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules live in fib-rules.ts: this page runs them for attract mode only; in a match the relay server keeps every cup and sends this tab its own dice alone
+// S: { mode, ph, tt, clock, cap, ch, rd, turn, bid: { n, f, by }, res: { cups, n, f, count, caller, bidder, loser }, P: [{ id, nick, color, bot, score, skill }] }
+const attract = createFibGame();
+let S = attract.state, myDice = [];
+const player = (id) => S.P.find((p) => p.id === id);
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; myDice = []; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  if (S !== attract.state) prevS = null;
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
+}
+
+// Multiplayer > lobby + state sync (server publishes S without cups, and this seat's own dice privately)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onPrivate(view) { myDice = view?.dice ?? []; renderMyCup(); },
+  onDone() { serverMatch.finish(); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'fib-dice', title: 'Fib Dice', emoji: '🎲', accent: '#ffc94a',
+  blurb: 'Everyone shakes a cup of dice in secret. Bid how many dice on the whole table show a face (stars are wild), raise, or call "Fib!". Cups lift, and whoever was wrong loses a die. Last cup standing, or most dice at the challenge cap, wins.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 players (humans + bots). 5 dice each up to 6 players, 4 up to 10, 3 beyond. Your dice never leave the server for anyone else.',
+  settings: [
+    { key: 'rounds', label: 'Challenge cap', options: [[10, '10'], [15, '15'], [25, '25']], value: 15 },
+    { key: 'clock', label: 'Turn clock', options: [[10, '10 s'], [15, '15 s'], [25, '25 s']], value: 15 },
+  ],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, seed, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
+    myDice = sync.mine?.dice ?? [];
+  },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); banner.clear(); startAttract(); },
+});
+const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: S.ph, players: S.P }), confirmMs: () => serverMatch.stats.confirmMs });
+function showHud(on) {
+  ['info', 'board', 'turn'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+  if (!on) pad.style.display = 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+function onChange(prev, cur) {
+  const me = lobby.room?.me, match = cur.mode === 'match';
+  if (cur.rd !== prev?.rd && cur.ph === 'bid') { sfx.rattle(); resetPick(); }
+  if (cur.bid && (cur.bid.n !== prev?.bid?.n || cur.bid.f !== prev?.bid?.f)) { sfx.bid(cur.bid.by === me); resetPick(); }
+  if (cur.ph === 'reveal' && prev?.ph !== 'reveal' && cur.res) {
+    const r = cur.res, caller = cur.P.find((p) => p.id === r.caller), loser = cur.P.find((p) => p.id === r.loser);
+    sfx.fib();
+    setTimeout(() => sfx.lose(r.loser === me), 900);
+    if (match) banner.flash(`<small>${esc(caller?.nick ?? '')} calls Fib! on ${r.n}× <img src="${faceUrl(r.f)}" style="height:1em;vertical-align:-0.12em;border-radius:4px"> · there ${r.count === 1 ? 'is' : 'are'} ${r.count}</small>${esc(loser?.nick ?? '')} loses a die`, 4.5);
+  }
+  if (match && cur.ph === 'bid' && cur.P[cur.turn]?.id === me && (prev?.turn !== cur.turn || prev?.ph !== 'bid')) sfx.turn();
+}
+
+// Input > count stepper, face buttons, Bid / Fib!; keys ↑↓ count, 2-6 face, Enter bid, F fib
+const pad = document.getElementById('pad'), nOut = document.getElementById('nOut'), facesEl = document.getElementById('faces');
+let selN = 1, selF = 2;
+facesEl.innerHTML = FACES.map((f) => `<button class="face" data-f="${f}"><img src="${faceUrl(f)}" alt="${f}"></button>`).join('');
+facesEl.querySelectorAll('button').forEach((b) => (b.onclick = () => { selF = +b.dataset.f; renderPick(); }));
+const myTurn = () => S.mode === 'match' && S.ph === 'bid' && S.P[S.turn]?.id === lobby.room?.me;
+function resetPick() { const r = minRaise(S.bid, diceOnTable(S)); if (r) { selN = r.n; selF = r.f; } renderPick(); }
+function renderPick() {
+  nOut.textContent = String(selN);
+  facesEl.querySelectorAll('button').forEach((b) => b.classList.toggle('on', +b.dataset.f === selF));
+  document.getElementById('bidBtn').disabled = !myTurn() || !isRaise({ n: selN, f: selF }, S.bid);
+  document.getElementById('fibBtn').disabled = !myTurn() || !S.bid;
+}
+function stepN(d) { selN = Math.max(1, Math.min(diceOnTable(S), selN + d)); renderPick(); }
+document.getElementById('nDown').onclick = () => stepN(-1);
+document.getElementById('nUp').onclick = () => stepN(1);
+function sendBid() { if (myTurn() && isRaise({ n: selN, f: selF }, S.bid)) sync.act({ t: 'bid', n: selN, f: selF }); }
+function sendFib() { if (myTurn() && S.bid) sync.act({ t: 'call' }); }
+document.getElementById('bidBtn').onclick = sendBid;
+document.getElementById('fibBtn').onclick = sendFib;
+addEventListener('keydown', (e) => {
+  if (S.mode !== 'match') return;
+  if (e.key === 'ArrowUp') { e.preventDefault(); stepN(1); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); stepN(-1); }
+  else if (/^[2-6]$/.test(e.key)) { selF = +e.key; renderPick(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { selF = Math.max(2, Math.min(6, selF + (e.key === 'ArrowLeft' ? -1 : 1))); renderPick(); }
+  else if (e.key === 'Enter') sendBid();
+  else if (e.key === 'f' || e.key === 'F') sendFib();
+});
+function renderMyCup() {
+  document.getElementById('myCup').innerHTML = myDice.length ? `Your cup ${myDice.map((v) => `<img src="${faceUrl(v)}" alt="${v}">`).join('')}` : '';
+}
+
+// HUD > turn line, scoreboard with dice left, pad, banners
+const banner = createBanner(document.getElementById('big')), turnEl = document.getElementById('turn');
+let lastClock = 0, hudT = 0;
+function hud(dt) {
+  if (S.mode !== 'match') return;
+  const flashing = banner.tick(dt);
+  const me = player(lobby.room?.me), up = S.P[S.turn], clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') banner.set(`<small>${S.P[0]?.score ?? 5} dice each · stars are wild</small>Fib Dice`);
+  else if (S.ph === 'final') { const w = [...S.P].sort((a, c) => c.score - a.score)[0]; banner.set(`<small>last cup with ${w?.score ?? 0} dice</small>🏆 ${esc(w?.nick ?? '')}`); }
+  else if (!flashing) banner.set('');
+  const bidder = S.bid && player(S.bid.by);
+  turnEl.innerHTML = S.ph === 'final' ? '🏁 match over' : S.ph === 'intro' ? '🎲 shaking cups' : S.ph === 'reveal' ? '🫣 cups up!' : myTurn() ? `<b>Your call</b> · ${clock}s` : `${esc(up?.nick ?? '')} is thinking${up?.bot ? '' : ` · ${clock}s`}`;
+  const showPad = !!me && me.score > 0 && (S.ph === 'bid' || S.ph === 'reveal');
+  pad.style.display = showPad ? 'block' : 'none';
+  if (showPad) {
+    renderPick();
+    document.getElementById('padS').textContent = S.bid ? `${myTurn() ? 'Raise' : 'Current bid'}: ${S.bid.n} × ${S.bid.f} by ${bidder?.nick ?? '?'} · ${diceOnTable(S)} dice on the table` : `${myTurn() ? 'Open the bidding' : 'No bid yet'} · ${diceOnTable(S)} dice on the table`;
+  }
+  if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').textContent = S.ph === 'final' ? 'Final' : `Round ${S.rd || 1}`;
+  document.getElementById('roundMeta').innerHTML = `Fib! calls ${S.ch} of ${S.cap}${me ? ` · your dice <b style="color:var(--fib)">${me.score}</b>` : ' · watching'}`;
+  const rows = [...S.P].sort((a, c) => c.score - a.score);
+  document.getElementById('board').innerHTML = boardHtml(rows, { me: lobby.room?.me, turnId: S.ph === 'bid' ? up?.id : null, right: (p) => (p.score ? '●'.repeat(p.score) : 'out'), mark: (p) => (S.bid?.by === p.id && S.ph === 'bid' ? '📣 ' : ''), cls: (p) => (p.score ? '' : 'out') });
+}
+
+// Run engine > attract rules tick; in a match only the clock between server states runs here
+startTicker(20, (dt) => {
+  if (S.mode === 'attract') attractTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: cups ring the table, mine sits nearest; on a reveal every cup lifts and matching dice hop
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 7, 9), camLook = new THREE.Vector3(0, 0.3, 0), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, seat] of seats3d) if (!ids.has(id)) { scene.remove(seat.g); seats3d.delete(id); }
+  const n = S.P.length, meAt = Math.max(0, S.P.findIndex((p) => p.id === lobby.room?.me));
+  tableR = Math.max(2.6, n * 0.42);
+  table.scale.set(tableR + 0.5, 1, tableR + 0.5);
+  felt.scale.set(tableR + 0.2, 1, tableR + 0.2);
+  const reveal = (S.ph === 'reveal' || S.ph === 'final') && S.res;
+  S.P.forEach((p, i) => {
+    let seat = seats3d.get(p.id);
+    if (!seat) { seat = makeSeat(p); seats3d.set(p.id, seat); }
+    const a = Math.PI / 2 + ((i - meAt) / n) * Math.PI * 2, out = p.score <= 0;
+    seat.g.position.set(Math.cos(a) * tableR, 0, Math.sin(a) * tableR);
+    seat.g.rotation.y = Math.PI / 2 - a;
+    seat.body.position.set(0, 0.3, 0.85);
+    const mine = p.id === lobby.room?.me && S.mode === 'match';
+    seat.body.userData.tag.visible = !mine;
+    const values = reveal ? S.res.cups[p.id] ?? [] : mine && S.ph !== 'final' ? myDice : [];
+    setDice(seat, values, reveal ? S.res.f : null);
+    seat.dice.position.set(0, 0, mine && !reveal ? -0.45 : 0);
+    const lift = reveal || out ? 1 : 0;
+    seat.lift += (lift - seat.lift) * Math.min(1, dt * 6);
+    // my own cup sits aside so my dice face the camera
+    seat.cupG.position.set(mine && !reveal ? 1.05 : 0, 0.375 + seat.lift * 1.1, 0);
+    seat.cupG.rotation.x = seat.lift * -0.5;
+    seat.cupMat.color.set(out ? '#555' : p.color);
+    for (const d of seat.dice.children) d.position.y = 0.17 + (d.userData.hot && reveal ? Math.abs(Math.sin(time * 6 + d.id)) * 0.22 : 0);
+    const active = S.ph === 'bid' && i === S.turn;
+    seat.body.position.y = 0.3 + (active ? Math.abs(Math.sin(time * 5)) * 0.18 : 0);
+  });
+  const bidder = S.bid && player(S.bid.by);
+  drawSign(S.ph === 'bid' ? S.bid : S.res && S.ph === 'reveal' ? { n: S.res.n, f: S.res.f } : null, bidder?.color ?? '#ffc94a');
+  sign.position.y = 2.1 + Math.sin(time * 2) * 0.08;
+  lanterns.forEach((l, k) => (l.position.y = 4.6 + Math.sin(time * 0.8 + k) * 0.15));
+  hud(dt);
+  const tall = camera.aspect < 1, span = tableR * 2 + 2.5;
+  const dist = Math.max(10, span / (0.8 * camera.aspect) * (tall ? 0.9 : 0.95));
+  camPos.lerp(_v.set(0, dist * (tall ? 0.85 : 0.7), dist * (tall ? 0.55 : 0.72)), 1 - Math.exp(-dt * 3));
+  camLook.set(0, 0.3, tableR * 0.42);
+  scene.fog.near = dist * 1.3; scene.fog.far = dist * 3.2;
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
