@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Bridge Isles</title>
+<style>
+  :root { --ink: #fff; --card: rgba(6, 30, 44, 0.74); --coral: #ff7a59; --lagoon: #2ec4b6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #7cc7e8; font-family: ui-rounded, "SF Pro Rounded", system-ui, sans-serif; color: var(--ink); touch-action: none; }
+  canvas { display: block; }
+  .card { position: fixed; background: var(--card); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; user-select: none; }
+  #info { top: 14px; left: 14px; padding: 10px 14px; display: none; }
+  #info .h { font-size: 20px; font-weight: 900; }
+  #info .m { font-size: 13px; margin-top: 3px; opacity: 0.92; max-width: 260px; }
+  #board { top: 62px; right: 14px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 190px; }
+  #board .team { font-weight: 900; font-size: 12px; letter-spacing: 0.08em; margin: 4px 0 2px; display: flex; justify-content: space-between; }
+  #board .row { display: flex; gap: 6px; align-items: center; padding: 1px 0; }
+  #board .row b { width: 16px; opacity: 0.6; }
+  #board .row i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  #board .row span { flex: 1; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .row em { font-style: normal; min-width: 20px; text-align: right; }
+  #board .row.me span { font-weight: 800; text-decoration: underline; }
+  #board .row.turn { background: rgba(255, 255, 255, 0.14); border-radius: 6px; }
+  #turn { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px; font-size: 16px; font-weight: 800; display: none; white-space: nowrap; }
+  #turn button { font: inherit; font-size: 14px; font-weight: 800; margin-left: 10px; color: #06202c; background: #ffd23f; border: 0; border-radius: 9px; padding: 5px 10px; cursor: pointer; }
+  #big { position: fixed; top: 38%; left: 50%; transform: translate(-50%, -50%); font-size: clamp(28px, 6.5vw, 62px); font-weight: 900; text-shadow: 0 4px 0 rgba(0, 0, 0, 0.35); pointer-events: none; text-align: center; white-space: nowrap; }
+  #big small { display: block; font-size: 0.32em; font-weight: 700; }
+  #hint { bottom: 14px; left: 14px; padding: 8px 12px; font-size: 12.5px; opacity: 0.92; max-width: 310px; }
+  #top { top: 14px; right: 14px; padding: 6px; display: none; gap: 6px; align-items: center; font-size: 13px; }
+  #top b { padding: 0 6px; letter-spacing: 0.15em; color: #ffd23f; }
+  #top button { font: inherit; font-weight: 700; color: inherit; background: rgba(255, 255, 255, 0.12); border: 0; padding: 6px 10px; border-radius: 9px; cursor: pointer; }
+  @media (pointer: coarse), (max-width: 900px) { #hint { display: none; } }
+  @media (max-width: 700px) { #turn { top: 96px; font-size: 14px; } #board { top: auto; bottom: 12px; right: 10px; font-size: 11.5px; min-width: 160px; } }
+</style>
+<link rel="stylesheet" href="../common/mobile-hud.css" />
+</head>
+<body>
+<div id="info" class="card"><div class="h" id="roundName"></div><div class="m" id="roundMeta"></div></div>
+<div id="board" class="card"></div>
+<div id="turn" class="card"><span id="turnText"></span><button id="swapBtn" hidden>Swap ⇄</button></div>
+<div id="big"></div>
+<div id="hint" class="card"><b style="color:var(--coral)">Coral</b> joins its two coral shores, <b style="color:var(--lagoon)">Lagoon</b> its two teal shores. Teams take turns, teammates rotate. Tap a free spot (or arrows + Enter) to drop a stepping stone. After the very first stone the other team may <b>swap</b> (S) and take it. There are no draws.</div>
+<div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { createLobby } from '../common/room-lobby.ts';
+import { exposeGameDebug } from '../common/debug-probe.ts';
+import { startTicker } from '../common/room-client.ts';
+import { createTurnSync } from '../common/turn-sync.ts';
+import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
+import { esc, nameTag, createBanner } from '../common/turn-page-kit.ts';
+import { createBridgeGame, moverOf, TEAM_NAMES } from './bridge-rules.ts';
+import { createGameAudio } from '../common/game-audio.ts';
+
+const TEAM_HEX = [0xff7a59, 0x2ec4b6], TEAM_CSS = ['var(--coral)', 'var(--lagoon)'];
+const R = 0.6, W = Math.sqrt(3) * R * 1.05, H = 1.5 * R * 1.05;
+
+// Scene > Renderer, open sea, sun, foam
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x7cc7e8);
+scene.fog = new THREE.Fog(0x7cc7e8, 30, 80);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 200);
+scene.add(new THREE.HemisphereLight(0xf2fbff, 0x1d5a78, 1.0));
+const sun = new THREE.DirectionalLight(0xfff0d0, 1.8);
+sun.position.set(-8, 18, 10);
+sun.castShadow = true;
+Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 14, bottom: -14 });
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+const seaMat = new THREE.MeshStandardMaterial({ color: 0x1f8fbf, roughness: 0.25, metalness: 0.05 });
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2), seaMat);
+sea.position.y = -0.12;
+sea.receiveShadow = true;
+scene.add(sea);
+
+// Board > hex shallows in a rhombus; shores in team colors on the four sides
+const board3d = new THREE.Group();
+scene.add(board3d);
+let cells = [], boardN = 0, boardWidth = 10, boardDepth = 8;
+const hexGeo = new THREE.CylinderGeometry(R * 0.98, R * 0.98, 0.16, 6);
+const shoreGeo = new THREE.CylinderGeometry(R * 0.9, R * 1.0, 0.3, 6);
+const stoneGeo = new THREE.SphereGeometry(R * 0.62, 18, 12).scale(1, 0.5, 1);
+const sandMat = new THREE.MeshStandardMaterial({ color: 0xf3e1b4, roughness: 0.9 }), sandHot = new THREE.MeshStandardMaterial({ color: 0xfff3c4, roughness: 0.8, emissive: 0x3a2c00 });
+const stoneMats = TEAM_HEX.map((c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.45 }));
+const posOf = (r, c, n) => [(c + r / 2 - (n - 1) * 0.75) * W, (r - (n - 1) / 2) * H];
+function buildBoard(n) {
+  board3d.clear();
+  cells = [];
+  boardN = n;
+  for (let i = 0; i < n * n; i++) {
+    const r = Math.floor(i / n), c = i % n, [x, z] = posOf(r, c, n);
+    const tile = new THREE.Mesh(hexGeo, sandMat); tile.position.set(x, 0, z); tile.receiveShadow = true; tile.userData.i = i;
+    const stone = new THREE.Mesh(stoneGeo, stoneMats[0]); stone.position.set(x, 0.12, z); stone.castShadow = true; stone.visible = false;
+    board3d.add(tile, stone);
+    cells.push({ i, x, z, tile, stone, mark: '0', drop: 0 });
+  }
+  // shores: Coral rows above and below, Lagoon columns left and right
+  for (let k = -1; k <= n; k++) {
+    for (const [r, c, team] of [[-1, k, 0], [n, k, 0], [k, -1, 1], [k, n, 1]]) {
+      if ((r === -1 || r === n) && (c < 0 || c >= n)) continue;
+      if ((c === -1 || c === n) && (r < 0 || r >= n)) continue;
+      const [x, z] = posOf(r, c, n);
+      const shore = new THREE.Mesh(shoreGeo, stoneMats[team]); shore.position.set(x, -0.05, z); shore.receiveShadow = true;
+      board3d.add(shore);
+    }
+  }
+  boardWidth = (1.5 * (n - 1) + 3) * W;
+  boardDepth = (n + 1) * H;
+}
+
+// Win > planks over the winning chain
+const planks = new THREE.Group();
+scene.add(planks);
+const plankMat = new THREE.MeshStandardMaterial({ color: 0x9a6a3c, roughness: 0.8 });
+function layPlanks(path) {
+  planks.clear();
+  for (let k = 1; k < (path?.length ?? 0); k++) {
+    const a = cells[path[k - 1]], b = cells[path[k]];
+    if (!a || !b) continue;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.08, len), plankMat);
+    m.position.set((a.x + b.x) / 2, 0.3, (a.z + b.z) / 2);
+    m.rotation.y = Math.atan2(b.x - a.x, b.z - a.z);
+    m.castShadow = true;
+    planks.add(m);
+  }
+}
+
+// Splash > ring where a stone lands
+const splashes = [];
+const splashGeo = new THREE.RingGeometry(0.45, 0.55, 30).rotateX(-Math.PI / 2);
+function splash(x, z, color = 0xffffff) {
+  const m = new THREE.Mesh(splashGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }));
+  m.position.set(x, 0.1, z);
+  scene.add(m);
+  splashes.push({ m, t: 0 });
+}
+
+// Players > islanders on their team's shores, the one dropping the next stone waves
+const pawns3d = new Map();
+function makeIslander(p) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color: p.color, roughness: 0.5 });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.24, 0.36, 6, 12), mat); torso.position.y = 0.45; torso.castShadow = true;
+  const sash = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.05, 6, 16).rotateX(Math.PI / 2), stoneMats[p.team]); sash.position.y = 0.42;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 10), new THREE.MeshStandardMaterial({ color: 0xffd9b0 })); head.position.y = 0.92;
+  body.add(torso, sash, head);
+  const tag = nameTag(p.nick, p.color, 'rgba(6,30,44,0.8)'); tag.position.y = 1.5;
+  g.add(body, tag);
+  g.userData = { body, team: p.team };
+  scene.add(g);
+  return g;
+}
+
+// Audio > stone plop, swap whoosh, win fanfare, turn ping, clock tick
+const gameAudio = createGameAudio();
+const { tone, noise } = gameAudio;
+const sfx = {
+  plop(me) { tone(240, 120, 0.12, me ? 0.09 : 0.05, 'sine'); noise(0.12, 0.05, 1400, 300); },
+  swap() { tone(400, 900, 0.25, 0.06, 'triangle'); },
+  win(mine) { (mine ? [523, 659, 784, 1047] : [392, 330, 262]).forEach((f, i) => tone(f, f, 0.18, 0.07, 'triangle', i * 0.1)); },
+  turn() { tone(660, 660, 0.1, 0.07, 'triangle'); tone(990, 990, 0.14, 0.07, 'triangle', 0.11); },
+  tick() { tone(1500, 1500, 0.02, 0.03, 'square'); },
+};
+
+// Game > rules live in bridge-rules.ts: this page runs them for attract mode only, a match is run by the relay server
+// S: { mode, ph, tt, clock, rd, rounds, n, B, team, first, ptr, mv, swapOk, last: { i, by, mv, swap }, win: { team, path }, wins, P: [{ id, nick, color, bot, team, score, skill }] }
+const attract = createBridgeGame();
+let S = attract.state;
+const player = (id) => S.P.find((p) => p.id === id);
+const sig = () => JSON.stringify(S, (k, v) => (k === 'tt' || k === 'think' ? undefined : v));
+let prevS = null;
+function startAttract() { attract.startAttract(); S = attract.state; prevS = null; }
+// Run engine > attract tick: page hooks fire on anything but the clock
+function attractTick(dt) {
+  const changed = attract.tick(dt);
+  if (S !== attract.state) prevS = null;
+  S = attract.state;
+  if (!changed && prevS) return;
+  onChange(prevS, S);
+  prevS = JSON.parse(sig());
+}
+
+// Multiplayer > lobby + state sync (server publishes S, every tab sends its stones)
+const sync = createTurnSync({
+  onState(s) { if (lobbyStarted) applyState(s); },
+  onDone() { serverMatch.finish(); },
+});
+let lobbyStarted = false;
+const lobby = createLobby({
+  game: 'bridge-isles', title: 'Bridge Isles', emoji: '🏝️', accent: '#2ec4b6',
+  blurb: 'Two teams, drawn by lot, drop stepping stones on a hex sea. Coral joins its two coral shores, Lagoon its two teal shores. Teams alternate and teammates rotate. The first unbroken bridge wins; there are no draws.',
+  maxBots: 13, defaultBots: 3, minPlayers: 2,
+  note: 'Up to 14 islanders (humans + bots). Uneven teams still get one stone per team per turn. The sea grows with the room: 7, 9 or 11 wide.',
+  settings: [
+    { key: 'rounds', label: 'Best of', options: [[1, '1'], [3, '3'], [5, '5']], value: 3 },
+    { key: 'clock', label: 'Turn clock', options: [[10, '10 s'], [15, '15 s'], [25, '25 s']], value: 15 },
+  ],
+  onJoin(room) {
+    document.getElementById('code').textContent = room.code;
+    sync.attach(room);
+    room.on('host', syncTop);
+  },
+  onStart({ bots, seed, settings }) {
+    lobbyStarted = true;
+    showHud(true);
+    syncTop();
+    serverMatch.start({ bots, seed, settings });
+    if (sync.state) applyState(sync.state);
+  },
+  onLobby() { serverMatch.stop(); lobbyStarted = false; showHud(false); banner.clear(); startAttract(); },
+});
+const serverMatch = createServerMatchClient(lobby);
+// Debug > ?debug exposes window.__GAME_DEBUG__ for Playwright x-ray checks
+exposeGameDebug({ lobby, read: () => ({ phase: S.ph, players: S.P }), confirmMs: () => serverMatch.stats.confirmMs });
+function showHud(on) {
+  ['info', 'board', 'turn'].forEach((id) => (document.getElementById(id).style.display = on ? 'block' : 'none'));
+  document.getElementById('top').style.display = on ? 'flex' : 'none';
+}
+function syncTop() { document.getElementById('lobbyBtn').style.display = lobby.room?.isHost ? '' : 'none'; }
+document.getElementById('lobbyBtn').onclick = () => lobby.backToLobby();
+function applyState(s) {
+  const prev = S?.mode === 'match' ? JSON.parse(sig()) : null;
+  S = { ...s, P: s.P.map((p) => ({ ...p })), mode: 'match' };
+  onChange(prev, S);
+}
+function onChange(prev, cur) {
+  const me = player(lobby.room?.me), match = cur.mode === 'match';
+  if (cur.n !== boardN) buildBoard(cur.n);
+  if (cur.last && cur.last.mv !== prev?.last?.mv) {
+    const c = cells[cur.last.i], mine = cur.last.by === me?.id;
+    if (c) { c.drop = 1; splash(c.x, c.z, TEAM_HEX[cur.B[c.i] === '1' ? 0 : 1]); }
+    if (cur.last.swap) { sfx.swap(); if (match) banner.flash(`<small>${esc(player(cur.last.by)?.nick ?? '')} takes the opening stone</small>⇄ Swap!`, 1.6); }
+    else sfx.plop(mine);
+  }
+  if (cur.ph === 'round' && prev?.ph !== 'round') {
+    layPlanks(cur.win?.path);
+    const t = cur.win?.team ?? 0;
+    if (match) { sfx.win(me?.team === t); banner.flash(`<small>${cur.win?.path ? 'the bridge holds' : 'the other team left'} · ${cur.wins[0]}–${cur.wins[1]}</small><span style="color:${TEAM_CSS[t]}">${TEAM_NAMES[t]}</span> wins round ${cur.rd}`, 4); }
+  }
+  if (cur.ph === 'play' && prev?.ph !== 'play') layPlanks(null);
+  if (match && cur.ph === 'play' && moverOf(cur)?.id === me?.id && moverOf(prev ?? cur)?.id !== me?.id) sfx.turn();
+}
+
+// Input > tap a free spot on my turn, or arrows move a cursor, Enter drops, S swaps
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+let hoverI = -1, cursorI = -1;
+function pickCell(e) {
+  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(cells.filter((c) => S.B[c.i] === '0').map((c) => c.tile), false)[0];
+  return hit ? hit.object.userData.i : -1;
+}
+const myTurn = () => S.mode === 'match' && S.ph === 'play' && moverOf(S)?.id === lobby.room?.me;
+function drop(i) { if (myTurn() && i >= 0 && S.B[i] === '0') sync.act({ t: 'stone', i }); }
+function trySwap() { if (myTurn() && S.swapOk) sync.act({ t: 'swap' }); }
+addEventListener('pointermove', (e) => { hoverI = myTurn() ? pickCell(e) : -1; });
+addEventListener('pointerdown', (e) => { if (e.target === renderer.domElement) drop(pickCell(e)); });
+document.getElementById('swapBtn').onclick = trySwap;
+addEventListener('keydown', (e) => {
+  if (!myTurn() || !boardN) return;
+  const n = boardN, step = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] }[e.key];
+  if (step) {
+    e.preventDefault();
+    if (cursorI < 0) { cursorI = Math.floor(n * n / 2); return; }
+    const r = Math.min(n - 1, Math.max(0, Math.floor(cursorI / n) + step[0])), c = Math.min(n - 1, Math.max(0, (cursorI % n) + step[1]));
+    cursorI = r * n + c;
+  } else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); drop(cursorI); }
+  else if (e.key === 's' || e.key === 'S') trySwap();
+});
+
+// HUD > turn line with swap button, team scoreboard, banners
+const banner = createBanner(document.getElementById('big'));
+const turnText = document.getElementById('turnText'), swapBtn = document.getElementById('swapBtn');
+let lastClock = 0, hudT = 0;
+function hud(dt) {
+  if (S.mode !== 'match') return;
+  const flashing = banner.tick(dt);
+  const me = player(lobby.room?.me), up = moverOf(S), clock = Math.ceil(Math.max(0, S.tt));
+  if (S.ph === 'intro') banner.set(`<small>you are ${me ? `<span style="color:${TEAM_CSS[me.team]}">${TEAM_NAMES[me.team]}</span>` : 'watching'} · best of ${S.rounds}</small>Bridge Isles`);
+  else if (S.ph === 'final') { const t = S.wins[0] > S.wins[1] ? 0 : 1; banner.set(`<small>${S.wins[0]}–${S.wins[1]}</small><span style="color:${TEAM_CSS[t]}">${TEAM_NAMES[t]}</span> wins! 🏆`); }
+  else if (!flashing) banner.set('');
+  const teamTag = up ? `<span style="color:${TEAM_CSS[up.team]}">●</span> ` : '';
+  turnText.innerHTML = S.ph === 'final' ? '🏁 match over' : S.ph !== 'play' ? '🏝️ get ready' : myTurn() ? `${teamTag}<b>Your stone</b> · ${clock}s` : `${teamTag}${esc(up?.nick ?? '')} is placing${up?.bot ? '' : ` · ${clock}s`}`;
+  swapBtn.hidden = !(myTurn() && S.swapOk);
+  if (myTurn() && clock !== lastClock && clock <= 3) sfx.tick();
+  lastClock = clock;
+  hudT -= dt;
+  if (hudT > 0) return;
+  hudT = 0.15;
+  document.getElementById('roundName').innerHTML = S.ph === 'final' ? 'Final' : `Round ${S.rd} of ${S.rounds}`;
+  document.getElementById('roundMeta').innerHTML = `<b style="color:var(--coral)">Coral ${S.wins[0]}</b> – <b style="color:var(--lagoon)">${S.wins[1]} Lagoon</b>${me ? ` · you: <b style="color:${TEAM_CSS[me.team]}">${TEAM_NAMES[me.team]}</b>` : ''}`;
+  document.getElementById('board').innerHTML = [0, 1].map((t) => {
+    const rows = S.P.filter((p) => p.team === t);
+    return `<div class="team" style="color:${TEAM_CSS[t]}"><span>${TEAM_NAMES[t]} · ${rows.length}</span><span>${S.wins[t]}</span></div>` + rows.map((p, k) => `<div class="row ${p.id === me?.id ? 'me' : ''} ${p === up && S.ph === 'play' ? 'turn' : ''}"><b>${k + 1}</b><i style="background:${p.color}"></i><span>${p === up && S.ph === 'play' ? '🪨 ' : ''}${esc(p.nick)}</span><em></em></div>`).join('');
+  }).join('');
+}
+
+// Run engine > attract rules tick; in a match only the clock between server states runs here
+startTicker(20, (dt) => {
+  if (S.mode === 'attract') attractTick(dt);
+  else S.tt -= dt;
+});
+
+// Run engine > render loop: stones drop in, the winning chain bounces, islanders line their shores
+const clock = new THREE.Clock();
+const camPos = new THREE.Vector3(0, 16, 12), camLook = new THREE.Vector3(0, 0, 0.4), _v = new THREE.Vector3();
+function loop() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const path = S.ph === 'round' || S.ph === 'final' ? new Set(S.win?.path ?? []) : null;
+  for (const c of cells) {
+    const mark = S.B?.[c.i] ?? '0';
+    if (mark !== c.mark) { c.mark = mark; c.stone.visible = mark !== '0'; if (mark !== '0') c.stone.material = stoneMats[+mark - 1]; }
+    c.drop = Math.max(0, c.drop - dt * 3);
+    const onPath = path?.has(c.i);
+    c.stone.position.y = 0.12 + c.drop * c.drop * 2.5 + (onPath ? Math.abs(Math.sin(time * 5 + c.i * 0.4)) * 0.18 : 0);
+    const hot = mark === '0' && myTurn() && (c.i === hoverI || c.i === cursorI);
+    c.tile.material = hot ? sandHot : sandMat;
+  }
+  for (let k = splashes.length - 1; k >= 0; k--) {
+    const s = splashes[k]; s.t += dt;
+    s.m.scale.setScalar(1 + s.t * 2.4);
+    s.m.material.opacity = Math.max(0, 0.85 - s.t);
+    if (s.t > 0.85) { scene.remove(s.m); splashes.splice(k, 1); }
+  }
+  seaMat.color.setHSL(0.55, 0.65, 0.43 + Math.sin(time * 0.7) * 0.015);
+  const ids = new Set(S.P.map((p) => p.id));
+  for (const [id, g] of pawns3d) if (!ids.has(id) || g.userData.team !== player(id)?.team) { scene.remove(g); pawns3d.delete(id); }
+  const up = S.ph === 'play' ? moverOf(S) : null, n = boardN || 7;
+  for (const t of [0, 1]) {
+    const team = S.P.filter((p) => p.team === t);
+    team.forEach((p, k) => {
+      let g = pawns3d.get(p.id);
+      if (!g) { g = makeIslander(p); pawns3d.set(p.id, g); }
+      // half the team on each of its two shores, spread along the edge
+      const side = k % 2, slot = Math.floor(k / 2), per = Math.ceil(team.length / 2), f = per > 1 ? slot / (per - 1) : 0.5;
+      const along = 1 + f * (n - 3);
+      const [x, z] = t === 0 ? posOf(side ? n + 0.9 : -1.9, along, n) : posOf(along, side ? n + 0.9 : -1.9, n);
+      g.position.set(x, 0, z);
+      g.lookAt(0, 0, 0);
+      g.userData.body.position.y = p === up ? Math.abs(Math.sin(time * 6)) * 0.25 : 0;
+    });
+  }
+  hud(dt);
+  // camera fits the rhombus and both shore crews; portrait swings round to look down the board's long side
+  const tall = camera.aspect < 0.9, across = tall ? boardDepth + 5 : boardWidth + 3, along = tall ? boardWidth + 3 : boardDepth + 4;
+  const dist = Math.max(14, across / (0.73 * camera.aspect), along / 0.73);
+  camPos.lerp(tall ? _v.set(dist * 0.3, dist * 0.95, 0) : _v.set(0, dist * 0.8, dist * 0.6), 1 - Math.exp(-dt * 3));
+  scene.fog.near = dist * 1.4; scene.fog.far = dist * 3;
+  camera.position.copy(camPos);
+  camera.lookAt(camLook);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+startAttract();
+loop();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

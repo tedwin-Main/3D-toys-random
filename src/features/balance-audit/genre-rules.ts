@@ -19,6 +19,7 @@ export const GAME_RULES = {
     rule: 'bomb holders 1..alive-1 while fuse burns; round ends at ≤1 alive', ref: 'https://en.wikipedia.org/wiki/Hot_potato_(game)',
     inv: `ph==='play'?(()=>{const al=P.filter(p=>p.alive),h=al.filter(p=>p.bomb).length;return al.length>1&&(h<1||h>al.length-1)?'bombs '+h+'/'+al.length:''})():${lastStandingEndsRound('round')}`,
   },
+  'bridge-isles': { serverRun: true, rule: 'a round ends only on a connected chain; cells only 0/1/2; teams alternate (pie rule)', ref: 'https://en.wikipedia.org/wiki/Hex_(board_game)', inv: `!/^[012]*$/.test(S_.B||'')?'bad cell':ph==='round'&&S_.win&&S_.win.path&&!(()=>{const n=S_.n,m=String(S_.win.team+1),p=S_.win.path;return p.every(i=>S_.B[i]===m)&&p.some(i=>S_.win.team?i%n===0:i<n)&&p.some(i=>S_.win.team?i%n===n-1:i>=n*(n-1))})()?'round won without a chain':''` },
   'bumper-sumo-arena': { serverRun: true, rule: 'round ends when ≤1 car left in the ring', ref: 'https://en.wikipedia.org/wiki/Sumo', inv: `ph==='roundEnd'&&P.filter(p=>p.inRound&&p.alive).length>1?'roundEnd with '+P.filter(p=>p.inRound&&p.alive).length+' in ring':''` },
   'fence-fields': { serverRun: true, rule: 'closing a box scores and moves again; scores never negative', ref: 'https://en.wikipedia.org/wiki/Dots_and_boxes', inv: noNegative('score') },
   'gem-diggers': { serverRun: true, rule: 'gem = dig again (Minesweeper Flags); random first digger', ref: 'https://www.novelgames.com/minesflagger' },
