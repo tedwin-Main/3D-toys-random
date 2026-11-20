@@ -16,7 +16,7 @@ const gameSpecs = (specs: Record<string, GameSpec>) => specs;
 
 const GAMES = gameSpecs({
   'kart-party': { rows: 'K', live: 'count', input: DRIVE, moved: 6 },
-  'turbo-ball': { rows: 'P', live: 'play', input: DRIVE, moved: 6 },
+  'turbo-ball': { rows: 'P', live: 'play', input: DRIVE, moved: 10 },
   'bumper-sumo': { rows: 'P', live: 'fight', input: { x: 1, z: 0, d: 0 }, moved: 3 },
   'hot-potato': { rows: 'P', live: 'play', input: { x: 1, z: 0, d: 0 }, moved: 3 },
   'crown-keep': { rows: 'P', live: 'play', input: { x: 1, z: 0, d: 0 }, moved: 4 },

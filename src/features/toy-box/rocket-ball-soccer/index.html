@@ -37,7 +37,7 @@
 <div id="teams" class="card"></div>
 <div id="boost" class="card">0</div>
 <div id="big"></div>
-<div id="hint" class="card"><b>W/S</b> drive · <b>A/D</b> steer · <b>Shift / Space</b> boost · <b>C</b> ball cam on/off · push the ball into the other team's goal</div>
+<div id="hint" class="card"><b>W/S</b> drive · <b>A/D</b> steer · <b>Shift / Space</b> boost · <b>C</b> ball cam on/off · the floor curves up into the walls: drive up them, too slow and you drop off</div>
 <div id="top" class="card"><span>Room</span><b id="code"></b><button id="lobbyBtn">Lobby</button></div>
 <div id="stick"><div></div></div>
 
@@ -51,10 +51,10 @@ import { createLobby } from '../common/room-lobby.ts';
 import { exposeGameDebug } from '../common/debug-probe.ts';
 import { startTicker } from '../common/room-client.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
-import { createTurboSim, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, TEAM } from './turbo-sim.ts';
+import { createTurboSim, arenaSurface, STEP, L, WD, GOAL_W, GOAL_D, GOAL_H, CR, BR, RR, CEIL, TEAM } from './turbo-sim.ts';
 import { createServerMatchClient } from '../common/server-run/server-match-client.ts';
 import { createSnapPacing } from '../common/snap-pacing.ts';
-import { createPrediction, blendAngle } from '../common/own-prediction.ts';
+import { createPrediction } from '../common/own-prediction.ts';
 import { createGameAudio } from '../common/game-audio.ts';
 import { keyId, trackKeys } from '../common/key-state.ts';
 
@@ -103,30 +103,42 @@ const outer = new THREE.Mesh(new THREE.PlaneGeometry(260, 200).rotateX(-Math.PI 
 outer.position.y = -0.02;
 scene.add(outer);
 const glass = new THREE.MeshStandardMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.12, roughness: 0.1, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false });
-const edgeMat = new THREE.MeshBasicMaterial({ color: 0xe8f4ff });
-function wallSeg(x0, z0, x1, z1, h = 3.2) {
-  const len = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(x1 - x0, z1 - z0);
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(len, h), glass);
-  m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2); m.rotation.y = a - Math.PI / 2;
-  const top = new THREE.Mesh(new THREE.BoxGeometry(len, 0.12, 0.12), edgeMat);
-  top.position.set((x0 + x1) / 2, h, (z0 + z1) / 2); top.rotation.y = a - Math.PI / 2;
-  scene.add(m, top);
+const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a8f4a, roughness: 0.85, side: THREE.DoubleSide });
+const edgeMat = new THREE.LineBasicMaterial({ color: 0xe8f4ff });
+// outline along the wall line with outward normals: ends, rounded corners, long sides (goal post edges kept exact)
+const outline = [];
+const span = (a, b, cuts = []) => { const n = Math.ceil(Math.abs(b - a) / 1.5); return [...Array.from({ length: n + 1 }, (_, i) => a + ((b - a) * i) / n), ...cuts].sort((p, q) => (b > a ? p - q : q - p)); };
+for (const [cx, cz, a0, ends] of [[L - CR, WD - CR, 0, 1], [-(L - CR), WD - CR, Math.PI / 2, 0], [-(L - CR), -(WD - CR), Math.PI, 1], [L - CR, -(WD - CR), Math.PI * 1.5, 0]]) {
+  const gx = Math.cos(a0), gz = Math.sin(a0);
+  // straight run leading into this corner
+  if (ends) for (const z of span(-gx * (WD - CR), gx * (WD - CR), [-GOAL_W, GOAL_W])) outline.push([gx * L, z, gx, 0]);
+  else for (const x of span(gz * (L - CR), -gz * (L - CR))) outline.push([x, gz * WD, 0, gz]);
+  for (let k = 0; k <= 8; k++) { const a = a0 + (k / 8) * (Math.PI / 2); outline.push([cx + Math.cos(a) * CR, cz + Math.sin(a) * CR, Math.cos(a), Math.sin(a)]); }
 }
-// outline: long sides, goal-end sides around the mouth, rounded corners
-const pts = [];
-for (const [cx, cz, a0] of [[L - CR, WD - CR, 0], [-(L - CR), WD - CR, Math.PI / 2], [-(L - CR), -(WD - CR), Math.PI], [L - CR, -(WD - CR), Math.PI * 1.5]]) {
-  for (let k = 0; k <= 6; k++) { const a = a0 + (k / 6) * (Math.PI / 2); pts.push([cx + Math.cos(a) * CR, cz + Math.sin(a) * CR]); }
-}
-for (let i = 0; i < pts.length; i++) {
-  const [x0, z0] = pts[i], [x1, z1] = pts[(i + 1) % pts.length];
-  if (Math.abs(x0) === L && Math.abs(x1) === L) {
-    // end wall split around the goal mouth
-    const s = Math.sign(x0), zs = [z0, z1].sort((a, b) => a - b);
-    wallSeg(s * L, zs[0], s * L, -GOAL_W); wallSeg(s * L, GOAL_W, s * L, zs[1]);
-    wallSeg(s * L, -GOAL_W, s * L, GOAL_W, GOAL_H + 0.01);
-    continue;
+// floor-to-wall quarter-circle ramp, then the glass wall up to the ceiling; the goal mouths stay open below the crossbar
+const ramp = Array.from({ length: 11 }, (_, k) => { const t = (k / 10) * (Math.PI / 2); return [RR - RR * Math.sin(t), RR - RR * Math.cos(t)]; });
+function arenaShell(profile, mat) {
+  const pos = [], idx = [], cols = profile.length;
+  for (const [x, z, gx, gz] of outline) for (const [s, y] of profile) pos.push(x - gx * s, y + 0.02, z - gz * s);
+  for (let i = 0; i < outline.length; i++) for (let k = 0; k < cols - 1; k++) {
+    const j = (i + 1) % outline.length, a = i * cols + k, b = j * cols + k;
+    const xc = (pos[a * 3] + pos[b * 3]) / 2, zc = (pos[a * 3 + 2] + pos[b * 3 + 2]) / 2, yc = (pos[a * 3 + 1] + pos[a * 3 + 4]) / 2;
+    if (Math.abs(zc) < GOAL_W && yc < GOAL_H && Math.abs(xc) > L - RR - 0.5) continue;
+    idx.push(a, b, a + 1, b, b + 1, a + 1);
   }
-  wallSeg(x0, z0, x1, z1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat);
+  m.receiveShadow = true;
+  scene.add(m);
+}
+arenaShell(ramp, rampMat);
+arenaShell([[0, RR], [0, GOAL_H], [0, CEIL]], glass);
+// seam where ramp meets wall, and the wall rim
+for (const y of [RR, CEIL]) {
+  const seg = outline.flatMap(([x, z], i) => { const [x1, z1] = outline[(i + 1) % outline.length]; return y < GOAL_H && Math.abs(z + z1) / 2 < GOAL_W ? [] : [new THREE.Vector3(x, y, z), new THREE.Vector3(x1, y, z1)]; });
+  scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(seg), edgeMat));
 }
 const goals3d = [];
 for (const [s, c] of [[-1, BLUE], [1, ORANGE]]) {
@@ -264,7 +276,7 @@ function startAttract() { sim.startAttract(); }
 // Multiplayer > Lobby: humans alternate teams, bots fill the smaller side
 const lobby = createLobby({
   game: 'turbo-ball', title: 'Turbo Ball', emoji: '⚽', accent: '#3fa7ff',
-  blurb: 'Car soccer, Blue vs Orange, up to 7 a side. Boost into a giant ball and bang it into the other goal. Three minutes, sudden death if tied.',
+  blurb: 'Car soccer, Blue vs Orange, up to 7 a side. Boost into a giant ball and bang it into the other goal. The floor curves up into the walls, so you can drive up them. Three minutes, sudden death if tied.',
   maxBots: 13, defaultBots: 6, minPlayers: 2,
   note: 'Up to 14 cars per room (7v7, humans + bots). Teams balance automatically.',
   onJoin(room) {
@@ -311,8 +323,15 @@ const pred = createPrediction({
   step: (p, dt) => { const keep = sim.events; sim.events = []; sim.stepCar(p, dt); sim.events = keep; },
   live: () => true,
   seed: () => {},
-  merge: (p, host) => { p.boost = host.boost; p.h = blendAngle(p.h, host.h, 0.2); },
-  angle: 'h',
+  // nose blends toward the host's; a flip between airborne and grounded takes the host's
+  merge: (p, host) => {
+    p.boost = host.boost;
+    const fx = p.fx + (host.fx - p.fx) * 0.2, fy = p.fy + (host.fy - p.fy) * 0.2, fz = p.fz + (host.fz - p.fz) * 0.2, l = Math.hypot(fx, fy, fz) || 1;
+    Object.assign(p, { fx: fx / l, fy: fy / l, fz: fz / l });
+    if (p.air !== host.air) Object.assign(p, { air: host.air, ux: host.ux, uy: host.uy, uz: host.uz });
+  },
+  pos: ['x', 'y', 'z'],
+  vel: ['vx', 'vy', 'vz'],
 });
 function applySnap(s) {
   serverMatch.onSnapshot(s);
@@ -321,12 +340,14 @@ function applySnap(s) {
   const [x, y, z, vx, vy, vz] = s.B;
   Object.assign(world.ball, { x, y, z, vx, vy, vz });
   const seen = new Set();
-  for (const [id, px, pz, h, pvx, pvz, steer, fl, team, boost, goals] of s.P) {
+  for (const [id, px, py, pz, fx, fy, fz, pvx, pvy, pvz, steer, fl, team, boost, goals] of s.P) {
     seen.add(id);
     if (!world.players.has(id) && !names.name(id)) continue;
     const p = world.players.get(id) ?? sim.addPlayer(id, ...names.name(id), !!(fl & 1), team);
     if (p.team !== team) { p.team = team; const g = cars3d.get(id); if (g) g.userData.paint.color.set(TEAM[team]); }
-    Object.assign(p, { x: px, z: pz, h, vx: pvx, vz: pvz, steer, boosting: !!(fl & 2), boost, goals });
+    Object.assign(p, { x: px, y: py, z: pz, fx, fy, fz, h: Math.atan2(fx, fz), vx: pvx, vy: pvy, vz: pvz, steer, boosting: !!(fl & 2), air: !!(fl & 4), boost, goals });
+    // grounded: up is the surface normal under the wheels
+    if (!p.air) { const n = arenaSurface(px, py, pz, 0); Object.assign(p, { ux: n.nx, uy: n.ny, uz: n.nz }); }
     if (id === lobby.room.me) pred.correct(p);
   }
   for (const id of [...world.players.keys()]) if (!seen.has(id)) sim.removePlayer(id);
@@ -426,6 +447,20 @@ function simTick(dt) {
 }
 startTicker(60, simTick);
 
+// Run engine > car pose: wheels down on the surface (up = its normal), nose along forward; airborne cars drift back upright
+const _up = new THREE.Vector3(), _fw = new THREE.Vector3(), _rt = new THREE.Vector3(), _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), WORLD_UP = new THREE.Vector3(0, 1, 0);
+function poseCar(g, v, k, dt) {
+  const up = (g.userData.up ??= new THREE.Vector3(0, 1, 0));
+  if (v.air) up.lerp(WORLD_UP, 1 - Math.exp(-dt * 1.5)).normalize();
+  else up.lerp(_up.set(v.ux, v.uy, v.uz), k).normalize();
+  _fw.set(v.fx, v.fy, v.fz).addScaledVector(up, -_fw.dot(up));
+  if (_fw.lengthSq() < 1e-4) return;
+  _fw.normalize();
+  _rt.crossVectors(up, _fw);
+  _q.setFromRotationMatrix(_m.makeBasis(_rt, up, _fw));
+  g.quaternion.slerp(_q, k);
+}
+
 // Run engine > render loop
 const clock = new THREE.Clock();
 const camPos = new THREE.Vector3(0, 40, 50), camLook = new THREE.Vector3(), _v = new THREE.Vector3(), _w = new THREE.Vector3();
@@ -436,17 +471,17 @@ function loop() {
   for (const [id, g] of cars3d) if (!world.players.has(id)) { scene.remove(g); cars3d.delete(id); }
   for (const p of world.players.values()) {
     let g = cars3d.get(p.id);
-    if (!g) { g = makeCar(p); cars3d.set(p.id, g); g.position.set(p.x, 0, p.z); g.rotation.y = p.h; }
+    if (!g) { g = makeCar(p); cars3d.set(p.id, g); g.position.set(p.x, p.y, p.z); }
     const v = (!hostSim && p.id === lobby.room?.me && pred.state) || p, va = v === p ? age : 0;
-    const tx = v.x + v.vx * va, tz = v.z + v.vz * va, a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
-    if (Math.hypot(tx - g.position.x, tz - g.position.z) > 8) g.position.set(tx, 0, tz);
-    g.position.x += (tx - g.position.x) * a; g.position.z += (tz - g.position.z) * a;
-    let dh = v.h - g.rotation.y; dh = Math.atan2(Math.sin(dh), Math.cos(dh));
-    g.rotation.y += dh * (hostSim ? 1 : Math.min(1, dt * 16));
+    const a = hostSim || v !== p ? 1 : 1 - Math.exp(-dt * pacing.rate(16));
+    _v.set(v.x + v.vx * va, v.y + v.vy * va, v.z + v.vz * va);
+    if (_v.distanceTo(g.position) > 8) g.position.copy(_v);
+    g.position.lerp(_v, a);
+    poseCar(g, v, hostSim ? 1 : Math.min(1, dt * 16), dt);
     const u = g.userData;
     u.flame.visible = p.boosting;
     if (p.boosting) u.flame.scale.set(1, 1, 0.7 + Math.random() * 0.6);
-    u.body.rotation.z = -p.steer * Math.min(Math.hypot(p.vx, p.vz) / 20, 1) * 0.06;
+    u.body.rotation.z = -p.steer * Math.min(Math.hypot(p.vx, p.vy, p.vz) / 20, 1) * 0.06;
     u.tag.visible = p.id !== lobby.room?.me;
   }
   const b = world.ball;
@@ -473,14 +508,17 @@ function loop() {
   // camera: ball cam behind own car facing the ball, or plain chase; attract = broadcast view
   const me = world.players.get(lobby.room?.me), mg = me && cars3d.get(me.id);
   if (mg && world.mode === 'match') {
-    let dx, dz;
-    if (ballCam) { dx = ball3d.position.x - mg.position.x; dz = ball3d.position.z - mg.position.z; }
-    else { dx = Math.sin(mg.rotation.y); dz = Math.cos(mg.rotation.y); }
-    const dl = Math.hypot(dx, dz) || 1;
-    camPos.lerp(_v.set(mg.position.x - (dx / dl) * 11, 5.5, mg.position.z - (dz / dl) * 11), 1 - Math.exp(-dt * 5));
-    const lookAt = ballCam ? _w.set(ball3d.position.x, ball3d.position.y * 0.5 + 0.8, ball3d.position.z) : _w.set(mg.position.x + (dx / dl) * 8, 1, mg.position.z + (dz / dl) * 8);
+    // behind the car toward the ball (or along the nose), lifted along a mix of car up and world up, kept inside the arena
+    const up = _up.copy(mg.userData.up ?? WORLD_UP).add(WORLD_UP).normalize();
+    const dir = ballCam ? _fw.copy(ball3d.position).sub(mg.position) : _fw.set(0, 0, 1).applyQuaternion(mg.quaternion);
+    dir.y *= 0.5;
+    dir.normalize();
+    _v.copy(mg.position).addScaledVector(dir, -11).addScaledVector(up, 5.5);
+    _v.set(clamp(_v.x, -L + 1, L - 1), clamp(_v.y, 1.5, CEIL + 3), clamp(_v.z, -WD + 1, WD - 1));
+    camPos.lerp(_v, 1 - Math.exp(-dt * 5));
+    const lookAt = ballCam ? _w.set(ball3d.position.x, ball3d.position.y * 0.5 + 0.8, ball3d.position.z) : _w.copy(mg.position).addScaledVector(dir, 8).addScaledVector(up, 1);
     camLook.lerp(lookAt, 1 - Math.exp(-dt * 8));
-    if (gameAudio.ctx) { const sp = Math.hypot(me.vx, me.vz); eng.frequency.value = 55 + sp * 4 + (me.boosting ? 30 : 0); engGain.gain.value = 0.025 + Math.min(sp / 30, 1) * 0.035; }
+    if (gameAudio.ctx) { const sp = Math.hypot(me.vx, me.vy, me.vz); eng.frequency.value = 55 + sp * 4 + (me.boosting ? 30 : 0); engGain.gain.value = 0.025 + Math.min(sp / 30, 1) * 0.035; }
   } else {
     camPos.lerp(_v.set(ball3d.position.x * 0.5, 34, ball3d.position.z * 0.3 + 40), 1 - Math.exp(-dt * 2));
     camLook.lerp(_w.set(ball3d.position.x * 0.6, 0, ball3d.position.z * 0.5), 1 - Math.exp(-dt * 3));
