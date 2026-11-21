@@ -3,6 +3,7 @@
 import { buildTrackData, W, NS } from './kart-track.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
+import { tickOrder } from '../common/seat-shuffle.ts';
 
 export const STEP = 1 / 60;
 export const LAPS = 3;
@@ -263,7 +264,7 @@ export function createKartSim({ onEnd = () => {} } = {}) {
 
   // Run engine > one fixed step for every kart
   const step = () => {
-    const ps = [...world.karts.values()];
+    const ps = tickOrder(world.karts.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) { sim.stepKart(p, STEP); if (p.itemSeq !== p.lastItem) { p.lastItem = p.itemSeq; if (world.phase === 'race') useItem(p); } }
     if (world.phase === 'race') { separate(ps); items(STEP, ps); }

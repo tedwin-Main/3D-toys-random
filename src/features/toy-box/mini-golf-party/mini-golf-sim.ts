@@ -1,6 +1,6 @@
 // Runs Putt Party rules (honor order, one putt at a time, shot clock, ball knocks, water, stroke cap, scorecard, bots) with no rendering, for page attract mode and the relay server host.
 
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 import { HOLES, R, SLOPE, clamp, parseHole, physStep, tileUnder } from './golf-course.ts';
@@ -191,7 +191,7 @@ export function createGolfSim({ onEnd = () => {} } = {}) {
   }
 
   function simBalls(dt) {
-    const inPlay = everyBall().filter((ball) => !ball.done);
+    const inPlay = tickOrder(everyBall().filter((ball) => !ball.done), rng);
     for (let sub = 0; sub < 2; sub++) {
       world.ht += dt / 2;
       for (const ball of inPlay) rollBall(ball, dt / 2);

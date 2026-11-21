@@ -2,7 +2,7 @@
 
 import { pickLeader } from '../common/pick-leader.ts';
 import { axis, seq, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
@@ -111,7 +111,7 @@ export function createTurfSim({ onEnd = () => {}, onGridChange = () => {} } = {}
     if (sp > 0.5) { let d = Math.atan2(p.vx, p.vz) - p.face; d = Math.atan2(Math.sin(d), Math.cos(d)); p.face += d * Math.min(1, dt * 10); }
   }
   function physics(dt) {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng); // fresh order each tick: last painter of a shared tile isn't always the last joiner
     const play = world.phase === 'play';
     for (const p of ps) {
       moveBlob(p, dt, play);

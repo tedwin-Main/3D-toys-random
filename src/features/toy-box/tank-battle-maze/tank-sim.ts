@@ -3,6 +3,7 @@
 import { axis, num, seq, applyPresses } from '../common/guest-input.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
+import { tickOrder } from '../common/seat-shuffle.ts';
 
 export const STEP = 1 / 60;
 // Arena > maze grid: W x H cells of CELL units, wall thickness TH
@@ -174,7 +175,7 @@ export function createTankSim({ onEnd = () => {} } = {}) {
       if (p.fireSeq !== p.lastFire) { p.lastFire = p.fireSeq; fire(p); }
     }
     // tank vs tank separation
-    const ts = [...world.tanks.values()].filter((p) => p.alive);
+    const ts = tickOrder(world.tanks.values(), rng).filter((p) => p.alive);
     for (let i = 0; i < ts.length; i++) for (let j = i + 1; j < ts.length; j++) {
       const a = ts[i], b = ts[j], dx = a.x - b.x, dz = a.z - b.z, d = Math.hypot(dx, dz);
       if (d < TANK_R * 2 && d > 1e-4) { const k = (TANK_R * 2 - d) / d / 2; a.x += dx * k; a.z += dz * k; b.x -= dx * k; b.z -= dz * k; }

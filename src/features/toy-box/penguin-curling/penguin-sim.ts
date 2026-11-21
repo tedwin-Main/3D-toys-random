@@ -3,6 +3,7 @@
 import { axis, applyPresses } from '../common/guest-input.ts';
 import { pickLeader } from '../common/pick-leader.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
 export const STEP = 1 / 60;
@@ -55,7 +56,7 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
   // throw order: shuffled in round 1, then leader first so last place throws last (the hammer); ties keep last round's order
   function lineUp() {
     const ps = everyone(), prev = new Map(world.order.map((id, k) => [id, k]));
-    if (world.round === 1) ps.sort(() => rng() - 0.5);
+    if (world.round === 1) shuffleInPlace(ps, rng);
     else ps.sort((a, b) => b.score - a.score || (prev.get(a.id) ?? 99) - (prev.get(b.id) ?? 99));
     // last end's final thrower never opens the next end (no back-to-back throws)
     const lastThrower = world.order.findLast((id) => world.players.has(id));
@@ -324,7 +325,7 @@ export function createPenguinSim({ onEnd = () => {} } = {}) {
 
   // Run engine > one fixed step for every penguin
   const step = () => {
-    const ps = everyone();
+    const ps = tickOrder(everyone(), rng);
     for (const p of ps) if (p.bot) botThink(p);
     // new SLIDE taps become one pending tap per step, so a fast double tap still reads as two
     for (const p of ps) {

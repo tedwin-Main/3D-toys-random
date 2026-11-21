@@ -4,6 +4,7 @@ import { box, cyl, createCourse, DT } from '../course-colliders.ts';
 import { CANDY } from '../course-kit.ts';
 import { steerTo, wander } from '../bean-bots.ts';
 import { respawn, findGrabTarget } from '../round-sim.ts';
+import { shuffleInPlace } from '../../seat-shuffle.ts';
 
 const HALF = 14, STEAL_RANGE = 1.4, IMMUNE = 2, STEAL_COOL = 1;
 const PILLARS = [[-6, -6], [6, -6], [-6, 6], [6, 6]];
@@ -22,7 +23,7 @@ export default {
     return createCourse({ cols, killY: -8, spawn: ringSpawnSquare, checkpoints: [{ x: 0, y: 0, z: 8, w: 10 }], view: { arena: HALF } });
   },
   start(sim) {
-    const order = [...sim.list].sort(() => sim.rng() - 0.5);
+    const order = shuffleInPlace([...sim.list], sim.rng); // Fisher-Yates: comparator sort kept early joiners' tails
     order.forEach((b, i) => Object.assign(b, { tail: i < sim.keep, immune: 0, stealCool: 0 }));
   },
   tick(sim) {

@@ -1,7 +1,7 @@
 // Runs Cannon Cove rules (sailing, broadsides, cannonball arcs, hull hits, repair barrels, bots, match clock) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
@@ -227,7 +227,7 @@ export function createCannonSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step
   function step() {
-    const ps = [...ships.values()];
+    const ps = tickOrder(ships.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepShip(p, STEP);
     shipCollide(ps);

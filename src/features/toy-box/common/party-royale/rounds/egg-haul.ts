@@ -13,7 +13,7 @@ const nestOf = (team, teams) => { const a = (team / teams) * Math.PI * 2 + Math.
 
 export default {
   id: 'egg-haul', title: 'Egg Haul', emoji: '🥚', kind: 'team', duration: 90,
-  goal: 'Teams race to stack eggs in their nest. Grab an egg, run it home, raid rival nests. Fewest eggs loses.',
+  goal: 'Teams race to stack eggs in their nest. Grab an egg, run it home, raid rival nests. Fewest eggs per player loses.',
   theme: { sky: [0x9be7ff, 0xfff4c4], fog: 0xe4f6ff },
   build(seed, n) {
     const teams = teamCount(n);
@@ -47,10 +47,12 @@ export default {
   },
   fell: (sim, b) => respawn(sim, b),
   over: (sim) => sim.playTime >= sim.round.duration || sim.active.length === 0,
-  // Rules > the team with the fewest nest eggs is out (ties broken by seeded coin)
+  // Rules > the team with the fewest nest eggs per member is out (uneven 4v3 sides compare fairly; ties broken by seeded coin)
   finish(sim) {
-    const scores = teamScores(sim), order = scores.map((s, k) => [s, sim.rng(), k]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    const loser = order[0][2];
+    const scores = teamScores(sim), sizes = teamSizes(sim);
+    // cross-multiplied s/size compare: no float ties
+    const order = scores.map((s, k) => [s, sizes[k], sim.rng(), k]).sort((a, b) => a[0] * b[1] - b[0] * a[1] || a[2] - b[2]);
+    const loser = order[0][3];
     sim.data.scores = scores; sim.data.loser = loser;
     for (const b of sim.active) (b.team === loser ? sim.eliminate : sim.qualify)(b);
   },
@@ -77,6 +79,12 @@ export default {
 };
 
 export const eggsOf = (sim) => sim.data.eggs ?? [];
+// starting head count per team (leavers still count: a team can't dodge the cut by losing a bean)
+export function teamSizes(sim) {
+  const sizes = new Array(sim.course.teams).fill(0);
+  for (const b of sim.list) sizes[b.team ?? 0]++;
+  return sizes.map((n) => Math.max(1, n));
+}
 export function teamScores(sim) {
   const scores = new Array(sim.course.teams).fill(0);
   for (const e of eggsOf(sim)) if (!e.carrier && e.nest >= 0) scores[e.nest]++;

@@ -4,6 +4,7 @@ import { box, createCourse, mulberry32, DT } from '../course-colliders.ts';
 import { CANDY, startPad, finishPad, crossedFinish, spawnGrid } from '../course-kit.ts';
 import { steerTo } from '../bean-bots.ts';
 import { ACTIVE } from '../round-sim.ts';
+import { shuffleInPlace } from '../../seat-shuffle.ts';
 
 const COLS = 6, ROWS = 14, SIZE = 3, PITCH = 3.4, GAP = PITCH - SIZE;
 const rowZ = (r) => -GAP - SIZE / 2 - r * PITCH; // tile centre; 0.5 gap after the start pad
@@ -98,8 +99,9 @@ function nextTile(sim, row, col) {
   const reach = row === 0 ? [...Array(COLS).keys()] : [col - 1, col, col + 1].filter((c) => c >= 0 && c < COLS);
   const opts = reach.map((c) => course.tiles[row * COLS + c]).filter((i) => course.cols[i].state !== GONE);
   const proven = opts.filter((i) => course.cols[i].state === PROVEN);
-  const near = (list) => list.sort((a, b) => Math.abs(course.cols[a].tile % COLS - col) - Math.abs(course.cols[b].tile % COLS - col) || sim.rng() - 0.5)[0];
+  // shuffle, then stable sort by distance: ties split evenly (a random comparator is not a fair tie-break)
+  const near = (list) => shuffleInPlace(list, sim.rng).sort((a, b) => Math.abs(course.cols[a].tile % COLS - col) - Math.abs(course.cols[b].tile % COLS - col))[0];
   if (proven.length) return near(proven);
   if (!opts.length) return course.tiles[row * COLS + col];
-  return row === 0 ? near(opts.filter((i) => Math.abs(course.cols[i].tile % COLS - col) <= 1).concat(opts).slice(0, 3).sort(() => sim.rng() - 0.5)) : opts[Math.floor(sim.rng() * opts.length)];
+  return row === 0 ? near(opts.filter((i) => Math.abs(course.cols[i].tile % COLS - col) <= 1).concat(opts).slice(0, 3)) : opts[Math.floor(sim.rng() * opts.length)];
 }

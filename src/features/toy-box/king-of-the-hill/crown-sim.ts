@@ -2,7 +2,7 @@
 
 import { pickLeader } from '../common/pick-leader.ts';
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 export const STEP = 1 / 60;
@@ -197,7 +197,7 @@ export function createCrownSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step for every knight
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng); // fresh order each tick: join order never wins the shove
     for (const p of ps) if (p.bot) botThink(p);
     for (const p of ps) stepPlayer(p, STEP);
     bump(ps);

@@ -1,7 +1,7 @@
 // Runs Bumper Sumo rules (car physics, bumps, shrinking ring, bots, rounds) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 export const STEP = 1 / 60;
@@ -75,7 +75,7 @@ export function createSumoSim({ onEnd = () => {} } = {}) {
 
   // Run engine > physics step: drive, dash, bumps, ring edge falls
   function physics(dt) {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     const canMove = world.phase === 'fight';
     for (const p of ps) {
       if (p.falling) { fall(p, dt); continue; }

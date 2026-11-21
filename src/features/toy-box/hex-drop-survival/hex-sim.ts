@@ -1,7 +1,7 @@
 // Runs Hex Drop rules (three hex floors that fall when stepped on, hopping beans, eliminations, 3 rounds, bots) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
@@ -229,7 +229,7 @@ export function createHexSim({ onEnd = () => {}, onTilesReset = () => {} } = {})
   }
   // Run engine > one fixed step
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepPlayer(p, STEP);
     bump(ps);

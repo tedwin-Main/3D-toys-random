@@ -2,7 +2,7 @@
 
 import { pickLeader } from '../common/pick-leader.ts';
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 export const STEP = 1 / 60;
@@ -240,7 +240,7 @@ export function createSheepdogSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step for dogs then the flock
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepDog(p, STEP);
     bumpDogs(ps);

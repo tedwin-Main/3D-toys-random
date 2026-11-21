@@ -1,6 +1,6 @@
 // Runs Light Cycles rules (trail grid, right-angle turns, guest turn rewind, boost energy, crashes, round points, bots) with no rendering, for page attract mode and the relay server host.
 
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 export const STEP = 1 / 60;
@@ -263,7 +263,7 @@ export function createCycleSim({ onEnd = () => {} } = {}) {
   // Run engine > one fixed step
   const step = () => {
     stepNo++;
-    const ps = everyone();
+    const ps = tickOrder(everyone(), rng); // fresh order each tick: a same-tick head-on never favors the earlier joiner
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepCycle(p, STEP);
     phases(STEP);

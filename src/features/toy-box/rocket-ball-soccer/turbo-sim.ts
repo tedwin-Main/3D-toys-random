@@ -1,6 +1,7 @@
 // Runs Turbo Ball match rules (car physics on a floor that curves up into drivable walls, ball, bots, goals, phases) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { createNameSync } from '../common/snapshot-names.ts';
+import { tickOrder } from '../common/seat-shuffle.ts';
 
 export const STEP = 1 / 60;
 // Field > half length, half width, goal mouth half width / depth / crossbar, corner radius, ball radius
@@ -39,7 +40,7 @@ export function arenaSurface(x: number, y: number, z: number, inset: number) {
 export function createTurboSim({ onEnd = () => {} } = {}) {
   const world = { mode: 'attract', phase: 'count', t: 3, clock: MATCH_TIME, score: [0, 0], over: false, players: new Map(), ball: { x: 0, y: BR, z: 0, vx: 0, vy: 0, vz: 0, last: null }, lastGoal: null };
   const names = createNameSync();
-  let lastBeep = 0, roleT = 0;
+  let lastBeep = 0, roleT = 0, tieTeam = 0;
   const emit = (e) => sim.events.push(e);
 
   // Game > World
@@ -51,7 +52,8 @@ export function createTurboSim({ onEnd = () => {} } = {}) {
   const removePlayer = (id) => world.players.delete(id);
   const clearPlayers = () => world.players.clear();
   const teamSizes = () => [0, 1].map((t) => [...world.players.values()].filter((q) => q.team === t).length);
-  const smallerTeam = () => { const n = teamSizes(); return n[0] <= n[1] ? 0 : 1; };
+  // even sides: coin-flipped team (tieTeam), so the first joiner isn't always Blue
+  const smallerTeam = () => { const n = teamSizes(); return n[0] === n[1] ? tieTeam : n[0] < n[1] ? 0 : 1; };
 
   function kickoff() {
     Object.assign(world.ball, { x: 0, y: BR + 3, z: 0, vx: 0, vy: 0, vz: 0, last: null });
@@ -290,6 +292,7 @@ export function createTurboSim({ onEnd = () => {} } = {}) {
   function fullTime() { world.phase = 'final'; world.t = 10; emit(['f']); }
   function resetMatch(mode) {
     sim.clearPlayers();
+    tieTeam = rng() < 0.5 ? 0 : 1;
     Object.assign(world, { mode, score: [0, 0], clock: MATCH_TIME, over: false });
   }
 
@@ -336,7 +339,7 @@ export function createTurboSim({ onEnd = () => {} } = {}) {
 
   // Run engine > one step: bot roles every 0.4 s, two physics substeps, phase clock
   const step = (dt = STEP) => {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng); // fresh order each tick: a kickoff touch on the same substep never favors the earlier joiner
     roleT -= dt;
     if (roleT <= 0) { roleT = ROLE_EVERY; assignRoles(); }
     for (const p of ps) if (p.bot) botThink(p);

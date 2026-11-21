@@ -4,6 +4,7 @@ import { box, createCourse, mulberry32 } from '../course-colliders.ts';
 import { CANDY, latestStarted } from '../course-kit.ts';
 import { steerTo, wander } from '../bean-bots.ts';
 import { INTRO } from '../round-sim.ts';
+import { shuffleInPlace } from '../../seat-shuffle.ts';
 
 const SIDE = 4, PITCH = 3.6, SIZE = 3.4, TILES = SIDE * SIDE;
 export const SYMBOLS = ['star', 'moon', 'heart', 'drop', 'leaf', 'bolt'];
@@ -51,7 +52,7 @@ function cycleSchedule(rng) {
   for (let i = 0; t < INTRO + 160; i++) {
     const show = Math.max(2.5, 5 - i * 0.4), hide = 1.5, call = Math.max(2.5, 4 - i * 0.25), drop = 2.5, back = 1.5;
     const called = Math.floor(rng() * SYMBOLS.length), safe = i < 1 ? 3 : i < 3 ? 2 : 1;
-    const order = [...Array(TILES).keys()].sort(() => rng() - 0.5);
+    const order = shuffleInPlace([...Array(TILES).keys()], rng);
     const board = new Array(TILES);
     order.forEach((k, j) => (board[k] = j < safe ? called : (called + 1 + Math.floor(rng() * (SYMBOLS.length - 1))) % SYMBOLS.length));
     out.push({ start: t, i, called, board, marks: [show, show + hide, show + hide + call, show + hide + call + drop, show + hide + call + drop + back] });

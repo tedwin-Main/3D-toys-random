@@ -2,7 +2,7 @@
 
 import { pickLeader } from '../common/pick-leader.ts';
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
@@ -227,7 +227,7 @@ export function createBalloonSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step for every scooter
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     if (world.phase === 'play') for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepPlayer(p, STEP);
     contacts(ps);

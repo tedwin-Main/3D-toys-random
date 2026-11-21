@@ -1,7 +1,7 @@
 // Runs Snowball Brawl rules (walk, lobbed throws, crumbling forts, freeze and thaw, bots, match clock) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { axis, num, seq } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
 
@@ -252,7 +252,7 @@ export function createSnowballSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step: kids, snowballs (two half steps so fast balls do not tunnel), forts
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP, ps);
     for (const p of ps) stepPlayer(p, STEP);
     playerBumps(ps);

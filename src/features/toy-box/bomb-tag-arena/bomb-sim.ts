@@ -1,7 +1,7 @@
 // Runs Hot Potato rules (movement, bumps, bomb passing, fuse waves, bots, rounds) with no rendering, for page attract, guest prediction and the relay server host.
 
 import { axis, applyPresses } from '../common/guest-input.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 export const STEP = 1 / 60;
@@ -221,7 +221,7 @@ export function createBombSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step for every player
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepPlayer(p, STEP);
     bump(ps);

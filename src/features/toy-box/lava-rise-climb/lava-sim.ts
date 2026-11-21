@@ -2,7 +2,7 @@
 
 import { axis, applyPresses } from '../common/guest-input.ts';
 import { createSeededRng } from '../common/seeded-rng.ts';
-import { shuffleInPlace } from '../common/seat-shuffle.ts';
+import { shuffleInPlace, tickOrder } from '../common/seat-shuffle.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 
 // tower platform; mv ones slide along the spiral tangent
@@ -308,7 +308,7 @@ export function createLavaSim({ onEnd = () => {} } = {}) {
   // Run engine > one fixed step: clock, bots think, every climber moves, rules
   const step = () => {
     world.time += STEP;
-    const ps = everyone();
+    const ps = tickOrder(everyone(), rng);
     for (const p of ps) {
       if (p.out) continue;
       if (p.bot) botThink(p, STEP, world.time);

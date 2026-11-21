@@ -3,6 +3,7 @@
 import { axis } from '../common/guest-input.ts';
 import { createNameSync } from '../common/snapshot-names.ts';
 import { createChangedOnly } from '../common/server-run/changed-only.ts';
+import { tickOrder } from '../common/seat-shuffle.ts';
 
 export const STEP = 1 / 60;
 export const R = 14; // stage radius
@@ -234,7 +235,7 @@ export function createChairsSim({ onEnd = () => {} } = {}) {
   }
   // Run engine > one fixed step for every dancer
   function step() {
-    const ps = [...world.players.values()];
+    const ps = tickOrder(world.players.values(), rng);
     for (const p of ps) if (p.bot) botThink(p, STEP);
     for (const p of ps) stepPlayer(p, STEP);
     bumps(ps);

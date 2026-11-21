@@ -2,6 +2,7 @@
 
 import { WORLD_W, WORLD_H, SPRITE_W, SPRITE_H, HIT_RADIUS, THEME_IDS, generateScene, stampTarget, targetPosition } from './waldo-scene.ts';
 import { noSettings } from '../common/match-settings.ts';
+import { shuffleInPlace } from '../common/seat-shuffle.ts';
 
 // Core > game-rules: round clock, decoy ramp, scoring, hide-spot checks
 export const ROUND_MS = 90_000;
@@ -273,8 +274,9 @@ export function createWaldoRounds({ send, now = Date.now, rng = Math.random }) {
       for (let i = 0; i < botCount; i++) addSeat(-1 - i, `${BOT_NAMES[i]} 🤖`, true);
       // every human hides once; bots top up to 5 rounds so a big bot table stays short
       const seats = [...H.players.values()];
-      const botIds = seats.filter((p) => p.bot).map((p) => p.id).sort(() => rng() - 0.5);
-      H.hiderOrder = [...seats.filter((p) => !p.bot).map((p) => p.id), ...botIds.slice(0, Math.max(0, MIN_ROUNDS_WITH_BOTS - humans.length))];
+      // drawn by lot: join order never picks who hides first (decoys ramp up each round)
+      const botIds = shuffleInPlace(seats.filter((p) => p.bot).map((p) => p.id), rng);
+      H.hiderOrder = [...shuffleInPlace(seats.filter((p) => !p.bot).map((p) => p.id), rng), ...botIds.slice(0, Math.max(0, MIN_ROUNDS_WITH_BOTS - humans.length))];
       beginRound();
     },
     act(id, { t, x, y }) {

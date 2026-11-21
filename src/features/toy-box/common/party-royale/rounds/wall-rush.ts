@@ -4,6 +4,7 @@ import { box, createCourse, mulberry32 } from '../course-colliders.ts';
 import { CANDY, latestStarted, PARKED } from '../course-kit.ts';
 import { steerTo, wander } from '../bean-bots.ts';
 import { INTRO } from '../round-sim.ts';
+import { shuffleInPlace } from '../../seat-shuffle.ts';
 
 const HALF = 12, BLOCKS = 8, BLOCK = (HALF * 2) / BLOCKS, SLOTS = 3, WALL_H = 1.5, RUN_OUT = HALF + 1.5;
 // wall heading: +z, -z, +x, -x
@@ -48,7 +49,7 @@ function waveSchedule(rng) {
   let t = INTRO + 2, i = 0;
   while (t < INTRO + 130) {
     const speed = Math.min(7, 3.5 + i * 0.25), gapCount = i < 2 ? 3 : i < 6 ? 2 : 1;
-    const gaps = new Set([...Array(BLOCKS).keys()].sort(() => rng() - 0.5).slice(0, gapCount));
+    const gaps = new Set(shuffleInPlace([...Array(BLOCKS).keys()], rng).slice(0, gapCount));
     out.push({ start: t, dir: Math.floor(rng() * 4), speed, gaps, life: (RUN_OUT * 2) / speed });
     t += Math.max(2.6, 4.5 - i * 0.15); i++;
   }

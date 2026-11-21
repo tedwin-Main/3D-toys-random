@@ -18,7 +18,7 @@ import { createPartyInput } from './party-input.ts';
 import { createPartyAudio } from './party-audio.ts';
 import { SYMBOL_EMOJI } from './course-meshes.ts';
 import { SYMBOLS } from './rounds/pattern-panic.ts';
-import { TEAM_COLORS, teamScores } from './rounds/egg-haul.ts';
+import { TEAM_COLORS, teamScores, teamSizes } from './rounds/egg-haul.ts';
 
 // gallery hover / poster (?preview) gets a fuller crowd; behind the lobby card 12 keeps CPU low
 const ATTRACT_BOTS = IS_PREVIEW ? 24 : 12;
@@ -226,7 +226,8 @@ export function bootPartyRoyale({ round: roundId, show = false }) {
     const kind = sim.round.kind;
     if (kind === 'race') return `<b>${sim.list.filter((b) => b.status === QUALIFIED).length}</b> / ${sim.keep} qualified${tag}`;
     if (kind === 'hunt') return `<b>${live.filter((b) => b.tail).length}</b> tails · ${mine?.tail ? 'you have one, run!' : 'grab a tail!'}${tag}`;
-    if (kind === 'team') return teamScores(sim).map((s, k) => `<b style="color:#${TEAM_COLORS[k].toString(16).padStart(6, '0')}">${s}</b>`).join(' · ') + ` eggs${mine?.team != null ? ` · your team <b style="color:#${TEAM_COLORS[mine.team].toString(16).padStart(6, '0')}">●</b>` : ''}${tag}`;
+    // uneven sides show head count: the cut is eggs per player
+    if (kind === 'team') { const sizes = teamSizes(sim), uneven = new Set(sizes).size > 1; return teamScores(sim).map((s, k) => `<b style="color:#${TEAM_COLORS[k].toString(16).padStart(6, '0')}">${s}</b>${uneven ? `<small>/${sizes[k]}</small>` : ''}`).join(' · ') + ` eggs${mine?.team != null ? ` · your team <b style="color:#${TEAM_COLORS[mine.team].toString(16).padStart(6, '0')}">●</b>` : ''}${tag}`; }
     if (kind === 'final' && sim.round.id === 'crown-summit') return `<b>👑</b> first to grab the crown wins${tag}`;
     return `<b>${live.length}</b> left · ${sim.keep} go through${tag}`;
   }

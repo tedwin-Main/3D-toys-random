@@ -3,6 +3,7 @@
 import { DT, mulberry32 } from './course-colliders.ts';
 import { newBean, stepBean, bumpBeans, stumble, RUN, STUMBLE } from './bean-physics.ts';
 import { botInput } from './bean-bots.ts';
+import { shuffleInPlace } from '../seat-shuffle.ts';
 
 export const INTRO = 4; // seconds of frozen countdown before play
 export const ACTIVE = 'in', QUALIFIED = 'q', OUT = 'out';
@@ -14,11 +15,12 @@ const GRAB_RANGE = 1.3, GRAB_BREAK = 2.4, GRAB_MAX = 3;
  */
 export function createRoundSim({ round, seed, roster, keep }) {
   const rng = mulberry32(seed ^ 0x9e3779b9);
+  const orderRng = mulberry32(seed ^ 0x27d4eb2f); // own stream for per-tick order: other rng draws stay as they were
   const course = round.build(seed, roster.length);
   // active list rebuilt once per tick (or after a status change): bots and round rules read it many times a tick
   let activeCache = null, activeTick = -1;
   const sim = {
-    round, seed, course, rng, keep: Math.max(1, Math.min(keep, roster.length)),
+    round, seed, course, rng, orderRng, keep: Math.max(1, Math.min(keep, roster.length)),
     clock: 0, tick: 0, phase: 'intro', beans: new Map(), list: [], events: [],
     qualified: [], out: [], result: null, data: {},
     get playTime() { return Math.max(0, sim.clock - INTRO); },
@@ -60,7 +62,8 @@ function stepRound(sim) {
   sim.tick++; sim.clock = sim.tick * DT;
   course.update(sim.clock);
   if (sim.phase === 'end') return;
-  const live = sim.active, frozen = sim.phase === 'intro';
+  // fresh seeded order each tick: roster (join) order never wins a bump, grab, egg or tail race
+  const live = shuffleInPlace([...sim.active], sim.orderRng), frozen = sim.phase === 'intro';
   for (const b of live) {
     if (b.bot && !frozen) botInput(sim, b);
     b.slow = 1;

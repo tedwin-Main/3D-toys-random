@@ -1,6 +1,7 @@
 // Runs Siege Hills rules (rounds, turn order, shots, blast damage, rising tide, bots, shot clock) with no rendering, for page attract mode and the relay server host.
 
 import { createSeededRng } from '../common/seeded-rng.ts';
+import { shuffleInPlace } from '../common/seat-shuffle.ts';
 import { reseatTurn } from '../common/turn-seats.ts';
 import { seatAttractBots, seatMatch, MAX_SEATS } from '../common/turn-table.ts';
 import { BLAST, heightAt, genTerrain, crater, launchPoint, velocity, simulate } from './siege-ballistics.ts';
@@ -32,7 +33,8 @@ export function createSiegeGame({ onEnd = () => {} } = {}) {
   function newRound(rd) {
     const n = S.P.length, W = 44 + n * 11;
     // spread catapults with jitter, shuffled seats
-    const spots = S.P.map((_, i) => (W / n) * (i + 0.5) + (rng() - 0.5) * (W / n) * 0.35).sort(() => rng() - 0.5);
+    // Fisher-Yates, not sort(() => rng() - 0.5): V8's comparator sort keeps early seats near their own slot (edge hills)
+    const spots = shuffleInPlace(S.P.map((_, i) => (W / n) * (i + 0.5) + (rng() - 0.5) * (W / n) * 0.35), rng);
     S.W = W;
     S.H = genTerrain(W, spots, rng);
     S.P.forEach((p, i) => Object.assign(p, { x: round2(spots[i]), hp: 100, alive: true }));

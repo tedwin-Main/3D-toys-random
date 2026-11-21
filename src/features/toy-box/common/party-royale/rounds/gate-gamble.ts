@@ -4,6 +4,7 @@ import { box, createCourse, mulberry32, BEAN_R } from '../course-colliders.ts';
 import { CANDY, startPad, finishPad, crossedFinish, strip, spawnGrid } from '../course-kit.ts';
 import { steerTo, reactWhenReady } from '../bean-bots.ts';
 import { ACTIVE } from '../round-sim.ts';
+import { shuffleInPlace } from '../../seat-shuffle.ts';
 
 const ROW_Z = [-10, -21, -32, -43, -54, -65, -76], OPEN_PER_ROW = [5, 5, 4, 4, 3, 3, 2], GATES = 7, GATE_W = 3;
 const FINISH_Z = -88, WIDTH = GATES * GATE_W;
@@ -57,7 +58,7 @@ export default {
 
 // one row: 7 gates between posts, OPEN of them breakable (seeded)
 function gateRow(cols, rng, z, open) {
-  const order = [...Array(GATES).keys()].sort(() => rng() - 0.5), breakable = new Set(order.slice(0, open));
+  const order = shuffleInPlace([...Array(GATES).keys()], rng), breakable = new Set(order.slice(0, open));
   const gates = [];
   for (let i = 0; i < GATES; i++) {
     const x = (i - (GATES - 1) / 2) * GATE_W;
