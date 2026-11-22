@@ -24,6 +24,7 @@ export const CATEGORIES = [
     { id: 'console', label: 'Console Menus' }, { id: 'y2k', label: 'Y2K Futurism' }, { id: 'mcbling', label: 'McBling' }, { id: 'vectorheart', label: 'Web 2.0 & Vectorheart' },
     { id: 'skeuo', label: 'Skeuomorphism' }, { id: 'retro', label: '90s Desktop & Web' },
     { id: 'outrun', label: 'Synthwave & Outrun' }, { id: 'memphis', label: 'Memphis Design' }, { id: 'cassette', label: 'Cassette & VHS' },
+    { id: 'softclub', label: 'Gen X Soft Club' },
   ] },
   { id: 'models', label: '3D Models', group: 'rendered', exts: MODEL },
   { id: 'blender-renders', label: 'Blender', group: 'rendered', exts: IMAGE },
@@ -38,6 +39,7 @@ export const TABS = [
   { id: 'apps', label: 'Apps & Algorithms', cats: ['apps', 'algorithms'] },
   { id: 'aero', label: 'Retro Aesthetics', cats: ['aero'], families: [
     { id: 'frutiger', label: 'Frutiger Aero', styles: ['core', 'eco', 'dark', 'aquatic', 'humanity', 'technozen', 'space', 'metro', 'glasscity'] },
+    { id: 'softclub', label: 'Gen X Soft Club', styles: ['softclub'] },
     { id: '2000s', label: '2000s', styles: ['y2k', 'mcbling', 'vectorheart', 'skeuo', 'console'] },
     { id: '90s', label: '90s', styles: ['retro'] },
     { id: '80s', label: '80s', styles: ['outrun', 'memphis', 'cassette'] },

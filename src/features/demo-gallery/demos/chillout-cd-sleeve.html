@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chill-Out CD Sleeve</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="77" />
+<meta name="capture" content="7000" />
+<meta name="tags" content="CSS 3D transforms, jewel case, preserve-3d, backface-visibility, iridescent conic disc, compilation artwork" />
+<meta name="description" content="A late-1990s chill-out compilation CD as a CSS 3D object, with an invented title and no real label. The jewel case turns in soft studio light, its clear lid swings open to show the tracklist booklet inside, and the iridescent disc lifts out of the tray and spins below before sliding back and the lid closing again. The cover is soft-focus pastel artwork with light lowercase type. Click to open or close it. Hard because the case is real 3D boxes (lid, tray, spine, edges) built from divs with preserve-3d, and the disc has to pass between the tray and the lid without z-fighting." />
+<meta name="prompt" content="Make a silent late-1990s chill-out compilation CD jewel case in one HTML file using only CSS 3D transforms and a little JS timeline, no real artist or label. Build the case from divs (tray, spine, edges, hinged clear lid with a soft-focus pastel cover on the front and a tracklist booklet on the back), turn it slowly, open the lid, lift an iridescent spinning disc out below the case, then return it and close. Add a tiny tracked caption line." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(100% 70% at 50% 30%, #f5f7fb, #d4dceb 60%, #b9c1d8); font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); cursor: pointer; user-select: none; -webkit-user-select: none; }
+.scene { position: fixed; left: 50%; top: 36%; perspective: 1400px; --w: min(66vw, 38vh, 380px); --h: calc(var(--w) * 0.88); --d: calc(var(--w) * 0.07); width: var(--w); height: var(--h); transform: translate(-50%, -50%); }
+.case { position: absolute; inset: 0; transform-style: preserve-3d; transform: rotateX(var(--rx)) rotateY(var(--ry)); }
+.case > div { position: absolute; }
+.back { inset: 0; background: linear-gradient(135deg, #e9edf4, #c3ccda); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
+.back::before { content: ''; position: absolute; left: 6%; top: 5%; width: calc(var(--h) * 0.9); aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, rgba(43, 54, 69, 0.18) 0 14%, transparent 15%), radial-gradient(circle, rgba(255, 255, 255, 0.5), rgba(160, 170, 190, 0.3)); }
+.edge { background: linear-gradient(90deg, rgba(220, 230, 242, 0.9), rgba(170, 182, 200, 0.9)); }
+.spine { left: 0; top: 0; width: var(--d); height: 100%; transform-origin: left; transform: rotateY(-90deg); background: linear-gradient(#2b3645, #3f4c66); display: grid; place-items: center; }
+.spine span { transform: rotate(90deg); white-space: nowrap; font-size: calc(var(--w) * 0.028); letter-spacing: 0.4em; color: #dfe9f3; }
+.right { left: 100%; top: 0; width: var(--d); height: 100%; transform-origin: left; transform: rotateY(-90deg); }
+.top { left: 0; top: 0; width: 100%; height: var(--d); transform-origin: top; transform: rotateX(90deg); }
+.bottom { left: 0; top: 100%; width: 100%; height: var(--d); transform-origin: top; transform: rotateX(90deg); }
+.disc { left: 6%; top: 5%; width: calc(var(--h) * 0.9); aspect-ratio: 1; border-radius: 50%; transform: translateZ(calc(var(--d) * 0.5)) translate(var(--dx), var(--dy)) translateZ(var(--dz)) rotate(var(--spin)); background: radial-gradient(circle, transparent 0 7%, rgba(255, 255, 255, 0.8) 7.5% 14%, transparent 14.5%), conic-gradient(from 20deg, #eef7ff, #cbbcff, #a8e7ff, #f7d7ff, #b9f1e6, #eef7ff 50%, #c0e1ff, #f3c9ff, #a0e3f6, #eef7ff); box-shadow: 0 14px 30px rgba(40, 55, 90, 0.35), inset 0 0 0 2px rgba(255, 255, 255, 0.7); }
+.disc::before { content: ''; position: absolute; inset: 30%; border-radius: 50%; background: radial-gradient(circle, transparent 0 24%, #2b3645 25% 27%, transparent 28%), linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(215, 230, 242, 0.85)); }
+.disc::after { content: 'soft sessions  ·  disc 1'; position: absolute; left: 0; right: 0; top: 74%; text-align: center; font-size: calc(var(--w) * 0.03); letter-spacing: 0.3em; color: #2b3645; }
+.lid { inset: 0; transform-origin: left center; transform-style: preserve-3d; transform: translateZ(var(--d)) rotateY(var(--lid)); }
+.face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow: hidden; }
+.front { background: linear-gradient(160deg, #e3eef8, #c8d3ee 50%, #d9cdf0); }
+.front .blob { position: absolute; border-radius: 50%; filter: blur(calc(var(--w) * 0.05)); }
+.front .grid { position: absolute; inset: 0; background-image: linear-gradient(rgba(255, 255, 255, 0.35) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.35) 1px, transparent 1px); background-size: calc(var(--w) / 8) calc(var(--w) / 8); }
+.front h1 { position: absolute; left: 9%; bottom: 17%; margin: 0; font-weight: 200; font-size: calc(var(--w) * 0.13); letter-spacing: 0.02em; line-height: 0.95; color: #fff; }
+.front p { position: absolute; left: 9.5%; bottom: 9%; margin: 0; font-size: calc(var(--w) * 0.028); letter-spacing: 0.45em; color: rgba(43, 54, 69, 0.8); }
+.front b { position: absolute; right: 8%; top: 8%; font-size: calc(var(--w) * 0.05); font-weight: 300; letter-spacing: 0.1em; color: #fff; }
+.front i { position: absolute; right: 8%; top: 17%; width: calc(var(--w) * 0.05); height: calc(var(--w) * 0.05); background: var(--accent); }
+.gloss { position: absolute; inset: 0; background: linear-gradient(115deg, rgba(255, 255, 255, 0.55) 0 18%, rgba(255, 255, 255, 0) 32% 62%, rgba(255, 255, 255, 0.25) 70%, rgba(255, 255, 255, 0) 80%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8); }
+.inside { transform: rotateY(180deg); background: linear-gradient(160deg, #f7f9fc, #e3e9f2); padding: 8% 9%; font-size: calc(var(--w) * 0.031); }
+.inside h2 { margin: 0 0 6%; font-weight: 300; font-size: calc(var(--w) * 0.05); letter-spacing: 0.08em; }
+.inside ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 3.2%; letter-spacing: 0.18em; }
+.inside li { display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; }
+.inside li span:last-child { opacity: 0.55; }
+.shadow { position: fixed; left: 50%; top: 36%; width: min(70vw, 40vh); height: 30px; transform: translate(-50%, calc(min(66vw, 38vh, 380px) * 0.5 + 30px)); background: radial-gradient(closest-side, rgba(40, 55, 90, 0.3), transparent); }
+#cap { position: fixed; left: 0; right: 0; top: 76%; text-align: center; font-size: 11px; letter-spacing: 0.5em; color: rgba(43, 54, 69, 0.7); }
+#cap b { color: var(--ink); letter-spacing: 0.3em; }
+#prog { position: fixed; left: 30%; right: 30%; top: calc(76% + 22px); height: 2px; background: rgba(43, 54, 69, 0.15); }
+#prog i { display: block; height: 100%; width: 0; background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="shadow"></div>
+<div class="scene" id="scene">
+  <div class="case">
+    <div class="back"></div>
+    <div class="edge spine"><span>SOFT SESSIONS VOL.2</span></div>
+    <div class="edge right"></div>
+    <div class="edge top"></div>
+    <div class="edge bottom"></div>
+    <div class="disc" id="disc"></div>
+    <div class="lid">
+      <div class="face front">
+        <div class="blob" style="left:-10%;top:10%;width:70%;height:70%;background:#a9d8ee"></div>
+        <div class="blob" style="left:40%;top:-10%;width:60%;height:60%;background:#d6c6ff"></div>
+        <div class="blob" style="left:30%;top:45%;width:30%;height:45%;background:#7f8fb6"></div>
+        <div class="grid"></div>
+        <b>vol.2</b><i></i>
+        <h1>soft<br>sessions</h1>
+        <p>MIXED FOR THE LATE HOURS · 2CD</p>
+        <div class="gloss"></div>
+      </div>
+      <div class="face inside">
+        <h2>tracklist</h2>
+        <ol>
+          <li><span>01 BLUE HOUR</span><span>KAI MORI</span></li>
+          <li><span>02 LIQUID SKY</span><span>NOVA & REI</span></li>
+          <li><span>03 FROSTED</span><span>ELLE VANCE</span></li>
+          <li><span>04 SATELLITE</span><span>SOMA</span></li>
+          <li><span>05 PIER 9</span><span>MARA LUX</span></li>
+          <li><span>06 AFTERGLOW</span><span>DJ HALO</span></li>
+          <li><span>07 CLOUD ROOM</span><span>THE CHILL UNIT</span></li>
+          <li><span>08 SUNRISE</span><span>TOWER FM</span></li>
+        </ol>
+        <div class="gloss"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="cap"><b>SOFT SESSIONS VOL.2</b> · 1999 · 74:02</div>
+<div id="prog"><i id="pi"></i></div>
+<script>
+const scene = document.getElementById('scene');
+const LOOP = 11;
+let offset = 0;
+const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const seg = (t, a, b) => ease((t - a) / (b - a));
+// tap: jump to open hold, or to close if already open
+addEventListener('pointerdown', () => { const t = (performance.now() / 1000 - offset) % LOOP; offset += t < 3.5 ? t - 3.5 : t - 8.2; });
+let spin = 0, last = performance.now() / 1000;
+function frame() {
+  const now = performance.now() / 1000, dt = now - last; last = now;
+  const t = ((now - offset) % LOOP + LOOP) % LOOP;
+  const open = seg(t, 1.6, 3) - seg(t, 9.2, 10.4);
+  const out = seg(t, 3.2, 4.6) - seg(t, 8, 9.2);
+  const ry = -24 + Math.sin(now * 0.45) * 14 + open * 18;
+  const rx = 10 + Math.sin(now * 0.3) * 4;
+  spin += dt * (90 + out * 520);
+  const s = scene.style;
+  s.setProperty('--ry', `${ry}deg`); s.setProperty('--rx', `${rx}deg`);
+  s.setProperty('--lid', `${-135 * open}deg`);
+  s.left = `${50 + open * 16}%`;
+  s.setProperty('--dx', `${out * 4}%`); s.setProperty('--dy', `${out * 78}%`); s.setProperty('--dz', `${out * 60}px`);
+  s.setProperty('--spin', `${spin}deg`);
+  document.getElementById('pi').style.width = `${(t / LOOP) * 100}%`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

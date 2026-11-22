@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lounge Radio Tuner</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="73" />
+<meta name="capture" content="4600" />
+<meta name="tags" content="late-90s hi-fi tuner, brushed silver, VFD glow, canvas dial + VU meters, preset scanning" />
+<meta name="description" content="A late-1990s hi-fi FM tuner in brushed silver, with no brand. A cyan vacuum-fluorescent display rolls the frequency while an orange needle sweeps the 88–108 MHz dial, signal bars climb, and on lock the STEREO and TUNED lamps light and the station's RDS text types across. Two analog VU meters bounce and a big knurled knob turns with the needle. It scans its six presets on its own; tap a preset to tune. Hard because the dial, the knob angle, the rolling digits and the meters are all driven from one eased frequency value." />
+<meta name="prompt" content="Make a silent late-1990s hi-fi FM tuner in one HTML file, no brand: brushed silver faceplate, a cyan VFD with big rolling frequency digits, STEREO and TUNED lamps, signal bars and scrolling RDS text, a canvas 88–108 MHz dial with an orange needle, two analog VU meters and a knurled tuning knob. Auto-scan six lounge and club stations with an eased sweep and lock, and let presets be tapped." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; --vfd: #7ff0ff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(120% 80% at 50% 30%, #eef2f7, #c3ccdb 70%, #aab3c8); font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+#stage { position: fixed; inset: 0; display: grid; place-items: center; padding-bottom: 12vh; }
+.unit { --w: min(86vw, 52vh, 460px); width: var(--w); padding: calc(var(--w) * 0.055); border-radius: calc(var(--w) * 0.04); background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 1px, rgba(0, 0, 0, 0.025) 1px 3px), linear-gradient(#f3f5f8, #cfd6df 55%, #e4e8ee); box-shadow: 0 30px 60px rgba(40, 55, 85, 0.35), inset 0 1px 0 #fff, inset 0 -2px 6px rgba(60, 75, 100, 0.25); display: grid; gap: calc(var(--w) * 0.045); }
+.head { display: flex; justify-content: space-between; font-size: calc(var(--w) * 0.024); letter-spacing: 0.45em; color: rgba(43, 54, 69, 0.75); }
+.head b { letter-spacing: 0.2em; }
+.vfd { border-radius: calc(var(--w) * 0.02); background: linear-gradient(#0b1826, #13283d); box-shadow: inset 0 3px 10px rgba(0, 0, 0, 0.6), 0 1px 0 #fff; padding: calc(var(--w) * 0.04) calc(var(--w) * 0.05); color: var(--vfd); font-family: Menlo, "Courier New", monospace; text-shadow: 0 0 6px rgba(127, 240, 255, 0.8); position: relative; overflow: hidden; }
+.vfd::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 3px); pointer-events: none; }
+.vfd .r1 { display: flex; justify-content: space-between; align-items: flex-end; }
+#freq { font-size: calc(var(--w) * 0.15); line-height: 0.9; letter-spacing: 0.02em; }
+.unitlbl { font-size: calc(var(--w) * 0.035); letter-spacing: 0.2em; }
+.lamps { display: flex; gap: calc(var(--w) * 0.03); margin-top: calc(var(--w) * 0.025); font-size: calc(var(--w) * 0.026); letter-spacing: 0.25em; }
+.lamps span { opacity: 0.15; transition: opacity 0.15s; }
+.lamps span.on { opacity: 1; }
+.lamps span.amber { color: #ffb77a; text-shadow: 0 0 6px rgba(255, 138, 61, 0.9); }
+#sig { margin-left: auto; display: flex; gap: 3px; align-items: flex-end; }
+#sig i { width: calc(var(--w) * 0.014); background: var(--vfd); opacity: 0.15; }
+#sig i.on { opacity: 1; }
+#rds { margin-top: calc(var(--w) * 0.02); height: 1.3em; white-space: nowrap; overflow: hidden; font-size: calc(var(--w) * 0.042); letter-spacing: 0.12em; }
+canvas { width: 100%; display: block; }
+#dial { aspect-ratio: 4.2; border-radius: calc(var(--w) * 0.015); box-shadow: inset 0 2px 6px rgba(40, 55, 85, 0.35), 0 1px 0 #fff; }
+.vus { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--w) * 0.04); }
+.vus canvas { aspect-ratio: 1.6; border-radius: calc(var(--w) * 0.015); box-shadow: inset 0 2px 6px rgba(40, 55, 85, 0.35), 0 1px 0 #fff; }
+.ctl { display: flex; align-items: center; gap: calc(var(--w) * 0.04); }
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--w) * 0.02); flex: 1; }
+.presets button { border: 0; border-radius: 30px; padding: calc(var(--w) * 0.018) 0; font-size: calc(var(--w) * 0.028); letter-spacing: 0.2em; color: var(--ink); background: linear-gradient(#fbfcfd, #cdd5df); box-shadow: 0 2px 4px rgba(40, 55, 85, 0.3), inset 0 1px 0 #fff; cursor: pointer; }
+.presets button.on { background: linear-gradient(#e2f6fc, #9fd6ea); box-shadow: 0 0 10px rgba(143, 208, 230, 0.9), inset 0 1px 0 #fff; }
+.knob { width: calc(var(--w) * 0.24); aspect-ratio: 1; border-radius: 50%; background: repeating-conic-gradient(#eef1f5 0 5deg, #aeb8c6 5deg 10deg); box-shadow: 0 6px 14px rgba(40, 55, 85, 0.4), inset 0 0 0 3px rgba(255, 255, 255, 0.7); position: relative; }
+.knob::after { content: ''; position: absolute; inset: 16%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #c3ccd8 70%); box-shadow: inset 0 -2px 5px rgba(40, 55, 85, 0.3); }
+.knob i { position: absolute; left: 50%; top: 20%; width: 5%; height: 16%; background: var(--accent); border-radius: 2px; transform: translateX(-50%); z-index: 1; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="unit">
+    <div class="head"><b>ST-990</b><span>FM STEREO TUNER</span></div>
+    <div class="vfd">
+      <div class="r1"><span id="freq">88.00</span><span class="unitlbl">MHz FM</span></div>
+      <div class="lamps"><span id="lst">STEREO</span><span id="ltu" class="amber">TUNED</span><span id="lsc">SCAN</span><span id="sig"></span></div>
+      <div id="rds"></div>
+    </div>
+    <canvas id="dial"></canvas>
+    <div class="vus"><canvas id="vuL"></canvas><canvas id="vuR"></canvas></div>
+    <div class="ctl"><div class="presets" id="presets"></div><div class="knob" id="knob"><i></i></div></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const STATIONS = [
+  { f: 89.1, ps: 'SOFT FM', rt: 'NOW PLAYING · BLUE HOUR SESSIONS' },
+  { f: 92.7, ps: 'LOUNGE 92', rt: 'CHILL-OUT FROM THE TERRACE' },
+  { f: 94.9, ps: 'AQUA RADIO', rt: 'LIQUID DRUM & BASS TILL 4AM' },
+  { f: 98.4, ps: 'CLUB FM', rt: 'LIVE FROM ROOM 101' },
+  { f: 101.2, ps: 'AMBIENT 1', rt: 'DEEP LISTENING HOUR' },
+  { f: 105.6, ps: 'SKY JAZZ', rt: 'NU-JAZZ & BOSSA LATE MIX' },
+];
+const sig = $('sig'); sig.innerHTML = [4, 6, 8, 10, 12].map((h) => `<i style="height:${h}px"></i>`).join('');
+const bars = [...sig.children];
+const presets = STATIONS.map((s, i) => { const b = document.createElement('button'); b.textContent = `P${i + 1}`; b.onclick = () => tune(i); $('presets').append(b); return b; });
+
+let freq = 88.0, from = 88.0, to = STATIONS[0].f, idx = 0, tuneAt = 0, lastAuto = 0;
+const SWEEP = 1.6;
+function tune(i) { idx = i; from = freq; to = STATIONS[i].f; tuneAt = performance.now() / 1000; lastAuto = tuneAt; presets.forEach((b, k) => b.classList.toggle('on', k === i)); }
+
+function sizeCanvas(c) { const r = c.getBoundingClientRect(), d = devicePixelRatio || 1; if (c.width !== Math.round(r.width * d)) { c.width = r.width * d; c.height = r.height * d; } return [c.getContext('2d'), c.width, c.height]; }
+
+function drawDial() {
+  const [g, w, h] = sizeCanvas($('dial'));
+  const bg = g.createLinearGradient(0, 0, 0, h); bg.addColorStop(0, '#f6f8fb'); bg.addColorStop(1, '#dfe6ee');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  const x0 = w * 0.06, x1 = w * 0.94, fx = (f) => x0 + ((f - 88) / 20) * (x1 - x0);
+  g.strokeStyle = '#2b3645'; g.fillStyle = '#2b3645'; g.lineWidth = Math.max(1, w / 500);
+  for (let f = 88; f <= 108.001; f += 0.5) { const x = fx(f), major = Math.abs(f % 2) < 0.01; g.beginPath(); g.moveTo(x, h * 0.62); g.lineTo(x, h * (major ? 0.36 : 0.5)); g.stroke(); }
+  g.font = `${h * 0.17}px "Helvetica Neue", Arial`; g.textAlign = 'center';
+  for (let f = 88; f <= 108; f += 4) g.fillText(String(f), fx(f), h * 0.27);
+  g.font = `${h * 0.12}px "Helvetica Neue", Arial`; g.fillStyle = 'rgba(43,54,69,0.6)';
+  STATIONS.forEach((s) => { g.beginPath(); g.arc(fx(s.f), h * 0.76, h * 0.035, 0, Math.PI * 2); g.fill(); });
+  g.fillText('MHz', w * 0.97, h * 0.92);
+  const nx = fx(freq);
+  g.fillStyle = 'rgba(255,138,61,0.25)'; g.fillRect(nx - w * 0.012, h * 0.08, w * 0.024, h * 0.84);
+  g.fillStyle = '#ff8a3d'; g.fillRect(nx - w * 0.0025, h * 0.06, w * 0.005, h * 0.88);
+}
+
+function drawVU(id, level) {
+  const [g, w, h] = sizeCanvas($(id));
+  const bg = g.createLinearGradient(0, 0, 0, h); bg.addColorStop(0, '#eaf5fb'); bg.addColorStop(1, '#c9e4f0');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  const cx = w / 2, cy = h * 1.05, r = h * 0.82;
+  g.lineWidth = Math.max(1, w / 260); g.strokeStyle = '#2b3645';
+  g.beginPath(); g.arc(cx, cy, r, Math.PI * 1.22, Math.PI * 1.78); g.stroke();
+  g.strokeStyle = '#ff8a3d'; g.lineWidth = Math.max(2, w / 110);
+  g.beginPath(); g.arc(cx, cy, r, Math.PI * 1.64, Math.PI * 1.78); g.stroke();
+  g.strokeStyle = '#2b3645'; g.lineWidth = Math.max(1, w / 260);
+  for (let i = 0; i <= 10; i++) { const a = Math.PI * (1.22 + 0.056 * i); g.beginPath(); g.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); g.lineTo(cx + Math.cos(a) * (r - h * (i % 5 ? 0.06 : 0.11)), cy + Math.sin(a) * (r - h * (i % 5 ? 0.06 : 0.11))); g.stroke(); }
+  g.fillStyle = '#2b3645'; g.font = `${h * 0.12}px "Helvetica Neue", Arial`; g.textAlign = 'center';
+  g.fillText('VU', cx, h * 0.62);
+  g.font = `${h * 0.09}px "Helvetica Neue", Arial`; g.fillText(id === 'vuL' ? 'L' : 'R', cx, h * 0.78);
+  const a = Math.PI * (1.25 + 0.5 * Math.min(1.05, level));
+  g.strokeStyle = '#1b2533'; g.lineWidth = Math.max(1.5, w / 200);
+  g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(a) * r * 1.02, cy + Math.sin(a) * r * 1.02); g.stroke();
+}
+
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+let vl = 0, vr = 0;
+function frame() {
+  const t = performance.now() / 1000;
+  if (t - lastAuto > SWEEP + 3.4) tune((idx + 1) % STATIONS.length);
+  const k = Math.min(1, (t - tuneAt) / SWEEP), locked = k >= 1;
+  freq = from + (to - from) * ease(k);
+  const shown = locked ? freq : freq + Math.sin(t * 40) * 0.05;
+  $('freq').textContent = shown.toFixed(2).padStart(6, ' ');
+  $('lst').classList.toggle('on', locked); $('ltu').classList.toggle('on', locked); $('lsc').classList.toggle('on', !locked && Math.floor(t * 6) % 2 === 0);
+  const strength = locked ? 5 : Math.floor(Math.random() * 2);
+  bars.forEach((b, i) => b.classList.toggle('on', i < strength));
+  const S = STATIONS[idx];
+  const text = `${S.ps}  ·  ${S.rt}  ·  ${S.ps}  ·  `;
+  const typed = locked ? Math.min(text.length, Math.floor((t - tuneAt - SWEEP) * 22)) : 0;
+  const rds = $('rds');
+  if (typed < text.length) { rds.textContent = locked ? text.slice(0, typed) : '- - - - - - - -'; rds.style.textIndent = '0'; }
+  else { rds.textContent = text + text; rds.style.textIndent = `-${((t - tuneAt - SWEEP - text.length / 22) * 30) % (rds.scrollWidth / 2)}px`; }
+  $('knob').style.transform = `rotate(${(freq - 88) * 36}deg)`;
+  const beat = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 * 1.2)), 4);
+  const tl = locked ? 0.55 + beat * 0.35 + Math.sin(t * 9.1) * 0.06 : 0.05 + Math.random() * 0.15;
+  const tr = locked ? 0.52 + beat * 0.38 + Math.sin(t * 7.7 + 1) * 0.06 : 0.05 + Math.random() * 0.15;
+  vl += (tl - vl) * 0.18; vr += (tr - vr) * 0.18;
+  drawDial(); drawVU('vuL', vl); drawVU('vuR', vr);
+  requestAnimationFrame(frame);
+}
+tune(0); requestAnimationFrame(frame);
+</script>
+</body>
+</html>

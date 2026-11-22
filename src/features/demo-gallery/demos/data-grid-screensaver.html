@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Data Grid Screensaver</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="78" />
+<meta name="capture" content="4000" />
+<meta name="tags" content="canvas 2D, perspective grid, depth-of-field sprite cache, rack focus, target lock HUD, screensaver" />
+<meta name="description" content="A turn-of-the-millennium techno-corporate screensaver. Glossy pastel spheres drift through a pale void above a scrolling perspective grid, each tagged with a leader line and live x/y/z readout. Every three seconds the HUD picks a sphere, brackets close in, it reads LOCK, and the focus racks to it so the others fall soft. Click a sphere to lock it yourself. Hard because depth of field comes from five pre-blurred sprite levels per colour, chosen per sphere per frame from its distance to the moving focal plane." />
+<meta name="prompt" content="Make a silent around-2000 techno screensaver in one HTML canvas file: glossy pastel spheres drifting in 3D over a scrolling perspective grid in a pale ice-blue void, each with a leader line and live coordinate label, a target-lock HUD with closing corner brackets every three seconds, and a rack-focus depth of field built from pre-blurred sprite levels. Add a scan line, tiny caps HUD text and click-to-lock." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe9f3; cursor: crosshair; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1, M = 0;
+const COLS = ['#8fd0e6', '#c9b8ff', '#ffffff', '#a6e6d0', '#ffd3b0', '#b9cdf0'];
+const LEVELS = 5, SPR = 128;
+let sprites = [];
+// Sprites > one glossy ball per colour, 5 blur levels each
+function makeSprites() {
+  sprites = COLS.map((col) => Array.from({ length: LEVELS }, (_, lv) => {
+    const pad = 24, c = document.createElement('canvas'); c.width = c.height = SPR + pad * 2;
+    const p = c.getContext('2d'); p.filter = lv ? `blur(${lv * 4}px)` : 'none';
+    const r = SPR / 2, cx = r + pad;
+    const gr = p.createRadialGradient(cx - r * 0.35, cx - r * 0.4, r * 0.05, cx, cx, r);
+    gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.35, col); gr.addColorStop(1, shade(col));
+    p.fillStyle = gr; p.beginPath(); p.arc(cx, cx, r, 0, Math.PI * 2); p.fill();
+    p.fillStyle = 'rgba(255,255,255,0.7)'; p.beginPath(); p.ellipse(cx - r * 0.3, cx - r * 0.45, r * 0.32, r * 0.18, -0.5, 0, Math.PI * 2); p.fill();
+    return c;
+  }));
+}
+function shade(hex) { const n = parseInt(hex.slice(1), 16); const f = (v) => Math.round(v * 0.62 + 40); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
+function size() { dpr = devicePixelRatio || 1; W = cv.width = innerWidth * dpr; H = cv.height = innerHeight * dpr; M = Math.min(W, H); }
+size(); makeSprites(); addEventListener('resize', size);
+
+const balls = Array.from({ length: 10 }, (_, i) => ({ id: i, x: 0, y: 0, z: 5 + Math.random() * 9, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.3, vz: (Math.random() - 0.5) * 0.6, r: 0.35 + Math.random() * 0.5, c: i % COLS.length }));
+balls.forEach((b) => { b.x = (Math.random() - 0.5) * b.z * 0.7; b.y = (Math.random() - 0.5) * b.z * 0.9; });
+let target = 0, lockAt = 0, focus = 8, lastPick = 0, proj = [];
+function project(b) { const f = M * 0.9 / b.z; return { x: W / 2 + b.x * f, y: H * 0.44 + b.y * f, s: b.r * f }; }
+cv.onclick = (e) => { const x = e.clientX * dpr, y = e.clientY * dpr; const hit = proj.find((p) => Math.hypot(p.x - x, p.y - y) < p.s); if (hit) { target = hit.id; lockAt = performance.now() / 1000; lastPick = lockAt; } };
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+
+function label(text, x, y, px, align = 'left', a = 0.75) { g.font = `400 ${px}px "Helvetica Neue", Arial, sans-serif`; g.letterSpacing = `${px * 0.3}px`; g.textAlign = align; g.fillStyle = `rgba(43,54,69,${a})`; g.fillText(text, x, y); g.letterSpacing = '0px'; }
+
+let last = performance.now() / 1000;
+function frame() {
+  const t = performance.now() / 1000, dt = Math.min(0.05, t - last); last = t;
+  const bg = g.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#f2f6fa'); bg.addColorStop(0.5, '#d9e6f2'); bg.addColorStop(1, '#bfc8de');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  // floor grid scrolling toward viewer
+  const hz = H * 0.6; g.strokeStyle = 'rgba(255,255,255,0.8)'; g.lineWidth = dpr;
+  for (let i = -12; i <= 12; i++) { g.beginPath(); g.moveTo(W / 2 + i * W * 0.02, hz); g.lineTo(W / 2 + i * W * 0.4, H); g.stroke(); }
+  for (let k = 0; k < 14; k++) { const z = ((k + (t * 0.8) % 1) / 14); const y = hz + Math.pow(z, 2.2) * (H - hz); g.globalAlpha = z; g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  g.globalAlpha = 1;
+  const hzg = g.createLinearGradient(0, hz - H * 0.05, 0, hz + H * 0.05); hzg.addColorStop(0, 'rgba(242,246,250,0)'); hzg.addColorStop(0.5, 'rgba(242,246,250,0.9)'); hzg.addColorStop(1, 'rgba(242,246,250,0)');
+  g.fillStyle = hzg; g.fillRect(0, hz - H * 0.05, W, H * 0.1);
+  // move balls, soft bounds
+  balls.forEach((b) => { b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; const xb = b.z * 0.4 * W / M, yb = b.z * 0.3 * H / M; if (Math.abs(b.x) > xb) b.vx = -Math.sign(b.x) * Math.abs(b.vx); if (Math.abs(b.y) > yb) b.vy = -Math.sign(b.y) * Math.abs(b.vy); if (b.z < 4.5 || b.z > 15) b.vz = (b.z < 4.5 ? 1 : -1) * Math.abs(b.vz); });
+  if (t - lastPick > 3) { target = (target + 3) % balls.length; lockAt = t; lastPick = t; }
+  const tb = balls[target];
+  focus += (tb.z - focus) * Math.min(1, dt * 2.5);
+  const order = [...balls].sort((a, b) => b.z - a.z);
+  proj = [];
+  order.forEach((b) => {
+    const p = project(b); proj.push({ ...p, id: b.id });
+    const lv = Math.min(LEVELS - 1, Math.round(Math.abs(b.z - focus) * 0.9));
+    const spr = sprites[b.c][lv], k = (p.s * 2) / SPR, sw = spr.width * k;
+    g.drawImage(spr, p.x - sw / 2, p.y - sw / 2, sw, sw);
+    // leader + readout
+    const lx = p.x + p.s * 0.8 + M * 0.04, ly = p.y - p.s * 0.8 - M * 0.03;
+    g.strokeStyle = 'rgba(43,54,69,0.45)'; g.lineWidth = dpr * 0.8; g.beginPath(); g.moveTo(p.x + p.s * 0.6, p.y - p.s * 0.6); g.lineTo(lx, ly); g.lineTo(lx + M * 0.05, ly); g.stroke();
+    label(`OBJ_${String(b.id).padStart(2, '0')}`, lx + M * 0.006, ly - M * 0.008, M * 0.017, 'left', 0.85);
+    label(`${b.x.toFixed(1)} ${b.y.toFixed(1)} ${b.z.toFixed(1)}`, lx + M * 0.006, ly + M * 0.02, M * 0.014, 'left', 0.55);
+  });
+  // lock brackets
+  const tp = project(tb), k = ease((t - lockAt) / 0.7), sz = tp.s * (1.3 + (1 - k) * 2.5), c = sz * 0.35;
+  g.strokeStyle = k >= 1 ? '#ff8a3d' : 'rgba(43,54,69,0.8)'; g.lineWidth = dpr * 1.6;
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy]) => { const x = tp.x + sx * sz, y = tp.y + sy * sz; g.beginPath(); g.moveTo(x - sx * c, y); g.lineTo(x, y); g.lineTo(x, y - sy * c); g.stroke(); });
+  if (k >= 1 && Math.floor(t * 4) % 2) label('LOCK', tp.x, tp.y + sz + M * 0.035, M * 0.02, 'center', 0.9);
+  // scan + HUD
+  const sy = H * 0.12 + ((t * 0.15) % 1) * H * 0.62; g.fillStyle = 'rgba(143,208,230,0.7)'; g.fillRect(0, sy, W, dpr);
+  const px = M * 0.02;
+  label('DATASCAPE · SCREENSAVER 2000', W * 0.06, H * 0.13, px);
+  label(`FOCUS ${focus.toFixed(2)} M   TARGET OBJ_${String(target).padStart(2, '0')}`, W * 0.06, H * 0.13 + px * 1.8, px * 0.8, 'left', 0.6);
+  label(`FRAME ${String(Math.floor(t * 30) % 100000).padStart(5, '0')}`, W * 0.94, H * 0.13, px * 0.8, 'right', 0.6);
+  g.fillStyle = '#ff8a3d'; g.fillRect(W * 0.06, H * 0.13 + px * 2.6, M * 0.05 * k, dpr * 2);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

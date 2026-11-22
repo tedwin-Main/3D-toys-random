@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Club Flyer Maker</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="71" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="late-90s club flyer, canvas 2D, seeded layouts, soft-focus blur, halftone, Swiss grid typography" />
+<meta name="description" content="A late-1990s club-night flyer that designs itself. Every five seconds a new A5 card slides onto a light table: soft-focus photo blobs, a white 12-column grid, a huge wide-tracked event name typeset letter by letter, a rotated date line, a tiny-caps line-up, a halftone band, a barcode and printer's crop marks. Three layout systems and five pastel palettes come from a seeded random, so each flyer is new but always on-grid. Click for the next one. Hard because the blurred photo layer is painted once per flyer to an offscreen canvas while the type reveal runs per frame." />
+<meta name="prompt" content="Make a silent generative late-1990s club flyer maker in one HTML canvas file. Each flyer: soft-focus pastel photo blobs, a 12-column white grid, a giant tracked Helvetica event name revealed letter by letter, a rotated date, tiny caps line-up and venue, a halftone dot band, barcode and crop marks. Use a seeded random for three layouts and five palettes, slide each card in and out on a light table every five seconds, and regenerate on click." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe5ec; cursor: pointer; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function size() { dpr = devicePixelRatio || 1; W = cv.width = innerWidth * dpr; H = cv.height = innerHeight * dpr; build(); }
+
+const PAL = [
+  ['#d7e6f2', '#8fd0e6', '#b8bdd3', '#ffffff', '#2b3645'],
+  ['#e8eaef', '#c9b8ff', '#9fd8f0', '#ffffff', '#2b3645'],
+  ['#cfe7e3', '#a6e6d0', '#b9cdf0', '#ffffff', '#24404a'],
+  ['#eadff2', '#f6c8de', '#bcd2f4', '#ffffff', '#3a3550'],
+  ['#dfe8f0', '#ffd3b0', '#a9cbe8', '#ffffff', '#2b3645'],
+];
+const NAMES = [['SOFT', 'CLUB'], ['BLUE', 'HOUR'], ['LIQUID', 'ROOM'], ['SATELLITE', 'LOUNGE'], ['AMBIENT', 'SUNDAY'], ['FROSTED', 'SOUND'], ['AFTER', 'GLOW']];
+const DJS = ['KAI MORI', 'ELLE VANCE', 'DJ HALO', 'SOMA SOUND SYSTEM', 'NOVA & REI', 'TOWER FM LIVE', 'MARA LUX', 'THE CHILL UNIT'];
+const VENUES = ['THE GLASSHOUSE', 'PIER 9 WAREHOUSE', 'ROOM 101', 'SKYLINE TERRACE', 'BASEMENT AQUA'];
+const ACCENT = '#ff8a3d';
+
+function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+// Flyer > seeded spec + offscreen photo layer (blur painted once)
+let seed = 7, fly = null, born = 0;
+const PERIOD = 5;
+function build() {
+  const r = rng(seed * 9973);
+  const pick = (a) => a[Math.floor(r() * a.length)];
+  const cw = Math.min(W * 0.8, H * 0.6 / 1.414), ch = cw * 1.414;
+  const pal = PAL[seed % PAL.length];
+  const photo = document.createElement('canvas'); photo.width = cw * 1.15; photo.height = ch * 1.15;
+  const p = photo.getContext('2d');
+  const lg = p.createLinearGradient(0, 0, photo.width * 0.3, photo.height);
+  lg.addColorStop(0, pal[0]); lg.addColorStop(1, pal[2]);
+  p.fillStyle = lg; p.fillRect(0, 0, photo.width, photo.height);
+  p.filter = `blur(${cw * 0.06}px)`;
+  for (let i = 0; i < 6; i++) {
+    p.fillStyle = [pal[1], pal[2], pal[3], pal[1]][i % 4];
+    p.globalAlpha = 0.55 + r() * 0.4;
+    p.beginPath(); p.ellipse(r() * photo.width, r() * photo.height, cw * (0.15 + r() * 0.3), cw * (0.2 + r() * 0.4), r() * 3, 0, Math.PI * 2); p.fill();
+  }
+  p.globalAlpha = 0.5; p.fillStyle = pal[4];
+  p.beginPath(); p.ellipse(photo.width * (0.3 + r() * 0.4), photo.height * (0.45 + r() * 0.2), cw * 0.08, cw * 0.22, 0, 0, Math.PI * 2); p.fill();
+  p.beginPath(); p.arc(photo.width * (0.3 + r() * 0.4), photo.height * 0.4, cw * 0.06, 0, Math.PI * 2); p.fill();
+  p.filter = 'none'; p.globalAlpha = 1;
+  const djs = [...DJS].sort(() => r() - 0.5).slice(0, 4);
+  const day = 1 + Math.floor(r() * 28), month = 1 + Math.floor(r() * 12);
+  fly = { cw, ch, pal, photo, layout: seed % 3, name: NAMES[seed % NAMES.length], djs, venue: pick(VENUES), date: `SAT ${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}.1999`, num: String(100 + seed * 7).padStart(4, '0'), tilt: (r() - 0.5) * 0.05 };
+}
+function next() { seed++; build(); born = performance.now() / 1000; }
+cv.onclick = next;
+
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+function tracked(text, x, y, px, track, align = 'left', weight = 700) {
+  g.font = `${weight} ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const widths = [...text].map((c) => g.measureText(c).width + px * track);
+  const total = widths.reduce((a, b) => a + b, 0) - px * track;
+  let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
+  return { draw(k) { let xx = cx; [...text].forEach((c, i) => { const on = ease(k * text.length - i); if (on > 0) { g.globalAlpha *= 1; g.save(); g.globalAlpha = on; g.fillText(c, xx, y + (1 - on) * px * 0.4); g.restore(); } xx += widths[i]; }); }, total };
+}
+
+function drawFlyer(age) {
+  const { cw, ch, pal, photo, layout, name, djs, venue, date, num } = fly;
+  const ink = pal[4], white = '#ffffff';
+  // photo layer drifts slowly for a parallax feel
+  g.save(); g.beginPath(); g.rect(0, 0, cw, ch); g.clip();
+  g.drawImage(photo, -cw * 0.07 + Math.sin(age * 0.6) * cw * 0.03, -ch * 0.07 + Math.cos(age * 0.5) * ch * 0.02);
+  // grid
+  g.strokeStyle = 'rgba(255,255,255,0.35)'; g.lineWidth = Math.max(1, dpr * 0.6);
+  const gp = ease((age - 0.4) * 1.6);
+  for (let i = 1; i < 12; i++) { const x = (cw / 12) * i; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, ch * gp); g.stroke(); }
+  for (let i = 1; i < 17; i++) { const y = (ch / 17) * i; g.beginPath(); g.moveTo(0, y); g.lineTo(cw * gp, y); g.stroke(); }
+  const m = cw * 0.07;
+  // fit: longest word spans at most the live area (vertical layout uses card height)
+  g.font = `700 100px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+  const room = layout === 2 ? (ch - 2 * m) / 0.78 : cw - 2.4 * m;
+  const longest = layout === 2 ? g.measureText(`${name[0]} ${name[1]}`).width * 1.04 : Math.max(...name.map((w) => g.measureText(w).width * (layout === 1 ? 1.08 : 1.02)));
+  const big = Math.min(cw * 0.24, (room / longest) * 100);
+  g.fillStyle = layout === 1 ? ink : white;
+  const titleK = (age - 0.7) / 1.1;
+  if (layout === 0) {
+    tracked(name[0], m, ch * 0.7, big, 0.02).draw(titleK);
+    tracked(name[1], m, ch * 0.7 + big * 0.92, big, 0.02).draw(titleK - 0.3);
+  } else if (layout === 1) {
+    tracked(name[0], cw / 2, ch * 0.24, big, 0.08, 'center').draw(titleK);
+    tracked(name[1], cw / 2, ch * 0.24 + big, big * 0.55, 0.6, 'center', 300).draw(titleK - 0.3);
+  } else {
+    g.save(); g.translate(m + big * 0.8, ch - m); g.rotate(-Math.PI / 2);
+    tracked(`${name[0]} ${name[1]}`, 0, 0, big * 0.78, 0.04).draw(titleK); g.restore();
+  }
+  // date rotated on right edge
+  g.save(); g.translate(cw - m * 0.55, m); g.rotate(Math.PI / 2); g.fillStyle = layout === 1 ? ink : white;
+  tracked(date, 0, 0, cw * 0.032, 0.5, 'left', 400).draw((age - 1.4) * 1.2); g.restore();
+  // line-up block
+  const lx = layout === 2 ? cw * 0.42 : m, ly = layout === 1 ? ch * 0.52 : ch * 0.12;
+  g.fillStyle = ink;
+  tracked('RESIDENTS & GUESTS', lx, ly, cw * 0.022, 0.45, 'left', 400).draw((age - 1.6) * 2);
+  djs.forEach((d, i) => tracked(d, lx, ly + cw * 0.05 * (i + 1.2), cw * 0.036, 0.25, 'left', 700).draw((age - 1.8 - i * 0.15) * 2));
+  tracked(`${venue} · 22:00—06:00`, lx, ly + cw * 0.05 * 6, cw * 0.022, 0.4, 'left', 400).draw((age - 2.5) * 2);
+  // halftone band
+  const hy = layout === 1 ? ch * 0.84 : ch * 0.47, hk = ease((age - 2) * 1.5);
+  g.fillStyle = layout === 1 ? ink : white;
+  for (let x = 0; x < cw * hk; x += cw * 0.025) for (let k = 0; k < 4; k++) {
+    const rr = cw * 0.009 * (0.3 + 0.7 * Math.abs(Math.sin(x / cw * 6 + k * 0.7 + age * 1.5)));
+    g.beginPath(); g.arc(x + cw * 0.0125, hy + k * cw * 0.025, rr, 0, Math.PI * 2); g.fill();
+  }
+  // ring mark + accent
+  g.strokeStyle = layout === 1 ? ink : white; g.lineWidth = cw * 0.008;
+  const rk = ease((age - 2.3) * 2);
+  g.beginPath(); g.arc(cw - m * 1.6, ch - m * 1.6, cw * 0.05, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rk); g.stroke();
+  g.fillStyle = ACCENT; g.fillRect(cw - m * 1.6 - cw * 0.012, ch - m * 1.6 - cw * 0.012, cw * 0.024 * rk, cw * 0.024 * rk);
+  // barcode + number
+  const bx = layout === 0 ? cw * 0.62 : m, by = ch - m * 1.25;
+  g.fillStyle = ink; const br = rng(seed);
+  let xx = bx; while (xx < bx + cw * 0.22 * ease((age - 2.6) * 2)) { const w = cw * (0.002 + br() * 0.006); g.fillRect(xx, by, w, cw * 0.05); xx += w + cw * (0.002 + br() * 0.004); }
+  tracked(`No. ${num}`, bx, by + cw * 0.075, cw * 0.02, 0.4, 'left', 400).draw((age - 2.8) * 2);
+  // print sheen
+  const sx = ((age - 3) / 1.2) * cw * 1.6 - cw * 0.3;
+  if (age > 3 && age < 4.3) { const sg = g.createLinearGradient(sx - cw * 0.2, 0, sx + cw * 0.2, 0); sg.addColorStop(0, 'rgba(255,255,255,0)'); sg.addColorStop(0.5, 'rgba(255,255,255,0.35)'); sg.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = sg; g.fillRect(0, 0, cw, ch); }
+  g.restore();
+}
+
+function cropMarks(cw, ch) {
+  g.strokeStyle = 'rgba(43,54,69,0.55)'; g.lineWidth = Math.max(1, dpr * 0.8);
+  const o = cw * 0.03, l = cw * 0.05;
+  [[0, 0], [cw, 0], [0, ch], [cw, ch]].forEach(([x, y]) => {
+    const sx = x ? 1 : -1, sy = y ? 1 : -1;
+    g.beginPath(); g.moveTo(x + sx * o, y); g.lineTo(x + sx * (o + l), y); g.moveTo(x, y + sy * o); g.lineTo(x, y + sy * (o + l)); g.stroke();
+  });
+  g.beginPath(); g.arc(cw / 2, -o * 1.6, o * 0.5, 0, Math.PI * 2); g.moveTo(cw / 2 - o, -o * 1.6); g.lineTo(cw / 2 + o, -o * 1.6); g.moveTo(cw / 2, -o * 2.6); g.lineTo(cw / 2, -o * 0.6); g.stroke();
+}
+
+function frame() {
+  const now = performance.now() / 1000;
+  let age = now - born;
+  if (age > PERIOD) { next(); age = 0; }
+  const tg = g.createLinearGradient(0, 0, 0, H); tg.addColorStop(0, '#eef2f6'); tg.addColorStop(1, '#d3dbe5');
+  g.fillStyle = tg; g.fillRect(0, 0, W, H);
+  const { cw, ch, tilt } = fly;
+  const inK = ease(age / 0.7), outK = ease((age - (PERIOD - 0.55)) / 0.55);
+  const x = (W - cw) / 2 + (1 - inK) * W * 0.9 - outK * W * 0.9, y = H * 0.1 + (H * 0.72 - ch) / 2;
+  g.save(); g.translate(x + cw / 2, y + ch / 2); g.rotate(tilt + (1 - inK) * 0.15 - outK * 0.15); g.translate(-cw / 2, -ch / 2);
+  g.shadowColor = 'rgba(40,60,90,0.35)'; g.shadowBlur = cw * 0.08; g.shadowOffsetY = cw * 0.03;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch); g.shadowColor = 'transparent';
+  drawFlyer(age);
+  cropMarks(cw, ch);
+  g.restore();
+  g.fillStyle = 'rgba(43,54,69,0.6)';
+  tracked(`FLYER ${String(seed).padStart(2, '0')}  ·  LAYOUT ${'ABC'[fly.layout]}  ·  TAP TO REGENERATE`, W / 2, y + ch + Math.min(W, H) * 0.08, Math.min(W, H) * 0.022, 0.4, 'center', 400).draw(1);
+  requestAnimationFrame(frame);
+}
+size(); addEventListener('resize', size); born = performance.now() / 1000;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

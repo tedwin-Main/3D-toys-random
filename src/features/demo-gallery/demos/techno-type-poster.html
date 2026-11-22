@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Techno Type Poster</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="74" />
+<meta name="capture" content="2600" />
+<meta name="tags" content="kinetic typography, canvas 2D, layered silver extrusion, lens flare sweep, Swiss data labels" />
+<meta name="description" content="A late-1990s techno record-sleeve poster that moves. Huge silver words (SOFT, CLUB, LIQUID, STEREO, SIGNAL, AMBIENT) are built from dozens of offset layers so they read as extruded chrome, and each letter rises in, holds while the extrusion angle drifts, then lifts out. Behind them a giant outlined word scrolls, a thin grid carries crosshairs and ticking coordinates, a lens flare sweeps the face, and an orange scan line walks down the sheet. Click to skip a word. Hard because the extrusion is drawn per letter per frame and still has to fit any screen width." />
+<meta name="prompt" content="Make a silent late-1990s kinetic typography poster in one HTML canvas file: giant silver extruded words drawn from many offset layers with a chrome gradient face, letters staggering in and out every three seconds, a huge outlined background word scrolling sideways, a pale blue grid with crosshairs, tiny data labels with ticking coordinates, a lens flare sweep and an orange scan line. Fit the word to the screen width and skip on click." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #d7e6f2; cursor: pointer; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function size() { dpr = devicePixelRatio || 1; W = cv.width = innerWidth * dpr; H = cv.height = innerHeight * dpr; }
+size(); addEventListener('resize', size);
+const WORDS = ['SOFT', 'CLUB', 'LIQUID', 'STEREO', 'SIGNAL', 'AMBIENT', 'LOUNGE'];
+const FONT = (px, w = 800) => `${w} ${px}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
+const PERIOD = 3;
+let wi = 0, born = performance.now() / 1000;
+cv.onclick = () => { wi = (wi + 1) % WORDS.length; born = performance.now() / 1000; };
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const easeIn = (x) => Math.pow(Math.min(1, Math.max(0, x)), 3);
+
+function label(text, x, y, px, align = 'left', alpha = 0.7) {
+  g.font = FONT(px, 400); g.textAlign = align; g.fillStyle = `rgba(43,54,69,${alpha})`;
+  g.letterSpacing = `${px * 0.35}px`; g.fillText(text, x, y); g.letterSpacing = '0px';
+}
+
+function frame() {
+  const t = performance.now() / 1000;
+  let age = t - born;
+  if (age > PERIOD) { wi = (wi + 1) % WORDS.length; born = t; age = 0; }
+  const m = Math.min(W, H);
+  // ground + grid
+  const bg = g.createLinearGradient(0, 0, W * 0.3, H); bg.addColorStop(0, '#eef4f9'); bg.addColorStop(0.55, '#d3e2ef'); bg.addColorStop(1, '#b8c2db');
+  g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  const step = W / 8;
+  g.strokeStyle = 'rgba(43,54,69,0.1)'; g.lineWidth = dpr * 0.7;
+  for (let x = step; x < W; x += step) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+  for (let y = step; y < H; y += step) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); }
+  g.strokeStyle = 'rgba(43,54,69,0.45)';
+  for (let x = step; x < W; x += step * 2) for (let y = step; y < H; y += step * 2) { const c = m * 0.008; g.beginPath(); g.moveTo(x - c, y); g.lineTo(x + c, y); g.moveTo(x, y - c); g.lineTo(x, y + c); g.stroke(); }
+  // background outline word scrolling
+  const word = WORDS[wi], ghost = WORDS[(wi + 3) % WORDS.length];
+  g.font = FONT(H * 0.36, 900); g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = dpr * 1.2;
+  const gw = g.measureText(ghost + '  ').width, off = -((t * W * 0.05) % gw);
+  for (let x = off; x < W; x += gw) g.strokeText(ghost + '  ', x, H * 0.92);
+  // big rotating ring
+  g.strokeStyle = 'rgba(43,54,69,0.25)'; g.lineWidth = dpr;
+  g.setLineDash([m * 0.01, m * 0.02]); g.lineDashOffset = -t * m * 0.02;
+  g.beginPath(); g.arc(W * 0.5, H * 0.42, m * 0.42, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
+  // fitted word size
+  g.font = FONT(100, 900);
+  const raw = [...word].map((c) => g.measureText(c).width), total = raw.reduce((a, b) => a + b, 0);
+  const px = Math.min(H * 0.26, (W * 0.8 / total) * 100);
+  const scale = px / 100, track = px * 0.02;
+  const widths = raw.map((w) => w * scale + track);
+  const sum = widths.reduce((a, b) => a + b, 0) - track;
+  const cx = W / 2, cy = H * 0.47;
+  const ang = -0.7 + Math.sin(t * 0.7) * 0.5, depth = px * 0.16, layers = 22;
+  g.font = FONT(px, 900); g.textAlign = 'left'; g.textBaseline = 'middle';
+  let x = cx - sum / 2;
+  [...word].forEach((c, i) => {
+    const kin = ease((age - i * 0.07) / 0.45), kout = easeIn((age - (PERIOD - 0.55) - i * 0.04) / 0.45);
+    const dy = (1 - kin) * px * 0.9 - kout * px * 1.1, alpha = Math.min(kin, 1 - kout);
+    if (alpha <= 0) { x += widths[i]; return; }
+    g.save(); g.globalAlpha = alpha; g.translate(0, dy);
+    for (let l = layers; l > 0; l--) {
+      const k = l / layers, sh = 150 + (1 - k) * 60;
+      g.fillStyle = `rgb(${sh - 20},${sh - 8},${sh + 12})`;
+      g.fillText(c, x + Math.cos(ang) * depth * k, cy + Math.sin(ang) * -depth * k * -1);
+    }
+    const face = g.createLinearGradient(0, cy - px * 0.45, 0, cy + px * 0.45);
+    face.addColorStop(0, '#ffffff'); face.addColorStop(0.42, '#e3e9f1'); face.addColorStop(0.5, '#9fabbd'); face.addColorStop(0.62, '#f4f7fb'); face.addColorStop(1, '#c4cedb');
+    g.fillStyle = face; g.fillText(c, x, cy);
+    g.strokeStyle = 'rgba(43,54,69,0.35)'; g.lineWidth = dpr * 0.8; g.strokeText(c, x, cy);
+    g.restore();
+    x += widths[i];
+  });
+  // flare sweep across the word
+  const fx = ((age - 0.5) / 1.4) * W * 1.4 - W * 0.2;
+  if (age > 0.5 && age < 2) {
+    const fl = g.createRadialGradient(fx, cy - px * 0.2, 0, fx, cy - px * 0.2, m * 0.25);
+    fl.addColorStop(0, 'rgba(255,255,255,0.9)'); fl.addColorStop(0.2, 'rgba(220,240,255,0.35)'); fl.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = fl; g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(255,255,255,0.55)'; g.fillRect(0, cy - px * 0.2 - dpr, W, dpr * 2);
+    [0.35, 0.6, 0.85].forEach((k, i) => { g.strokeStyle = `rgba(143,208,230,${0.5 - i * 0.12})`; g.lineWidth = dpr * 2; g.beginPath(); g.arc(fx + (W / 2 - fx) * k * 2, cy - px * 0.2 + (H * 0.5 - cy) * k, m * (0.02 + i * 0.015), 0, Math.PI * 2); g.stroke(); });
+  }
+  // scan line
+  const sy = ((t * 0.12) % 1) * H;
+  g.fillStyle = 'rgba(255,138,61,0.85)'; g.fillRect(0, sy, W, dpr * 1.5);
+  label(`Y ${String(Math.floor(sy / dpr)).padStart(4, '0')}`, W * 0.94, sy - dpr * 4, m * 0.018, 'right', 0.8);
+  // labels
+  const lp = m * 0.02, top = H * 0.13;
+  label('TYPE SPECIMEN · GROTESK 95 BLACK', W * 0.06, top, lp);
+  label(`SHEET ${String(wi + 1).padStart(2, '0')} / ${String(WORDS.length).padStart(2, '0')}`, W * 0.94, top, lp, 'right');
+  label(`X ${(Math.sin(t) * 120 + 400).toFixed(1)}   Y ${(Math.cos(t * 0.8) * 80 + 260).toFixed(1)}   Z ${(t * 3 % 1000).toFixed(1)}`, W * 0.06, top + lp * 2, lp);
+  label(`ANGLE ${(ang * 57.3).toFixed(1)}°   DEPTH ${depth.toFixed(0)}   LAYERS ${layers}`, W * 0.06, H * 0.68, lp);
+  label('SIDE A — 33 RPM — STEREO', W * 0.06, H * 0.68 + lp * 2, lp);
+  label('1998', W * 0.94, H * 0.68 + lp * 2, lp * 1.6, 'right', 0.85);
+  g.fillStyle = '#ff8a3d'; g.fillRect(W * 0.06, H * 0.68 + lp * 3.4, m * 0.04 * ((age / PERIOD) * 4 % 1 + 0.2), m * 0.008);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

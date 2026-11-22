@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Silver Theme Desktop</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="83" />
+<meta name="capture" content="5200" />
+<meta name="tags" content="around-2000 OS desktop, silver theme, frosted windows, canvas visualizer, scripted window choreography" />
+<meta name="description" content="An around-2000 desktop wearing an invented silver and ice theme, with no real OS. A soft-focus blue wallpaper sits under a brushed-silver taskbar, desktop icons and frosted windows. A media player runs a liquid blob visualizer with a scrolling track title and progress bar, a disc window opens with a zoom from its icon, a selection walks down the file list, the window minimises into the taskbar, a network balloon slides in, and the clock ticks, all on a loop. Click a window to raise it. Hard because the window choreography is a small keyframe timeline driving transforms, z-order and taskbar state together." />
+<meta name="prompt" content="Make a silent self-running around-2000 desktop in one HTML file with an invented silver/ice theme and no real OS branding: soft-focus blue wallpaper, a brushed-silver taskbar with a round menu button, task buttons, tray and clock, desktop icons, a frosted media player window with a canvas blob visualizer, marquee title and progress bar, and a disc window that zooms open, walks a selection down its file list and minimises to the taskbar, plus a network balloon. Click raises windows." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; font-family: Tahoma, Verdana, "Helvetica Neue", Arial, sans-serif; font-size: 11px; color: var(--ink); user-select: none; -webkit-user-select: none; }
+body { background: radial-gradient(60% 40% at 70% 60%, rgba(255, 255, 255, 0.85), transparent 70%), radial-gradient(90% 60% at 20% 80%, #8fb4e6, transparent 70%), linear-gradient(160deg, #cfe0f2, #8fa9d6 55%, #b8bdd3); }
+.orb { position: fixed; left: 40%; top: 38%; width: 70vw; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.9), rgba(200, 225, 245, 0.5) 40%, rgba(143, 180, 230, 0.15) 70%, transparent 72%); filter: blur(6px); }
+.wave { position: fixed; left: -10%; right: -10%; height: 2px; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent); border-radius: 50%; }
+.task { position: fixed; left: 0; right: 0; top: 0; height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 6px; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.15) 0 1px, transparent 1px 3px), linear-gradient(#fbfcfd, #d3d9e2 60%, #c3cad6); border-bottom: 1px solid #8e98ab; box-shadow: 0 2px 8px rgba(40, 50, 90, 0.25); z-index: 50; }
+.menu { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #8fd0e6 60%, #4f8fb8); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.6); }
+.tb { height: 24px; padding: 0 10px; display: flex; align-items: center; gap: 6px; border-radius: 3px; background: linear-gradient(#fff, #dfe4ec); box-shadow: inset 0 0 0 1px #a7b0c0; white-space: nowrap; max-width: 34%; overflow: hidden; }
+.tb.on { background: linear-gradient(#d3e9f5, #a9d2e8); box-shadow: inset 0 1px 2px rgba(40, 60, 90, 0.4); }
+.tb.flash { background: linear-gradient(#ffe2cc, #ffc199); }
+.tray { margin-left: auto; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border-radius: 3px; box-shadow: inset 0 1px 2px rgba(40, 60, 90, 0.3); background: rgba(255, 255, 255, 0.4); font-family: Menlo, monospace; }
+.tray i { width: 10px; height: 10px; border-radius: 2px; background: var(--cyan); }
+.icons { position: fixed; left: 14px; top: 56px; display: grid; gap: 16px; z-index: 1; }
+.ic { width: 64px; text-align: center; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); font-size: 10px; }
+.ic div { width: 34px; height: 34px; margin: 0 auto 4px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.8); }
+.win { position: fixed; border-radius: 6px 6px 3px 3px; background: rgba(240, 244, 249, 0.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 16px 40px rgba(20, 35, 70, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.85); overflow: hidden; transform-origin: 0 0; }
+.tt { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: linear-gradient(#ffffff, #d6dde8 55%, #c6cfdd); border-bottom: 1px solid #a7b0c0; font-weight: 700; letter-spacing: 0.04em; }
+.win.focus .tt { background: linear-gradient(#f2fbff, #b9dff0 55%, #9fcfe6); }
+.tt span { flex: 1; white-space: nowrap; overflow: hidden; }
+.tt b { width: 14px; height: 14px; border-radius: 3px; background: linear-gradient(#fff, #c9d1dc); box-shadow: inset 0 0 0 1px #8e98ab; }
+#player { left: 8%; right: 8%; top: 38%; }
+#viz { width: 100%; height: 150px; display: block; background: #0f1d2e; }
+.pbar { padding: 8px 10px; display: grid; gap: 6px; }
+.title { height: 16px; overflow: hidden; white-space: nowrap; font-family: Menlo, monospace; }
+.prog { height: 6px; border-radius: 3px; background: rgba(43, 54, 69, 0.15); overflow: hidden; }
+.prog i { display: block; height: 100%; background: linear-gradient(90deg, #8fd0e6, #b8a8f0); }
+.btns { display: flex; gap: 6px; align-items: center; }
+.btns span { width: 30px; height: 18px; border-radius: 9px; background: linear-gradient(#fff, #d0d8e3); box-shadow: inset 0 0 0 1px #a7b0c0; display: grid; place-items: center; font-size: 9px; }
+.btns em { margin-left: auto; font-style: normal; font-family: Menlo, monospace; }
+#disc { left: 26%; right: 5%; top: 13%; }
+#disc ul { list-style: none; margin: 0; padding: 4px; }
+#disc li { display: flex; gap: 8px; align-items: center; padding: 3px 6px; border-radius: 2px; }
+#disc li i { width: 14px; height: 14px; border-radius: 2px; background: linear-gradient(#e7f6fc, #8fd0e6); box-shadow: inset 0 0 0 1px rgba(43, 54, 69, 0.3); }
+#disc li small { margin-left: auto; opacity: 0.6; font-family: Menlo, monospace; }
+#disc li.sel { background: #3f78b0; color: #fff; }
+.status { padding: 3px 8px; border-top: 1px solid #c3cad6; font-size: 10px; opacity: 0.75; }
+#toast { position: fixed; right: 10px; top: 44px; width: 210px; padding: 10px 12px; border-radius: 8px; background: #fffbe8; box-shadow: 0 8px 20px rgba(20, 35, 70, 0.35); z-index: 60; transition: transform 0.5s, opacity 0.5s; transform: translateY(-12px); opacity: 0; }
+#toast.on { transform: none; opacity: 1; }
+#toast b { display: block; margin-bottom: 3px; }
+</style>
+</head>
+<body>
+<div class="orb"></div>
+<div class="wave" style="top:70%"></div><div class="wave" style="top:73%;opacity:.6"></div>
+<div class="task"><div class="menu"></div><div class="tb on" id="tbp">♫ Media Player</div><div class="tb" id="tbd">▣ Disc (D:)</div><div class="tray"><i></i><i style="background:#b8a8f0"></i><span id="clock">23:41</span></div></div>
+<div class="icons">
+  <div class="ic"><div style="background:linear-gradient(#f4f7fb,#b9c4d4)"></div>Computer</div>
+  <div class="ic" id="icdisc"><div style="background:radial-gradient(circle,#fff 0 18%,#c9b8ff 20%,#a6e6ff 60%,#eef7ff)"></div>Disc (D:)</div>
+  <div class="ic"><div style="background:linear-gradient(#e7f6fc,#8fd0e6)"></div>Music</div>
+  <div class="ic"><div style="background:linear-gradient(#f0fbf6,#a6e6d0)"></div>Network</div>
+  <div class="ic"><div style="background:linear-gradient(#fff,#cfd6e0)"></div>Trash</div>
+</div>
+<div class="win" id="player">
+  <div class="tt"><span>♫ Media Player — Soft Sessions</span><b></b><b></b><b></b></div>
+  <canvas id="viz"></canvas>
+  <div class="pbar">
+    <div class="title"><span id="title"></span></div>
+    <div class="prog"><i id="prog"></i></div>
+    <div class="btns"><span>◀◀</span><span>▶</span><span>▶▶</span><span>■</span><em id="time">00:00</em></div>
+  </div>
+</div>
+<div class="win" id="disc">
+  <div class="tt"><span>▣ Disc (D:) — SOFT_SESSIONS_2</span><b></b><b></b><b></b></div>
+  <ul id="files"></ul>
+  <div class="status">8 object(s) · 612 MB · CD-ROM</div>
+</div>
+<div id="toast"><b>Network connected</b>Speed 56.0 Kbps · signal excellent</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const FILES = [['01 blue hour.wav', '42 MB'], ['02 liquid sky.wav', '51 MB'], ['03 frosted.wav', '38 MB'], ['04 satellite.wav', '47 MB'], ['05 pier 9.wav', '44 MB'], ['06 afterglow.wav', '55 MB'], ['readme.txt', '2 KB'], ['cover.bmp', '1 MB']];
+$('files').innerHTML = FILES.map(([n, s]) => `<li><i></i>${n}<small>${s}</small></li>`).join('');
+const items = [...$('files').children];
+const TRACKS = ['Soft Focus — Lounge Mix', 'Blue Hour — Late Edit', 'Liquid Sky — Ambient Dub', 'Frosted — Sunrise Version'];
+let z = 10;
+['player', 'disc'].forEach((id) => { $(id).onpointerdown = () => focus(id); });
+function focus(id) { z++; $(id).style.zIndex = String(z); ['player', 'disc'].forEach((w) => $(w).classList.toggle('focus', w === id)); }
+
+const viz = $('viz'), vg = viz.getContext('2d');
+function drawViz(t) {
+  const d = devicePixelRatio || 1, w = viz.clientWidth * d, h = viz.clientHeight * d;
+  if (viz.width !== w) { viz.width = w; viz.height = h; }
+  vg.fillStyle = 'rgba(15,29,46,0.35)'; vg.fillRect(0, 0, w, h);
+  vg.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 6; i++) {
+    const x = w * (0.5 + Math.sin(t * (0.5 + i * 0.13) + i) * 0.35), y = h * (0.5 + Math.cos(t * (0.4 + i * 0.11) + i * 2) * 0.3), r = h * (0.25 + 0.12 * Math.sin(t * 2 + i));
+    const gr = vg.createRadialGradient(x, y, 0, x, y, r);
+    const col = ['143,208,230', '184,168,240', '166,230,208', '255,211,176', '185,205,240', '255,255,255'][i];
+    gr.addColorStop(0, `rgba(${col},0.55)`); gr.addColorStop(1, `rgba(${col},0)`);
+    vg.fillStyle = gr; vg.beginPath(); vg.arc(x, y, r, 0, Math.PI * 2); vg.fill();
+  }
+  vg.globalCompositeOperation = 'source-over';
+  vg.strokeStyle = 'rgba(223,243,251,0.8)'; vg.lineWidth = d; vg.beginPath();
+  for (let x = 0; x <= w; x += 4 * d) { const y = h * 0.5 + Math.sin(x / w * 18 + t * 5) * h * 0.12 * Math.sin(t * 1.3 + x / w * 3); x ? vg.lineTo(x, y) : vg.moveTo(x, y); }
+  vg.stroke();
+}
+
+// Timeline > disc window zoom-open, select walk, minimise, toast; loops every 12 s
+const LOOP = 12;
+const ease = (x) => { x = Math.min(1, Math.max(0, x)); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+function windowState(t) {
+  const open = ease((t - 0.5) / 0.6) * (1 - ease((t - 8) / 0.6));
+  const disc = $('disc'), r = disc.getBoundingClientRect(), ic = $('icdisc').getBoundingClientRect(), tb = $('tbd').getBoundingClientRect();
+  const minimising = t > 8;
+  const tx = minimising ? tb.left : ic.left, ty = minimising ? tb.top : ic.top;
+  const s = 0.08 + 0.92 * open;
+  disc.style.transform = `translate(${(tx - r.left / 1) * (1 - open) - (r.left - r.left)}px, ${(ty - parseFloat(getComputedStyle(disc).top)) * (1 - open)}px) scale(${s})`;
+  disc.style.opacity = String(Math.min(1, open * 1.4));
+  $('tbd').classList.toggle('on', open > 0.5);
+  $('tbd').classList.toggle('flash', t > 8 && t < 8.8 && Math.floor(t * 6) % 2 === 0);
+  const sel = t > 1.6 && t < 8 ? Math.min(FILES.length - 1, Math.floor((t - 1.6) / 0.75)) : -1;
+  items.forEach((li, i) => li.classList.toggle('sel', i === sel));
+  if (t > 0.5 && t < 0.6) focus('disc');
+  if (t > 8.6 && t < 8.7) focus('player');
+  $('toast').classList.toggle('on', t > 9.2 && t < 11.6);
+}
+const pad = (n) => String(n).padStart(2, '0');
+focus('player');
+function frame() {
+  const now = performance.now() / 1000, t = now % LOOP;
+  windowState(t);
+  drawViz(now);
+  const ti = Math.floor(now / LOOP) % TRACKS.length, el = (now % (LOOP * 2));
+  const title = $('title'), text = `${TRACKS[ti]}   ·   ${TRACKS[ti]}   ·   `;
+  if (title.dataset.t !== text) { title.dataset.t = text; title.textContent = text; }
+  title.style.display = 'inline-block'; title.style.transform = `translateX(${-((now * 30) % (title.scrollWidth / 2))}px)`;
+  $('prog').style.width = `${(el / (LOOP * 2)) * 100}%`;
+  $('time').textContent = `${pad(Math.floor(el / 60))}:${pad(Math.floor(el % 60))}`;
+  $('clock').textContent = `23:${pad(41 + Math.floor(now / 60) % 18)}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

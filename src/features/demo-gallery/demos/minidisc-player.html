@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frosted MD Player</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="70" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="late-90s portable disc recorder, frosted translucent shell, conic-gradient disc, backlit LCD, canvas bokeh" />
+<meta name="description" content="A late-1990s portable mini-disc recorder seen from above, with no brand. An ice-blue frosted shell has a smoky lid window, and a translucent cartridge under it shows the iridescent disc spinning. A backlit LCD scrolls the track title, counts time and bounces a stereo level meter, and every few seconds the player reads the TOC and skips to the next track while the jog dial turns. Click the transport buttons or the dial to skip. Hard because the spinning disc, the lid reflection sweep and the LCD all have to stay in sync on one clock over a soft-focus bokeh backdrop." />
+<meta name="prompt" content="Build a silent late-1990s portable mini-disc recorder toy in one HTML file, no brand: top view of a frosted ice-blue translucent shell with a smoky lid window showing a clear cartridge and an iridescent spinning disc, a backlit pale-blue LCD with track number, running time, scrolling title and L/R level bars, transport buttons and a knurled jog dial. Auto-play through tracks with a TOC-reading flicker on each skip, sweep a reflection across the lid, and drift pastel bokeh behind it." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #c9d8e6; font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+#stage { position: fixed; inset: 0; display: grid; place-items: center; padding-bottom: 14vh; }
+.dev { --w: min(80vw, 56vh, 430px); width: var(--w); height: calc(var(--w) * 1.42); position: relative; border-radius: calc(var(--w) * 0.08); background: linear-gradient(150deg, rgba(240, 247, 252, 0.88), rgba(186, 208, 228, 0.78) 55%, rgba(160, 186, 212, 0.82)); box-shadow: 0 40px 70px rgba(40, 60, 90, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.95), inset 0 -3px 8px rgba(70, 100, 140, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.6); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.brand { position: absolute; left: 8%; top: 4.2%; font-size: calc(var(--w) * 0.026); letter-spacing: 0.42em; color: rgba(43, 54, 69, 0.7); }
+.brand b { letter-spacing: 0.2em; color: var(--ink); }
+.lid { position: absolute; left: 8%; right: 8%; top: 9%; height: 52%; border-radius: calc(var(--w) * 0.05); background: radial-gradient(120% 90% at 30% 10%, rgba(255, 255, 255, 0.35), rgba(110, 140, 175, 0.35) 60%, rgba(70, 95, 130, 0.45)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55), inset 0 10px 30px rgba(20, 40, 70, 0.35); overflow: hidden; }
+.cart { position: absolute; left: 11%; top: 9%; width: 78%; aspect-ratio: 1 / 1.02; border-radius: 6% 6% 6% 6% / 6%; background: linear-gradient(160deg, rgba(160, 225, 245, 0.42), rgba(120, 170, 220, 0.3)); box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.5), 0 6px 18px rgba(20, 40, 70, 0.3); clip-path: polygon(0 0, 88% 0, 100% 10%, 100% 100%, 0 100%); }
+.disc { position: absolute; left: 9%; top: 9%; width: 82%; aspect-ratio: 1; border-radius: 50%; background: conic-gradient(from 0deg, #e9f6ff, #c9b8ff, #a6e6ff, #f6d6ff, #b8f0e6, #e9f6ff 50%, #bfe0ff, #f2c8ff, #9fe3f5, #e9f6ff); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6); }
+.disc::before { content: ''; position: absolute; inset: 16%; border-radius: 50%; background: repeating-radial-gradient(circle, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 4px); }
+.disc::after { content: ''; position: absolute; left: 50%; top: 4%; width: 2px; height: 44%; background: linear-gradient(rgba(255, 255, 255, 0.9), transparent); transform: translateX(-50%); }
+.hub { position: absolute; left: 50%; top: 50%; width: 22%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, #f4f6f9 0 28%, #9aa6b6 30% 34%, #dfe5ec 36% 100%); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.7), 0 2px 6px rgba(0, 0, 0, 0.25); }
+.label { position: absolute; right: 6%; bottom: 5%; font-size: calc(var(--w) * 0.03); letter-spacing: 0.3em; color: rgba(255, 255, 255, 0.85); }
+.sweep { position: absolute; top: -20%; bottom: -20%; width: 30%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent); transform: skewX(-18deg); }
+.lcd { position: absolute; left: 8%; right: 8%; top: 65%; height: 15%; border-radius: calc(var(--w) * 0.03); background: linear-gradient(#c7ecf8, #a9dcef); box-shadow: inset 0 2px 6px rgba(20, 60, 90, 0.4), 0 1px 0 rgba(255, 255, 255, 0.9); font-family: Menlo, "Courier New", monospace; color: #17324d; padding: 3.2% 4.5%; overflow: hidden; }
+.lcd .row { display: flex; justify-content: space-between; align-items: center; font-size: calc(var(--w) * 0.042); font-weight: 700; letter-spacing: 0.06em; }
+.lcd .row small { font-size: 0.6em; letter-spacing: 0.25em; font-weight: 400; }
+.lcd .title { margin-top: 2%; height: 1.3em; overflow: hidden; white-space: nowrap; font-size: calc(var(--w) * 0.05); letter-spacing: 0.12em; }
+.lcd .title span { display: inline-block; }
+.meter { position: absolute; right: 4.5%; bottom: 10%; display: grid; gap: 3px; }
+.meter div { display: flex; gap: 2px; }
+.meter i { width: calc(var(--w) * 0.012); height: calc(var(--w) * 0.014); background: #17324d; opacity: 0.12; }
+.meter i.on { opacity: 0.85; }
+.ctl { position: absolute; left: 8%; right: 8%; top: 84%; display: flex; align-items: center; gap: 4%; }
+.ctl button { flex: 0 0 auto; width: 15%; aspect-ratio: 1.7; border: 0; border-radius: 40px; background: linear-gradient(#f8fbfe, #c8d6e4); box-shadow: 0 2px 4px rgba(40, 60, 90, 0.3), inset 0 1px 0 #fff; color: var(--ink); font-size: calc(var(--w) * 0.032); cursor: pointer; transition: transform 0.12s, background 0.2s; }
+.ctl button.on { transform: translateY(2px); background: linear-gradient(#dff3fb, #9fd3ea); box-shadow: 0 0 10px rgba(143, 208, 230, 0.9), inset 0 1px 0 #fff; }
+.jog { margin-left: auto; width: 22%; aspect-ratio: 1; border-radius: 50%; background: repeating-conic-gradient(#e9eef4 0 6deg, #aab8c8 6deg 12deg); box-shadow: 0 4px 10px rgba(40, 60, 90, 0.35), inset 0 0 0 3px rgba(255, 255, 255, 0.6); position: relative; cursor: pointer; }
+.jog::after { content: ''; position: absolute; inset: 22%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #c4d2e0); box-shadow: inset 0 -2px 4px rgba(40, 60, 90, 0.25); }
+.jog i { position: absolute; left: 50%; top: 6%; width: 4%; height: 14%; background: var(--accent); border-radius: 2px; transform: translateX(-50%); z-index: 1; }
+.spec { position: absolute; left: 8%; bottom: 3.2%; font-size: calc(var(--w) * 0.022); letter-spacing: 0.4em; color: rgba(43, 54, 69, 0.55); }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="stage">
+  <div class="dev">
+    <div class="brand"><b>DR-74</b> &nbsp;PORTABLE DISC RECORDER</div>
+    <div class="lid">
+      <div class="cart"><div class="disc" id="disc"><div class="hub"></div></div><div class="label">74 MIN</div></div>
+      <div class="sweep" id="sweep"></div>
+    </div>
+    <div class="lcd">
+      <div class="row"><span id="tr">TR 01</span><small id="mode">▶ PLAY</small><span id="time">00:00</span></div>
+      <div class="title"><span id="title"></span></div>
+      <div class="meter" id="meter"></div>
+    </div>
+    <div class="ctl">
+      <button id="prev">◀◀</button><button id="play">▶</button><button id="next">▶▶</button>
+      <div class="jog" id="jog"><i></i></div>
+    </div>
+    <div class="spec">DIGITAL · 44.1 kHz · ATRAC</div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const TRACKS = ['SOFT FOCUS', 'BLUE HOUR LOUNGE', 'LIQUID SKY', 'SATELLITE DUB', 'FROSTED GLASS', 'AFTER HOURS', 'CLOUD 9 MIX', 'SUNRISE PIER'];
+const bg = $('bg'), g = bg.getContext('2d');
+let W = 0, H = 0, dpr = 1;
+function size() { dpr = devicePixelRatio || 1; W = bg.width = innerWidth * dpr; H = bg.height = innerHeight * dpr; }
+size(); addEventListener('resize', size);
+
+// Backdrop > pastel bokeh discs drifting upward
+const DOTS = Array.from({ length: 26 }, (_, i) => ({ x: Math.random(), y: Math.random(), r: 0.04 + Math.random() * 0.12, s: 0.004 + Math.random() * 0.01, h: [200, 230, 260, 185][i % 4], a: 0.12 + Math.random() * 0.2 }));
+function drawBg(t, dt) {
+  const grd = g.createLinearGradient(0, 0, W * 0.4, H);
+  grd.addColorStop(0, '#e6eef6'); grd.addColorStop(0.5, '#c4d6e8'); grd.addColorStop(1, '#b4bfd8');
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  const m = Math.min(W, H);
+  for (const d of DOTS) {
+    d.y -= d.s * dt; if (d.y < -0.2) { d.y = 1.2; d.x = Math.random(); }
+    const x = (d.x + Math.sin(t * 0.2 + d.h) * 0.03) * W, y = d.y * H, r = d.r * m;
+    const rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, `hsla(${d.h}, 70%, 92%, ${d.a})`); rg.addColorStop(0.7, `hsla(${d.h}, 60%, 85%, ${d.a * 0.6})`); rg.addColorStop(1, `hsla(${d.h}, 60%, 85%, 0)`);
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+}
+
+// LCD > 2 x 12 level meter segments
+const meter = $('meter');
+const rows = [0, 1].map(() => { const r = document.createElement('div'); r.innerHTML = '<i></i>'.repeat(12); meter.append(r); return [...r.children]; });
+
+// Player > track state; skip shows TOC READING then restarts clock
+let track = 0, elapsed = 0, reading = 0, spin = 0, speed = 1, jogAngle = 0, jogTarget = 0, lastSkip = 0;
+function skip(d) {
+  track = (track + d + TRACKS.length) % TRACKS.length; elapsed = 0; reading = 0.9; jogTarget += d * 60;
+  const b = $(d > 0 ? 'next' : 'prev'); b.classList.add('on'); setTimeout(() => b.classList.remove('on'), 260);
+}
+$('next').onclick = () => { skip(1); lastSkip = performance.now() / 1000; };
+$('prev').onclick = () => { skip(-1); lastSkip = performance.now() / 1000; };
+$('jog').onclick = () => { skip(1); lastSkip = performance.now() / 1000; };
+$('play').classList.add('on');
+
+const pad = (n) => String(n).padStart(2, '0');
+let last = performance.now() / 1000, levelL = 0, levelR = 0;
+function frame() {
+  const now = performance.now() / 1000, dt = Math.min(0.05, now - last); last = now;
+  const t = now;
+  drawBg(t, dt);
+  if (now - lastSkip > 6.5) { skip(1); lastSkip = now; }
+  reading = Math.max(0, reading - dt);
+  const target = reading > 0 ? 0.35 : 1;
+  speed += (target - speed) * Math.min(1, dt * 3);
+  spin += dt * 420 * speed;
+  $('disc').style.transform = `rotate(${spin}deg)`;
+  jogAngle += (jogTarget - jogAngle) * Math.min(1, dt * 6);
+  $('jog').style.transform = `rotate(${jogAngle}deg)`;
+  const sw = ((t % 5) / 5) * 160 - 40;
+  $('sweep').style.left = `${sw}%`;
+  if (reading > 0) {
+    $('mode').textContent = Math.floor(t * 8) % 2 ? 'TOC' : 'READING';
+    $('title').textContent = '· · · · · ·';
+    $('title').style.transform = 'none';
+  } else {
+    elapsed += dt;
+    $('mode').textContent = '▶ PLAY';
+    const text = `${TRACKS[track]}   ·   ${TRACKS[track]}   ·   `;
+    const el = $('title'); if (el.dataset.t !== text) { el.dataset.t = text; el.textContent = text; }
+    const w = el.scrollWidth / 2;
+    el.style.transform = `translateX(${-((elapsed * 38) % w)}px)`;
+  }
+  $('tr').textContent = `TR ${pad(track + 1)}`;
+  $('time').textContent = `${pad(Math.floor(elapsed / 60))}:${pad(Math.floor(elapsed % 60))}`;
+  const beat = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2 * 1.45)), 6);
+  const on = reading > 0 ? 0 : 1;
+  levelL += ((0.45 + beat * 0.5 + Math.sin(t * 7.3) * 0.08) * on - levelL) * 0.35;
+  levelR += ((0.42 + beat * 0.52 + Math.sin(t * 6.1 + 1) * 0.08) * on - levelR) * 0.35;
+  [levelL, levelR].forEach((lv, k) => rows[k].forEach((seg, i) => seg.classList.toggle('on', i < lv * 12)));
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

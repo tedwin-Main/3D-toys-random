@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Translucent Pager</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="79" />
+<meta name="capture" content="4200" />
+<meta name="tags" content="late-90s two-way pager, see-through ice shell, CSS circuit board, EL backlight flash, vibrate shake, canvas bokeh" />
+<meta name="description" content="A late-1990s two-way pager in see-through ice-blue plastic, with no brand. Through the frosted shell you can see a pastel circuit board, chips, a battery and the speaker. Every few seconds a page arrives: the EL backlight flashes, an orange LED blinks, the whole pager buzzes on the table, and the message types across the pixel LCD (meet at the lounge, bring the CDs, sunrise set at the pier). Soft city-light bokeh drifts behind. Tap to read the next page. Hard because the vibrate shake, backlight flash, LED and typing all hang off one message clock." />
+<meta name="prompt" content="Make a silent late-1990s two-way pager toy in one HTML file, no brand: a see-through ice-blue shell showing a CSS-drawn circuit board, chips, battery and speaker under frosted plastic, a backlit pixel-style LCD with envelope icon, message counter and clock, small buttons and an orange LED. Every few seconds a message arrives with a backlight flash, LED blink and vibrate shake, then types across the LCD. Put soft city-light bokeh behind it and let a tap advance messages." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #b9bdd6; font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); cursor: pointer; user-select: none; -webkit-user-select: none; }
+#bg { position: fixed; inset: 0; width: 100%; height: 100%; }
+#stage { position: fixed; inset: 0; display: grid; place-items: center; padding-bottom: 16vh; }
+.wrap { --w: min(86vw, 56vh, 520px); width: var(--w); display: grid; gap: calc(var(--w) * 0.05); justify-items: center; }
+.pager { width: 100%; height: calc(var(--w) * 0.64); position: relative; border-radius: calc(var(--w) * 0.09) calc(var(--w) * 0.09) calc(var(--w) * 0.12) calc(var(--w) * 0.12); background: linear-gradient(160deg, rgba(215, 240, 250, 0.75), rgba(143, 208, 230, 0.55) 60%, rgba(120, 170, 215, 0.6)); box-shadow: 0 30px 50px rgba(40, 45, 90, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.9), inset 0 -4px 10px rgba(40, 80, 130, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.5); overflow: hidden; }
+.board { position: absolute; inset: 9% 6% 8%; border-radius: calc(var(--w) * 0.05); background: linear-gradient(90deg, rgba(90, 150, 170, 0.35) 0 1px, transparent 1px) 0 0 / 14px 100%, linear-gradient(rgba(90, 150, 170, 0.3) 0 1px, transparent 1px) 0 0 / 100% 12px, linear-gradient(135deg, rgba(166, 230, 208, 0.55), rgba(185, 205, 240, 0.55)); }
+.chip { position: absolute; background: rgba(43, 54, 69, 0.55); border-radius: 2px; box-shadow: 0 0 0 2px rgba(200, 215, 230, 0.5); }
+.chip::after { content: ''; position: absolute; inset: -5px 10%; background: repeating-linear-gradient(90deg, rgba(220, 230, 240, 0.8) 0 2px, transparent 2px 5px); z-index: -1; }
+.batt { position: absolute; right: 8%; bottom: 10%; width: 26%; height: 22%; border-radius: 6px; background: linear-gradient(#e7eef6, #b7c3d4); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8); font-size: calc(var(--w) * 0.022); letter-spacing: 0.3em; display: grid; place-items: center; }
+.spk { position: absolute; left: 8%; bottom: 12%; width: 14%; aspect-ratio: 1; border-radius: 50%; background: repeating-radial-gradient(circle, rgba(43, 54, 69, 0.45) 0 1.5px, transparent 1.5px 4px); }
+.frost { position: absolute; inset: 0; background: linear-gradient(115deg, rgba(255, 255, 255, 0.45) 0 14%, rgba(255, 255, 255, 0.06) 30% 70%, rgba(255, 255, 255, 0.2)); backdrop-filter: blur(1.5px); -webkit-backdrop-filter: blur(1.5px); }
+.lcd { position: absolute; left: 12%; right: 12%; top: 14%; height: 44%; border-radius: calc(var(--w) * 0.025); background: linear-gradient(#cdeef8, #a6d8ea); box-shadow: inset 0 2px 6px rgba(20, 60, 90, 0.45), 0 0 0 3px rgba(255, 255, 255, 0.55); padding: 3% 4%; font-family: Menlo, "Courier New", monospace; color: #14304a; transition: background 0.5s, box-shadow 0.5s; overflow: hidden; }
+.lcd.flash { transition: none; background: linear-gradient(#f0fdff, #c7f3ff); box-shadow: inset 0 2px 6px rgba(20, 60, 90, 0.3), 0 0 30px rgba(143, 230, 255, 0.95), 0 0 0 3px rgba(255, 255, 255, 0.8); }
+.lcd .hd { display: flex; justify-content: space-between; font-size: calc(var(--w) * 0.032); font-weight: 700; letter-spacing: 0.08em; border-bottom: 2px solid rgba(20, 48, 74, 0.6); padding-bottom: 2%; }
+.lcd .msg { margin-top: 3%; font-size: calc(var(--w) * 0.048); font-weight: 700; letter-spacing: 0.06em; line-height: 1.25; white-space: pre-wrap; }
+.lcd .from { margin-top: 2%; font-size: calc(var(--w) * 0.026); letter-spacing: 0.15em; opacity: 0.75; }
+.btns { position: absolute; left: 12%; right: 12%; bottom: 13%; display: flex; gap: 4%; align-items: center; }
+.btns i { width: 15%; aspect-ratio: 2; border-radius: 30px; background: linear-gradient(#f6fafd, #c3d3e2); box-shadow: 0 2px 3px rgba(40, 60, 90, 0.35), inset 0 1px 0 #fff; transition: transform 0.1s; }
+.btns i.on { transform: translateY(2px); background: linear-gradient(#e2f6fc, #9fd3ea); }
+.led { margin-left: auto; width: 4.5%; aspect-ratio: 1; border-radius: 50%; background: #a0513a; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4); }
+.led.on { background: var(--accent); box-shadow: 0 0 12px var(--accent), 0 0 3px #fff; }
+.clip { width: 34%; height: calc(var(--w) * 0.035); border-radius: 0 0 20px 20px; background: linear-gradient(#c6d4e3, #9fb2c8); margin-top: calc(var(--w) * -0.06); box-shadow: 0 6px 10px rgba(40, 45, 90, 0.25); }
+.cap { font-size: 10px; letter-spacing: 0.5em; color: rgba(43, 54, 69, 0.75); }
+.cap b { color: var(--ink); letter-spacing: 0.25em; }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="stage">
+  <div class="wrap">
+    <div class="pager" id="pager">
+      <div class="board">
+        <div class="chip" style="left:8%;top:62%;width:16%;height:16%"></div>
+        <div class="chip" style="left:30%;top:66%;width:22%;height:12%"></div>
+        <div class="chip" style="left:58%;top:64%;width:8%;height:10%"></div>
+        <div class="spk"></div><div class="batt">3V</div>
+      </div>
+      <div class="frost"></div>
+      <div class="lcd" id="lcd">
+        <div class="hd"><span id="env">✉ MSG 1/6</span><span id="clk">23:41</span></div>
+        <div class="msg" id="msg"></div>
+        <div class="from" id="from"></div>
+      </div>
+      <div class="btns"><i id="b0"></i><i id="b1"></i><i id="b2"></i><span class="led" id="led"></span></div>
+    </div>
+    <div class="clip"></div>
+    <div class="cap"><b>TP-900</b> · TWO-WAY PAGER · 900 MHz</div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const MSGS = [
+  ['MEET @ THE LOUNGE\n11PM', 'FROM: REI'],
+  ['BRING THE CDS :)', 'FROM: KAI'],
+  ['DJ STARTS AT 2AM\nDONT BE LATE', 'FROM: MARA'],
+  ['WHERE R U??', 'FROM: REI'],
+  ['ROOM 101 IS PACKED\nCOME UPSTAIRS', 'FROM: NOVA'],
+  ['SUNRISE SET\n@ THE PIER 6AM', 'FROM: KAI'],
+];
+const bg = $('bg'), g = bg.getContext('2d');
+let W = 0, H = 0;
+function size() { const d = devicePixelRatio || 1; W = bg.width = innerWidth * d; H = bg.height = innerHeight * d; }
+size(); addEventListener('resize', size);
+const LIGHTS = Array.from({ length: 34 }, (_, i) => ({ x: Math.random(), y: 0.15 + Math.random() * 0.75, r: 0.02 + Math.random() * 0.07, h: [200, 260, 30, 185, 320][i % 5], v: (Math.random() - 0.5) * 0.01, a: 0.15 + Math.random() * 0.3 }));
+function drawBg(t) {
+  const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, '#dfe2f2'); gr.addColorStop(0.6, '#b9bdd6'); gr.addColorStop(1, '#9aa2c4');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  const M = Math.min(W, H);
+  LIGHTS.forEach((l) => { l.x += l.v * 0.016; if (l.x > 1.1) l.x = -0.1; if (l.x < -0.1) l.x = 1.1; const x = l.x * W, y = l.y * H, r = l.r * M * (1 + Math.sin(t + l.h) * 0.05);
+    const rg = g.createRadialGradient(x, y, 0, x, y, r); rg.addColorStop(0, `hsla(${l.h},80%,92%,${l.a})`); rg.addColorStop(0.75, `hsla(${l.h},70%,85%,${l.a * 0.55})`); rg.addColorStop(1, `hsla(${l.h},70%,85%,0)`);
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); });
+}
+
+const PERIOD = 3.6;
+let mi = 0, born = performance.now() / 1000, shown = -1;
+addEventListener('pointerdown', () => { mi = (mi + 1) % MSGS.length; born = performance.now() / 1000; });
+function frame() {
+  const t = performance.now() / 1000;
+  let age = t - born; if (age > PERIOD) { mi = (mi + 1) % MSGS.length; born = t; age = 0; }
+  drawBg(t);
+  const buzzing = age < 0.7;
+  const jx = buzzing ? Math.sin(t * 160) * 3 : 0, jr = buzzing ? Math.sin(t * 130) * 0.6 : 0;
+  $('pager').style.transform = `translateX(${jx}px) rotate(${jr}deg)`;
+  $('lcd').classList.toggle('flash', age < 0.9 && Math.floor(age * 6) % 2 === 0);
+  $('led').classList.toggle('on', age < 1.2 ? Math.floor(age * 8) % 2 === 0 : Math.floor(t * 1.2) % 2 === 0 && Math.floor(t * 4) % 3 === 0);
+  const [text, from] = MSGS[mi];
+  const n = Math.max(0, Math.floor((age - 0.6) * 18));
+  $('msg').textContent = text.slice(0, n) + (n < text.length && Math.floor(t * 6) % 2 ? '█' : '');
+  $('from').textContent = n >= text.length ? from : '';
+  $('env').textContent = `${Math.floor(t * 2) % 2 && age < 2 ? '✉' : '✉'} MSG ${mi + 1}/${MSGS.length}`;
+  const mins = 41 + Math.floor(t / 60);
+  $('clk').textContent = `23:${String(mins % 60).padStart(2, '0')}`;
+  ['b0', 'b1', 'b2'].forEach((b, i) => $(b).classList.toggle('on', age > 2.6 + i * 0.12 && age < 2.8 + i * 0.12));
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ambient Tunnel</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="82" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="raw WebGL fragment shader, polar tunnel mapping, pastel fog, soft ring glow, HUD overlay" />
+<meta name="description" content="A late-1990s chill-out room visual: an endless soft-focus tunnel of glowing rings and fine grid lines rushing toward a bright white vanishing point, tinted in drifting ice-blue, lilac and mint, with a slow camera sway and a pulse every few seconds. A thin HUD overlay counts depth, flow and zone names and a crosshair breathes at the centre. Click to switch the colour zone. Hard because the whole tunnel is one fragment shader mapping each pixel to angle and 1/radius, with every line anti-aliased through fwidth so it stays soft instead of aliasing." />
+<meta name="prompt" content="Write a silent late-1990s chill-out tunnel visualizer in one HTML file with a raw WebGL fragment shader: map pixels to angle and 1/radius for an endless tunnel of soft glowing rings and fine grid lines, pastel ice-blue, lilac and mint colours that drift with depth, white fog at the vanishing point, a slow camera sway and periodic pulse. Overlay a thin wide-tracked HUD with depth, flow and zone readouts and a centre crosshair; click cycles colour zones." />
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #e8eef6; font-family: "Helvetica Neue", Arial, sans-serif; color: #2b3645; cursor: pointer; user-select: none; -webkit-user-select: none; }
+canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+.hud { position: fixed; font-size: 10px; letter-spacing: 0.45em; pointer-events: none; }
+.hud b { font-family: Menlo, monospace; letter-spacing: 0.08em; font-size: 12px; }
+#tl { left: 7%; top: 12.5%; line-height: 1.9; }
+#tr { right: 7%; top: 12.5%; text-align: right; line-height: 1.9; }
+#zone { left: 0; right: 0; top: 68%; text-align: center; font-size: 11px; letter-spacing: 0.7em; }
+#zone i { display: block; margin: 8px auto 0; height: 1px; width: 0; background: #2b3645; transition: width 1.2s; }
+#xh { position: fixed; left: 50%; top: 44%; width: 46px; height: 46px; transform: translate(-50%, -50%); pointer-events: none; }
+#xh::before, #xh::after { content: ''; position: absolute; background: rgba(43, 54, 69, 0.6); }
+#xh::before { left: 50%; top: 0; bottom: 0; width: 1px; }
+#xh::after { top: 50%; left: 0; right: 0; height: 1px; }
+#ring { position: fixed; left: 50%; top: 44%; width: 90px; height: 90px; border: 1px solid rgba(43, 54, 69, 0.45); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div class="hud" id="tl">DEPTH <b id="depth">0000</b> M<br>FLOW <b id="flow">1.00</b></div>
+<div class="hud" id="tr">CHILL ROOM VISUAL<br>REEL <b id="reel">01</b> / 04</div>
+<div id="xh"></div><div id="ring"></div>
+<div class="hud" id="zone"><span id="zn">ZONE · BLUE HOUR</span><i id="zi"></i></div>
+<script>
+const cv = document.getElementById('gl');
+const gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: false });
+const VS = 'attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }';
+const FS = `#extension GL_OES_standard_derivatives : enable
+precision highp float;
+uniform vec2 res; uniform float t; uniform vec3 c1; uniform vec3 c2; uniform vec3 c3; uniform float pulse;
+float line(float x, float w) { float d = abs(fract(x) - 0.5); float fw = fwidth(x) * 1.5 + w; return smoothstep(0.5 - fw, 0.5, d); }
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * res) / res.y;
+  uv.y -= 0.06;
+  uv += vec2(sin(t * 0.31) * 0.05, cos(t * 0.23) * 0.04);
+  float r = length(uv), a = atan(uv.y, uv.x);
+  float z = 0.32 / max(r, 0.001) + t * 0.9;
+  float ang = a / 6.28318 * 18.0 + sin(z * 0.15) * 0.4;
+  float rings = line(z * 1.2, 0.05);
+  float grid = line(ang, 0.03) * 0.5;
+  float band = 0.5 + 0.5 * sin(z * 3.7699);
+  float glow = exp(-pow(fract(z * 0.3 - t * 0.1) - 0.5, 2.0) * 40.0) * pulse;
+  vec3 base = mix(c1, c2, 0.5 + 0.5 * sin(z * 0.35));
+  base = mix(base, c3, (0.5 + 0.5 * sin(a * 2.0 + z * 0.2 + t * 0.3)) * 0.6);
+  vec3 col = base * (0.7 + 0.3 * band) + vec3(1.0) * (rings * 0.4 + grid * 0.22 + glow * 0.25);
+  float fog = smoothstep(0.02, 0.38, r);
+  col = mix(vec3(1.0), col, fog);
+  col *= 0.92 + 0.08 * smoothstep(1.2, 0.3, r);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+gl.getExtension('OES_standard_derivatives');
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+const U = Object.fromEntries(['res', 't', 'c1', 'c2', 'c3', 'pulse'].map((n) => [n, gl.getUniformLocation(prog, n)]));
+
+const ZONES = [
+  ['BLUE HOUR', [0.52, 0.70, 0.90], [0.62, 0.60, 0.86], [0.42, 0.76, 0.88]],
+  ['MINT ROOM', [0.48, 0.82, 0.72], [0.58, 0.70, 0.92], [0.72, 0.88, 0.84]],
+  ['LILAC FOG', [0.68, 0.58, 0.92], [0.80, 0.66, 0.88], [0.54, 0.66, 0.92]],
+  ['PEACH DAWN', [0.98, 0.74, 0.60], [0.70, 0.66, 0.90], [0.90, 0.66, 0.80]],
+];
+let zi = 0, zoneAt = 0, cur = ZONES[0].slice(1).map((c) => [...c]);
+const $ = (id) => document.getElementById(id);
+function zone(i) { zi = i; zoneAt = performance.now() / 1000; $('zn').textContent = `ZONE · ${ZONES[i][0]}`; $('reel').textContent = String(i + 1).padStart(2, '0'); const bar = $('zi'); bar.style.transition = 'none'; bar.style.width = '0'; requestAnimationFrame(() => { bar.style.transition = 'width 1.2s'; bar.style.width = '120px'; }); }
+addEventListener('pointerdown', () => zone((zi + 1) % ZONES.length));
+function size() { const d = Math.min(2, devicePixelRatio || 1); cv.width = innerWidth * d; cv.height = innerHeight * d; gl.viewport(0, 0, cv.width, cv.height); }
+size(); addEventListener('resize', size); zone(0);
+let lastAuto = 0;
+function frame() {
+  const t = performance.now() / 1000;
+  if (t - zoneAt > 6) zone((zi + 1) % ZONES.length);
+  const tgt = ZONES[zi].slice(1);
+  cur.forEach((c, k) => c.forEach((v, j) => { c[j] = v + (tgt[k][j] - v) * 0.03; }));
+  const pulse = 0.4 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.6), 3);
+  gl.uniform2f(U.res, cv.width, cv.height); gl.uniform1f(U.t, t); gl.uniform1f(U.pulse, pulse);
+  gl.uniform3fv(U.c1, cur[0]); gl.uniform3fv(U.c2, cur[1]); gl.uniform3fv(U.c3, cur[2]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  $('depth').textContent = String(Math.floor(t * 18) % 10000).padStart(4, '0');
+  $('flow').textContent = (1.2 + Math.sin(t * 0.7) * 0.3).toFixed(2);
+  const s = 1 + pulse * 0.35;
+  $('ring').style.transform = `translate(-50%, -50%) scale(${s})`; $('ring').style.opacity = String(1.1 - pulse * 0.6);
+  $('xh').style.transform = `translate(-50%, -50%) rotate(${t * 12}deg)`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hover League Menu</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="72" />
+<meta name="capture" content="3200" />
+<meta name="tags" content="three.js, flat-shaded low-poly craft, anti-gravity racing menu, techno HUD, scrolling grid" />
+<meta name="description" content="A late-1990s anti-gravity racing team select, original and unbranded. A flat-shaded low-poly hover craft bobs over a glowing pad above a scrolling pale grid while a wide-tracked techno HUD types the team name, code and pilot and slides four stat bars. Every four seconds the craft spins away and returns in the next team's pastel livery. Arrows, swipe or click change team. Hard because the hull is a hand-built low-poly mesh with per-part livery materials, and the HUD, the craft swap and the stat tweens share one timeline." />
+<meta name="prompt" content="Create a silent late-1990s anti-gravity racing team select screen in three.js, one HTML file, no real game or brand. Build a flat-shaded low-poly hover craft from simple meshes, float it over a glowing pad and a scrolling grid in pale fog, and overlay a techno HUD in wide-tracked caps: league line, team name typed in, code, pilot and four animated stat bars. Auto-cycle five pastel team liveries every four seconds with a spin-out swap, plus arrow, swipe and click control." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: linear-gradient(#eef3f8, #c9d6e6 60%, #b8bdd3); font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+canvas { display: block; position: fixed; inset: 0; }
+.hud { position: fixed; left: 7%; right: 7%; pointer-events: none; }
+#top { top: 12.5%; }
+#top .lg { font-size: 10px; letter-spacing: 0.5em; opacity: 0.7; display: flex; justify-content: space-between; }
+#top .lg b { color: var(--accent); font-weight: 700; }
+#name { margin-top: 10px; font-size: clamp(30px, 9vw, 64px); font-weight: 800; letter-spacing: 0.12em; line-height: 1; white-space: nowrap; }
+#sub { margin-top: 8px; font-size: 11px; letter-spacing: 0.45em; opacity: 0.75; }
+#rule { height: 1px; background: linear-gradient(90deg, var(--ink), transparent); margin-top: 12px; transform-origin: left; }
+#stats { top: 63%; display: grid; gap: 9px; }
+.st { display: grid; grid-template-columns: 82px 1fr 34px; align-items: center; gap: 10px; font-size: 10px; letter-spacing: 0.35em; }
+.st .bar { height: 7px; background: rgba(43, 54, 69, 0.12); position: relative; overflow: hidden; }
+.st .bar i { position: absolute; inset: 0 auto 0 0; background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 8px); }
+.st b { font-family: Menlo, monospace; font-size: 11px; letter-spacing: 0.05em; text-align: right; }
+#dots { top: 77%; display: flex; gap: 8px; align-items: center; font-size: 10px; letter-spacing: 0.4em; }
+#dots i { width: 22px; height: 4px; background: rgba(43, 54, 69, 0.2); }
+#dots i.on { background: var(--ink); }
+#dots span { margin-left: auto; opacity: 0.7; }
+.mark { position: fixed; width: 14px; height: 14px; border: 1px solid rgba(43, 54, 69, 0.5); pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="hud" id="top">
+  <div class="lg"><span>SOFT LEAGUE · SEASON 01</span><b>SELECT TEAM</b></div>
+  <div id="name"></div>
+  <div id="sub"></div>
+  <div id="rule"></div>
+</div>
+<div class="hud" id="stats"></div>
+<div class="hud" id="dots"></div>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const TEAMS = [
+  { name: 'AURA DYNAMICS', code: 'AD-01', pilot: 'PILOT  R. SATO', a: '#8fd0e6', b: '#ffffff', c: '#ff8a3d', s: [82, 70, 55, 76] },
+  { name: 'KIRA SYSTEMS', code: 'KS-02', pilot: 'PILOT  M. LUND', a: '#c9b8ff', b: '#eef0f6', c: '#2b3645', s: [74, 88, 62, 60] },
+  { name: 'VEGA MOTORS', code: 'VM-03', pilot: 'PILOT  J. OKAFOR', a: '#f3f5f8', b: '#8fb4e6', c: '#ff8a3d', s: [90, 64, 48, 70] },
+  { name: 'NOVA FIELD', code: 'NF-04', pilot: 'PILOT  E. VANCE', a: '#a6e6d0', b: '#ffffff', c: '#3b5a8a', s: [66, 72, 86, 80] },
+  { name: 'HALO RACING', code: 'HR-05', pilot: 'PILOT  T. ROSSI', a: '#ffd3b0', b: '#f7f7fa', c: '#2b3645', s: [78, 80, 70, 58] },
+];
+const STATS = ['SPEED', 'THRUST', 'SHIELD', 'HANDLING'];
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog('#d9e3ee', 8, 30);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+function fit() { const a = innerWidth / innerHeight; camera.aspect = a; camera.fov = a < 0.8 ? 52 : 36; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+fit(); addEventListener('resize', fit);
+scene.add(new THREE.HemisphereLight('#ffffff', '#9fb0c8', 1.2));
+const sun = new THREE.DirectionalLight('#ffffff', 2.4); sun.position.set(3, 6, 4); scene.add(sun);
+
+// Floor > two grids scrolled toward camera for endless motion
+const grids = [0, 1].map((i) => { const gr = new THREE.GridHelper(40, 40, '#ffffff', '#ffffff'); gr.material.transparent = true; gr.material.opacity = 0.6; gr.position.set(0, -1.6, -i * 40); scene.add(gr); return gr; });
+const pad = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.03, 8, 64), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+pad.rotation.x = Math.PI / 2; pad.position.y = -1.3; scene.add(pad);
+const padGlow = new THREE.Mesh(new THREE.CircleGeometry(1.5, 48), new THREE.MeshBasicMaterial({ color: '#8fd0e6', transparent: true, opacity: 0.25 }));
+padGlow.rotation.x = -Math.PI / 2; padGlow.position.y = -1.32; scene.add(padGlow);
+
+// Craft > low-poly hull, wings, fins, pods; materials recoloured per team
+const mats = { a: new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.35, metalness: 0.2, side: THREE.DoubleSide }), b: new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.4, side: THREE.DoubleSide }), c: new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.5, side: THREE.DoubleSide }), glass: new THREE.MeshStandardMaterial({ color: '#203048', roughness: 0.05, metalness: 0.6 }), glow: new THREE.MeshBasicMaterial({ color: '#bff4ff' }) };
+function hull() {
+  const v = [0, 0, 2.6, -0.75, 0.05, -1.3, 0.75, 0.05, -1.3, 0, 0.5, -0.7, 0, -0.25, -0.8];
+  const idx = [0, 3, 1, 0, 2, 3, 0, 1, 4, 0, 4, 2, 1, 3, 2, 1, 2, 4];
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  return geo;
+}
+const craft = new THREE.Group();
+craft.add(new THREE.Mesh(hull(), mats.a));
+const canopy = new THREE.Mesh(new THREE.ConeGeometry(0.28, 1.1, 4), mats.glass); canopy.rotation.x = -Math.PI / 2 + 0.25; canopy.position.set(0, 0.28, 0.2); craft.add(canopy);
+// wing = flat delta from a Shape, mirrored with scale.x = -1
+const wingShape = new THREE.Shape([new THREE.Vector2(0.3, 0.7), new THREE.Vector2(1.9, -0.8), new THREE.Vector2(1.95, -1.25), new THREE.Vector2(0.3, -1.15)]);
+const wingGeo = new THREE.ExtrudeGeometry(wingShape, { depth: 0.07, bevelEnabled: false });
+const tipGeo = new THREE.ExtrudeGeometry(new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(0.55, 0), new THREE.Vector2(0.15, 0.5), new THREE.Vector2(-0.05, 0.5)]), { depth: 0.05, bevelEnabled: false });
+[-1, 1].forEach((s) => {
+  const wing = new THREE.Mesh(wingGeo, mats.b); wing.rotation.x = Math.PI / 2; wing.scale.x = s; wing.position.y = 0.04; craft.add(wing);
+  const edge = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.09, 0.08), mats.c); edge.position.set(s * 1.1, 0.02, -0.05); edge.rotation.y = s * -0.75; craft.add(edge);
+  const fin = new THREE.Mesh(tipGeo, mats.c); fin.rotation.y = -Math.PI / 2; fin.position.set(s * 1.9, 0.02, -0.75); craft.add(fin);
+  const pod = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 1.1, 6), mats.a); pod.rotation.x = Math.PI / 2; pod.position.set(s * 0.5, -0.02, -1.2); craft.add(pod);
+  const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 0.12, 6), mats.c); ring.rotation.x = Math.PI / 2; ring.position.set(s * 0.5, -0.02, -1.72); craft.add(ring);
+  const jet = new THREE.Mesh(new THREE.CircleGeometry(0.19, 6), mats.glow); jet.position.set(s * 0.5, -0.02, -1.79); jet.rotation.y = Math.PI; craft.add(jet);
+});
+scene.add(craft);
+
+// HUD > stat rows, team dots
+const statsEl = document.getElementById('stats');
+const bars = STATS.map((s) => { const r = document.createElement('div'); r.className = 'st'; r.innerHTML = `<span>${s}</span><div class="bar"><i></i></div><b>00</b>`; statsEl.append(r); return { i: r.querySelector('i'), b: r.querySelector('b'), v: 0 }; });
+const dotsEl = document.getElementById('dots');
+dotsEl.innerHTML = TEAMS.map(() => '<i></i>').join('') + '<span>◀  ▶  CONFIRM</span>';
+const dots = [...dotsEl.querySelectorAll('i')];
+[[3, 3], [97, 3], [3, 97], [97, 97]].forEach(([x, y]) => { const m = document.createElement('div'); m.className = 'mark'; m.style.left = `calc(${x}% - 7px)`; m.style.top = `calc(${y}% - 7px)`; document.body.append(m); });
+
+let team = 0, shown = -1, switchAt = 0, lastAuto = 0;
+const clock = new THREE.Clock();
+function go(d) { team = (team + d + TEAMS.length) % TEAMS.length; switchAt = clock.elapsedTime; lastAuto = clock.elapsedTime; }
+addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1); });
+addEventListener('pointerdown', (e) => go(e.clientX < innerWidth / 2 ? -1 : 1));
+
+function applyTeam(t) {
+  const T = TEAMS[t];
+  mats.a.color.set(T.a); mats.b.color.set(T.b); mats.c.color.set(T.c);
+  padGlow.material.color.set(T.a);
+  dots.forEach((d, i) => d.classList.toggle('on', i === t));
+}
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+
+function frame() {
+  const t = clock.getElapsedTime(), dt = Math.min(0.05, clock.getDelta() || 0.016);
+  if (t - lastAuto > 4) go(1);
+  const since = t - switchAt;
+  // swap at the bottom of the spin-out
+  if (shown !== team && since > 0.25) { applyTeam(team); shown = team; }
+  const out = since < 0.25 ? ease(since / 0.25) : 1 - ease((since - 0.25) / 0.5);
+  const sc = (innerWidth / innerHeight < 0.8 ? 0.6 : 0.8) * (1 - out * 0.85);
+  craft.scale.setScalar(sc);
+  craft.rotation.y = t * 0.6 + out * 4;
+  craft.rotation.z = Math.sin(t * 1.3) * 0.06;
+  craft.position.y = Math.sin(t * 2) * 0.12 + 0.1;
+  pad.scale.setScalar(1 + Math.sin(t * 2) * 0.03);
+  grids.forEach((gr) => { gr.position.z += dt * 6; if (gr.position.z > 20) gr.position.z -= 80; });
+  const a = innerWidth / innerHeight;
+  camera.position.set(Math.sin(t * 0.25) * 1.2, a < 0.8 ? 2.6 : 2.2, a < 0.8 ? 9.5 : 8);
+  camera.lookAt(0, a < 0.8 ? -0.9 : 0, 0);
+  // HUD type-in + bars
+  const T = TEAMS[shown < 0 ? 0 : shown], k = ease((since - 0.25) / 0.9);
+  const n = Math.round(T.name.length * k);
+  document.getElementById('name').textContent = T.name.slice(0, n) + (k < 1 && Math.floor(t * 10) % 2 ? '_' : '');
+  document.getElementById('sub').textContent = `${T.code}   ·   ${T.pilot}`.slice(0, Math.round(30 * ease((since - 0.4) / 0.8)));
+  document.getElementById('rule').style.transform = `scaleX(${k})`;
+  bars.forEach((bar, i) => { const target = T.s[i] * ease((since - 0.35 - i * 0.08) / 0.7); bar.v += (target - bar.v) * 0.2; bar.i.style.width = `${bar.v}%`; bar.b.textContent = String(Math.round(bar.v)).padStart(2, '0'); });
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+applyTeam(0); shown = 0;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

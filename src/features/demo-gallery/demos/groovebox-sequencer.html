@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Groovebox Sequencer</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="75" />
+<meta name="capture" content="3500" />
+<meta name="tags" content="late-90s groovebox, 16-step sequencer, pattern mutation, CSS conic knobs, canvas waveform LCD" />
+<meta name="description" content="A late-1990s pastel groovebox, with no brand and no sound: a lilac-ice plastic case with a backlit LCD, four automated knobs, a 4×16 step grid for kick, snare, hats and bass, and four big pads. A playhead runs at 174 BPM, lit steps flash when they fire, the pads pulse, the LCD scrolls a fake waveform and bar counter, and every two bars the machine writes a few steps into the pattern while the knobs sweep. Click any step to toggle it. Hard because the steps, pads, knobs and LCD all read the same musical clock so the visuals lock to a groove without audio." />
+<meta name="prompt" content="Build a silent late-1990s groovebox in one HTML file, no brand: lilac-ice plastic body, pale backlit LCD with pattern name, BPM, bar counter and a scrolling canvas waveform, four conic-gradient knobs on automation, a 4×16 step sequencer (kick, snare, hats, bass) with a playhead at 174 BPM, lit steps that flash when they fire, four pads that pulse on hits, auto-mutation every two bars and click-to-toggle steps." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(110% 70% at 50% 35%, #f0f2f9, #cfd3e6 65%, #b3b8d0); font-family: "Helvetica Neue", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+#stage { position: fixed; inset: 0; display: grid; place-items: center; padding-bottom: 12vh; }
+.box { --w: min(90vw, 54vh, 480px); width: var(--w); padding: calc(var(--w) * 0.05); border-radius: calc(var(--w) * 0.05); background: linear-gradient(160deg, #eef0f9, #d3d6ea 50%, #c2c7e0); box-shadow: 0 30px 60px rgba(50, 55, 95, 0.35), inset 0 2px 0 #fff, inset 0 -3px 8px rgba(70, 75, 120, 0.25); display: grid; gap: calc(var(--w) * 0.04); }
+.head { display: flex; justify-content: space-between; font-size: calc(var(--w) * 0.024); letter-spacing: 0.45em; opacity: 0.8; }
+.head b { letter-spacing: 0.15em; color: var(--accent); }
+.lcd { border-radius: calc(var(--w) * 0.02); background: linear-gradient(#cdeef8, #a9d9ec); box-shadow: inset 0 2px 6px rgba(20, 60, 90, 0.4), 0 1px 0 #fff; padding: calc(var(--w) * 0.03) calc(var(--w) * 0.04); font-family: Menlo, "Courier New", monospace; color: #17324d; }
+.lcd .r { display: flex; justify-content: space-between; font-size: calc(var(--w) * 0.036); font-weight: 700; letter-spacing: 0.05em; }
+.lcd .r small { font-size: 0.7em; font-weight: 400; letter-spacing: 0.2em; }
+#wave { width: 100%; height: calc(var(--w) * 0.09); display: block; margin-top: calc(var(--w) * 0.015); }
+.knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(var(--w) * 0.03); text-align: center; font-size: calc(var(--w) * 0.022); letter-spacing: 0.3em; }
+.knob { width: 62%; aspect-ratio: 1; margin: 0 auto calc(var(--w) * 0.015); border-radius: 50%; position: relative; background: conic-gradient(from 225deg, var(--cyan) 0 var(--v), rgba(43, 54, 69, 0.15) var(--v) 270deg, transparent 270deg); padding: 9%; }
+.knob div { width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #c9cde0 75%); box-shadow: 0 3px 8px rgba(50, 55, 95, 0.35); position: relative; }
+.knob div i { position: absolute; left: 50%; top: 8%; width: 7%; height: 30%; background: var(--ink); border-radius: 2px; transform: translateX(-50%); }
+.grid { display: grid; gap: calc(var(--w) * 0.018); }
+.trk { display: grid; grid-template-columns: calc(var(--w) * 0.13) 1fr; align-items: center; font-size: calc(var(--w) * 0.022); letter-spacing: 0.25em; }
+.steps { display: grid; grid-template-columns: repeat(16, 1fr); gap: calc(var(--w) * 0.008); }
+.steps i { aspect-ratio: 0.8; border-radius: 3px; background: linear-gradient(#f7f8fc, #d0d4e6); box-shadow: 0 1px 2px rgba(50, 55, 95, 0.3), inset 0 1px 0 #fff; cursor: pointer; transition: filter 0.08s; }
+.steps i:nth-child(4n + 1) { margin-left: 0; }
+.steps i:nth-child(4n) { margin-right: calc(var(--w) * 0.008); }
+.steps i.on { background: linear-gradient(var(--c1), var(--c2)); box-shadow: 0 0 6px var(--c2), inset 0 1px 0 rgba(255, 255, 255, 0.8); }
+.steps i.head { outline: 2px solid rgba(43, 54, 69, 0.55); outline-offset: 1px; }
+.steps i.hit { filter: brightness(1.35) saturate(1.3); box-shadow: 0 0 14px var(--c2), 0 0 2px #fff; }
+.pads { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(var(--w) * 0.03); }
+.pad { aspect-ratio: 1.3; border-radius: calc(var(--w) * 0.02); background: linear-gradient(#f9fafd, #ccd1e5); box-shadow: 0 3px 6px rgba(50, 55, 95, 0.3), inset 0 1px 0 #fff; display: grid; place-items: end start; padding: 8%; font-size: calc(var(--w) * 0.022); letter-spacing: 0.3em; transition: background 0.25s, box-shadow 0.25s; }
+.pad.hit { transition: none; background: linear-gradient(var(--c1), var(--c2)); box-shadow: 0 0 18px var(--c2), inset 0 1px 0 #fff; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="box">
+    <div class="head"><span>GROOVEBOX · GB-505</span><b>● SEQ</b></div>
+    <div class="lcd">
+      <div class="r"><span id="pat">A-01 LIQUID ROLLER</span><small id="mode">PLAY</small></div>
+      <div class="r"><span>BPM 174.0</span><span id="bar">BAR 01.1</span></div>
+      <canvas id="wave"></canvas>
+    </div>
+    <div class="knobs" id="knobs"></div>
+    <div class="grid" id="grid"></div>
+    <div class="pads" id="pads"></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const TRACKS = [
+  { n: 'KICK', c1: '#e7f8ff', c2: '#8fd0e6', p: [1,0,0,0, 0,0,0,0, 0,0,1,0, 0,0,0,0] },
+  { n: 'SNARE', c1: '#f1ecff', c2: '#b9a8ff', p: [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,1] },
+  { n: 'HATS', c1: '#ffffff', c2: '#c7d2e6', p: [1,0,1,0, 1,0,1,1, 1,0,1,0, 1,0,1,0] },
+  { n: 'BASS', c1: '#ffe9d9', c2: '#ff8a3d', p: [1,0,0,1, 0,0,1,0, 0,0,1,0, 0,1,0,0] },
+];
+const PATS = ['LIQUID ROLLER', 'BLUE HOUR', 'SOFT STEP', 'AQUA BREAK', 'NIGHT BUS', 'SKY LOUNGE'];
+const KNOBS = ['CUTOFF', 'RESO', 'DELAY', 'SWING'];
+const knobs = KNOBS.map((k) => { const d = document.createElement('div'); d.innerHTML = `<div class="knob"><div><i></i></div></div>${k}`; $('knobs').append(d); return { wrap: d.querySelector('.knob'), cap: d.querySelector('.knob > div') }; });
+const rows = TRACKS.map((tr, ti) => {
+  const r = document.createElement('div'); r.className = 'trk'; r.style.setProperty('--c1', tr.c1); r.style.setProperty('--c2', tr.c2);
+  r.innerHTML = `<span>${tr.n}</span><div class="steps">${'<i></i>'.repeat(16)}</div>`; $('grid').append(r);
+  const cells = [...r.querySelectorAll('i')];
+  cells.forEach((c, si) => { c.onclick = () => { tr.p[si] ^= 1; paint(); }; });
+  return cells;
+});
+const pads = TRACKS.map((tr) => { const p = document.createElement('div'); p.className = 'pad'; p.textContent = tr.n; p.style.setProperty('--c1', tr.c1); p.style.setProperty('--c2', tr.c2); $('pads').append(p); return p; });
+function paint() { rows.forEach((cells, ti) => cells.forEach((c, si) => c.classList.toggle('on', !!TRACKS[ti].p[si]))); }
+paint();
+
+const STEP = 60 / 174 / 4;
+let lastStep = -1, writeUntil = 0, patIdx = 0;
+const hitUntil = TRACKS.map(() => 0);
+const wave = $('wave'), wg = wave.getContext('2d');
+const hist = new Array(120).fill(0);
+
+// Every 2 bars > flip 3 random steps so the pattern evolves
+function mutate(t) {
+  for (let k = 0; k < 3; k++) { const ti = Math.floor(Math.random() * 4), si = Math.floor(Math.random() * 16); if (ti === 0 && si % 4 === 0) continue; TRACKS[ti].p[si] ^= 1; }
+  paint(); writeUntil = t + 0.6;
+}
+
+function frame() {
+  const t = performance.now() / 1000;
+  const step = Math.floor(t / STEP), s16 = step % 16;
+  if (step !== lastStep) {
+    lastStep = step;
+    rows.forEach((cells, ti) => cells.forEach((c, si) => { c.classList.toggle('head', si === s16); c.classList.remove('hit'); }));
+    TRACKS.forEach((tr, ti) => { if (tr.p[s16]) { rows[ti][s16].classList.add('hit'); hitUntil[ti] = t + 0.11; } });
+    if (s16 === 0 && Math.floor(step / 16) % 2 === 0) mutate(t);
+    if (s16 === 0 && Math.floor(step / 16) % 4 === 0) { patIdx = (patIdx + 1) % PATS.length; $('pat').textContent = `A-${String(patIdx + 1).padStart(2, '0')} ${PATS[patIdx]}`; }
+    const bar = Math.floor(step / 16) % 99 + 1, beat = Math.floor(s16 / 4) + 1;
+    $('bar').textContent = `BAR ${String(bar).padStart(2, '0')}.${beat}`;
+    const energy = TRACKS.reduce((a, tr, i) => a + (tr.p[s16] ? [1, 0.8, 0.3, 0.6][i] : 0), 0);
+    hist.push(energy); hist.shift();
+  }
+  pads.forEach((p, i) => p.classList.toggle('hit', t < hitUntil[i]));
+  $('mode').textContent = t < writeUntil ? (Math.floor(t * 8) % 2 ? 'WRITE' : '') : 'PLAY';
+  knobs.forEach((k, i) => {
+    const v = 0.5 + 0.42 * Math.sin(t * (0.35 + i * 0.17) + i * 1.7);
+    k.wrap.style.setProperty('--v', `${v * 270}deg`);
+    k.cap.style.transform = `rotate(${-135 + v * 270}deg)`;
+  });
+  // waveform: energy history as mirrored bars
+  const d = devicePixelRatio || 1, w = wave.clientWidth * d, h = wave.clientHeight * d;
+  if (wave.width !== w) { wave.width = w; wave.height = h; }
+  wg.clearRect(0, 0, w, h); wg.fillStyle = '#17324d';
+  const bw = w / hist.length, frac = (t % STEP) / STEP;
+  hist.forEach((e, i) => { const amp = (0.12 + e * 0.32 * (0.7 + 0.3 * Math.sin(i * 1.7 + t * 3))) * h; wg.globalAlpha = 0.25 + (i / hist.length) * 0.75; wg.fillRect((i - frac) * bw, h / 2 - amp / 2, Math.max(1, bw - d), amp); });
+  wg.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

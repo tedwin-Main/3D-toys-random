@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pixel Label Homepage</title>
+<meta name="category" content="aero" />
+<meta name="style" content="softclub" />
+<meta name="order" content="80" />
+<meta name="capture" content="3000" />
+<meta name="tags" content="late-90s record label site, hand-coded 5x7 bitmap font, canvas wireframe icosahedron, marquee ticker, odometer counter" />
+<meta name="description" content="A late-1990s Tokyo electronica label homepage, invented and unbranded. Headings are drawn in a hand-coded 5×7 bitmap font whose pixels shimmer in a pastel wave. A wireframe icosahedron spins beside a blinking NEW! release, a 3×2 grid of record sleeves takes turns being highlighted with catalogue numbers, a news marquee crawls along the bottom, and a visitor counter rolls its digits like an odometer, all inside a silver late-90s browser window. Hard because the bitmap font, wireframe and odometer are all drawn by hand with no images or web fonts." />
+<meta name="prompt" content="Recreate the feel of a late-1990s Tokyo electronica record label homepage in one HTML file, with an invented label and no real brands: a silver browser window frame, pastel colour blocks, headings drawn on canvas with a hand-coded 5x7 bitmap font that shimmers, a rotating wireframe icosahedron beside a blinking NEW! badge, a 3x2 grid of generated record sleeves with a cycling highlight, a scrolling news marquee and an odometer-style visitor counter. Keep it silent and self-running." />
+<style>
+:root { --ice: #d7e6f2; --silver: #e8eaef; --lilac: #b8bdd3; --cyan: #8fd0e6; --accent: #ff8a3d; --ink: #2b3645; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #c9cfe0; font-family: Verdana, "Helvetica Neue", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+.win { position: fixed; left: 4%; right: 4%; top: 10%; bottom: 17%; background: #e8eaef; border: 1px solid #fff; box-shadow: 0 20px 40px rgba(40, 50, 90, 0.3), inset -1px -1px 0 #9aa3b5; display: flex; flex-direction: column; }
+.bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: linear-gradient(#f6f7fa, #d5d9e3); border-bottom: 1px solid #a9b1c2; font-size: 10px; }
+.bar i { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(#fff, #b6bfcf); box-shadow: inset 0 0 0 1px #8e98ab; }
+.addr { flex: 1; background: #fff; border: 1px solid #a9b1c2; padding: 2px 6px; font-family: Menlo, monospace; font-size: 10px; white-space: nowrap; overflow: hidden; }
+.page { flex: 1; overflow: hidden; background: #fbfcfe; padding: 10px; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto 1fr auto auto; gap: 10px; }
+.page > *, .hero > * { min-width: 0; }
+canvas { display: block; image-rendering: pixelated; }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 34%; gap: 10px; }
+.box { background: var(--ice); padding: 8px; position: relative; overflow: hidden; }
+.box.wirebox { display: grid; place-items: center; }
+.box.lil { background: #e6e2f6; }
+.new { position: absolute; right: 8px; top: 8px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.15em; padding: 2px 5px; }
+.small { font-size: 9px; letter-spacing: 0.2em; line-height: 1.6; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; align-content: start; width: 80%; justify-self: center; }
+.rec { font-size: 8px; letter-spacing: 0.12em; line-height: 1.4; }
+.sleeve { aspect-ratio: 1; position: relative; transition: box-shadow 0.2s; }
+.rec.on .sleeve { box-shadow: 0 0 0 2px #fbfcfe, 0 0 0 4px var(--ink); }
+.rec.on b { background: var(--ink); color: #fff; }
+.ticker { background: var(--ink); color: #dff3fb; font-family: Menlo, monospace; font-size: 11px; padding: 4px 0; white-space: nowrap; overflow: hidden; }
+.ticker span { display: inline-block; padding-left: 100%; }
+.foot { display: flex; justify-content: space-between; align-items: center; font-size: 9px; letter-spacing: 0.15em; }
+.odo { display: flex; gap: 2px; }
+.odo div { width: 12px; height: 18px; overflow: hidden; background: #111a26; color: #9ff0ff; font-family: Menlo, monospace; font-size: 12px; line-height: 18px; text-align: center; }
+.odo div span { display: block; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="bar"><i></i><i></i><i></i><div class="addr">http://www.softrecords.jp/~tokyo/index.html</div></div>
+  <div class="page">
+    <div class="box"><canvas id="logo"></canvas><div class="small">TOKYO · ELECTRONICA · SINCE 1996 · 新譜 ニュース</div></div>
+    <div class="hero">
+      <div class="box lil"><span class="new" id="new">NEW!</span><canvas id="head2"></canvas><div class="small" id="rel"></div></div>
+      <div class="box wirebox"><canvas id="wire"></canvas></div>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="ticker"><span id="tick">++ 1999.11.20 KAI MORI LIVE AT ROOM 101 ++ NEW 12" SFT-012 OUT NOW ++ MAIL ORDER OPEN ++ 東京 · 大阪 TOUR DATES ++ BEST VIEWED AT 800×600 ++</span></div>
+    <div class="foot"><span>YOU ARE VISITOR NO.</span><div class="odo" id="odo"></div><span>© SOFT REC.</span></div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+// Font > 5x7 glyphs, one 5-bit row per number
+const F = { A: [14,17,17,31,17,17,17], B: [30,17,17,30,17,17,30], C: [14,17,16,16,16,17,14], D: [30,17,17,17,17,17,30], E: [31,16,16,30,16,16,31], F: [31,16,16,30,16,16,16], G: [14,17,16,23,17,17,15], H: [17,17,17,31,17,17,17], I: [14,4,4,4,4,4,14], J: [7,2,2,2,2,18,12], K: [17,18,20,24,20,18,17], L: [16,16,16,16,16,16,31], M: [17,27,21,21,17,17,17], N: [17,17,25,21,19,17,17], O: [14,17,17,17,17,17,14], P: [30,17,17,30,16,16,16], Q: [14,17,17,17,21,18,13], R: [30,17,17,30,20,18,17], S: [15,16,16,14,1,1,30], T: [31,4,4,4,4,4,4], U: [17,17,17,17,17,17,14], V: [17,17,17,17,17,10,4], W: [17,17,17,21,21,21,10], X: [17,17,10,4,10,17,17], Y: [17,17,17,10,4,4,4], Z: [31,1,2,4,8,16,31], 0: [14,17,19,21,25,17,14], 1: [4,12,4,4,4,4,14], 2: [14,17,1,2,4,8,31], 3: [31,2,4,2,1,17,14], 4: [2,6,10,18,31,2,2], 5: [31,16,30,1,1,17,14], 6: [6,8,16,30,17,17,14], 7: [31,1,2,4,8,8,8], 8: [14,17,17,14,17,17,14], 9: [14,17,17,15,1,2,12], '!': [4,4,4,4,4,0,4], '.': [0,0,0,0,0,12,12], '-': [0,0,0,31,0,0,0], ' ': [0,0,0,0,0,0,0], '/': [0,1,2,4,8,16,0], ':': [0,12,12,0,12,12,0] };
+const PAL = ['#8fd0e6', '#b8a8f0', '#ff8a3d', '#a6e6d0', '#2b3645'];
+function pixelText(cv, text, t, base) {
+  const d = devicePixelRatio || 1, w = cv.parentElement.clientWidth - 16;
+  if (cv.dataset.key === `${text}${w}${Math.floor(t * 20)}`) return;
+  cv.dataset.key = `${text}${w}${Math.floor(t * 20)}`;
+  const cols = text.length * 6 - 1, px = Math.max(2, Math.floor((w * d) / cols));
+  cv.width = cols * px; cv.height = 7 * px + px; cv.style.width = `${(cols * px) / d}px`; cv.style.height = `${cv.height / d}px`;
+  const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+  [...text].forEach((ch, ci) => (F[ch] || F[' ']).forEach((row, ry) => { for (let bx = 0; bx < 5; bx++) if (row & (16 >> bx)) {
+    const x = ci * 6 + bx, wave = Math.sin(x * 0.35 - t * 4 + ry * 0.4);
+    g.fillStyle = wave > 0.75 ? PAL[(ci + Math.floor(t)) % 4] : base;
+    const gap = px >= 4 ? Math.round(px * 0.15) : 0;
+    g.fillRect(x * px, ry * px, px - gap, px - gap);
+  } }));
+}
+
+// Wire > rotating icosahedron, depth-shaded edges
+const phi = (1 + Math.sqrt(5)) / 2;
+const V = [[-1, phi, 0], [1, phi, 0], [-1, -phi, 0], [1, -phi, 0], [0, -1, phi], [0, 1, phi], [0, -1, -phi], [0, 1, -phi], [phi, 0, -1], [phi, 0, 1], [-phi, 0, -1], [-phi, 0, 1]];
+const E = []; V.forEach((a, i) => V.forEach((b, j) => { if (j > i && Math.abs(Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) - 2) < 0.01) E.push([i, j]); }));
+function wire(t) {
+  const cv = $('wire'), d = devicePixelRatio || 1, w = Math.min(cv.parentElement.clientWidth - 16, cv.parentElement.clientHeight - 16, 170), h = w;
+  if (cv.width !== Math.round(w * d)) { cv.width = w * d; cv.height = h * d; cv.style.width = `${w}px`; cv.style.height = `${h}px`; }
+  const g = cv.getContext('2d'); g.clearRect(0, 0, cv.width, cv.height);
+  const a = t * 0.9, b = t * 0.6, s = cv.width * 0.24;
+  const P = V.map(([x, y, z]) => { let x1 = x * Math.cos(a) - z * Math.sin(a), z1 = x * Math.sin(a) + z * Math.cos(a); let y1 = y * Math.cos(b) - z1 * Math.sin(b), z2 = y * Math.sin(b) + z1 * Math.cos(b); const p = 3.2 / (4 - z2 * 0.5); return [cv.width / 2 + x1 * s * p, cv.height / 2 + y1 * s * p, z2]; });
+  g.lineWidth = d * 1.2;
+  E.forEach(([i, j]) => { const z = (P[i][2] + P[j][2]) / 2; g.strokeStyle = `rgba(43,54,69,${0.25 + (z + 2) * 0.18})`; g.beginPath(); g.moveTo(P[i][0], P[i][1]); g.lineTo(P[j][0], P[j][1]); g.stroke(); });
+  P.forEach(([x, y, z], i) => { g.fillStyle = i % 3 ? '#8fd0e6' : '#ff8a3d'; g.fillRect(x - d * 2, y - d * 2, d * 4, d * 4); });
+}
+
+const RECS = [['SFT-007', 'BLUE HOUR EP'], ['SFT-008', 'LIQUID SKY'], ['SFT-009', 'PIER 9 DUB'], ['SFT-010', 'CLOUD ROOM'], ['SFT-011', 'AFTERGLOW'], ['SFT-012', 'SATELLITE']];
+const ART = [['#8fd0e6', '#e6f4fb'], ['#c9b8ff', '#f4f0ff'], ['#a6e6d0', '#effbf7'], ['#ffd3b0', '#fff5ec'], ['#b9cdf0', '#eef3fc'], ['#f6c8de', '#fdf0f6']];
+const recs = RECS.map(([cat, title], i) => {
+  const el = document.createElement('div'); el.className = 'rec';
+  const [c1, c2] = ART[i];
+  el.innerHTML = `<div class="sleeve" style="background:radial-gradient(circle at ${30 + i * 9}% ${60 - i * 6}%, ${c1}, ${c2} 70%)"><div style="position:absolute;inset:${i % 2 ? 30 : 20}%;border:${i % 3 ? '2px solid #fff' : 'none'};border-radius:${i % 2 ? '50%' : '0'};background:${i % 3 ? 'transparent' : 'rgba(255,255,255,.6)'}"></div></div><b>${cat}</b><br>${title}`;
+  $('grid').append(el); return el;
+});
+const odo = $('odo'), DIG = 7;
+odo.innerHTML = Array.from({ length: DIG }, () => `<div><span>${[...'01234567890'].join('</span><span>')}</span></div>`).join('');
+const reels = [...odo.querySelectorAll('div')];
+
+function frame() {
+  const t = performance.now() / 1000;
+  pixelText($('logo'), 'SOFT RECORDS', t, '#2b3645');
+  const ri = Math.floor(t / 1.6) % RECS.length;
+  pixelText($('head2'), 'NEW RELEASE', t + 1, '#2b3645');
+  $('rel').textContent = `${RECS[ri][0]} · ${RECS[ri][1]} · 12" / CD · OUT NOW`;
+  $('new').style.visibility = Math.floor(t * 2.5) % 2 ? 'visible' : 'hidden';
+  recs.forEach((r, i) => r.classList.toggle('on', i === ri));
+  wire(t);
+  const tick = $('tick'); tick.style.transform = `translateX(${-((t * 60) % tick.scrollWidth)}px)`;
+  // odometer: 3 visitors/sec, each reel scrolls continuously as the one below wraps
+  const count = 198200 + t * 3;
+  reels.forEach((r, i) => { const place = Math.pow(10, DIG - 1 - i), v = (count / place) % 10, whole = Math.floor(v), frac = i === DIG - 1 ? v - whole : Math.max(0, ((count % place) / place - 0.9) * 10); r.firstChild.style.marginTop = `${-(whole + frac) * 18}px`; });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
